@@ -144,14 +144,15 @@ def inspect_execution(settings: Settings, job_id: int, *,
     if job_id < 1 or ordinal is not None and ordinal < 0:
         raise ValueError("Task ID and ordinal must be nonnegative integers")
     job = _jobs(settings).get(job_id)
-    folder = settings.reports_dir / "media_package-executions" / str(job_id)
     result = {
         "read_only": True, "job_id": job_id, "task_status": None,
         "disposition": "retain_execution_recovery_or_audit",
     }
     if not job or job["kind"] != _EXECUTION_KIND:
         result["diagnosis"] = "Execution task not found; preserve orphaned reports"
-        result["report_entries"] = _entries(folder)
+        result["report_entries"] = _entries(
+            settings.reports_dir / "media_package-executions" / str(job_id)
+        )
         return result
 
     result["task_status"] = job["status"]
@@ -161,6 +162,12 @@ def inspect_execution(settings: Settings, job_id: int, *,
         result["diagnosis"] = "Missing or unreadable execution task state"
         return result
     preview_id = state["preview_job_id"]
+    frozen_job_id = state.get("recovery_of_job_id")
+    if not isinstance(frozen_job_id, int) or frozen_job_id < 1:
+        frozen_job_id = job_id
+    folder = (settings.reports_dir / "media_package-executions"
+              / str(frozen_job_id))
+    result["frozen_execution_job_id"] = frozen_job_id
     result["preview_job_id"] = preview_id
     if ordinal is None:
         current = int(job["progress_current"] or 0)
@@ -175,11 +182,15 @@ def inspect_execution(settings: Settings, job_id: int, *,
         return result
 
     record = None
-    with report.open("r", encoding="utf-8") as stream:
-        for position, line in enumerate(stream):
-            if position == ordinal:
-                record = json.loads(line)
-                break
+    try:
+        with report.open("r", encoding="utf-8") as stream:
+            for position, line in enumerate(stream):
+                if position == ordinal:
+                    record = json.loads(line)
+                    break
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        result["diagnosis"] = "Original preview evidence is unreadable or invalid"
+        return result
     if not isinstance(record, dict) or not isinstance(record.get("package"), str):
         result["diagnosis"] = "Package ordinal absent or invalid in original preview"
         return result
@@ -191,7 +202,7 @@ def inspect_execution(settings: Settings, job_id: int, *,
     if result["manifest_present"]:
         try:
             manifest = load_frozen_manifest(
-                manifest_file, job_id=job_id, package=package,
+                manifest_file, job_id=frozen_job_id, package=package,
             )
             result["manifest_integrity"] = "valid"
             result["frozen_move_count"] = len(manifest.get("moves", []))
@@ -206,7 +217,7 @@ def inspect_execution(settings: Settings, job_id: int, *,
     try:
         with os.scandir(package) as listing:
             for entry in listing:
-                if entry.name.startswith(f".nfc-media_package-stage-{job_id}-"):
+                if entry.name.startswith(f".nfc-media_package-stage-{frozen_job_id}-"):
                     stages.append(entry.name)
     except OSError:
         result["stage_inspection"] = "package unavailable"
