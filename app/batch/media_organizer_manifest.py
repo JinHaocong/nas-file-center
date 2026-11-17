@@ -80,6 +80,21 @@ def build_frozen_preview_manifest(
         os.close(fd)
     if any(move["identity"][0] != base_dev for move in planned):
         raise FrozenPreviewError("cross-filesystem source identity")
+    # Store the exact directory binding before moving any files. On publish,
+    # only these source wrappers can be retired, and only while still empty.
+    wrapper_identities = {}
+    for literal in fresh.get("wrapper_cleanup", []):
+        wrapper = Path(literal)
+        if not wrapper.is_relative_to(unit) or wrapper == unit:
+            raise FrozenPreviewError("classification wrapper escaped organizing unit")
+        wrapper_fd = _open_directory_nofollow(wrapper)
+        try:
+            info = os.fstat(wrapper_fd)
+            if not stat.S_ISDIR(info.st_mode) or int(info.st_dev) != base_dev:
+                raise FrozenPreviewError("unsafe classification wrapper binding")
+            wrapper_identities[str(wrapper)] = [int(info.st_dev), int(info.st_ino)]
+        finally:
+            os.close(wrapper_fd)
     return {
         "schema_version": MANIFEST_VERSION,
         "job_id": job_id,
@@ -94,6 +109,7 @@ def build_frozen_preview_manifest(
         "needed_moves": fresh["needed_moves"],
         "renamed_count": fresh["renamed_count"],
         "wrapper_cleanup": fresh["wrapper_cleanup"],
+        "wrapper_identities": wrapper_identities,
     }
 
 
