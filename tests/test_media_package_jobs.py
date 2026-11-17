@@ -179,3 +179,48 @@ def test_media_package_scope_requires_deploy_private_absolute_root(tmp_path):
         _root(outside)
     protected = Settings(**base, MEDIA_PACKAGE_ROOT=str(data / "Else" / "Collection"))
     assert _root(protected) == data / "Else" / "Collection"
+
+
+def test_deleted_preview_job_id_is_not_reused_when_reports_remain(tmp_path):
+    client, root, settings = _app(tmp_path)
+    package = _package(root, "SampleAuthor", "SampleBundle")
+    (package / "image.jpg").write_bytes(b"img")
+    (package / "video.mp4").write_bytes(b"video")
+    selection = str(root / "Else" / "Collection" / "2611")
+    first = client.post("/api/media_package/previews", json={"selection": selection})
+    assert first.status_code == 200, first.text
+    old_id = first.json()["job_id"]
+    assert process_work_job(settings, old_id)
+    old_report = (settings.reports_dir / "media_package-previews"
+                  / f"{old_id}.packages.jsonl")
+    before = old_report.read_bytes()
+
+    # SQLite can reuse a deleted max WorkJob ID. Report evidence must not.
+    deleted = client.delete(f"/api/tasks/{old_id}")
+    assert deleted.status_code == 200, deleted.text
+    second = client.post("/api/media_package/previews", json={"selection": selection})
+    assert second.status_code == 200, second.text
+    new_id = second.json()["job_id"]
+    assert new_id > old_id
+    assert old_report.read_bytes() == before
+    assert process_work_job(settings, new_id)
+
+
+def test_existing_preview_artifact_is_not_silently_removed(tmp_path):
+    client, root, settings = _app(tmp_path)
+    package = _package(root, "SampleAuthor", "SampleBundle")
+    (package / "image.jpg").write_bytes(b"img")
+    (package / "video.mp4").write_bytes(b"video")
+    selection = str(root / "Else" / "Collection" / "2611")
+    response = client.post("/api/media_package/previews", json={"selection": selection})
+    assert response.status_code == 200, response.text
+    job_id = response.json()["job_id"]
+    artifact = (settings.reports_dir / "media_package-previews"
+                / f"{job_id}.packages.jsonl")
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_bytes(b"foreign report evidence")
+    process_work_job(settings, job_id)
+    assert artifact.read_bytes() == b"foreign report evidence"
+    status = client.get(f"/api/media_package/previews/{job_id}")
+    assert status.status_code == 200
+    assert status.json()["status"] == "failed"

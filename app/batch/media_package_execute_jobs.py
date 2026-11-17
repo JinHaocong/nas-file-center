@@ -13,6 +13,7 @@ from pathlib import Path
 from sqlalchemy import func, select, text
 from app.batch.media_package_jobs import PREVIEW_KIND, _files as _preview_files, _root
 from app.batch.media_package_organizer import _package_path
+from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.batch.media_package_execution import (
     MediaPackageExecutionConflict, execute_frozen_manifest, load_frozen_manifest,
     prepare_media_package_manifest, save_frozen_manifest,
@@ -80,6 +81,7 @@ def enqueue_media_package_execution(session_factory, settings: Settings,
         if active is not None:
             raise ValueError(f"Another MediaPackage execution task #{active} is running")
         job = WorkJob(
+            id=next_media_package_job_id(session, settings),
             kind=EXECUTE_KIND, status="queued", progress_current=0,
             progress_total=summary["package_count"],
             progress_message="等待 Worker 对资源包进行冻结、校验与安全移动",
@@ -228,11 +230,14 @@ def enqueue_media_package_recovery(session_factory, settings: Settings, *,
             "selection": original_state.get("selection", ""),
             "recovery_of_job_id": failed_job_id,
         }
-        job = WorkJob(kind=EXECUTE_KIND, status="queued",
-                      progress_current=failed_ordinal, progress_total=original.progress_total,
-                      progress_message="Awaiting explicit frozen-manifest reconciliation",
-                      state_json=json.dumps(payload, ensure_ascii=False),
-                      retry_of=failed_job_id)
+        job = WorkJob(
+            id=next_media_package_job_id(session, settings),
+            kind=EXECUTE_KIND, status="queued",
+            progress_current=failed_ordinal, progress_total=original.progress_total,
+            progress_message="Awaiting explicit frozen-manifest reconciliation",
+            state_json=json.dumps(payload, ensure_ascii=False),
+            retry_of=failed_job_id,
+        )
         session.add(job)
         session.flush()
         log_task_event(

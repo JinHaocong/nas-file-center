@@ -11,7 +11,8 @@ import os
 import time
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.batch.media_package_organizer import (
     _validate_scope, iter_media_package_packages, preview_media_package_package,
 )
@@ -104,12 +105,15 @@ def enqueue_media_package_preview(session_factory, settings: Settings, *, select
         quarantine_root=settings.quarantine_root,
     )
     with session_factory() as session:
+        # Serialize ID allocation with all other SQLite task inserts.
+        session.execute(text("BEGIN IMMEDIATE"))
         active = session.scalar(select(func.count(WorkJob.id)).where(
             WorkJob.kind == PREVIEW_KIND, WorkJob.status.in_(ACTIVE_STATUSES),
         )) or 0
         if active >= MAX_QUEUED_PREVIEWS:
             raise ValueError("Too many MediaPackage previews are active; cancel or finish one first")
         job = WorkJob(
+            id=next_media_package_job_id(session, settings),
             kind=PREVIEW_KIND, status="queued",
             progress_current=0, progress_total=0,
             progress_message="等待 Worker 扫描 MediaPackage 资源包",
@@ -189,8 +193,13 @@ class MediaPackagePreviewHandler(TaskHandler):
 
         data, index, summary = _files(settings, int(job.id))
         staged = [path.with_name(path.name + ".staging") for path in (data, index, summary)]
+        # A reused/stale report path is evidence, not disposable scratch.
+        # Never erase it merely because a new preview uses the same task ID.
         for path in (*staged, data, index, summary):
-            path.unlink(missing_ok=True)
+            if os.path.lexists(path):
+                raise ValueError(
+                    f"MediaPackage preview report already exists; preserve for review: {path}"
+                )
         seen = ready = blocked = skipped = already_organized = files_seen = changes = 0
         renamed = automatically_resolved = 0
         start = last_checkpoint = time.monotonic()
@@ -260,16 +269,17 @@ class MediaPackagePreviewHandler(TaskHandler):
                 json.dump(finished, output, ensure_ascii=False)
                 output.flush()
                 os.fsync(output.fileno())
-            # Publish the summary last. Readers never read an incomplete report.
-            os.replace(staged[0], data)
-            os.replace(staged[1], index)
-            os.replace(staged[2], summary)
+            # Publish without overwriting another report that appeared after
+            # the initial preflight. The summary remains the final commit marker.
+            for staged_path, final_path in zip(staged, (data, index, summary)):
+                os.link(staged_path, final_path, follow_symlinks=False)
+                os.unlink(staged_path)
             context.checkpoint(
                 progress_current=seen,
                 progress_message=f"MediaPackage 预览完成：{seen:,} 包，待整理 {ready:,}，冲突 {blocked:,}",
                 checkpoint_data={"schema_version": 1, "packages_scanned": seen, "finished": True},
             )
         except BaseException:
-            for path in (*staged, data, index, summary):
-                path.unlink(missing_ok=True)
+            # Preserve failed-preview evidence for diagnosis. A new task uses
+            # another reserved ID; it must never erase these report artifacts.
             raise
