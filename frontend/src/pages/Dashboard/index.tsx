@@ -1,7 +1,8 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { dashboardApi, scansApi, tasksApi } from '../../api/domain';
+import { dashboardApi, scansApi } from '../../api/domain';
+import { tasksApi } from '../../api/tasks';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { MetricCard } from '../../components/ui/MetricCard';
 import { DataPanel } from '../../components/ui/DataPanel';
@@ -52,7 +53,7 @@ export const DashboardPage: React.FC = () => {
   });
   const { data: tasksData, isLoading: tasksLoading, isError: tasksError } = useQuery({
     queryKey: ['recentTasks'],
-    queryFn: () => tasksApi.listJobs(1, 5),
+    queryFn: () => tasksApi.listTasks({ page: 1, pageSize: 5 }),
     refetchInterval: 5000,
   });
 
@@ -185,9 +186,9 @@ export const DashboardPage: React.FC = () => {
                 <div className="nfc-mobile-activity-list">
                   {taskItems.map(item => (
                     <div key={item.id} className="nfc-mobile-activity-card">
-                      <div className="nfc-mobile-activity-topline"><strong>任务 #{item.id} · {item.kind}</strong><StatusBadge status={item.status} /></div>
+                      <div className="nfc-mobile-activity-topline"><strong>任务 #{item.id} · {item.job_type}</strong><StatusBadge status={item.status} /></div>
                       <div className="nfc-mobile-activity-grid">
-                        <span>进度 <b>{item.progress_total > 0 ? item.progress_current + '/' + item.progress_total : '—'}</b></span>
+                        <span>进度 <b>{item.progress.total > 0 ? item.progress.current + '/' + item.progress.total : '—'}</b></span>
                         <span>{taskStateLabel[item.status] || item.status}</span>
                       </div>
                       <span className="nfc-mobile-activity-meta">{formatDateTime(item.created_at)}</span>
@@ -202,10 +203,10 @@ export const DashboardPage: React.FC = () => {
                       {taskItems.map(item => (
                         <tr key={item.id}>
                           <td><span className="nfc-v2-task-icon"><ConsoleIcon name="activity" size={17} /></span>
-                            <strong>#{item.id}</strong><span className="nfc-v2-task-kind">{item.kind}</span></td>
+                            <strong>#{item.id}</strong><span className="nfc-v2-task-kind">{item.job_type}</span></td>
                           <td><StatusBadge status={item.status} /></td>
                           <td className="nfc-v2-numeric">
-                            {item.progress_total > 0 ? item.progress_current + ' / ' + item.progress_total : '—'}
+                            {item.progress.total > 0 ? item.progress.current + ' / ' + item.progress.total : '—'}
                           </td>
                           <td className="nfc-v2-date">{formatDateTime(item.created_at)}</td>
                         </tr>

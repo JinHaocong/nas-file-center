@@ -22,12 +22,17 @@ describe('Pure White v2.1 dashboard and scan detail pass', () => {
 
   test('Dashboard KPI, recent scans and worker summaries still use real APIs', () => {
     for (const source of [
-      "dashboardApi.getSummary()", "scansApi.listScans(1, 5)", "tasksApi.listJobs(1, 5)",
+      "dashboardApi.getSummary()", "scansApi.listScans(1, 5)", "tasksApi.listTasks({ page: 1, pageSize: 5 })",
       "queryKey: ['dashboardSummary']", "queryKey: ['recentScans']",
       "queryKey: ['recentTasks']", 'refetchInterval: 10000', 'refetchInterval: 5000',
       "navigate('/scans/' + item.id)", "navigate('/tasks')",
     ]) assert.ok(dashboard.includes(source), source);
     assert.ok(dashboard.includes('来自 API 的最新统计，非历史趋势预测'));
+    assert.ok(dashboard.includes("import { tasksApi } from '../../api/tasks';"));
+    assert.ok(dashboard.includes('item.job_type'));
+    assert.ok(dashboard.includes('item.progress.total'));
+    assert.ok(!dashboard.includes('tasksApi.listJobs(1, 5)'));
+
   });
 
   test('Dashboard has a precise white table hierarchy and accessible row focus', () => {

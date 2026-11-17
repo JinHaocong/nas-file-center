@@ -40,6 +40,7 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
       toast.success('已清理 ' + res.deleted_count + ' 个历史任务');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tasksList'] }),
+        queryClient.invalidateQueries({ queryKey: ['recentTasks'] }),
         queryClient.invalidateQueries({ queryKey: ['taskDetail'] }),
         queryClient.invalidateQueries({ queryKey: ['taskLogs'] }),
       ]);
