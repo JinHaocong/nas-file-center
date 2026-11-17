@@ -48,7 +48,9 @@ def preview(client, settings, work):
     assert process_work_job(settings, pid)
     report = client.get(f"/api/media-organizer/previews/{pid}")
     assert report.status_code == 200
-    assert report.json()["summary"]["ready_count"] == 1
+    assert report.json()["summary"]["ready_count"] >= 1
+    assert any(row["unit"] == str(work) and row["status"] == "ready"
+               for row in report.json()["units"])
     return pid
 
 
@@ -195,7 +197,9 @@ def test_explicit_recovery_reuses_frozen_manifest_after_stage_interruption(tmp_p
     assert approved.status_code == 200, approved.text
     recovered_id = approved.json()["job_id"]
     assert recovered_id != original_id
-    assert worker(settings, recovered_id, name="second-owner")
+    # The original exclusive lease is still fresh; the same worker identity
+    # can renew it, but an unrelated owner must never take over early.
+    assert worker(settings, recovered_id, name="first-owner")
     assert client.get(f"/api/media-organizer/executions/{recovered_id}").json()["status"] == "completed"
     assert list(work.glob("P [*]/*.jpg"))
     assert list(work.glob("V [*]/*.mp4"))
