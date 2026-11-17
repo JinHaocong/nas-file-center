@@ -50,3 +50,19 @@ def test_stream_preview_cancel_callback_is_honored(tmp_path):
         with pytest.raises(RuntimeError,match='cancelled by test'):
             write_semantic_preview(root,allowed_roots=[tmp_path],out=out,check_cancelled=cancel)
     assert (root/'work'/'a.jpg').read_bytes()==b'data'
+
+
+def test_stream_preview_respects_configured_excluded_directory_name(tmp_path):
+    root = tmp_path / "Else"
+    put(root / "Collection" / "NO.001" / "source_bundle_poster.jpg")
+    put(root / "SOURCE_BUNDLE" / "NO.002" / "should_not_be_reported.jpg")
+    report = tmp_path / "scanned.jsonl"
+    with report.open("w") as output:
+        summary = write_semantic_preview(
+            root, allowed_roots=[tmp_path], out=output,
+            exclude_dir_names=["source_bundle"],
+        )
+    assert summary["unit_count"] == 1
+    contents = report.read_text()
+    assert "source_bundle_poster.jpg" in contents
+    assert "should_not_be_reported.jpg" not in contents
