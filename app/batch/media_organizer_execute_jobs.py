@@ -19,7 +19,7 @@ from sqlalchemy import func, select, text
 
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.batch.media_organizer_jobs import (
-    PREVIEW_KIND, _validate_selection, report_files,
+    PREVIEW_KIND, _validate_selection, _excluded_names, report_files,
 )
 from app.batch.media_organizer_manifest import (
     build_frozen_preview_manifest, load_frozen_preview_manifest,
@@ -354,6 +354,7 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             manifest = build_frozen_preview_manifest(
                 unit, preview_record=record, allowed_roots=settings.allowed_roots,
                 quarantine_root=settings.quarantine_root, job_id=frozen_job_id,
+                exclude_dir_names=_excluded_names(settings),
             )
             folder.mkdir(parents=True, exist_ok=True, mode=0o700)
             fence()
