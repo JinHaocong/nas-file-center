@@ -231,12 +231,13 @@ def enqueue_media_package_recovery(session_factory, settings: Settings, *,
             "recovery_of_job_id": failed_job_id,
         }
         job = WorkJob(
-                      id=next_media_package_job_id(session, settings),
-                      kind=EXECUTE_KIND, status="queued",
-                      progress_current=failed_ordinal, progress_total=original.progress_total,
-                      progress_message="Awaiting explicit frozen-manifest reconciliation",
-                      state_json=json.dumps(payload, ensure_ascii=False),
-                      retry_of=failed_job_id)
+            id=next_media_package_job_id(session, settings),
+            kind=EXECUTE_KIND, status="queued",
+            progress_current=failed_ordinal, progress_total=original.progress_total,
+            progress_message="Awaiting explicit frozen-manifest reconciliation",
+            state_json=json.dumps(payload, ensure_ascii=False),
+            retry_of=failed_job_id,
+        )
         session.add(job)
         session.flush()
         log_task_event(
