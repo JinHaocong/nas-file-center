@@ -14,6 +14,17 @@ class MediaOrganizerPreviewRequest(BaseModel):
     selection: str = Field(min_length=1, max_length=4096)
 
 
+class MediaOrganizerExecuteRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    unit: str = Field(min_length=1, max_length=4096)
+    confirmation: str = Field(min_length=1, max_length=256)
+
+
+class MediaOrganizerRecoveryRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    confirmation: str = Field(min_length=1, max_length=256)
+
+
 @router.post('/previews')
 def start_media_organizer_preview(request: Request, payload: MediaOrganizerPreviewRequest,
                                   _admin=Depends(require_admin_user)):
@@ -43,3 +54,49 @@ def read_media_organizer_preview(request: Request, job_id: int,
         raise HTTPException(status_code=404, detail='Preview task not found') from exc
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post('/previews/{job_id}/execute')
+def start_media_organizer_execution(request: Request, job_id: int,
+                                   payload: MediaOrganizerExecuteRequest,
+                                   _admin=Depends(require_admin_user)):
+    """Only queues an explicitly confirmed, unit-scoped execution Worker."""
+    from app.batch.media_organizer_execute_jobs import enqueue_media_organizer_execution
+    try:
+        return enqueue_media_organizer_execution(
+            request.app.state.service.SessionLocal, request.app.state.settings,
+            preview_job_id=job_id, unit=payload.unit,
+            confirmation=payload.confirmation,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, 'Preview not found') from exc
+    except (ValueError, PermissionError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get('/executions/{job_id}')
+def read_media_organizer_execution(request: Request, job_id: int,
+                                   _admin=Depends(require_admin_user)):
+    from app.batch.media_organizer_execute_jobs import get_media_organizer_execution
+    try:
+        return get_media_organizer_execution(
+            request.app.state.service.SessionLocal, job_id,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, 'Execution not found') from exc
+
+
+@router.post('/executions/{job_id}/recover')
+def recover_media_organizer_execution(request: Request, job_id: int,
+                                      payload: MediaOrganizerRecoveryRequest,
+                                      _admin=Depends(require_admin_user)):
+    from app.batch.media_organizer_execute_jobs import enqueue_media_organizer_recovery
+    try:
+        return enqueue_media_organizer_recovery(
+            request.app.state.service.SessionLocal, request.app.state.settings,
+            failed_job_id=job_id, confirmation=payload.confirmation,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, 'Original failed execution not found') from exc
+    except (ValueError, PermissionError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
