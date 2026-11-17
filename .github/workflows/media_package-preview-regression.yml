@@ -8,6 +8,8 @@ on:
       - 'app/batch/media_package_jobs.py'
       - 'app/batch/media_package_execution.py'
       - 'app/batch/media_package_execute_jobs.py'
+      - 'app/batch/media_package_report_lifecycle.py'
+      - 'app/batch/media_package_report_inspector.py'
       - 'app/api/router.py'
       - 'app/tasks/handlers.py'
       - 'app/tasks/handlers_base.py'
@@ -19,6 +21,7 @@ on:
       - 'tests/test_media_package_jobs.py'
       - 'tests/test_media_package_execution.py'
       - 'tests/test_media_package_execute_jobs.py'
+      - 'tests/test_media_package_report_safety.py'
       - 'tests/test_media_package_zfuse_publish.py'
       - 'tests/test_media_package_zfuse_probe.py'
       - 'app/batch/media_package_zfuse_probe.py'
@@ -55,7 +58,7 @@ jobs:
       - name: Test scope, 200-file partitioning, security and Worker paging
         env:
           PYTHONPATH: .
-        run: pytest -q tests/test_media_package_organizer.py tests/test_media_package_jobs.py tests/test_media_package_execution.py tests/test_media_package_execute_jobs.py tests/test_media_package_zfuse_publish.py tests/test_media_package_zfuse_probe.py
+        run: pytest -q tests/test_media_package_organizer.py tests/test_media_package_jobs.py tests/test_media_package_execution.py tests/test_media_package_execute_jobs.py tests/test_media_package_report_safety.py tests/test_media_package_zfuse_publish.py tests/test_media_package_zfuse_probe.py
       - name: Synthetic read-only scan throughput baseline
         env:
           PYTHONPATH: .
