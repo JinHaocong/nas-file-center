@@ -112,21 +112,19 @@ def _inspect_stage(stage_fd: int, stage: Path, moves: list[dict],
                    expected: bytes) -> bool:
     if not _read_marker(stage_fd, _OWNER, expected):
         raise StagingConflict("stage owner marker missing")
-    names = {Path(row["target"]).name for row in moves}
-    permissible = names | {_OWNER, _COMPLETE}
+    by_name = {Path(row["target"]).name: row for row in moves}
+    if len(by_name) != len(moves):
+        raise StagingConflict("duplicate staged file names")
+    permissible = set(by_name) | {_OWNER, _COMPLETE}
     with os.scandir(stage_fd) as entries:
         seen = set()
         for entry in entries:
             if entry.name not in permissible:
                 raise StagingConflict(f"untrusted stage workspace entry: {entry.name}")
             seen.add(entry.name)
-            if entry.name in names:
-                index = next((i for i, row in enumerate(moves)
-                              if Path(row["target"]).name == entry.name), None)
-                if index is None:
-                    raise StagingConflict("unknown staged media file")
+            if entry.name in by_name:
                 info = entry.stat(follow_symlinks=False)
-                _check_identity(info, moves[index]["identity"], stage / entry.name)
+                _check_identity(info, by_name[entry.name]["identity"], stage / entry.name)
             else:
                 info = entry.stat(follow_symlinks=False)
                 if not stat.S_ISREG(info.st_mode):
