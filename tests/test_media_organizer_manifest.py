@@ -81,3 +81,26 @@ def test_freeze_publication_is_exclusive_checksum_verified_and_private(tmp_path)
     path.write_text(json.dumps(payload))
     with pytest.raises(FrozenPreviewError, match='checksum'):
         load_frozen_preview_manifest(path, job_id=22, unit=root)
+
+
+def test_freeze_reuses_preview_exclusion_policy_and_preflight_preserves_it(tmp_path):
+    from app.batch.media_organizer_execution import validate_execution_preflight
+    root = tmp_path / "synthetic-work"
+    root.mkdir()
+    (root / "photo.jpg").write_bytes(b"img")
+    (root / "movie.mp4").write_bytes(b"vid")
+    private = root / "PHOTOS"
+    private.mkdir()
+    (private / "hidden.jpg").write_bytes(b"private")
+    preview = preview_semantic_unit(
+        root, allowed_roots=[tmp_path], exclude_dir_names=["photos"],
+    )
+    manifest = build_frozen_preview_manifest(
+        root, preview_record=preview, allowed_roots=[tmp_path],
+        job_id=44, exclude_dir_names=["photos"],
+    )
+    assert manifest["excluded_dir_names"] == ["photos"]
+    result = validate_execution_preflight(manifest, allowed_roots=[tmp_path])
+    assert result["ready"] is True
+    assert result["file_count"] == 2
+    assert (private / "hidden.jpg").exists()
