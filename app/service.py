@@ -648,8 +648,13 @@ class FileCenterService:
         page_size = max(1, min(int(page_size), 500))
         offset = (page - 1) * page_size
         with self.SessionLocal() as session:
-            total = session.scalar(select(func.count(WorkJob.id))) or 0
-            rows = list(session.scalars(select(WorkJob).order_by(WorkJob.id.desc()).limit(page_size).offset(offset)))
+            # Match Task Center visibility: failed MediaPackage execution
+            # records remain in SQLite for recovery after being dismissed.
+            visible = func.coalesce(func.json_extract(WorkJob.checkpoint_json, "$._task_queue_dismissed"), 0) != 1
+            total = session.scalar(select(func.count(WorkJob.id)).where(visible)) or 0
+            rows = list(session.scalars(
+                select(WorkJob).where(visible).order_by(WorkJob.id.desc()).limit(page_size).offset(offset)
+            ))
             items = [{
                 "id": row.id,
                 "kind": row.kind,

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from app.config import Settings
-from app.models import AuditEvent, DuplicateFile, DuplicateGroup, ScanJob
+from app.models import AuditEvent, DuplicateFile, DuplicateGroup, ScanJob, WorkJob
 from app.service import FileCenterService
 
 
@@ -110,3 +110,37 @@ def test_scan_groups_and_audit_list_renderable_shape(tmp_path: Path):
     assert audit["total"] == 1
     assert audit["items"][0]["operation"] == "scan"
     assert audit["items"][0]["details"] == {"x": 1}
+
+
+def test_dismissed_execution_hidden_consistently_in_task_center_and_dashboard(tmp_path: Path):
+    service, _data = make_service(tmp_path)
+    with service.SessionLocal() as session:
+        dismissed = WorkJob(
+            kind="media_package-package-execute", status="failed",
+            state_json='{"preview_job_id":13}',
+            checkpoint_json='{"_task_queue_dismissed":true}',
+        )
+        visible = WorkJob(
+            kind="media_package-package-execute", status="failed",
+            state_json='{"preview_job_id":13}',
+            checkpoint_json='{}',
+        )
+        completed = WorkJob(kind="fclones-scan", status="completed")
+        session.add_all([dismissed, visible, completed])
+        session.commit()
+        dismissed_id, visible_id, completed_id = dismissed.id, visible.id, completed.id
+
+    canonical = service.list_tasks(page=1, page_size=10)
+    legacy = service.list_work_jobs(page=1, page_size=10)
+    assert canonical["total"] == legacy["total"] == 2
+    assert {row["id"] for row in canonical["items"]} == {visible_id, completed_id}
+    assert {row["id"] for row in legacy["items"]} == {visible_id, completed_id}
+
+    # Deleting failed execution hides it but keeps its recovery authority.
+    service.delete_task(visible_id)
+    after = service.list_work_jobs(page=1, page_size=10)
+    assert after["total"] == service.list_tasks(page=1, page_size=10)["total"] == 1
+    assert all(row["id"] != visible_id for row in after["items"])
+    with service.SessionLocal() as session:
+        assert session.get(WorkJob, dismissed_id) is not None
+        assert session.get(WorkJob, visible_id) is not None

@@ -29,14 +29,20 @@ export const TaskDeleteButton: React.FC<Props> = ({
     mutationFn: () => tasksApi.deleteTask(task.id),
     onSuccess: async () => {
       toast.success('任务 #' + task.id + ' 已删除');
-      await queryClient.invalidateQueries({ queryKey: ['tasksList'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tasksList'] }),
+        queryClient.invalidateQueries({ queryKey: ['recentTasks'] }),
+      ]);
       queryClient.removeQueries({ queryKey: ['taskDetail', task.id] });
       queryClient.removeQueries({ queryKey: ['taskLogs', task.id] });
       setOpen(false);
       onSuccess?.();
     },
     onError: async (err: Error) => {
-      await queryClient.invalidateQueries({ queryKey: ['tasksList'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tasksList'] }),
+        queryClient.invalidateQueries({ queryKey: ['recentTasks'] }),
+      ]);
       toast.error(err.message || '删除任务失败');
     },
   });
