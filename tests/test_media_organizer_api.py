@@ -4,11 +4,12 @@ from fastapi.testclient import TestClient
 from app.media_organizer.router import router
 
 
-def test_admin_only_preview_routes_present_without_execute_route():
+def test_admin_only_preview_and_guarded_execution_routes_are_registered():
     routes={(x.path,tuple(sorted(x.methods or []))) for x in router.routes}
     assert ('/api/media-organizer/previews',('POST',)) in routes
     assert ('/api/media-organizer/previews/{job_id}',('GET',)) in routes
-    assert not any('/execute' in path for path,_ in routes)
+    assert ('/api/media-organizer/previews/{job_id}/execute', ('POST',)) in routes
+    assert ('/api/media-organizer/executions/{job_id}/recover', ('POST',)) in routes
 
 
 def test_preview_endpoint_passes_scope_through_without_mutation(tmp_path, monkeypatch):
