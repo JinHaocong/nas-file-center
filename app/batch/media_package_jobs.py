@@ -269,16 +269,17 @@ class MediaPackagePreviewHandler(TaskHandler):
                 json.dump(finished, output, ensure_ascii=False)
                 output.flush()
                 os.fsync(output.fileno())
-            # Publish the summary last. Readers never read an incomplete report.
-            os.replace(staged[0], data)
-            os.replace(staged[1], index)
-            os.replace(staged[2], summary)
+            # Publish without overwriting another report that appeared after
+            # the initial preflight. The summary remains the final commit marker.
+            for staged_path, final_path in zip(staged, (data, index, summary)):
+                os.link(staged_path, final_path, follow_symlinks=False)
+                os.unlink(staged_path)
             context.checkpoint(
                 progress_current=seen,
                 progress_message=f"MediaPackage 预览完成：{seen:,} 包，待整理 {ready:,}，冲突 {blocked:,}",
                 checkpoint_data={"schema_version": 1, "packages_scanned": seen, "finished": True},
             )
         except BaseException:
-            for path in (*staged, data, index, summary):
-                path.unlink(missing_ok=True)
+            # Preserve failed-preview evidence for diagnosis. A new task uses
+            # another reserved ID; it must never erase these report artifacts.
             raise
