@@ -249,3 +249,21 @@ def test_recovery_after_partial_retirement_never_restarts_staging(tmp_path, monk
     assert process_work_job(settings, second.json()["job_id"])
     rows = client.get(f"/api/media-organizer/previews/{second.json()['job_id']}").json()["units"]
     assert any(x["unit"] == str(work) and x["status"] == "already_organized" for x in rows)
+
+
+def test_preview_exposes_confirmation_only_to_enabled_admin_and_ready_unit(tmp_path):
+    disabled, off_settings, off_work = setup(tmp_path / "disabled", enabled=False)
+    off_pid = preview(disabled, off_settings, off_work)
+    off_body = disabled.get(f"/api/media-organizer/previews/{off_pid}").json()
+    assert off_body["execution_enabled"] is False
+    assert off_body["confirmation_tokens"] == {}
+
+    enabled, on_settings, on_work = setup(tmp_path / "enabled", enabled=True)
+    on_pid = preview(enabled, on_settings, on_work)
+    on_body = enabled.get(f"/api/media-organizer/previews/{on_pid}").json()
+    assert on_body["execution_enabled"] is True
+    assert on_body["confirmation_tokens"] == {
+        str(on_work): approval_token(on_pid, str(on_work)),
+    }
+    enabled.cookies.clear()
+    assert enabled.get(f"/api/media-organizer/previews/{on_pid}").status_code == 401
