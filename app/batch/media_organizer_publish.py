@@ -285,16 +285,37 @@ def _create_public_group(unit: Path, name: str, manifest: dict, witness: bytes,
     _check_unit(unit, manifest, fence)
     unit_fd = _open_directory_nofollow(unit)
     try:
+        # Do not publish into a same-named directory merely because our mkdir
+        # returned. A concurrent rename can replace its binding before open.
         os.mkdir(name, mode=0o755, dir_fd=unit_fd)
+        created = os.stat(name, dir_fd=unit_fd, follow_symlinks=False)
+        if (not stat.S_ISDIR(created.st_mode)
+                or int(created.st_dev) != manifest["unit_dev"]):
+            raise PublishingConflict("created public directory has unsafe identity")
         os.fsync(unit_fd)
+        target_fd = os.open(
+            name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            dir_fd=unit_fd,
+        )
+        try:
+            opened = os.fstat(target_fd)
+            bound = os.stat(name, dir_fd=unit_fd, follow_symlinks=False)
+            created_id = (int(created.st_dev), int(created.st_ino))
+            if (not stat.S_ISDIR(opened.st_mode)
+                    or (int(opened.st_dev), int(opened.st_ino)) != created_id
+                    or (int(bound.st_dev), int(bound.st_ino)) != created_id):
+                raise PublishingConflict("created public directory replaced before ownership witness")
+            # A foreign directory swapped into this name may already have
+            # contents. Never write our owner witness into such a directory.
+            with os.scandir(target_fd) as entries:
+                if next(entries, None) is not None:
+                    raise PublishingConflict("foreign public directory occupied before witness")
+            _check_unit(unit, manifest, fence)
+            _write_marker(target_fd, _PUBLIC_OWNER, witness)
+        finally:
+            os.close(target_fd)
     finally:
         os.close(unit_fd)
-    target_fd = _open_directory_nofollow(unit / name)
-    try:
-        _check_unit(unit, manifest, fence)
-        _write_marker(target_fd, _PUBLIC_OWNER, witness)
-    finally:
-        os.close(target_fd)
 
 
 def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
