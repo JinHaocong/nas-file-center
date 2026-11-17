@@ -64,7 +64,9 @@ def build_frozen_preview_manifest(
             "target_name": item["target_name"],
             "group": item["kind"],
             "identity": list(item["identity"]),
-            "stage": str(unit / stage / f"{index:06d}{src.suffix}"),
+            # Keep existing staging-executor field names: target is the
+            # private staged path; final is the reviewed public path.
+            "target": str(unit / stage / f"{index:06d}{src.suffix}"),
         })
     if not planned:
         raise FrozenPreviewError("ready preview had no files")
