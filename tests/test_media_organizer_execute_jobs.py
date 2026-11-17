@@ -338,3 +338,44 @@ def test_assisted_recovery_confirmation_is_idempotent_after_success(tmp_path, mo
     assert repeated.status_code == 200, repeated.text
     assert repeated.json()["job_id"] == second_id
     assert repeated.json()["status"] == "completed"
+
+
+def test_assisted_recovery_after_last_marker_gap_requires_durable_receipt(
+    tmp_path, monkeypatch,
+):
+    """Admin recovery may continue an EMPTY stage only with exact private proof."""
+    from app.batch import media_organizer_retire as retirement
+    client, settings, work = setup(tmp_path, enabled=True)
+    pid = preview(client, settings, work)
+    queued = execute_request(client, pid, work)
+    assert queued.status_code == 200
+    original_job_id = queued.json()["job_id"]
+    original_rmdir = retirement.os.rmdir
+    stage_name = f".nfc-media-organizer-stage-{original_job_id}"
+    interrupted = []
+
+    def stop_before_final_rmdir(name, *args, **kwargs):
+        if name == stage_name and kwargs.get("dir_fd") is not None and not interrupted:
+            interrupted.append(name)
+            raise RuntimeError("synthetic power loss in marker gap")
+        return original_rmdir(name, *args, **kwargs)
+
+    monkeypatch.setattr(retirement.os, "rmdir", stop_before_final_rmdir)
+    assert worker(settings, original_job_id, name="receipt-owner") is False
+    monkeypatch.setattr(retirement.os, "rmdir", original_rmdir)
+    assert interrupted
+    stage = work / stage_name
+    assert stage.is_dir()
+    assert list(stage.iterdir()) == []
+    receipt = (settings.reports_dir / "media_organizer-executions" /
+               str(original_job_id) / "manifest.json.retirement-receipt.json")
+    assert receipt.is_file()
+    approved = client.post(
+        f"/api/media-organizer/executions/{original_job_id}/recover",
+        json={"confirmation": recovery_token(original_job_id)},
+    )
+    assert approved.status_code == 200, approved.text
+    recovered_id = approved.json()["job_id"]
+    assert worker(settings, recovered_id, name="receipt-owner")
+    assert not stage.exists()
+    assert client.get(f"/api/media-organizer/executions/{recovered_id}").json()["status"] == "completed"
