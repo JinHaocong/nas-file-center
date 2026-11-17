@@ -196,3 +196,91 @@ def test_final_private_marker_gap_blocks_without_deleting_unwitnessed_directory(
         retire(tmp_path, manifest, frozen, resume=True)
     assert stage.is_dir()
     assert all(Path(row["final"]).is_file() for row in manifest["moves"])
+
+
+def test_crash_after_last_private_marker_before_rmdir_recovers_from_durable_receipt(
+    tmp_path, monkeypatch,
+):
+    """No staged file can disappear: receipt must outlive the last marker."""
+    from app.batch import media_organizer_retire as retirement
+    unit, manifest, frozen = published(tmp_path)
+    stage = unit / manifest["stage_directory"]
+    original_rmdir = retirement.os.rmdir
+    crash = []
+
+    def interrupt_final_rmdir(name, *args, **kwargs):
+        if name == stage.name and kwargs.get("dir_fd") is not None and not crash:
+            crash.append(name)
+            raise RuntimeError("synthetic power loss before last stage rmdir")
+        return original_rmdir(name, *args, **kwargs)
+
+    monkeypatch.setattr(retirement.os, "rmdir", interrupt_final_rmdir)
+    with pytest.raises(RuntimeError, match="synthetic power loss"):
+        retire(tmp_path, manifest, frozen)
+    assert crash
+    assert stage.is_dir()
+    assert list(stage.iterdir()) == []
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
+    receipt = frozen.with_name(frozen.name + ".retirement-receipt.json")
+    assert receipt.is_file()
+    assert receipt.stat().st_mode & 0o777 == 0o600
+
+    monkeypatch.setattr(retirement.os, "rmdir", original_rmdir)
+    result = retire(tmp_path, manifest, frozen, resume=True)
+    assert result["finalized"] is True
+    assert not stage.exists()
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
+    assert preview_semantic_unit(unit, allowed_roots=[tmp_path])["status"] == "already_organized"
+
+
+def test_last_marker_gap_recovery_rejects_foreign_empty_stage_replacement(
+    tmp_path, monkeypatch,
+):
+    from app.batch import media_organizer_retire as retirement
+    unit, manifest, frozen = published(tmp_path)
+    stage = unit / manifest["stage_directory"]
+    original_rmdir = retirement.os.rmdir
+
+    def fail(name, *args, **kwargs):
+        if name == stage.name and kwargs.get("dir_fd") is not None:
+            raise RuntimeError("synthetic crash")
+        return original_rmdir(name, *args, **kwargs)
+
+    monkeypatch.setattr(retirement.os, "rmdir", fail)
+    with pytest.raises(RuntimeError):
+        retire(tmp_path, manifest, frozen)
+    monkeypatch.setattr(retirement.os, "rmdir", original_rmdir)
+    moved = unit / "detached-old-stage"
+    stage.rename(moved)
+    stage.mkdir()
+    with pytest.raises(RetirementConflict, match="receipt|identity|changed|stage"):
+        retire(tmp_path, manifest, frozen, resume=True)
+    assert stage.is_dir()
+    assert moved.is_dir()
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
+
+
+def test_last_marker_gap_recovery_rejects_tampered_external_receipt(
+    tmp_path, monkeypatch,
+):
+    from app.batch import media_organizer_retire as retirement
+    unit, manifest, frozen = published(tmp_path)
+    stage = unit / manifest["stage_directory"]
+    original_rmdir = retirement.os.rmdir
+
+    def fail(name, *args, **kwargs):
+        if name == stage.name and kwargs.get("dir_fd") is not None:
+            raise RuntimeError("synthetic crash")
+        return original_rmdir(name, *args, **kwargs)
+
+    monkeypatch.setattr(retirement.os, "rmdir", fail)
+    with pytest.raises(RuntimeError):
+        retire(tmp_path, manifest, frozen)
+    monkeypatch.setattr(retirement.os, "rmdir", original_rmdir)
+    receipt = frozen.with_name(frozen.name + ".retirement-receipt.json")
+    assert receipt.exists()
+    receipt.write_text("forged receipt", encoding="utf-8")
+    with pytest.raises(RetirementConflict, match="receipt|invalid|changed|checksum"):
+        retire(tmp_path, manifest, frozen, resume=True)
+    assert stage.is_dir()
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
