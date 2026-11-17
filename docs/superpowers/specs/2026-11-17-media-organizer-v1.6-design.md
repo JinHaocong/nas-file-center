@@ -1,6 +1,6 @@
 # Media Organizer V1.6 — SDD Design (MediaPackage + semantic)
 
-**Status:** Product behavior approved 2026-11-17; implementation design for review. This file intentionally uses synthetic examples only.  
+**Status:** Product behavior approved 2026-11-17; implementation design for review. This file intentionally uses synthetic examples only.
 **Goal:** Give both organizer modes one deterministic numbering and 200-item grouping contract, while adding semantic-boundary-aware recursive organization for semantic trees.
 
 ## User outcomes
