@@ -95,6 +95,23 @@ def build_frozen_preview_manifest(
             wrapper_identities[str(wrapper)] = [int(info.st_dev), int(info.st_ino)]
         finally:
             os.close(wrapper_fd)
+    # Correctly named buckets can still be source wrappers when another
+    # media kind in the same unit requires changes. Capture those original
+    # directory identities too; never adopt a same-named foreign folder.
+    for group in fresh.get("groups", []):
+        folder = Path(group["destination"])
+        if str(folder) in wrapper_identities:
+            continue
+        if not any(Path(row["source"]).is_relative_to(folder) for row in files):
+            continue
+        folder_fd = _open_directory_nofollow(folder)
+        try:
+            info = os.fstat(folder_fd)
+            if not stat.S_ISDIR(info.st_mode) or int(info.st_dev) != base_dev:
+                raise FrozenPreviewError("unsafe already-named source group binding")
+            wrapper_identities[str(folder)] = [int(info.st_dev), int(info.st_ino)]
+        finally:
+            os.close(folder_fd)
     return {
         "schema_version": MANIFEST_VERSION,
         "job_id": job_id,
