@@ -68,9 +68,12 @@ empty. Unknown or replaced scratch entries are **not automatically deleted**.
 The CLI deliberately refuses to start without --ack-scratch-write.
 
 Require all fields to be true: directory_noreplace,
-collision_preserved, directory_fsync, hardlink_noreplace,
-cross_directory_hardlink, original_probe_compatible, cleanup_complete, and
-compatible. Any false field, error, leftover scratch directory or an
+directory_cross_parent_noreplace, collision_preserved, directory_fsync,
+hardlink_noreplace, cross_directory_hardlink,
+original_probe_compatible, cleanup_complete, and compatible.
+The cross-parent field specifically verifies a private stage child being
+atomically promoted to a public sibling of the stage folder, matching the
+current execution engine. Any false field, error, leftover scratch directory or an
 unsupported rename/no-replace operation blocks deployment.
 
 GitHub Actions tests exercise this probe on synthetic runner storage only.
