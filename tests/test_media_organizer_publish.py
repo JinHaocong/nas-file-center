@@ -332,37 +332,30 @@ def test_public_folder_swap_after_mkdir_never_marks_foreign_directory(tmp_path, 
     assert all(Path(row["target"]).is_file() for row in manifest["moves"])
 
 
-def test_swapped_empty_new_group_must_not_gain_owner_witness(tmp_path, monkeypatch):
-    """An empty adversarial replacement must never be marked as job-owned."""
+def test_public_group_is_only_promoted_from_private_witnessed_directory(
+    tmp_path, monkeypatch,
+):
+    """No public P/V name may ever be created as an unwitnessed bare mkdir."""
     from app.batch import media_organizer_publish as publishing
     root, manifest, frozen = prepared(
         tmp_path, {"a.jpg": b"image", "b.mp4": b"video"},
     )
     actual_mkdir = publishing.os.mkdir
-    replaced = []
+    public_mkdir_calls = []
+    destinations = {group["name"] for group in manifest["groups"]}
 
-    def swap_any_initial_group(name, *args, **kwargs):
-        result = actual_mkdir(name, *args, **kwargs)
-        # Works with both the old directly published directory and a future
-        # private temporary one: the injected replacement remains EMPTY.
-        if (kwargs.get("dir_fd") is not None and not replaced and
-                (name == manifest["groups"][0]["name"] or
-                 str(name).startswith(".nfc-publish-pending-"))):
-            created = root / name
-            original = root / "owned-directory-moved-aside"
-            created.rename(original)
-            actual_mkdir(created)
-            replaced.append(created)
-        return result
+    def forbid_unwitnessed_public_mkdir(name, *args, **kwargs):
+        if name in destinations and kwargs.get("dir_fd") is not None:
+            public_mkdir_calls.append(str(name))
+        return actual_mkdir(name, *args, **kwargs)
 
-    monkeypatch.setattr(publishing.os, "mkdir", swap_any_initial_group)
-    with pytest.raises(PublishingConflict, match="identity|replaced|foreign|occupied"):
-        publish(tmp_path, manifest, frozen)
-    assert replaced, "failure injection must actually swap a created directory"
-    assert replaced[0].is_dir()
-    assert not (replaced[0] / ".nfc-publish-owner").exists()
-    assert not (replaced[0] / "001.jpg").exists()
-    assert all(Path(row["target"]).is_file() for row in manifest["moves"])
+    monkeypatch.setattr(publishing.os, "mkdir", forbid_unwitnessed_public_mkdir)
+    result = publish(tmp_path, manifest, frozen)
+    assert result["ready_for_retirement"]
+    assert not public_mkdir_calls, "public group must be an atomic private promotion"
+    for name in destinations:
+        assert (root / name / ".nfc-publish-owner").is_file()
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
 
 
 def test_public_group_promotion_uses_noreplace_and_refuses_late_empty_target(
@@ -411,7 +404,7 @@ def test_pending_group_with_valid_witness_resumes_after_promotion_crash(
     with pytest.raises(RuntimeError, match="synthetic crash"):
         publish(tmp_path, manifest, frozen)
     assert crashed, "private-group promotion must be a distinct operation"
-    pending = root / crashed[0]
+    pending = root / manifest["stage_directory"] / crashed[0]
     assert pending.is_dir() and (pending / ".nfc-publish-owner").is_file()
     monkeypatch.setattr(publishing, "rename_noreplace_at", actual)
     result = publish(tmp_path, manifest, frozen, resume=True)
