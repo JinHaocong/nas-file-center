@@ -20,6 +20,7 @@ from app.batch.media_organizer_planner import (
 
 MAX_TRAVERSAL_DIRS = 250_000
 MAX_TRAVERSAL_DEPTH = 64
+_CLEAR_WORK = re.compile(r"^(?:NO[. _-]?\d+|A\d+-\d+)", re.IGNORECASE)
 _AMBIGUOUS = re.compile(r"^(?:\d{1,3}|新建文件夹(?:\s*\(\d+\))?)$", re.IGNORECASE)
 
 
@@ -95,7 +96,35 @@ def discover_semantic_units(selection: Path, *, allowed_roots: list[Path],
                 yield _blocked_result(path, "symlink or special child needs manual review")
 
         if has_regular_files or has_wrappers:
-            yield preview_semantic_unit(current, allowed_roots=allowed_roots,
-                                        quarantine_root=quarantine)
+            record = preview_semantic_unit(current, allowed_roots=allowed_roots,
+                                           quarantine_root=quarantine)
+            yield record
+            if has_wrappers and record['status'] == 'blocked':
+                # A historical P/V folder can itself contain numbered works.
+                # Do not flatten its parent, but safely discover unambiguous
+                # work directories inside it as independent future units.
+                for name, info in entries:
+                    if not stat.S_ISDIR(info.st_mode) or not _is_wrapper(name):
+                        continue
+                    wrapper = current / name
+                    try:
+                        fd = _open_directory_nofollow(wrapper)
+                        try:
+                            if os.fstat(fd).st_dev != dev:
+                                raise ValueError("cross-device wrapper")
+                            with os.scandir(fd) as scan:
+                                inside = list(scan)
+                                if len(inside) > MAX_IMMEDIATE_ENTRIES:
+                                    raise ValueError("wrapper entry limit")
+                                for entry in inside:
+                                    if _CLEAR_WORK.match(entry.name):
+                                        info = entry.stat(follow_symlinks=False)
+                                        if stat.S_ISDIR(info.st_mode) and info.st_dev == dev:
+                                            children.append(wrapper / entry.name)
+                        finally:
+                            os.close(fd)
+                    except (OSError, ValueError) as exc:
+                        yield _blocked_result(wrapper, str(exc))
+        children.sort(key=lambda x: (str(x).casefold(), str(x)))
         for child in reversed(children):
             stack.append((child, depth+1))
