@@ -36,6 +36,22 @@ class _Blocked(ValueError):
     pass
 
 
+def _normalized_excluded_dir_names(values: list[str] | None) -> frozenset[str]:
+    """Validate literal basenames; never match filenames by substring."""
+    if values is None:
+        return frozenset()
+    if not isinstance(values, (list, tuple, set, frozenset)):
+        raise _Blocked("excluded directory names must be a list")
+    names = set()
+    for value in values:
+        if (not isinstance(value, str) or not value.strip()
+                or value in (".", "..")
+                or "/" in value or "\\" in value or "\x00" in value):
+            raise _Blocked("excluded directory name must be a single safe basename")
+        names.add(value.casefold())
+    return frozenset(names)
+
+
 def _is_wrapper(name: str) -> bool:
     folded = name.casefold()
     return bool(_SHORT.fullmatch(name) or _BUCKET.fullmatch(name) or
@@ -79,7 +95,8 @@ def _blocked_result(unit: Path, reason: str) -> dict:
 
 
 def preview_semantic_unit(unit: Path, *, allowed_roots: list[Path],
-                          quarantine_root: Path | None = None) -> dict:
+                          quarantine_root: Path | None = None,
+                          exclude_dir_names: list[str] | None = None) -> dict:
     """Return a complete deterministic read-only plan for one safe unit.
 
     Recursion is limited to old media classification wrappers. Independent
@@ -88,6 +105,9 @@ def preview_semantic_unit(unit: Path, *, allowed_roots: list[Path],
     """
     unit = Path(unit)
     try:
+        excluded_names = _normalized_excluded_dir_names(exclude_dir_names)
+        if any(piece.casefold() in excluded_names for piece in unit.parts):
+            raise _Blocked("organizing unit is inside a protected excluded directory")
         _check_scope(unit, [Path(x) for x in allowed_roots],
                      Path(quarantine_root) if quarantine_root is not None else None)
         rows: list[dict] = []
@@ -116,6 +136,14 @@ def preview_semantic_unit(unit: Path, *, allowed_roots: list[Path],
                             raise _Blocked("reserved workspace requires recovery")
                         st = entry.stat(follow_symlinks=False)
                         if stat.S_ISDIR(st.st_mode):
+                            if entry.name.casefold() in excluded_names:
+                                # A root-level excluded folder is a protected
+                                # sibling. Inside a classification wrapper the
+                                # wrapper itself cannot be safely retired.
+                                if inside_wrapper:
+                                    raise _Blocked("excluded directory inside old classification wrapper")
+                                protected.append(str(current / entry.name))
+                                continue
                             if st.st_dev != root_dev:
                                 raise _Blocked("cross-device child directory")
                             if _is_wrapper(entry.name):
