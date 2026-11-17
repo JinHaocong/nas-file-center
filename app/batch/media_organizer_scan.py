@@ -13,6 +13,7 @@ from app.batch.media_organizer_reports import compact_preview_record
 def write_semantic_preview(selection: Path, *, allowed_roots: list[Path], out: TextIO,
                            quarantine_root: Path | None = None,
                            exclude_roots: list[Path] | None = None,
+                           exclude_dir_names: list[str] | None = None,
                            max_items: int = 10,
                            check_cancelled: Callable[[], None] | None = None,
                            on_progress: Callable[[int, dict], None] | None = None) -> dict:
@@ -25,6 +26,7 @@ def write_semantic_preview(selection: Path, *, allowed_roots: list[Path], out: T
     for preview in discover_semantic_units(selection, allowed_roots=allowed_roots,
                                            quarantine_root=quarantine_root,
                                            exclude_roots=exclude_roots,
+                                           exclude_dir_names=exclude_dir_names,
                                            check_cancelled=check_cancelled):
         record = compact_preview_record(preview, max_items=max_items)
         out.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
