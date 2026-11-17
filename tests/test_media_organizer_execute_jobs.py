@@ -146,8 +146,10 @@ def test_confirmed_worker_executes_only_selected_unit_then_second_scan_is_noop(t
     result = client.get(f"/api/media-organizer/executions/{job_id}")
     assert result.status_code == 200
     assert result.json()["status"] == "completed"
-    images = list(work.glob("P [*]/*.jpg"))
-    videos = list(work.glob("V [*]/*.mp4"))
+    images = [p for folder in work.iterdir() if folder.is_dir()
+              and folder.name.startswith("P [") for p in folder.glob("*.jpg")]
+    videos = [p for folder in work.iterdir() if folder.is_dir()
+              and folder.name.startswith("V [") for p in folder.glob("*.mp4")]
     assert [f.read_bytes() for f in images] == [b"photo-1"]
     assert [f.read_bytes() for f in videos] == [b"video-1"]
     assert (sibling / "untouched.jpg").read_bytes() == b"untouched"
@@ -201,5 +203,7 @@ def test_explicit_recovery_reuses_frozen_manifest_after_stage_interruption(tmp_p
     # can renew it, but an unrelated owner must never take over early.
     assert worker(settings, recovered_id, name="first-owner")
     assert client.get(f"/api/media-organizer/executions/{recovered_id}").json()["status"] == "completed"
-    assert list(work.glob("P [*]/*.jpg"))
-    assert list(work.glob("V [*]/*.mp4"))
+    assert any(folder.name.startswith("P [") and list(folder.glob("*.jpg"))
+               for folder in work.iterdir() if folder.is_dir())
+    assert any(folder.name.startswith("V [") and list(folder.glob("*.mp4"))
+               for folder in work.iterdir() if folder.is_dir())
