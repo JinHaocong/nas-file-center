@@ -146,3 +146,35 @@ def test_foreign_stage_entry_blocks_retirement_without_deleting_it(tmp_path):
         retire(tmp_path, manifest, frozen)
     assert foreign.read_bytes() == b"keep"
     assert all(Path(row["target"]).exists() for row in manifest["moves"])
+
+
+@pytest.mark.parametrize("count,expected_groups", [(200, []), (201, [200, 1])])
+def test_exact_two_hundred_boundary_end_to_end_is_idempotent(tmp_path, count, expected_groups):
+    from collections import Counter
+    unit = tmp_path / f"work{count}"
+    unit.mkdir()
+    payloads = Counter()
+    for index in range(count):
+        contents = f"synthetic-{index:04d}".encode()
+        (unit / f"raw_{index:04d}.jpg").write_bytes(contents)
+        payloads[contents] += 1
+    before = preview_semantic_unit(unit, allowed_roots=[tmp_path])
+    assert before["status"] == "ready"
+    manifest = build_frozen_preview_manifest(
+        unit, preview_record=before, allowed_roots=[tmp_path], job_id=1021,
+    )
+    frozen = tmp_path / "private" / "1021.manifest.json"
+    save_frozen_preview_manifest(frozen, manifest)
+    stage_frozen_sources(manifest, frozen_manifest_path=frozen,
+                         allowed_roots=[tmp_path], lease_fence=lambda: None)
+    publish_frozen_stage(manifest, frozen_manifest_path=frozen,
+                         allowed_roots=[tmp_path], lease_fence=lambda: None)
+    retire_published_stage(manifest, frozen_manifest_path=frozen,
+                           allowed_roots=[tmp_path], lease_fence=lambda: None)
+    assert [group["count"] for group in manifest["groups"]] == expected_groups
+    final_payloads = Counter(Path(row["final"]).read_bytes() for row in manifest["moves"])
+    assert final_payloads == payloads
+    final_preview = preview_semantic_unit(unit, allowed_roots=[tmp_path])
+    assert final_preview["status"] == "already_organized"
+    assert final_preview["needed_moves"] == 0
+    assert not (unit / manifest["stage_directory"]).exists()
