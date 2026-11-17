@@ -207,3 +207,45 @@ def test_explicit_recovery_reuses_frozen_manifest_after_stage_interruption(tmp_p
                for folder in work.iterdir() if folder.is_dir())
     assert any(folder.name.startswith("V [") and list(folder.glob("*.mp4"))
                for folder in work.iterdir() if folder.is_dir())
+
+
+def test_recovery_after_partial_retirement_never_restarts_staging(tmp_path, monkeypatch):
+    """A published job must only continue its frozen retirement journal."""
+    from app.batch import media_organizer_retire as retirement
+    client, settings, work = setup(tmp_path, enabled=True)
+    pid = preview(client, settings, work)
+    response = execute_request(client, pid, work)
+    assert response.status_code == 200
+    original_id = response.json()["job_id"]
+    original_unlink = retirement._retire_stage_link
+    calls = 0
+
+    def stop_during_retirement(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("synthetic crash after one staged link retired")
+        return original_unlink(*args, **kwargs)
+
+    monkeypatch.setattr(retirement, "_retire_stage_link", stop_during_retirement)
+    assert worker(settings, original_id, name="lease-owner") is False
+    monkeypatch.setattr(retirement, "_retire_stage_link", original_unlink)
+    current = client.get(f"/api/media-organizer/executions/{original_id}").json()
+    assert current["status"] == "failed"
+    assert current["progress"]["phase"] == "published"
+    confirmed = client.post(
+        f"/api/media-organizer/executions/{original_id}/recover",
+        json={"confirmation": recovery_token(original_id)},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    recovery_id = confirmed.json()["job_id"]
+    assert worker(settings, recovery_id, name="lease-owner")
+    assert client.get(f"/api/media-organizer/executions/{recovery_id}").json()["status"] == "completed"
+    assert not any(p.name.startswith(".nfc-") for p in work.iterdir())
+    second = client.post("/api/media-organizer/previews", json={
+        "selection": str(work.parent),
+    })
+    assert second.status_code == 200
+    assert process_work_job(settings, second.json()["job_id"])
+    rows = client.get(f"/api/media-organizer/previews/{second.json()['job_id']}").json()["units"]
+    assert any(x["unit"] == str(work) and x["status"] == "already_organized" for x in rows)
