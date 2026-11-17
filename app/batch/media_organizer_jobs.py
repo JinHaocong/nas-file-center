@@ -105,10 +105,27 @@ def get_media_organizer_preview(session_factory, settings: Settings, job_id: int
             summary = json.load(stream)
         units, total = read_preview_page(data, page=page, page_size=page_size,
                                          status_filter=status_filter)
+    execution_enabled = bool(
+        getattr(settings, 'media_organizer_execution_enabled', False)
+        and settings.allow_mutation and settings.allow_delete
+    )
+    confirmation_tokens = {}
+    if (execution_enabled and status == 'completed' and summary
+            and summary.get('blocked_count') == 0
+            and 1 <= summary.get('unit_count', 0) <= 5000):
+        # Admin-only endpoint: provide the exact unit-bound confirmation
+        # for visible ready rows, not for skipped/blocked/foreign units.
+        from app.batch.media_organizer_execute_jobs import approval_token
+        confirmation_tokens = {
+            row['unit']: approval_token(job_id, row['unit'])
+            for row in units if row.get('status') == 'ready'
+        }
     return {'job_id': job_id, 'status': status, 'error': error,
             'selection': state.get('selection', ''), 'progress': progress,
             'summary': summary, 'units': units, 'page': page,
-            'page_size': page_size, 'filtered_total': total, 'read_only': True}
+            'page_size': page_size, 'filtered_total': total, 'read_only': True,
+            'execution_enabled': execution_enabled,
+            'confirmation_tokens': confirmation_tokens}
 
 
 @register_handler
