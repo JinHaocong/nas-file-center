@@ -298,3 +298,35 @@ def test_preexisting_canonical_bucket_with_matching_final_label_is_rebuilt_witho
     assert result["ready_for_retirement"]
     assert (old / "001.jpg").read_bytes() == photo
     assert any(g["name"] == old.name for g in manifest["groups"])
+
+
+def test_public_folder_swap_after_mkdir_never_marks_foreign_directory(tmp_path, monkeypatch):
+    """Race: a directory created by our job is swapped before owner witness."""
+    from app.batch import media_organizer_publish as publishing
+    root, manifest, frozen = prepared(
+        tmp_path, {"a.jpg": b"image", "b.mp4": b"video"},
+    )
+    name = manifest["groups"][0]["name"]
+    foreign = root / name
+    moved = root / "moved-aside-owned-directory"
+    old_mkdir = publishing.os.mkdir
+    replaced = False
+
+    def swap_after_create(path, *args, **kwargs):
+        nonlocal replaced
+        result = old_mkdir(path, *args, **kwargs)
+        if path == name and kwargs.get("dir_fd") is not None and not replaced:
+            replaced = True
+            foreign.rename(moved)
+            old_mkdir(foreign)
+            (foreign / "foreign.txt").write_bytes(b"untouched")
+        return result
+
+    monkeypatch.setattr(publishing.os, "mkdir", swap_after_create)
+    with pytest.raises(PublishingConflict, match="replaced|identity|foreign"):
+        publish(tmp_path, manifest, frozen)
+    assert replaced is True
+    assert (foreign / "foreign.txt").read_bytes() == b"untouched"
+    assert not (foreign / ".nfc-publish-owner").exists()
+    assert not (foreign / "001.jpg").exists()
+    assert all(Path(row["target"]).is_file() for row in manifest["moves"])
