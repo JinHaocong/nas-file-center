@@ -109,13 +109,18 @@ def _validate_frozen_rows(manifest: dict, unit: Path) -> list[dict]:
 
 
 def _inspect_stage(stage_fd: int, stage: Path, moves: list[dict],
-                   expected: bytes) -> bool:
+                   expected: bytes, *, groups: list[dict] | None = None) -> bool:
     if not _read_marker(stage_fd, _OWNER, expected):
         raise StagingConflict("stage owner marker missing")
     by_name = {Path(row["target"]).name: row for row in moves}
     if len(by_name) != len(moves):
         raise StagingConflict("duplicate staged file names")
-    permissible = set(by_name) | {_OWNER, _COMPLETE}
+    # A publication in progress may have already prepared an owned,
+    # witnessed PRIVATE directory that must not be mistaken for a foreign
+    # regular file. It is never an authority for a new public destination.
+    pending = {f".nfc-publish-pending-{index:06d}"
+               for index in range(1, len(groups or []) + 1)}
+    permissible = set(by_name) | {_OWNER, _COMPLETE} | pending
     with os.scandir(stage_fd) as entries:
         seen = set()
         for entry in entries:
@@ -125,6 +130,21 @@ def _inspect_stage(stage_fd: int, stage: Path, moves: list[dict],
             if entry.name in by_name:
                 info = entry.stat(follow_symlinks=False)
                 _check_identity(info, by_name[entry.name]["identity"], stage / entry.name)
+            elif entry.name in pending:
+                info = entry.stat(follow_symlinks=False)
+                if not stat.S_ISDIR(info.st_mode):
+                    raise StagingConflict("unexpected type for pending public group")
+                pending_fd = os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY |
+                                     os.O_NOFOLLOW, dir_fd=stage_fd)
+                try:
+                    if not _read_marker(pending_fd, ".nfc-publish-owner", expected):
+                        raise StagingConflict("pending group lacks frozen owner witness")
+                    with os.scandir(pending_fd) as children:
+                        names = {child.name for child in children}
+                    if names != {".nfc-publish-owner"}:
+                        raise StagingConflict("foreign entry in pending public group")
+                finally:
+                    os.close(pending_fd)
             else:
                 info = entry.stat(follow_symlinks=False)
                 if not stat.S_ISREG(info.st_mode):
@@ -200,7 +220,8 @@ def stage_frozen_sources(
             if int(os.fstat(stage_fd).st_dev) != manifest["unit_dev"]:
                 raise StagingConflict("stage filesystem changed")
             if resume:
-                _inspect_stage(stage_fd, stage, moves, expected)
+                _inspect_stage(stage_fd, stage, moves, expected,
+                               groups=manifest.get("groups", []))
             else:
                 lease_fence()
                 _write_marker(stage_fd, _OWNER, expected)
@@ -241,11 +262,13 @@ def stage_frozen_sources(
 
         stage_fd = _open_directory_nofollow(stage)
         try:
-            complete = _inspect_stage(stage_fd, stage, moves, expected)
+            complete = _inspect_stage(stage_fd, stage, moves, expected,
+                                      groups=manifest.get("groups", []))
             if not complete:
                 guard()
                 _write_marker(stage_fd, _COMPLETE, expected)
-            if not _inspect_stage(stage_fd, stage, moves, expected):
+            if not _inspect_stage(stage_fd, stage, moves, expected,
+                                  groups=manifest.get("groups", [])):
                 raise StagingConflict("staging completion witness missing")
         finally:
             os.close(stage_fd)
