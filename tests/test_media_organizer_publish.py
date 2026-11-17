@@ -430,3 +430,62 @@ def test_post_promotion_folder_replacement_never_gets_new_media(tmp_path, monkey
     assert swapped
     assert list(swapped[0].iterdir()) == []
     assert all(Path(row["target"]).exists() for row in manifest["moves"])
+
+
+def test_resume_never_adopts_cloned_public_owner_marker_in_replaced_empty_folder(
+    tmp_path, monkeypatch,
+):
+    """A copied marker cannot authorize public file writes into another inode."""
+    from app.batch import media_organizer_publish as publishing
+    root, manifest, frozen = prepared(
+        tmp_path, {"a.jpg": b"image", "b.mp4": b"video"},
+    )
+    original = publishing._link_one
+    interrupted = []
+
+    def interrupt_before_first_public_link(*args, **kwargs):
+        if not interrupted:
+            interrupted.append(True)
+            raise RuntimeError("simulated post-promotion interruption")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(publishing, "_link_one", interrupt_before_first_public_link)
+    with pytest.raises(RuntimeError, match="simulated post-promotion interruption"):
+        publish(tmp_path, manifest, frozen)
+    monkeypatch.setattr(publishing, "_link_one", original)
+    group = root / manifest["groups"][0]["name"]
+    detached = root / "detached-valid-public-group"
+    assert (group / ".nfc-publish-owner").is_file()
+    group.rename(detached)
+    group.mkdir()
+    (group / ".nfc-publish-owner").write_bytes(
+        (detached / ".nfc-publish-owner").read_bytes(),
+    )
+    with pytest.raises(PublishingConflict, match="identity|replaced|binding|foreign"):
+        publish(tmp_path, manifest, frozen, resume=True)
+    assert list(group.iterdir()) == [group / ".nfc-publish-owner"]
+    assert all(Path(row["target"]).is_file() for row in manifest["moves"])
+
+
+def test_same_published_group_identity_survives_resume_after_interruption(
+    tmp_path, monkeypatch,
+):
+    from app.batch import media_organizer_publish as publishing
+    root, manifest, frozen = prepared(
+        tmp_path, {"a.jpg": b"image", "b.mp4": b"video"},
+    )
+    original = publishing._link_one
+    once = []
+
+    def abort(*args, **kwargs):
+        if not once:
+            once.append(True)
+            raise RuntimeError("simulated interruption")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(publishing, "_link_one", abort)
+    with pytest.raises(RuntimeError):
+        publish(tmp_path, manifest, frozen)
+    monkeypatch.setattr(publishing, "_link_one", original)
+    assert publish(tmp_path, manifest, frozen, resume=True)["ready_for_retirement"]
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
