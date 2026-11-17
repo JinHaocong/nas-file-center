@@ -34,25 +34,38 @@ def _check_parent(parent: Path) -> Path:
 
 def _clear_owned(scratch: Path, original: tuple[int, int],
                  created_inodes: set[tuple[int, int]]) -> tuple[bool, str | None]:
-    """Remove only empty directories created within this exact scratch inode."""
+    """Remove only original, empty, locally-created disposable directories."""
     try:
         if not stat.S_ISDIR(os.lstat(scratch).st_mode):
             return False, "scratch directory replaced"
-        current = os.lstat(scratch)
-        if (int(current.st_dev), int(current.st_ino)) != original:
+        initial = os.lstat(scratch)
+        if (int(initial.st_dev), int(initial.st_ino)) != original:
             return False, "scratch directory identity changed"
-        for child in list(scratch.iterdir()):
-            info = os.lstat(child)
-            identity = (int(info.st_dev), int(info.st_ino))
-            if not stat.S_ISDIR(info.st_mode) or identity not in created_inodes:
-                return False, "unrecognized scratch entry preserved for manual review"
-            # rmdir never removes a nonempty directory: fail closed rather
-            # than removing any file or symlink written by another process.
-            child.rmdir()
+
+        def clear_children(parent: Path) -> None:
+            for child in list(parent.iterdir()):
+                info = os.lstat(child)
+                identity = (int(info.st_dev), int(info.st_ino))
+                if not stat.S_ISDIR(info.st_mode) or identity not in created_inodes:
+                    raise ValueError("unrecognized scratch entry preserved for manual review")
+                clear_children(child)
+                current = os.lstat(child)
+                if ((int(current.st_dev), int(current.st_ino)) != identity
+                        or not stat.S_ISDIR(current.st_mode)):
+                    raise ValueError("scratch child directory changed before cleanup")
+                # rmdir cannot delete any nonempty directory. Unknown entries
+                # are always preserved for a manual inspection, never unlinked.
+                child.rmdir()
+
+        clear_children(scratch)
+        final = os.lstat(scratch)
+        if (int(final.st_dev), int(final.st_ino)) != original:
+            return False, "scratch root identity changed before cleanup"
         scratch.rmdir()
         return True, None
     except (OSError, ValueError) as exc:
         return False, f"owned scratch cleanup requires manual review: {exc}"
+
 
 
 def probe_semantic_organizer_mount(parent: Path) -> dict:
@@ -60,6 +73,7 @@ def probe_semantic_organizer_mount(parent: Path) -> dict:
     parent = _check_parent(parent)
     report = {
         "directory_noreplace": False,
+        "directory_cross_parent_noreplace": False,
         "collision_preserved": False,
         "directory_fsync": False,
         "cleanup_complete": False,
@@ -76,41 +90,59 @@ def probe_semantic_organizer_mount(parent: Path) -> dict:
         try:
             os.fsync(fd)
             report["directory_fsync"] = True
-            for name in ("source", "occupied"):
+            for name in ("stage", "occupied"):
                 os.mkdir(name, mode=0o700, dir_fd=fd)
                 info = os.stat(name, dir_fd=fd, follow_symlinks=False)
                 owned.add((int(info.st_dev), int(info.st_ino)))
             os.fsync(fd)
-            original_target = os.stat("occupied", dir_fd=fd, follow_symlinks=False)
-            expected_target = (int(original_target.st_dev), int(original_target.st_ino))
+            stage_fd = os.open("stage", os.O_RDONLY | os.O_DIRECTORY |
+                               os.O_NOFOLLOW, dir_fd=fd)
             try:
-                # Target is deliberately EMPTY. An unsafe plain os.rename()
-                # could silently replace it, so ENOTEMPTY is not enough.
-                rename_noreplace_at(fd, "source", fd, "occupied")
-            except OSError as exc:
-                if exc.errno in (errno.EEXIST, errno.ENOTEMPTY):
-                    report["directory_noreplace"] = True
-                else:
-                    report["errors"].append(f"directory no-replace capability: {exc}")
-            else:
-                report["errors"].append("empty occupied directory was silently replaced")
-            target = os.stat("occupied", dir_fd=fd, follow_symlinks=False)
-            report["collision_preserved"] = (
-                (int(target.st_dev), int(target.st_ino)) == expected_target
-            )
-            if not report["collision_preserved"]:
-                report["errors"].append("foreign empty target was replaced by rename")
-            if report["directory_noreplace"] and report["collision_preserved"]:
+                # Reproduce real execution: a PRIVATE stage child is atomically
+                # promoted into a public sibling of the stage parent.
+                os.mkdir("pending", mode=0o700, dir_fd=stage_fd)
+                pending_info = os.stat("pending", dir_fd=stage_fd,
+                                       follow_symlinks=False)
+                pending_id = (int(pending_info.st_dev), int(pending_info.st_ino))
+                owned.add(pending_id)
+                os.fsync(stage_fd)
+                original_target = os.stat("occupied", dir_fd=fd,
+                                          follow_symlinks=False)
+                expected_target = (int(original_target.st_dev),
+                                   int(original_target.st_ino))
                 try:
-                    rename_noreplace_at(fd, "source", fd, "published")
-                    proof = os.stat("published", dir_fd=fd, follow_symlinks=False)
-                    if (int(proof.st_dev), int(proof.st_ino)) not in owned:
-                        report["directory_noreplace"] = False
-                        report["errors"].append("published directory identity differs")
-                    os.fsync(fd)
+                    # Destination is deliberately an existing EMPTY folder:
+                    # ordinary rename may clobber it on some filesystems.
+                    rename_noreplace_at(stage_fd, "pending", fd, "occupied")
                 except OSError as exc:
-                    report["directory_noreplace"] = False
-                    report["errors"].append(f"directory publish capability: {exc}")
+                    if exc.errno in (errno.EEXIST, errno.ENOTEMPTY):
+                        report["directory_noreplace"] = True
+                    else:
+                        report["errors"].append(f"cross-parent directory no-replace: {exc}")
+                else:
+                    report["errors"].append("existing empty directory was replaced")
+                target = os.stat("occupied", dir_fd=fd, follow_symlinks=False)
+                report["collision_preserved"] = (
+                    (int(target.st_dev), int(target.st_ino)) == expected_target
+                )
+                if not report["collision_preserved"]:
+                    report["errors"].append("foreign empty target was replaced")
+                if report["directory_noreplace"] and report["collision_preserved"]:
+                    try:
+                        rename_noreplace_at(stage_fd, "pending", fd, "published")
+                        published = os.stat("published", dir_fd=fd,
+                                             follow_symlinks=False)
+                        report["directory_cross_parent_noreplace"] = (
+                            (int(published.st_dev), int(published.st_ino)) == pending_id
+                        )
+                        if not report["directory_cross_parent_noreplace"]:
+                            report["errors"].append("cross-parent directory identity differs")
+                        os.fsync(stage_fd)
+                        os.fsync(fd)
+                    except OSError as exc:
+                        report["errors"].append(f"cross-parent group promotion: {exc}")
+            finally:
+                os.close(stage_fd)
         except OSError as exc:
             report["errors"].append(f"disposable directory/metadata test: {exc}")
         finally:
@@ -133,7 +165,8 @@ def probe_semantic_organizer_mount(parent: Path) -> dict:
         report["errors"].extend(existing.get("errors", []))
     report["compatible"] = all(
         report.get(key) is True for key in (
-            "directory_noreplace", "collision_preserved", "directory_fsync",
+            "directory_noreplace", "directory_cross_parent_noreplace",
+            "collision_preserved", "directory_fsync",
             "hardlink_noreplace", "cross_directory_hardlink",
             "original_probe_compatible", "cleanup_complete",
         )
