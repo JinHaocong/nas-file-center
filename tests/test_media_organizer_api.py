@@ -29,3 +29,28 @@ def test_preview_endpoint_passes_scope_through_without_mutation(tmp_path, monkey
         assert res.status_code==200
         assert res.json()['job_id']==5
         assert called==[str(tmp_path)]
+
+
+def test_main_app_registers_protected_preview_routes(tmp_path):
+    from app.config import Settings
+    from app.main import create_app
+    data = tmp_path / "data"
+    config = tmp_path / "config"
+    data.mkdir()
+    config.mkdir()
+    settings = Settings(
+        _env_file=None,
+        CONFIG_DIR=str(config), DATA_MOUNT=str(data),
+        ALLOWED_ROOTS=str(data), QUARANTINE_ROOT=str(data / ".trash"),
+        ALLOW_MUTATION=False, ALLOW_DELETE=False,
+        INITIAL_ADMIN_USERNAME="admin", INITIAL_ADMIN_PASSWORD="test-password-123",
+    )
+    app = create_app(settings)
+    assert any(r.path == "/api/media-organizer/previews"
+               and "POST" in r.methods for r in app.routes)
+    assert any(r.path == "/api/media-organizer/previews/{job_id}"
+               and "GET" in r.methods for r in app.routes)
+    with TestClient(app) as client:
+        resp = client.post("/api/media-organizer/previews",
+                           json={"selection": str(data)})
+        assert resp.status_code == 401
