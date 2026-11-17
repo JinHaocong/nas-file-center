@@ -7,15 +7,15 @@ organizing unit: exclusive private workspace creation and staging its sources.
 """
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from pathlib import Path
 from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
-from app.batch.media_package_execution import (
-    _move_one, MediaPackageExecutionConflict,
-)
+from app.batch.media_package_execution import MediaPackageExecutionConflict
+from app.fs_ops import rename_noreplace_at
 from app.batch.media_organizer_execution import (
     _absolute_literal, validate_execution_preflight,
     ExecutionPreflightError,
@@ -75,6 +75,74 @@ def _read_marker(stage_fd: int, name: str, expected: bytes) -> bool:
     if value != expected:
         raise StagingConflict(f"stage owner marker mismatch: {name}")
     return True
+
+
+def _move_one(move: dict, *, lease_fence: Callable[[], None],
+              ignore_final: bool, stage_binding: tuple[int, int],
+              stage_witness: bytes) -> str:
+    """Use a PINNED verified private directory FD for the actual mutation.
+
+    The existing generic file mover reopens its destination pathname inside
+    the operation, which would allow a name swap after preflight. This
+    specialized mover keeps the verified stage FD through rename/link and
+    never writes into a similarly named foreign directory.
+    """
+    if not ignore_final:
+        raise StagingConflict("staging mover cannot publish final paths")
+    src = Path(move["source"])
+    target = Path(move["target"])
+    identity = move["identity"]
+    src_fd = _open_directory_nofollow(src.parent)
+    try:
+        stage_fd = _open_directory_nofollow(target.parent)
+        try:
+            unit_fd = _open_directory_nofollow(target.parent.parent)
+            try:
+                def check_stage_binding() -> None:
+                    live = os.fstat(stage_fd)
+                    binding = _entry(unit_fd, target.parent.name)
+                    if (binding is None or not stat.S_ISDIR(binding.st_mode)
+                            or (int(live.st_dev), int(live.st_ino)) != stage_binding
+                            or (int(binding.st_dev), int(binding.st_ino)) != stage_binding):
+                        raise StagingConflict("private stage directory binding changed")
+                    if not _read_marker(stage_fd, _OWNER, stage_witness):
+                        raise StagingConflict("private staging owner witness is missing")
+
+                check_stage_binding()
+                _check_identity(_entry(src_fd, src.name), identity, src)
+                if _entry(stage_fd, target.name) is not None:
+                    raise StagingConflict("private stage target unexpectedly occupied")
+                if int(os.fstat(stage_fd).st_dev) != identity[0]:
+                    raise StagingConflict("cross-filesystem stage refused")
+                lease_fence()
+                check_stage_binding()
+                _check_identity(_entry(src_fd, src.name), identity, src)
+                try:
+                    rename_noreplace_at(src_fd, src.name, stage_fd, target.name)
+                except OSError as exc:
+                    if exc.errno != errno.EOPNOTSUPP:
+                        raise
+                    # Only use the no-overwrite same-filesystem hardlink
+                    # fallback. An interruption yielding two pathnames is
+                    # intentionally blocked on resume, never unlinked blindly.
+                    os.link(src.name, target.name, src_dir_fd=src_fd,
+                            dst_dir_fd=stage_fd, follow_symlinks=False)
+                    _check_identity(_entry(stage_fd, target.name), identity, target)
+                    _check_identity(_entry(src_fd, src.name), identity, src)
+                    lease_fence()
+                    check_stage_binding()
+                    os.unlink(src.name, dir_fd=src_fd)
+                _check_identity(_entry(stage_fd, target.name), identity, target)
+                check_stage_binding()
+                os.fsync(stage_fd)
+                os.fsync(src_fd)
+                return "moved"
+            finally:
+                os.close(unit_fd)
+        finally:
+            os.close(stage_fd)
+    finally:
+        os.close(src_fd)
 
 
 def _validate_frozen_rows(manifest: dict, unit: Path) -> list[dict]:
@@ -225,6 +293,8 @@ def stage_frozen_sources(
             else:
                 lease_fence()
                 _write_marker(stage_fd, _OWNER, expected)
+            owned_stat = os.fstat(stage_fd)
+            stage_binding = (int(owned_stat.st_dev), int(owned_stat.st_ino))
         finally:
             os.close(stage_fd)
 
@@ -255,7 +325,10 @@ def stage_frozen_sources(
                 reconciled += 1
             else:
                 _check_identity(source_stat, row["identity"], source)
-                outcome = _move_one(row, lease_fence=guard, ignore_final=True)
+                outcome = _move_one(
+                    row, lease_fence=guard, ignore_final=True,
+                    stage_binding=stage_binding, stage_witness=expected,
+                )
                 if outcome != "moved":
                     raise StagingConflict("unexpected staging reconciliation state")
                 staged += 1
