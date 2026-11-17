@@ -353,23 +353,30 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             manifest = load_frozen_preview_manifest(
                 manifest_path, job_id=frozen_job_id, unit=unit,
             )
-        checkpoint(1, "frozen", "冻结清单已经验证，准备安全暂存")
-        fence()
-        stage_frozen_sources(
-            manifest, frozen_manifest_path=manifest_path,
-            allowed_roots=settings.allowed_roots,
-            quarantine_root=settings.quarantine_root, lease_fence=fence,
-            resume=original_id is not None,
-        )
-        checkpoint(2, "staged", "全部已暂存，开始核验与无覆盖发布")
-        fence()
-        publish_frozen_stage(
-            manifest, frozen_manifest_path=manifest_path,
-            allowed_roots=settings.allowed_roots,
-            quarantine_root=settings.quarantine_root, lease_fence=fence,
-            resume=original_id is not None,
-        )
-        checkpoint(3, "published", "文件已安全发布，准备核验并移除暂存链接")
+        checkpoint(1, "frozen", "冻结清单已经验证")
+        if phase != "published":
+            # An interruption in staging or publication retains all private
+            # source links, so retry those phases only with the original
+            # checksum-validated manifest and owner witness.
+            fence()
+            stage_frozen_sources(
+                manifest, frozen_manifest_path=manifest_path,
+                allowed_roots=settings.allowed_roots,
+                quarantine_root=settings.quarantine_root, lease_fence=fence,
+                resume=original_id is not None,
+            )
+            checkpoint(2, "staged", "全部已暂存，开始核验与无覆盖发布")
+            fence()
+            publish_frozen_stage(
+                manifest, frozen_manifest_path=manifest_path,
+                allowed_roots=settings.allowed_roots,
+                quarantine_root=settings.quarantine_root, lease_fence=fence,
+                resume=original_id is not None,
+            )
+        # Retirement may have already removed one or more staged hardlinks.
+        # Its durable marker, not the source layout, governs continuation:
+        # never attempt restaging after the original job reached published.
+        checkpoint(3, "published", "已验证发布阶段，准备核验并移除暂存链接")
         fence()
         retire_published_stage(
             manifest, frozen_manifest_path=manifest_path,
