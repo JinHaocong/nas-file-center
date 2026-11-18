@@ -54,6 +54,24 @@ def _calls(function: ast.FunctionDef | ast.AsyncFunctionDef):
             yield node
 
 
+def _is_explicit_secret_cleanup(call: ast.Call) -> bool:
+    """Allow deletion only through the two known config/tmpfs secret channels."""
+    receiver = call.func.value
+    if (
+        isinstance(receiver, ast.Call)
+        and isinstance(receiver.func, ast.Name)
+        and receiver.func.id == "source_secret_path"
+    ):
+        return True
+    if (
+        isinstance(receiver, ast.BinOp)
+        and isinstance(receiver.left, ast.Name)
+        and receiver.left.id == "SECRET_DIR"
+    ):
+        return True
+    return False
+
+
 def test_registered_api_routes_do_not_mutate_media_filesystem_directly():
     root = Path(__file__).resolve().parents[1]
     violations: list[str] = []
@@ -68,7 +86,7 @@ def test_registered_api_routes_do_not_mutate_media_filesystem_directly():
             route_count += 1
             for call in _calls(node):
                 method = call.func.attr
-                if method in FORBIDDEN_FILESYSTEM_METHODS:
+                if method in FORBIDDEN_FILESYSTEM_METHODS and not _is_explicit_secret_cleanup(call):
                     violations.append(
                         f"{relative}:{call.lineno} route {node.name} calls "
                         f"filesystem mutation method .{method}()"
