@@ -27,7 +27,6 @@ from app.batch.media_organizer_manifest import (
 )
 from app.batch.media_organizer_stage import stage_frozen_sources
 from app.batch.media_organizer_publish import publish_frozen_stage
-from app.batch.media_organizer_retire import retire_published_stage
 from app.batch.media_organizer_deferred_cleanup import (
     validate_deferred_publication, record_deferred_cleanup_evidence,
 )
