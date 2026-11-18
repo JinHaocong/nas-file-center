@@ -4,6 +4,7 @@ All changes occur inside disposable pytest fixtures. This is a safer
 publication mode than the older auto-retirement library path.
 """
 import os
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -178,3 +179,38 @@ def test_deferred_manifest_forbids_legacy_stage_retirement_and_directory_deletio
     assert (work / "P1").is_dir()
     assert all(Path(row["target"]).is_file() for row in manifest["moves"])
     assert all(Path(row["final"]).is_file() for row in manifest["moves"])
+
+
+def test_deferred_synthetic_dry_run_preserves_count_hashes_and_original_names(tmp_path):
+    """Full disposable run: no lost bytes, no overwritten inode, no false zero-scan."""
+    work, manifest, frozen = prepare(tmp_path, old_wrapper=True)
+    expected = {
+        row["source"]: sha256(Path(row["source"]).read_bytes()).hexdigest()
+        for row in manifest["moves"]
+    }
+    assert len(expected) == len(manifest["moves"]) == 2
+    execute_deferred(tmp_path, manifest, frozen)
+    evidence = record_deferred_cleanup_evidence(
+        manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
+        lease_fence=lambda: None,
+    )
+    assert evidence["files_published"] == 2
+    assert evidence["staged_links_retained"] == 2
+    assert evidence["original_sources_retained"] == 2
+    assert len({row["source"] for row in manifest["moves"]}) == 2
+    assert len({row["final"] for row in manifest["moves"]}) == 2
+    for row in manifest["moves"]:
+        original, staged, final = (
+            Path(row["source"]), Path(row["target"]), Path(row["final"]),
+        )
+        assert original.is_file() and staged.is_file() and final.is_file()
+        assert (original.stat().st_dev, original.stat().st_ino) == (
+            staged.stat().st_dev, staged.stat().st_ino
+        ) == (final.stat().st_dev, final.stat().st_ino)
+        for location in (original, staged, final):
+            assert sha256(location.read_bytes()).hexdigest() == expected[row["source"]]
+    # V1.6 intentionally retains the originals and private stage. A fresh
+    # preview MUST NOT claim a finalized no-op before reviewed cleanup (#400).
+    followup = preview_semantic_unit(work, allowed_roots=[tmp_path])
+    assert followup["status"] == "blocked"
+    assert followup["needed_moves"] == 0
