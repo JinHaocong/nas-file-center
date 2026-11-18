@@ -263,7 +263,7 @@ def _worker_fixture(tmp_path: Path, source: Path, output: Path):
 
 def test_no_files_report_retains_deep_unsupported_reason(tmp_path, monkeypatch):
     source = tmp_path / "broken.7z"
-    source.write_bytes(b"7z\\xbc\\xaf\\x27\\x1c" + b"x" * 40)
+    source.write_bytes(b"7z\xbc\xaf\x27\x1c" + b"x" * 40)
     output = tmp_path / "broken.7z_恢复结果_deadbeef"
     settings, engine, session_factory, job, context = _worker_fixture(tmp_path, source, output)
     def no_files(*args, **kwargs):
