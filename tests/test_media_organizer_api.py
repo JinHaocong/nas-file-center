@@ -8,6 +8,7 @@ def test_admin_only_preview_and_guarded_execution_routes_are_registered():
     routes={(x.path,tuple(sorted(x.methods or []))) for x in router.routes}
     assert ('/api/media-organizer/previews',('POST',)) in routes
     assert ('/api/media-organizer/previews/{job_id}',('GET',)) in routes
+    assert ('/api/media-organizer/previews/{job_id}/mappings/{mapping_id}',('GET',)) in routes
     assert ('/api/media-organizer/previews/{job_id}/execute', ('POST',)) in routes
     assert ('/api/media-organizer/executions/{job_id}/recover', ('POST',)) in routes
 
@@ -55,3 +56,36 @@ def test_main_app_registers_protected_preview_routes(tmp_path):
         assert resp.status_code == 401
         query = client.get("/api/media-organizer/previews/17")
         assert query.status_code == 401
+
+
+def test_full_mapping_route_is_admin_only_and_pages_the_requested_unit_map(monkeypatch):
+    from app.batch import media_organizer_jobs as jobs
+
+    calls = []
+
+    def fake_mapping(session_factory, settings, job_id, mapping_id, *, page, page_size):
+        calls.append((job_id, mapping_id, page, page_size))
+        return {
+            "job_id": job_id, "mapping_id": mapping_id,
+            "page": page, "page_size": page_size, "total_moves": 51,
+            "moves": [{"source": "/a.jpg", "target": "/001.jpg",
+                       "target_name": "001.jpg", "kind": "P", "bytes": 1}],
+            "read_only": True,
+        }
+
+    monkeypatch.setattr(jobs, "get_media_organizer_mapping", fake_mapping)
+    app = FastAPI()
+    app.include_router(router)
+    app.state.service = type("Service", (), {"SessionLocal": object()})()
+    app.state.settings = object()
+    from app.auth.dependencies import require_admin_user
+    app.dependency_overrides[require_admin_user] = lambda: None
+    mapping_id = "a" * 64
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/media-organizer/previews/9/mappings/{mapping_id}?page=2&page_size=25",
+            headers={"origin": "http://testserver"},
+        )
+    assert response.status_code == 200
+    assert response.json()["total_moves"] == 51
+    assert calls == [(9, mapping_id, 2, 25)]
