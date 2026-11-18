@@ -6,7 +6,7 @@
 
 1. Review the independent organizing-unit preview; require status ready, actual P/V/Other counts/bytes and a stable source-to-target map.
 2. Build a complete frozen manifest from a fresh scan, storing it as a checksum-protected, exclusive, private file. Retain source file identities and the device/inode binding of every old classification directory the plan may retire.
-3. Use an administrator-only API to queue **one named organizing unit** from a completed, conflict-free preview, after typing the exact unit-bound confirmation token. Require MEDIA_ORGANIZER_EXECUTION_ENABLED, ALLOW_MUTATION and ALLOW_DELETE. The first flag defaults to false. The Worker independently rechecks all three and requires an active exclusive lease.
+3. Use an administrator-only API to queue **one named organizing unit** from a completed, conflict-free preview, after typing the exact unit-bound confirmation token. Require MEDIA_ORGANIZER_EXECUTION_ENABLED, ALLOW_MUTATION and ALLOW_DELETE **plus** MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK. The independent execution and namespace flags default to false. The Worker independently checks all permissions and requires an exclusive lease. The namespace flag is only an operator acknowledgement of externally established isolation; it does NOT create filesystem exclusion or solve an uncooperative writer race.
 4. **validate_execution_preflight:** re-check unit identity, source rows, target occupancy, classification grouping and frozen values.
 5. **stage_frozen_sources:** create an exclusive private staging directory with an owner witness and stage every frozen file through no-replace moves. Resume only with the same immutable manifest and lease; never adopt an unknown staged directory.
 6. **publish_frozen_stage:** verify all staged entries; retire only original empty classification wrappers by frozen device/inode identity. Prepare each P/V/Other directory with its owner witness INSIDE the verified private stage, and durably write a separate 0600 private group identity receipt (manifest checksum, group ordinal/name and original directory dev/inode) BEFORE atomic no-replace promotion. Resume requires that exact receipt; copied owner markers alone cannot authorize adopting another directory. Every public hardlink rechecks its original group inode receipt, ownership and directory binding. On interruption, prove already published identities before continuing missing entries.
@@ -81,8 +81,35 @@ GitHub Actions tests exercise this probe on synthetic runner storage only.
 **Their success does not establish NAS mount compatibility**; no real NAS
 probe has been executed in this PR.
 
+## Directory cleanup source-name race — still a release blocker (#399)
+
+The old classification wrapper cleanup and final empty-stage cleanup use POSIX
+name-based rename/rmdir operations. An inode check, O_NOFOLLOW directory FD,
+Worker lease or directory NOREPLACE destination protection cannot make the
+SOURCE name identity conditional on its inode at the instant of this syscall.
+
+**Temporary fail-closed containment:** MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK
+defaults to false and is required in addition to the existing three gates.
+API enqueue, preview execute controls and Worker entry check it. The switch
+must remain false on any NAS mount whose namespace can be modified by
+uncooperative SMB, WebDAV, NAS apps or other writers. The synthetic CI tests
+set the acknowledgement explicitly to exercise execution in isolated
+temporary test directories.
+
+Setting this flag to true **does not enforce exclusivity**. It is permitted
+only after a separate technical determination that concurrent writes to the
+relevant parent directories are enforceably excluded, including during
+recovery and cleanup. If that cannot be demonstrated, do not enable it.
+No production NAS execution is authorized by this document or by passing CI.
+
+Issue #399 remains OPEN until source-name cleanup can be guaranteed safe or
+the executor is redesigned to defer those deletions and report a manual
+cleanup state. Neither a reviewer-free self-audit nor an affirmative flag is
+proof that the race has been removed.
+
 ## Gates before live deployment / production NAS execution
 
+- [ ] Independently resolve the source-name cleanup race in #399, or provide a verifiable exclusive namespace mechanism. Do not treat the new acknowledgement as a fix.
 - [ ] Independent security review of private pending group promotion, directory rename races, destination binding checks, same-name old bucket replacement and receipt-backed stage retirement.
 - [x] Dedicated Worker ownership, exact unit-bound confirmation, freeze/validate before mutation, lease checkpoints, and explicit single-attempt recovery: verified in synthetic focused CI. Production security review still pending.
 - [ ] No-replace / hardlink / directory fsync capability proved on the owner-approved disposable parent on the actual NAS mount using the probe above. GitHub-runner tests alone are insufficient.
