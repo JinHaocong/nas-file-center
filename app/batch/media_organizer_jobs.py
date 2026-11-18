@@ -118,6 +118,7 @@ def get_media_organizer_preview(session_factory, settings: Settings, job_id: int
                                          status_filter=status_filter)
     execution_enabled = bool(
         getattr(settings, 'media_organizer_execution_enabled', False)
+        and getattr(settings, 'media_organizer_namespace_quiescence_ack', False)
         and settings.allow_mutation and settings.allow_delete
     )
     confirmation_tokens = {}
