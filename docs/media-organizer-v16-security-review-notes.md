@@ -25,6 +25,21 @@
 
 | SEC-12 | Critical | Private pending-group directory promotion in the reachable Worker uses source basename in cross-parent rename. Another writer able to mutate the private stage namespace could swap a foreign directory into the source name after verification, relocating it before the post-check raises. | Adversarial tests first RED at `2978e867`. **Interim containment:** all grouped plans are now refused before staging in V1.6 deferred mode, and API/UI do not offer execution confirmation for those units. Pure-media flat behavior remains under separate default-OFF gates. Historical non-deferred grouped library behavior is not production authorization. | **#402 OPEN:** audited source-inode-bound directory promotion or enforceable isolation is still needed for full grouped functionality. No real NAS authorization/independent sign-off. |
 
+### SEC-12 stage permission evidence (necessary, not sufficient)
+
+Adversarial RED probes at `78e59851` demonstrated that previously an
+already-verified stage chmod'd to 0777 was still accepted on resume and after
+owner-witness creation. Strengthened code rechecks the open stage FD's owner
+and group/other permission bits before staging, per-file work, publication and
+final stage inspection. Scratch probe reports explicit private-stage owner/mode
+fields and always keeps grouped/source-namespace authorization FALSE: process
+identity/mode bits do not exclude other same-UID or privileged NAS writers.
+
+The Linux mount API `move_mount()` requires CAP_SYS_ADMIN and cannot be
+assumed available in a normal NAS container; POSIX RENAME_NOREPLACE is
+destination-only and not a source inode compare. No unverified mount-specific
+primitive may be treated as release authorization.
+
 ## Synthetic validation evidence
 
 - Deferred cleanup TDD introduced five isolated unit tests for no-delete publication, old-wrapper preservation, immutable manual journal, group conflict fail-closed and changed evidence. Worker integration tests now assert `manual_cleanup_required`, `finalized=false`, retained staged hardlinks and status that does **not** claim zero-change idempotency. A separate RED→GREEN test asserts that deferred manifests cannot enter the legacy automatic publication/retirement paths.

@@ -25,7 +25,7 @@ from app.batch.media_organizer_manifest import (
 )
 from app.batch.media_organizer_stage import (
     _authority, _check_identity, _read_marker, _write_marker,
-    stage_frozen_sources, StagingConflict,
+    _assert_private_stage_fd, stage_frozen_sources, StagingConflict,
 )
 from app.batch.media_organizer_planner import _check_scope
 from app.fs_ops import rename_noreplace_at
@@ -516,7 +516,8 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
     target_fd = _open_directory_nofollow(dest.parent)
     source_file_fd = None
     try:
-        if (int(os.fstat(stage_fd).st_dev) != manifest["unit_dev"]
+        stage_info = _assert_private_stage_fd(stage_fd)
+        if (int(stage_info.st_dev) != manifest["unit_dev"]
                 or int(os.fstat(target_fd).st_dev) != manifest["unit_dev"]):
             raise PublishingConflict("cross-device publication forbidden")
         if not _read_marker(stage_fd, ".nfc-stage-authority", witness):
@@ -550,6 +551,7 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
                 unit, dest.parent, target_fd, witness,
                 group_bindings[dest.parent.name],
             )
+        _assert_private_stage_fd(stage_fd)
         _check_identity(_entry(stage_fd, source_name), row["identity"], stage / source_name)
         try:
             # Linux linkat(AT_EMPTY_PATH) is exclusive and source-fd bound.

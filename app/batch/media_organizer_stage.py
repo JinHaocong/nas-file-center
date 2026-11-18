@@ -53,6 +53,23 @@ def _check_identity(info, identity: list[int], path: Path) -> None:
         raise StagingConflict(f"frozen source or stage identity changed: {path}")
 
 
+def _assert_private_stage_fd(stage_fd: int) -> os.stat_result:
+    """Require a private, Worker-owned staging directory at each entry point.
+
+    This is necessary but NEVER sufficient evidence of exclusive namespace
+    custody: another same-UID process, root or an NAS-mapped service may still
+    modify the stage. SEC-12 grouped publication remains blocked regardless.
+    """
+    st = os.fstat(stage_fd)
+    if (not stat.S_ISDIR(st.st_mode)
+            or int(st.st_uid) != os.geteuid()
+            or (stat.S_IMODE(st.st_mode) & 0o077) != 0):
+        raise StagingConflict(
+            "private stage directory owner or permissions are unsafe"
+        )
+    return st
+
+
 def _write_marker(stage_fd: int, name: str, expected: bytes) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
     fd = os.open(name, flags, 0o600, dir_fd=stage_fd)
@@ -100,7 +117,7 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None],
             unit_fd = _open_directory_nofollow(target.parent.parent)
             try:
                 def check_stage_binding() -> None:
-                    live = os.fstat(stage_fd)
+                    live = _assert_private_stage_fd(stage_fd)
                     binding = _entry(unit_fd, target.parent.name)
                     if (binding is None or not stat.S_ISDIR(binding.st_mode)
                             or (int(live.st_dev), int(live.st_ino)) != stage_binding
@@ -313,7 +330,8 @@ def stage_frozen_sources(
 
         stage_fd = _open_directory_nofollow(stage)
         try:
-            if int(os.fstat(stage_fd).st_dev) != manifest["unit_dev"]:
+            stage_stat = _assert_private_stage_fd(stage_fd)
+            if int(stage_stat.st_dev) != manifest["unit_dev"]:
                 raise StagingConflict("stage filesystem changed")
             if resume:
                 _inspect_stage(stage_fd, stage, moves, expected,
@@ -371,6 +389,7 @@ def stage_frozen_sources(
 
         stage_fd = _open_directory_nofollow(stage)
         try:
+            _assert_private_stage_fd(stage_fd)
             complete = _inspect_stage(stage_fd, stage, moves, expected,
                                       groups=manifest.get("groups", []))
             if not complete:

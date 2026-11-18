@@ -89,6 +89,14 @@ def probe_semantic_organizer_mount(parent: Path) -> dict:
         "directory_cross_parent_noreplace": False,
         "collision_preserved": False,
         "directory_fsync": False,
+        "private_stage_owner_verified": False,
+        "private_stage_mode_verified": False,
+        # Necessary POSIX mode checks are NOT proof of isolation against
+        # same-UID/root writers, remote NAS mappings or mount ACL behavior.
+        "namespace_exclusive_custody_proven": False,
+        "grouped_promotion_proven": False,
+        "grouped_publication_authorized": False,
+        "flat_filesystem_capabilities_compatible": False,
         "source_fd_hardlink_noreplace": False,
         "source_fd_name_swap_safe": False,
         "cleanup_complete": False,
@@ -114,6 +122,19 @@ def probe_semantic_organizer_mount(parent: Path) -> dict:
             stage_fd = os.open("stage", os.O_RDONLY | os.O_DIRECTORY |
                                os.O_NOFOLLOW, dir_fd=fd)
             try:
+                stage_info = os.fstat(stage_fd)
+                report["private_stage_owner_verified"] = (
+                    stat.S_ISDIR(stage_info.st_mode)
+                    and int(stage_info.st_uid) == os.geteuid()
+                )
+                report["private_stage_mode_verified"] = (
+                    (stat.S_IMODE(stage_info.st_mode) & 0o077) == 0
+                )
+                if not (report["private_stage_owner_verified"]
+                        and report["private_stage_mode_verified"]):
+                    # Do not continue performing the probe's stage mutations
+                    # under demonstrably unconfined scratch permissions.
+                    raise OSError(errno.EACCES, "private stage owner/mode is unsafe")
                 # Reproduce real execution: a PRIVATE stage child is atomically
                 # promoted into a public sibling of the stage parent.
                 os.mkdir("pending", mode=0o700, dir_fd=stage_fd)
@@ -273,11 +294,21 @@ def probe_semantic_organizer_mount(parent: Path) -> dict:
         report.get(key) is True for key in (
             "directory_noreplace", "directory_cross_parent_noreplace",
             "collision_preserved", "directory_fsync",
+            "private_stage_owner_verified", "private_stage_mode_verified",
             "source_fd_hardlink_noreplace", "source_fd_name_swap_safe",
             "hardlink_noreplace", "cross_directory_hardlink",
             "original_probe_compatible", "cleanup_complete",
         )
     )
+    # Backward-compatible "compatible" is now explicitly a FLAT-FILE-only
+    # capability result. A successful POSIX destination-noreplace test does
+    # NOT prove that the pending directory SOURCE basename cannot be swapped.
+    report["flat_filesystem_capabilities_compatible"] = report["compatible"]
+    # No automated test in this probe can prove absence of uncooperative
+    # same-UID/root/NAS clients. Never infer permission to publish groups.
+    report["grouped_promotion_proven"] = False
+    report["grouped_publication_authorized"] = False
+    report["namespace_exclusive_custody_proven"] = False
     return report
 
 

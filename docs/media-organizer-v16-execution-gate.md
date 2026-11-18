@@ -22,6 +22,20 @@ demonstrated this in RED. A separate source-inode-bound directory promotion
 primitive or enforceable namespace exclusion requires independent approval
 before group execution can be reinstated.
 
+Synthetic RED→GREEN tests also require private-stage mode/owner verification
+at fresh staging, every pinned-FD media link and resume. A 0700 stage owned by
+the Worker is a **necessary** file permission boundary, not evidence that
+same-UID/root/NAS-mapped clients cannot modify its child namespace.
+
+The capability probe now exposes
+`private_stage_owner_verified`, `private_stage_mode_verified`,
+`flat_filesystem_capabilities_compatible`, `grouped_promotion_proven`,
+`grouped_publication_authorized`, and
+`namespace_exclusive_custody_proven`. Even if the legacy `compatible`
+field is TRUE, it describes **filesystem operations only**, applicable at
+most to currently allowed flat-file workflows; grouped authorization remains
+FALSE. No automatically generated POSIX mode evidence can change this status.
+
 The historical library function remains only for legacy synthetic regression;
 any manifest stamped `cleanup_policy=deferred` is now rejected before that
 directory promotion. Do not bypass via an environment acknowledgement, direct
@@ -111,7 +125,12 @@ Require all fields to be true: directory_noreplace,
 directory_cross_parent_noreplace, collision_preserved, directory_fsync,
 hardlink_noreplace, cross_directory_hardlink,
 source_fd_hardlink_noreplace, source_fd_name_swap_safe,
+private_stage_owner_verified, private_stage_mode_verified,
 original_probe_compatible, cleanup_complete, and compatible.
+For currently enabled grouped operation the additional fields would
+need `namespace_exclusive_custody_proven=true` and
+`grouped_publication_authorized=true`; the present probe deliberately
+does NOT produce those claims. No real NAS mount has been approved.
 The cross-parent field specifically verifies a private stage child being
 atomically promoted to a public sibling of the stage folder, matching the
 current execution engine. Any false field, error, leftover scratch directory or an
