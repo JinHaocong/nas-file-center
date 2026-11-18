@@ -144,3 +144,36 @@ def test_report_refuses_tampered_private_journal_and_preserves_media(tmp_path):
         )
     assert report.read_bytes() == b"foreign-journal"
     assert all(Path(row["target"]).is_file() for row in manifest["moves"])
+
+
+def test_deferred_manifest_forbids_legacy_publication_that_renames_old_wrappers(tmp_path):
+    from app.batch.media_organizer_publish import PublishingConflict
+    work, manifest, frozen = prepare(tmp_path, old_wrapper=True)
+    stage_frozen_sources(
+        manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
+        lease_fence=lambda: None,
+    )
+    with pytest.raises(PublishingConflict, match="deferred|automatic|cleanup"):
+        publish_frozen_stage(
+            manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
+            lease_fence=lambda: None,
+        )
+    assert (work / "P1").is_dir()
+    assert all(Path(row["target"]).is_file() for row in manifest["moves"])
+    assert not any(Path(row["final"]).is_file() for row in manifest["moves"])
+
+
+def test_deferred_manifest_forbids_legacy_stage_retirement_and_directory_deletion(tmp_path):
+    from app.batch.media_organizer_retire import (
+        RetirementConflict, retire_published_stage,
+    )
+    work, manifest, frozen = prepare(tmp_path, old_wrapper=True)
+    execute_deferred(tmp_path, manifest, frozen)
+    with pytest.raises(RetirementConflict, match="deferred|automatic|cleanup"):
+        retire_published_stage(
+            manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
+            lease_fence=lambda: None,
+        )
+    assert (work / "P1").is_dir()
+    assert all(Path(row["target"]).is_file() for row in manifest["moves"])
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
