@@ -73,6 +73,18 @@ def _require_enabled(settings: Settings) -> None:
         )
 
 
+def _require_nonroot_mutation_worker() -> None:
+    """V1.6 must not run destructive work as container/host UID 0.
+
+    This is necessary, not sufficient: mount and namespace custody must also
+    be proved independently. A boolean acknowledgement alone is not authority.
+    """
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+        raise PermissionError(
+            "V1.6 requires a dedicated non-root Worker; UID 0 cannot mutate media"
+        )
+
+
 def _literal_unit(value: str, settings: Settings) -> Path:
     if (not isinstance(value, str) or not value or
             not Path(value).is_absolute() or os.path.normpath(value) != value):
@@ -337,6 +349,7 @@ class MediaOrganizerExecuteHandler(TaskHandler):
         _require_enabled(settings)
         if not context.worker_id:
             raise PermissionError("exclusive Worker lease required for media mutation")
+        _require_nonroot_mutation_worker()
         state = json.loads(job.state_json or "{}")
         original_id = state.get("recovery_of_job_id")
         preview_id = state.get("preview_job_id")
