@@ -20,13 +20,15 @@ from pathlib import Path
 from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
+from app.config_sharing import shared_config_gid
 from app.batch.media_organizer_manifest import (
     load_frozen_preview_manifest, FrozenPreviewError, _checksum,
 )
 from app.batch.media_organizer_stage import (
     _authority, _check_identity, _read_marker, _write_marker,
-    _assert_private_stage_fd, stage_frozen_sources, StagingConflict,
+    _assert_private_stage_fd, _inspect_stage, stage_frozen_sources, StagingConflict,
 )
+from app.batch.media_organizer_path_roles import classify_path_roles, uses_path_roles
 from app.batch.media_organizer_planner import _check_scope
 from app.fs_ops import rename_noreplace_at
 from app.batch.media_organizer_custody import assert_exclusive_custody
@@ -509,6 +511,23 @@ def _create_public_group_direct(
         with os.scandir(group_fd) as entries:
             if next(entries, None) is not None:
                 raise PublishingConflict("new public group is not empty")
+        shared_gid = shared_config_gid()
+        if shared_gid is not None:
+            # Only this newly created, still-pinned inode receives API read
+            # access. Original directories and payload file modes are untouched.
+            fence()
+            _assert_named_directory(unit / name, group_fd,
+                                    (int(created.st_dev), int(created.st_ino)))
+            if int(created.st_gid) != shared_gid:
+                os.fchown(group_fd, -1, shared_gid)
+            fence()
+            _assert_named_directory(unit / name, group_fd,
+                                    (int(created.st_dev), int(created.st_ino)))
+            os.fchmod(group_fd, 0o750)
+            readable = os.fstat(group_fd)
+            if (readable.st_uid != os.geteuid() or readable.st_gid != shared_gid
+                    or stat.S_IMODE(readable.st_mode) != 0o750):
+                raise PublishingConflict("new public group read-only sharing failed")
         _write_marker(group_fd, _PUBLIC_OWNER, witness)
         os.fsync(group_fd)
         identity = (int(created.st_dev), int(created.st_ino))
@@ -728,6 +747,351 @@ def _mark_completed(directory: Path, part: list[dict], witness: bytes,
         os.close(fd)
 
 
+def _assert_named_directory(directory: Path, fd: int,
+                            identity: tuple[int, int]) -> None:
+    opened = os.fstat(fd)
+    parent_fd = _open_directory_nofollow(directory.parent)
+    try:
+        named = _entry(parent_fd, directory.name)
+        if (not stat.S_ISDIR(opened.st_mode)
+                or (int(opened.st_dev), int(opened.st_ino)) != identity
+                or named is None or not stat.S_ISDIR(named.st_mode)
+                or (int(named.st_dev), int(named.st_ino)) != identity):
+            raise PublishingConflict("frozen input/public directory binding changed")
+    finally:
+        os.close(parent_fd)
+
+
+def _original_children(manifest: dict, directory: Path) -> dict:
+    result = {
+        Path(row["source"]).name: ("file", row["identity"])
+        for row in manifest["moves"] if Path(row["source"]).parent == directory
+    }
+    for literal, identity in manifest["wrapper_identities"].items():
+        path = Path(literal)
+        if path.parent == directory:
+            if path.name in result:
+                raise PublishingConflict("frozen file/directory roles overlap")
+            result[path.name] = ("directory", identity)
+    return result
+
+
+def _check_role_entry(info, kind: str, identity: list[int], path: Path) -> None:
+    if kind == "file":
+        _check_identity(info, identity, path)
+    elif (info is None or not stat.S_ISDIR(info.st_mode)
+          or [int(info.st_dev), int(info.st_ino)] != identity):
+        raise PublishingConflict("frozen nested wrapper identity changed")
+
+
+def _inspect_original_wrapper(manifest: dict, directory: Path, identity: list[int]) -> None:
+    expected = _original_children(manifest, directory)
+    fd = _open_directory_nofollow(directory)
+    try:
+        _assert_named_directory(directory, fd, tuple(identity))
+        with os.scandir(fd) as entries:
+            observed = set()
+            for entry in entries:
+                if entry.name not in expected:
+                    raise PublishingConflict("foreign entry in retained source wrapper")
+                observed.add(entry.name)
+                _check_role_entry(entry.stat(follow_symlinks=False),
+                                  *expected[entry.name], directory / entry.name)
+        if observed != set(expected):
+            raise PublishingConflict("retained source wrapper inventory changed")
+        _assert_named_directory(directory, fd, tuple(identity))
+    finally:
+        os.close(fd)
+
+
+def _inspect_role_group(
+    manifest: dict, directory: Path, part: list[dict], roles: dict,
+    witness: bytes, identity: tuple[int, int], *, phase: str,
+) -> None:
+    """Check exact original/final roles, never treating a matching name as ownership.
+
+    Input groups have only their frozen original entries. A witnessed resume
+    may have a subset of nonconflicting finals. Prepared groups have all such
+    finals, while deferred destinations still retain their original occupants.
+    """
+    if phase not in ("input", "resume", "prepared"):
+        raise PublishingConflict("invalid prepared publication phase")
+    expected = _original_children(manifest, directory)
+    required = set(expected)
+    deferred = {row["final"] for row in roles["deferred_rows"]}
+    final_names = set()
+    partial = any(row["final"] in deferred for row in part)
+    if phase != "input":
+        for row in part:
+            if row["final"] in deferred:
+                continue
+            name = Path(row["final"]).name
+            entry = ("file", row["identity"])
+            if name in expected and expected[name] != entry:
+                raise PublishingConflict("prepared final overlaps a different original role")
+            expected[name] = entry
+            final_names.add(name)
+        if phase == "prepared":
+            required.update(final_names)
+    markers = set() if phase == "input" else {_PUBLIC_OWNER}
+    if phase != "input" and not partial:
+        markers.add(_PUBLIC_COMPLETE)
+    fd = _open_directory_nofollow(directory)
+    try:
+        _assert_named_directory(directory, fd, identity)
+        observed = set()
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                observed.add(entry.name)
+                info = entry.stat(follow_symlinks=False)
+                if entry.name in expected:
+                    _check_role_entry(info, *expected[entry.name], directory / entry.name)
+                elif entry.name in markers:
+                    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                            or stat.S_IMODE(info.st_mode) != 0o600
+                            or int(info.st_uid) != os.geteuid()):
+                        raise PublishingConflict("unsafe prepared group witness")
+                    if not _read_marker(fd, entry.name, witness):
+                        raise PublishingConflict("prepared group witness disappeared")
+                else:
+                    raise PublishingConflict("foreign entry in prepared public group")
+        if not required.issubset(observed):
+            raise PublishingConflict("prepared original or final inventory incomplete")
+        if phase != "input" and _PUBLIC_OWNER not in observed:
+            raise PublishingConflict("prepared group owner witness missing")
+        if _PUBLIC_COMPLETE in observed and not final_names.issubset(observed):
+            raise PublishingConflict("prepared group completion witness is inconsistent")
+        if phase == "prepared" and not partial and _PUBLIC_COMPLETE not in observed:
+            raise PublishingConflict("prepared group completion witness missing")
+        _assert_named_directory(directory, fd, identity)
+    finally:
+        os.close(fd)
+
+
+def _source_identities_by_name(rows: list[dict]) -> dict[str, list[list[int]]]:
+    result: dict[str, list[list[int]]] = {}
+    for row in rows:
+        result.setdefault(row["source"].casefold(), []).append(row["identity"])
+    return result
+
+
+def _check_deferred_occupant(row: dict, source_identities: dict) -> None:
+    """A deferred final is vacant or aliases a still-retained frozen source."""
+    target = Path(row["final"])
+    try:
+        parent_fd = _open_directory_nofollow(target.parent)
+    except FileNotFoundError:
+        return
+    try:
+        found = _entry(parent_fd, target.name)
+        if found is None:
+            return
+        candidates = source_identities.get(row["final"].casefold(), [])
+        if not any(stat.S_ISREG(found.st_mode) and [
+                int(found.st_dev), int(found.st_ino), int(found.st_size),
+                int(found.st_mtime_ns)] == identity for identity in candidates):
+            raise PublishingConflict("deferred final is occupied by a foreign inode")
+    finally:
+        os.close(parent_fd)
+
+
+def verify_prepared_publication(manifest: dict, *, frozen_manifest_path: Path) -> dict:
+    """Read-only verification of every original, stage and prepared final role.
+
+    Deferred final names are not advertised as published. This is inventory
+    evidence only; it neither issues namespace custody nor authorizes cleanup.
+    """
+    try:
+        if not uses_path_roles(manifest):
+            raise PublishingConflict("explicit prepared publication policy required")
+        unit = Path(manifest["unit"])
+        frozen = Path(frozen_manifest_path)
+        if load_frozen_preview_manifest(frozen, job_id=manifest["job_id"], unit=unit) != manifest:
+            raise PublishingConflict("prepared frozen manifest changed")
+        rows, group_rows = _validate_shape(manifest, unit)
+        roles = classify_path_roles(manifest)
+        _check_unit(unit, manifest, lambda: None)
+        deferred = {row["final"] for row in roles["deferred_rows"]}
+        source_identities = _source_identities_by_name(rows)
+        witness = _authority(manifest)
+        for row in rows:
+            for field in ("source", "target", "final"):
+                if field == "final" and row["final"] in deferred:
+                    _check_deferred_occupant(row, source_identities)
+                    continue
+                path = Path(row[field])
+                fd = _open_directory_nofollow(path.parent)
+                try:
+                    _check_identity(_entry(fd, path.name), row["identity"], path)
+                finally:
+                    os.close(fd)
+        stage = unit / manifest["stage_directory"]
+        stage_fd = _open_directory_nofollow(stage)
+        try:
+            _assert_private_stage_fd(stage_fd)
+            if not _inspect_stage(stage_fd, stage, rows, witness, groups=manifest["groups"]):
+                raise PublishingConflict("prepared stage is incomplete")
+            with os.scandir(stage_fd) as entries:
+                actual = {entry.name for entry in entries}
+            if actual != {Path(row["target"]).name for row in rows} | {
+                    ".nfc-stage-authority", ".nfc-stage-complete"}:
+                raise PublishingConflict("foreign prepared stage entry")
+        finally:
+            os.close(stage_fd)
+        bindings = _group_receipts(manifest, frozen)
+        for name, part in group_rows.items():
+            original = roles["retained_groups"].get(str(unit / name))
+            if original is not None and tuple(original) != bindings[name]:
+                raise PublishingConflict("retained group receipt differs from frozen input")
+            _inspect_role_group(manifest, unit / name, part, roles, witness,
+                                bindings[name], phase="prepared")
+        for name, identity in roles["removed_wrappers"].items():
+            _inspect_original_wrapper(manifest, Path(name), identity)
+        expected_root = {manifest["stage_directory"]} | set(group_rows)
+        for row in rows:
+            for key in ("source", "final"):
+                if key == "final" and row["final"] in deferred:
+                    continue
+                expected_root.add(Path(row[key]).relative_to(unit).parts[0])
+        root_fd = _open_directory_nofollow(unit)
+        try:
+            with os.scandir(root_fd) as entries:
+                for entry in entries:
+                    if entry.name not in expected_root and not stat.S_ISDIR(
+                            entry.stat(follow_symlinks=False).st_mode):
+                        raise PublishingConflict("foreign root entry in prepared inventory")
+        finally:
+            os.close(root_fd)
+        _check_unit(unit, manifest, lambda: None)
+        return {
+            "file_count": len(rows), "retained_files": len(roles["retained_sources"]),
+            "deferred_files": len(deferred), "publication_complete": not deferred,
+            "verified_source_links": len(rows), "verified_stage_links": len(rows),
+            "verified_final_links": len(rows) - len(deferred),
+            "verified_wrapper_count": len(manifest["wrapper_identities"]),
+            "verified_group_count": len(group_rows),
+        }
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        if isinstance(exc, PublishingConflict):
+            raise
+        raise PublishingConflict(f"prepared publication inventory unsafe: {exc}") from exc
+
+
+def _publish_with_path_roles(
+    manifest: dict, frozen: Path, *, fence: Callable[[], None], resume: bool,
+    namespace_custody,
+) -> dict:
+    """Publish only unoccupied/self finals; release no original source name."""
+    unit = Path(manifest["unit"])
+    rows, group_rows = _validate_shape(manifest, unit)
+    roles = classify_path_roles(manifest)
+    witness = _authority(manifest)
+    deferred = {row["final"] for row in roles["deferred_rows"]}
+    source_identities = _source_identities_by_name(rows)
+    retained = {row["source"] for row in roles["retained_sources"]}
+    parents = {unit}
+    for row in rows:
+        parents.update(Path(row[key]).parent for key in ("source", "target", "final"))
+
+    def guard() -> None:
+        fence()
+        assert_exclusive_custody(namespace_custody, sorted(parents))
+
+    guard()
+    # Validate every prospective group before creating any receipt or marker.
+    for ordinal, (name, part) in enumerate(group_rows.items(), 1):
+        group = unit / name
+        receipt = _group_receipt_path(frozen, ordinal)
+        original = roles["retained_groups"].get(str(group))
+        if original is not None:
+            has_receipt = os.path.lexists(receipt)
+            if has_receipt and not resume:
+                raise PublishingConflict("unexpected retained group receipt requires recovery")
+            if has_receipt and _read_group_receipt(receipt, manifest, name, ordinal) != tuple(original):
+                raise PublishingConflict("retained group receipt differs from frozen input")
+            fd = _open_directory_nofollow(group)
+            try:
+                _assert_named_directory(group, fd, tuple(original))
+                owned = _entry(fd, _PUBLIC_OWNER) is not None
+            finally:
+                os.close(fd)
+            if owned and not has_receipt:
+                raise PublishingConflict("foreign owner marker lacks original group receipt")
+            _inspect_role_group(manifest, group, part, roles, witness, tuple(original),
+                                phase="resume" if owned else "input")
+        elif os.path.lexists(group):
+            if not resume:
+                raise PublishingConflict("foreign public group folder occupied")
+            identity = _read_group_receipt(receipt, manifest, name, ordinal)
+            _inspect_role_group(manifest, group, part, roles, witness, identity, phase="resume")
+        elif os.path.lexists(receipt):
+            raise PublishingConflict("public group disappeared after its private receipt")
+    for literal, identity in roles["removed_wrappers"].items():
+        _inspect_original_wrapper(manifest, Path(literal), identity)
+    for row in rows:
+        if row["final"] in deferred:
+            _check_deferred_occupant(row, source_identities)
+            continue
+        final = Path(row["final"])
+        if os.path.lexists(final):
+            if row["source"] not in retained and not resume:
+                raise PublishingConflict("foreign prepared final target occupied")
+            _check_identity(os.lstat(final), row["identity"], final)
+
+    for ordinal, (name, part) in enumerate(group_rows.items(), 1):
+        group = unit / name
+        original = roles["retained_groups"].get(str(group))
+        if original is not None:
+            receipt = _group_receipt_path(frozen, ordinal)
+            fd = _open_directory_nofollow(group)
+            try:
+                _assert_named_directory(group, fd, tuple(original))
+                if not os.path.lexists(receipt):
+                    _inspect_role_group(manifest, group, part, roles, witness,
+                                        tuple(original), phase="input")
+                    guard()
+                    _assert_named_directory(group, fd, tuple(original))
+                    _write_group_receipt(receipt, manifest, name, ordinal, tuple(original))
+                if _entry(fd, _PUBLIC_OWNER) is None:
+                    _inspect_role_group(manifest, group, part, roles, witness,
+                                        tuple(original), phase="input")
+                    guard()
+                    _assert_named_directory(group, fd, tuple(original))
+                    _write_marker(fd, _PUBLIC_OWNER, witness)
+                _assert_public_group_binding(unit, group, fd, witness, tuple(original))
+            finally:
+                os.close(fd)
+        elif not os.path.lexists(group):
+            guard()
+            _create_public_group_direct(unit, name, manifest, witness, guard,
+                                        frozen_manifest_path=frozen)
+    bindings = _group_receipts(manifest, frozen)
+    stage = unit / manifest["stage_directory"]
+    published = reconciled = 0
+    for row in rows:
+        if row["final"] in deferred:
+            continue
+        guard()
+        if _link_one(row, stage=stage, unit=unit, witness=witness,
+                     manifest=manifest, fence=guard,
+                     resume=resume or row["source"] in retained,
+                     group_bindings=bindings):
+            published += 1
+        else:
+            reconciled += 1
+    for name, part in group_rows.items():
+        if not any(row["final"] in deferred for row in part):
+            guard()
+            _mark_completed(unit / name, part, witness, guard, bindings[name])
+    verified = verify_prepared_publication(manifest, frozen_manifest_path=frozen)
+    guard()
+    return {
+        **verified, "unit": str(unit), "published_files": published,
+        "reconciled_files": reconciled, "retired_wrappers": 0,
+        "ready_for_retirement": not deferred, "prepared_for_cleanup": True,
+    }
+
+
 def publish_frozen_stage(
     manifest: dict, *, frozen_manifest_path: Path, allowed_roots: list[Path],
     lease_fence: Callable[[], None], quarantine_root: Path | None = None,
@@ -778,6 +1142,11 @@ def publish_frozen_stage(
             quarantine_root=quarantine_root, lease_fence=lease_fence,
             resume=True,
         )
+        if uses_path_roles(manifest):
+            return _publish_with_path_roles(
+                manifest, Path(frozen_manifest_path), fence=lease_fence,
+                resume=resume, namespace_custody=namespace_custody,
+            )
         witness = _authority(manifest)
         _foreign_preflight(
             unit, manifest, group_rows, rows, witness, resume,

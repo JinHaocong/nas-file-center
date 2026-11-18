@@ -200,7 +200,7 @@ def _publish_and_finalize(client, settings, unit, preview_id, report, rows, grou
     record = next(row for row in report["units"] if row["unit"] == str(unit))
     assert record["status"] == "ready"
     assert record["totals"] == dict(zip(("P", "V", "Other"), totals))
-    assert record["needed_moves"] == len(rows)
+    assert record["needed_moves"] == sum(source != target for source, target, _ in rows)
     assert tuple(
         (group["kind"], group["name"], group["count"], group["bytes"])
         for group in record["groups"]
@@ -226,7 +226,8 @@ def _publish_and_finalize(client, settings, unit, preview_id, report, rows, grou
     assert review.status_code == 200, review.text
     plan = review.json()
     assert plan["unit"] == str(unit)
-    assert plan["total_original_links"] == plan["total_staged_links"] == len(rows)
+    assert plan["total_original_links"] == sum(source != target for source, target, _ in rows)
+    assert plan["total_staged_links"] == len(rows)
     assert plan["cleanup_authorized"] is False
     cleanup_token = cleanup_confirmation(plan["job_id"], str(unit), plan["plan_sha256"])
     assert cleanup_token != execute_token
@@ -337,30 +338,23 @@ def test_recursive_collection_work_and_version_boundaries_remain_independent(
     )
 
 
-def test_existing_same_named_canonical_group_is_safely_refused_before_mutation(
+def test_existing_same_named_canonical_group_is_retained_through_full_finalization(
     tmp_path, monkeypatch,
 ):
-    """Known completeness gap: an unchanged P bucket cannot yet be reused."""
+    """The previous refusal regression now requires a complete retained-group flow."""
     client, settings, unit = _empty_setup(tmp_path, monkeypatch)
-    _write_rows(unit, (
+    rows = (
         ("P [1 5B]/001.jpg", "P [1 5B]/001.jpg", b"photo"),
         ("movie.mp4", "V [1 5B]/001.mp4", b"video"),
-    ))
-    before = _files(unit)
-    before_hashes = _byte_hash_multiset(before)
-    before_directories = _directories(unit)
+    )
+    _write_rows(unit, rows)
+    group_inode = (unit / "P [1 5B]").stat().st_ino
+    picture_inode = (unit / "P [1 5B]/001.jpg").stat().st_ino
     preview_id, report = _preview_selection(client, settings, unit.parent)
-    assert report["units"][0]["status"] == "ready"
-    result = execute_request(client, preview_id, unit)
-    assert result.status_code == 200, result.text
-    assert _files(unit) == before
-    execution_id = result.json()["job_id"]
-    assert worker(settings, execution_id, name="synthetic-rule-worker") is False
-    refused = client.get(f"/api/media-organizer/executions/{execution_id}").json()
-    assert refused["status"] == "failed"
-    assert refused["finalized"] is False
-    assert "old classification wrapper" in refused["error"]
-    assert _files(unit) == before
-    assert _byte_hash_multiset(_files(unit)) == before_hashes
-    assert _directories(unit) == before_directories
-    assert not any(path.name.startswith(".nfc-") for path in unit.rglob("*"))
+    _publish_and_finalize(
+        client, settings, unit, preview_id, report, rows,
+        (("P", "P [1 5B]", 1, 5), ("V", "V [1 5B]", 1, 5)), (1, 1, 0),
+    )
+    assert (unit / "P [1 5B]").stat().st_ino == group_inode
+    assert (unit / "P [1 5B]/001.jpg").stat().st_ino == picture_inode
+    _assert_zero_rescan(client, settings, unit.parent, [unit])

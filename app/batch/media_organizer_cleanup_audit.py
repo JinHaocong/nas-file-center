@@ -18,6 +18,7 @@ from app.batch.media_organizer_deferred_cleanup import (
 )
 from app.batch.media_organizer_manifest import load_frozen_preview_manifest
 from app.batch.media_organizer_planner import _check_scope
+from app.batch.media_organizer_path_roles import classify_path_roles, uses_path_roles
 from app.batch.media_organizer_publish import (
     _group_receipts, _validate_shape, _check_unit,
 )
@@ -62,6 +63,9 @@ def audit_deferred_cleanup_inventory(
             raise DeferredCleanupConflict("unsafe cleanup authorization in review evidence")
 
         rows, groups = _validate_shape(manifest, unit)
+        role_mode = uses_path_roles(manifest)
+        deferred = ({row["final"] for row in classify_path_roles(manifest)["deferred_rows"]}
+                    if role_mode else set())
         stage = unit / manifest["stage_directory"]
         stage_fd = _open_directory_nofollow(stage)
         try:
@@ -78,10 +82,14 @@ def audit_deferred_cleanup_inventory(
         # Verify ALL public destinations and their exact group receipts.
         # Even with an empty group list this checks every final file inode.
         bindings = _group_receipts(manifest, frozen)
-        _verify_public(
-            unit, manifest, rows, groups, _authority(manifest),
-            require_witness=True, group_bindings=bindings,
-        )
+        if role_mode:
+            from app.batch.media_organizer_publish import verify_prepared_publication
+            verify_prepared_publication(manifest, frozen_manifest_path=frozen)
+        else:
+            _verify_public(
+                unit, manifest, rows, groups, _authority(manifest),
+                require_witness=True, group_bindings=bindings,
+            )
 
         def require_frozen_link(path: str, identity: list[int], role: str) -> None:
             target = Path(path)
@@ -106,6 +114,8 @@ def audit_deferred_cleanup_inventory(
                 ("target", "staged"),
                 ("final", "published"),
             ):
+                if field == "final" and row["final"] in deferred:
+                    continue
                 require_frozen_link(row[field], identity, role)
             total_bytes += identity[2]
 
@@ -113,7 +123,7 @@ def audit_deferred_cleanup_inventory(
         # contain exactly their expected retained files / nested wrappers.
         # Unknown directories/files are preserved and cause a safe stop.
         wrappers = manifest["wrapper_identities"]
-        for name, identity in wrappers.items():
+        for name, identity in ({} if role_mode else wrappers).items():
             directory = Path(name)
             if not directory.is_relative_to(unit) or directory == unit:
                 raise DeferredCleanupConflict("old wrapper outside frozen unit")
@@ -147,7 +157,9 @@ def audit_deferred_cleanup_inventory(
             "frozen_total_bytes": total_bytes,
             "verified_source_links": len(rows),
             "verified_stage_links": len(rows),
-            "verified_final_links": len(rows),
+            "verified_final_links": len(rows) - len(deferred),
+            "publication_complete": not deferred,
+            "deferred_publication_count": len(deferred),
             "verified_wrapper_count": len(wrappers),
             "frozen_inventory_matches": True,
             "read_only": True,

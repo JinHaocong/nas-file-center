@@ -24,7 +24,10 @@ MAX_IMMEDIATE_ENTRIES = 300_000
 MAX_WRAPPER_DEPTH = 32
 
 # The final named buckets are themselves legacy input wrappers on a rescan.
-_BUCKET = re.compile(r"^(?:p|v)(?:_[1-9]\d*)? \[\d+ [^/]+\]$", re.IGNORECASE)
+_BUCKET = re.compile(
+    r"^(?P<kind>p|v)(?:_(?P<index>[1-9]\d*))? (?P<label>\[\d+ [^/]+\])$",
+    re.IGNORECASE,
+)
 _SHORT = re.compile(r"^(?:p|v)(?:_?[1-9]\d*)?$", re.IGNORECASE)
 _IMAGE_ALIASES = frozenset({"图片", "图", "照片", "photo", "photos", "image", "images", "picture", "pictures", "pic"})
 _VIDEO_ALIASES = frozenset({"视频", "video", "videos"})
@@ -57,6 +60,30 @@ def _is_wrapper(name: str) -> bool:
     return bool(_SHORT.fullmatch(name) or _BUCKET.fullmatch(name) or
                 _OTHER_BUCKET.fullmatch(name) or folded in _IMAGE_ALIASES or
                 folded in _VIDEO_ALIASES or folded in _OTHER_ALIASES)
+
+
+def _source_sort_key(path: str, unit: Path) -> tuple:
+    """Order canonical bucket ordinals numerically, preserving lexical files.
+
+    Only directory components recognized by the existing bucket syntax get
+    numeric ordinals. Labels never decide media kind, and ordinary paths keep
+    their casefolded lexical order with the full literal path as the tiebreak.
+    """
+    relative = os.path.relpath(path, unit)
+    parts = Path(relative).parts
+    folded = []
+    for part in parts[:-1]:
+        bucket = _BUCKET.fullmatch(part)
+        if bucket is not None and bucket.group("index") is not None:
+            folded.append((
+                bucket.group("kind").casefold() + "_",
+                int(bucket.group("index")), bucket.group("label").casefold() + "/",
+            ))
+        else:
+            # Keep the separator: e.g. root P.jpg sorts before wrapper P/a.jpg.
+            folded.append((part.casefold() + "/", -1, ""))
+    folded.append((parts[-1].casefold(), -1, ""))
+    return tuple(folded), relative
 
 
 def _check_scope(unit: Path, allowed_roots: list[Path], quarantine_root: Path | None) -> None:
@@ -169,8 +196,7 @@ def preview_semantic_unit(unit: Path, *, allowed_roots: list[Path],
             finally:
                 os.close(directory_fd)
             folders.extend(sorted(children, key=lambda c: (c[0].name.casefold(), c[0].name), reverse=True))
-        rows.sort(key=lambda row: (os.path.relpath(row['path'], unit).casefold(),
-                                   os.path.relpath(row['path'], unit)))
+        rows.sort(key=lambda row: _source_sort_key(row["path"], unit))
         source_paths = {row['path'] for row in rows}
         occupied_input_dirs = {str(unit / Path(p).relative_to(unit).parts[0])
                                for p in source_paths

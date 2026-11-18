@@ -34,6 +34,7 @@ from app.batch.media_organizer_deferred_cleanup import (
 from app.config import Settings
 from app.config_sharing import shared_config_gid, ensure_shared_report_directory
 from app.batch.media_organizer_cleanup_audit import audit_deferred_cleanup_inventory
+from app.batch.media_organizer_path_roles import POLICY, classify_path_roles, uses_path_roles
 from app.batch import media_organizer_custody as namespace_custody
 from app.batch.media_organizer_cleanup_plan import (
     cleanup_plan_path, read_cleanup_plan, save_cleanup_plan,
@@ -277,6 +278,15 @@ def get_media_organizer_execution(
             "recovery_of_job_id": state.get("recovery_of_job_id"),
             "manual_cleanup_required": checkpoint.get("phase") == "manual_cleanup_required",
             "finalized": checkpoint.get("phase") == "completed",
+            "publication_complete": (
+                checkpoint.get("phase") == "completed" or
+                checkpoint.get("phase") in ("published", "manual_cleanup_required")
+                and checkpoint.get("deferred_publication_count", 0) == 0
+            ),
+            "deferred_publication_count": (
+                0 if checkpoint.get("phase") == "completed" else
+                checkpoint.get("deferred_publication_count", 0)
+            ),
             "cleanup": cleanup_status,
             "progress": {
                 "current": int(job.progress_current or 0),
@@ -287,22 +297,18 @@ def get_media_organizer_execution(
         }
 
 
-def get_media_organizer_cleanup_review(
-    session_factory, settings: Settings, job_id: int, *,
-    page: int = 1, page_size: int = 25,
-) -> dict:
-    """Admin-read evidence for a finished publication; never queue/retire."""
-    if not (isinstance(job_id, int) and job_id > 0):
+def _cleanup_review_authority(session_factory, settings: Settings, job_id: int):
+    """Bind review artifacts to a completed execution, without private reads."""
+    if type(job_id) is not int or job_id <= 0:
         raise ValueError("invalid execution job")
-    if not (isinstance(page, int) and page >= 1 and
-            isinstance(page_size, int) and 1 <= page_size <= 100):
-        raise ValueError("invalid review page")
     with session_factory() as session:
         job = session.get(WorkJob, job_id)
         if job is None or job.kind != EXECUTE_KIND:
             raise KeyError(job_id)
         state = json.loads(job.state_json or "{}")
         checkpoint = json.loads(job.checkpoint_json or "{}")
+        if not isinstance(state, dict) or not isinstance(checkpoint, dict):
+            raise ValueError("invalid completed execution checkpoint")
         if (job.status != "completed" or
                 checkpoint.get("phase") != "manual_cleanup_required"):
             raise ValueError("completed publication evidence is not ready for review")
@@ -319,10 +325,33 @@ def get_media_organizer_cleanup_review(
     )
     if manifest.get("cleanup_policy") != "deferred":
         raise ValueError("unsafe cleanup policy in frozen plan")
-    result = read_deferred_cleanup_review(
-        manifest, frozen_manifest_path=manifest_file,
-        page=page, page_size=page_size,
+    return manifest, manifest_file, checkpoint
+
+
+def get_media_organizer_cleanup_review(
+    session_factory, settings: Settings, job_id: int, *,
+    page: int = 1, page_size: int = 25,
+) -> dict:
+    """Review a shared Worker snapshot or the explicit legacy live reader."""
+    if not (type(page) is int and page >= 1 and
+            type(page_size) is int and 1 <= page_size <= 100):
+        raise ValueError("invalid review page")
+    shared = shared_config_gid() is not None
+    manifest, manifest_file, checkpoint = _cleanup_review_authority(
+        session_factory, settings, job_id,
     )
+    if shared:
+        from app.batch.media_organizer_shared_handoff import (
+            read_shared_cleanup_handoff, shared_review_page,
+        )
+        read_shared_cleanup_handoff(manifest, manifest_file, checkpoint)
+        result = shared_review_page(manifest, page=page, page_size=page_size)
+    else:
+        result = read_deferred_cleanup_review(
+            manifest, frozen_manifest_path=manifest_file, page=page, page_size=page_size,
+        )
+        result.update(verification_scope="live_frozen_inventory",
+                      live_inventory_verified=True, read_only=True)
     result["reviewed_execution_job_id"] = job_id
     return result
 
@@ -331,6 +360,15 @@ def get_media_organizer_cleanup_audit(
     session_factory, settings: Settings, job_id: int,
 ) -> dict:
     """Admin-read entire frozen inventory; not a cleanup/finalize operation."""
+    if shared_config_gid() is not None:
+        from app.batch.media_organizer_shared_handoff import (
+            read_shared_cleanup_handoff, shared_audit_summary,
+        )
+        manifest, path, checkpoint = _cleanup_review_authority(session_factory, settings, job_id)
+        read_shared_cleanup_handoff(manifest, path, checkpoint)
+        result = shared_audit_summary(manifest)
+        result["reviewed_execution_job_id"] = job_id
+        return result
     # This existing reader already checks completed WorkJob, phase, checksum,
     # read-only journal, the first frozen row and source→unit binding.
     review = get_media_organizer_cleanup_review(
@@ -348,6 +386,7 @@ def get_media_organizer_cleanup_audit(
         quarantine_root=settings.quarantine_root,
     )
     result["reviewed_execution_job_id"] = job_id
+    result.update(verification_scope="live_frozen_inventory", live_inventory_verified=True)
     return result
 
 
@@ -360,13 +399,18 @@ def get_media_organizer_cleanup_plan(
             or not isinstance(page_size, int) or not 1 <= page_size <= 100):
         raise ValueError("invalid cleanup plan pagination")
     from app.batch.media_organizer_finalize import cleanup_confirmation
-    audit = get_media_organizer_cleanup_audit(session_factory, settings, job_id)
-    frozen_id = int(audit["job_id"])
-    path = _manifest_file(settings, frozen_id)
-    manifest = load_frozen_preview_manifest(
-        path, job_id=frozen_id, unit=Path(audit["unit"]),
-    )
-    plan = read_cleanup_plan(cleanup_plan_path(path), manifest)
+    shared = shared_config_gid() is not None
+    if shared:
+        from app.batch.media_organizer_shared_handoff import read_shared_cleanup_handoff
+        manifest, path, checkpoint = _cleanup_review_authority(session_factory, settings, job_id)
+        plan = read_shared_cleanup_handoff(manifest, path, checkpoint)["plan"]
+        frozen_id = manifest["job_id"]
+    else:
+        audit = get_media_organizer_cleanup_audit(session_factory, settings, job_id)
+        frozen_id = int(audit["job_id"])
+        path = _manifest_file(settings, frozen_id)
+        manifest = load_frozen_preview_manifest(path, job_id=frozen_id, unit=Path(audit["unit"]))
+        plan = read_cleanup_plan(cleanup_plan_path(path), manifest)
     offset = (page - 1) * page_size
     return {
         "job_id": frozen_id,
@@ -383,12 +427,21 @@ def get_media_organizer_cleanup_plan(
         "original_links": plan["original_links"][offset:offset + page_size],
         "staged_links": plan["staged_links"][offset:offset + page_size],
         "wrapper_directories": plan["wrapper_directories"],
+        "total_deferred_publications": len(plan.get("deferred_publications", [])),
+        "deferred_publications": plan.get("deferred_publications", [])[offset:offset + page_size],
+        "total_released_original_links": len(plan.get("released_original_links", [])),
+        "released_original_links": plan.get("released_original_links", [])[offset:offset + page_size],
+        "total_retained_original_links": len(plan.get("retained_original_links", [])),
+        "retained_original_links": plan.get("retained_original_links", [])[offset:offset + page_size],
+        "retained_wrapper_directories": plan.get("retained_wrapper_directories", []),
         "stage": plan["stage"],
         "cleanup_authorized": False,
         "finalized": False,
         "zero_change_rescan_verified": False,
         "namespace_exclusive_custody_proven": False,
         "read_only": True,
+        "verification_scope": "worker_handoff_snapshot" if shared else "live_frozen_inventory",
+        "live_inventory_verified": not shared,
     }
 
 
@@ -515,7 +568,7 @@ class MediaOrganizerExecuteHandler(TaskHandler):
 
         def bind_frozen_group_custody(manifest: dict) -> None:
             nonlocal custody, custody_parents
-            if manifest.get("groups"):
+            if manifest.get("groups") or uses_path_roles(manifest):
                 parents = {unit}
                 parents.update(Path(row["source"]).parent for row in manifest["moves"])
                 parents.update(Path(row["target"]).parent for row in manifest["moves"])
@@ -544,13 +597,18 @@ class MediaOrganizerExecuteHandler(TaskHandler):
                     raise ValueError("unsupported original recovery phase")
         folder = _execution_folder(settings, frozen_job_id)
         manifest_path = _manifest_file(settings, frozen_job_id)
+        handoff_checkpoint = {}
 
         def checkpoint(n: int, mode: str, message: str) -> None:
+            pending_count = (len(classify_path_roles(manifest)["deferred_rows"])
+                             if uses_path_roles(manifest) else 0)
             context.checkpoint(
                 progress_current=n, progress_total=4, progress_message=message,
                 checkpoint_data={
                     "schema_version": 1, "phase": mode, "preview_job_id": preview_id,
                     "frozen_job_id": frozen_job_id, "unit": str(unit),
+                    "deferred_publication_count": pending_count,
+                    **handoff_checkpoint,
                 },
             )
 
@@ -570,9 +628,12 @@ class MediaOrganizerExecuteHandler(TaskHandler):
                 exclude_dir_names=_excluded_names(settings),
             )
             manifest["cleanup_policy"] = "deferred"
+            roles = classify_path_roles(manifest)
+            if roles["retained_sources"] or roles["retained_groups"] or roles["deferred_rows"]:
+                manifest["path_role_policy"] = POLICY
             bind_frozen_group_custody(manifest)
-            # A same-named old media bucket cannot be replaced without
-            # deleting the original directory. Reject BEFORE touching files.
+            # Only newly frozen, explicitly versioned plans can retain final
+            # roles or defer occupied final names to separately approved cleanup.
             validate_deferred_publication(manifest, namespace_custody=custody)
             shared_gid = shared_config_gid()
             if shared_gid is None:
@@ -615,7 +676,12 @@ class MediaOrganizerExecuteHandler(TaskHandler):
         # wrappers, private staged hardlinks or recovery witnesses.
         # Its durable marker, not the source layout, governs continuation:
         # never attempt restaging after the original job reached published.
-        checkpoint(3, "published", "已发布文件，正在核验人工清理凭证")
+        deferred_count = (len(classify_path_roles(manifest)["deferred_rows"])
+                          if uses_path_roles(manifest) else 0)
+        checkpoint(3, "published", (
+            "暂存和可用目标已验证，正在准备需单独确认的最终重排清单"
+            if deferred_count else "已发布文件，正在核验人工清理凭证"
+        ))
         fence()
         record_deferred_cleanup_evidence(
             manifest, frozen_manifest_path=manifest_path,
@@ -632,7 +698,12 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             quarantine_root=settings.quarantine_root,
         )
         save_cleanup_plan(cleanup_plan_path(manifest_path), manifest)
+        if shared_config_gid() is not None:
+            from app.batch.media_organizer_shared_handoff import shared_handoff_checkpoint
+            handoff_checkpoint = shared_handoff_checkpoint(manifest, manifest_path)
         checkpoint(
             4, "manual_cleanup_required",
-            "媒体文件已发布；旧分类目录和暂存文件已保留，等待人工核查清理",
+            ("全部原文件与暂存副本已保留；目标重排及清理等待单独确认"
+             if deferred_count else
+             "媒体文件已发布；旧分类目录和暂存文件已保留，等待人工核查清理"),
         )

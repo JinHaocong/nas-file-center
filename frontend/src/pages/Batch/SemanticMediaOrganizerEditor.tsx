@@ -17,7 +17,7 @@ import {
   mediaOrganizerApi, executableSemanticUnits, semanticExecutionNeedsPolling,
   canConfirmSemanticCleanup, canRecoverSemanticCleanup,
   semanticExecutionIdFromSearch, withSemanticExecutionId,
-  type SemanticUnitPreview, type SemanticCleanupLink,
+  type SemanticUnitPreview, type SemanticCleanupLink, type SemanticCleanupPlan,
 } from '../../api/media_organizer';
 
 const isRunning = (status: string | undefined) =>
@@ -38,21 +38,86 @@ const kindDescription = (item: SemanticUnitPreview) => {
   return item.reason || '当前目录无待处理文件';
 };
 
-const CleanupLinks: React.FC<{ title: string; links: SemanticCleanupLink[] }> = ({ title, links }) => (
+const CleanupLinks: React.FC<{
+  title: string;
+  links: (SemanticCleanupLink & { stage_path?: string })[];
+  pathLabel?: string;
+  showStage?: boolean;
+}> = ({ title, links, pathLabel = '待清理路径', showStage = false }) => (
   <div className="nfc-v2-batch-media-scroll">
     <table className="nfc-v2-batch-media-table">
       <caption>{title}</caption>
-      <thead><tr><th scope="col">待清理路径</th><th scope="col">已发布文件</th></tr></thead>
+      <thead><tr><th scope="col">{pathLabel}</th><th scope="col">最终文件路径</th>
+        {showStage && <th scope="col">已核验暂存路径</th>}</tr></thead>
       <tbody>
         {links.map(link => (
           <tr key={link.path}>
             <td><CodePath value={link.path} /></td>
             <td><CodePath value={link.published_path} /></td>
+            {showStage && <td><CodePath value={link.stage_path || ''} /></td>}
           </tr>
         ))}
       </tbody>
     </table>
   </div>
+);
+
+export const SemanticCleanupPlanInventory: React.FC<{
+  plan: SemanticCleanupPlan;
+  page: number;
+  pageSize: number;
+  busy: boolean;
+  onPageChange: (page: number, pageSize: number) => void;
+}> = ({ plan, page, pageSize, busy, onPageChange }) => (
+  <>
+    {plan.verification_scope === 'worker_handoff_snapshot' && (
+      <p className="nfc-form-note" role="status">
+        这份冻结清单记录上次 Worker 完整核验的结果。Worker 会在执行前再次核验所有文件和目录，
+        发现变化即停止执行。
+      </p>
+    )}
+    <div className="nfc-v2-batch-media-stats" role="status">
+      <span>清理原始路径 <strong>{plan.total_original_links.toLocaleString()}</strong></span>
+      <span>清理暂存路径 <strong>{plan.total_staged_links.toLocaleString()}</strong></span>
+      <span>确认后释放路径 <strong>{plan.total_released_original_links.toLocaleString()}</strong></span>
+      <span>确认后完成发布 <strong>{plan.total_deferred_publications.toLocaleString()}</strong></span>
+      <span>保留文件 <strong>{plan.total_retained_original_links.toLocaleString()}</strong></span>
+      <span>清理旧目录 <strong>{plan.wrapper_directories.length.toLocaleString()}</strong></span>
+      <span>保留目标目录 <strong>{plan.retained_wrapper_directories.length.toLocaleString()}</strong></span>
+    </div>
+    <p className="nfc-form-note">以上数量属于冻结清单，不代表清理开始后的当前剩余进度。</p>
+    <CleanupLinks title="确认后释放的原始路径" links={plan.released_original_links}
+      pathLabel="确认后释放路径" showStage />
+    <CleanupLinks title="确认后完成发布的目标"
+      pathLabel="原始来源路径" showStage links={plan.deferred_publications.map(row => ({
+        path: row.source_path, published_path: row.path,
+        stage_path: row.stage_path, identity: row.identity,
+      }))} />
+    <CleanupLinks title="保留的最终文件" links={plan.retained_original_links} pathLabel="保留路径" />
+    <CleanupLinks title="原始路径清理清单" links={plan.original_links} />
+    <CleanupLinks title="暂存路径清理清单" links={plan.staged_links} />
+    <ConsolePagination page={page} pageSize={pageSize}
+      total={Math.max(plan.total_original_links, plan.total_staged_links,
+        plan.total_deferred_publications, plan.total_released_original_links,
+        plan.total_retained_original_links)}
+      pageSizes={[25, 50, 100]}
+      onChange={(next, size) => { if (!busy) onPageChange(next, size); }} />
+    <div className="nfc-v2-batch-field">
+      <span>保留的目标目录</span>
+      {plan.retained_wrapper_directories.length ? (
+        <ul>{plan.retained_wrapper_directories.map(folder => (
+          <li key={folder.path}><CodePath value={folder.path} /></li>
+        ))}</ul>
+      ) : <small>没有需要沿用的原始目标目录。</small>}
+      <span>待清理的旧分类目录</span>
+      {plan.wrapper_directories.length ? (
+        <ul>{plan.wrapper_directories.map(folder => (
+          <li key={folder.path}><CodePath value={folder.path} /></li>
+        ))}</ul>
+      ) : <small>没有需要移除的旧分类目录。</small>}
+      <span>暂存目录：<CodePath value={plan.stage.path} /></span>
+    </div>
+  </>
 );
 
 /** Preview-first workflow. Execution is default-off and requires explicit unit approval. */
@@ -562,12 +627,16 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
           action={<span className="nfc-panel-count">任务 #{executionJobId}</span>}>
           {executionStatus ? (
             <>
-              <TaskProgress status={executionStatus.status} showDetails progress={{
+              {executionStatus.status === 'completed' && !executionStatus.finalized ? (
+                <StatusBadge status="paused" label={executionStatus.cleanup
+                  ? '发布与清理待核验'
+                  : executionStatus.publication_complete ? '已发布，待清理' : '已准备，待完成发布'} />
+              ) : <TaskProgress status={executionStatus.status} showDetails progress={{
                 current: executionStatus.progress.current,
                 total: executionStatus.progress.total,
                 percent: null,
                 message: executionStatus.progress.message,
-              }} />
+              }} />}
               <p className="nfc-form-note">
                 目标：<CodePath value={executionStatus.unit} />
               </p>
@@ -576,10 +645,23 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                   执行中断：{executionStatus.error || '请检查任务记录'}。不得手动修改暂存目录。
                 </p>
               )}
-              {executionStatus.manual_cleanup_required && !executionStatus.cleanup && expectedCleanupJobId === null && (
+              {executionStatus.manual_cleanup_required && executionStatus.publication_complete &&
+                !executionStatus.cleanup && expectedCleanupJobId === null && (
                 <p className="nfc-v2-batch-error" role="alert">
                   媒体文件已发布，但原始文件、旧分类目录与私有暂存文件均已保留，
                   等待人工核查清理。请核对下方清单，再单独确认清理；无需自行删除暂存文件。
+                </p>
+              )}
+              {executionStatus.manual_cleanup_required && !executionStatus.publication_complete &&
+                !executionStatus.cleanup && expectedCleanupJobId === null && (
+                <p className="nfc-form-note" role="status">
+                  文件已安全暂存，部分目标需要在独立确认后完成发布。请核对下方释放、发布与保留清单，再确认后续操作。
+                </p>
+              )}
+              {executionStatus.manual_cleanup_required && !executionStatus.publication_complete && (
+                <p className="nfc-form-note">
+                  冻结计划中的待发布目标数：{executionStatus.deferred_publication_count.toLocaleString()}。
+                  该数值不代表当前剩余进度，完成情况以最终核验为准。
                 </p>
               )}
               {executionStatus.manual_cleanup_required && (executionStatus.cleanup || expectedCleanupJobId !== null) && (
@@ -637,7 +719,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
         (cleanupReviewAvailable || executionStatus.cleanup || expectedCleanupJobId !== null) && (
         <DataPanel title="独立清理与恢复" variant="dense"
           className="nfc-v2-batch-media-panel"
-          description="核对原始路径、暂存路径和已发布文件后，单独确认清理。清理完成以服务器验证零变更复扫为准。">
+          description="核对原始路径、暂存文件、最终目标与保留项后，单独确认剩余发布和清理。完成以服务器验证零变更复扫为准。">
           <p className="nfc-form-note">整理单元：<CodePath value={executionStatus.unit} /></p>
           {expectedCleanupJobId !== null && executionStatus.cleanup?.job_id !== expectedCleanupJobId && (
             <p className="nfc-form-note" role="status">
@@ -712,34 +794,16 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                   </ConsoleButton>
                 </div>
               ) : cleanupPlanFetching && !cleanupPlan ? (
-                <p className="nfc-form-note" role="status">正在核对冻结清单和全部已发布文件…</p>
+                <p className="nfc-form-note" role="status">正在读取并校验冻结清理清单…</p>
               ) : cleanupPlan ? (
                 <>
-                  <div className="nfc-v2-batch-media-stats" role="status">
-                    <span>原始路径 <strong>{cleanupPlan.total_original_links.toLocaleString()}</strong></span>
-                    <span>暂存路径 <strong>{cleanupPlan.total_staged_links.toLocaleString()}</strong></span>
-                    <span>旧分类目录 <strong>{cleanupPlan.wrapper_directories.length.toLocaleString()}</strong></span>
-                  </div>
-                  <CleanupLinks title="原始路径清理清单" links={cleanupPlan.original_links} />
-                  <CleanupLinks title="暂存路径清理清单" links={cleanupPlan.staged_links} />
-                  <ConsolePagination page={cleanupPage} pageSize={cleanupPageSize}
-                    total={Math.max(cleanupPlan.total_original_links, cleanupPlan.total_staged_links)}
-                    pageSizes={[25, 50, 100]}
-                    onChange={(next, size) => {
-                      if (busy) return;
+                  <SemanticCleanupPlanInventory plan={cleanupPlan}
+                    page={cleanupPage} pageSize={cleanupPageSize} busy={busy || cleanupPlanFetching}
+                    onPageChange={(next, size) => {
                       setCleanupConfirmation('');
                       setCleanupPage(next);
                       setCleanupPageSize(size);
                     }} />
-                  <div className="nfc-v2-batch-field">
-                    <span>待清理的旧分类目录</span>
-                    {cleanupPlan.wrapper_directories.length ? (
-                      <ul>{cleanupPlan.wrapper_directories.map(folder => (
-                        <li key={folder.path}><CodePath value={folder.path} /></li>
-                      ))}</ul>
-                    ) : <small>没有需要移除的旧分类目录。</small>}
-                    <span>暂存目录：<CodePath value={cleanupPlan.stage.path} /></span>
-                  </div>
                   <div className="nfc-v2-batch-form">
                     <div className="nfc-v2-batch-field">
                       <label htmlFor="semantic-cleanup-confirmation">独立清理确认码</label>
@@ -750,13 +814,14 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                         onChange={event => setCleanupConfirmation(event.target.value)} />
                     </div>
                     <p className="nfc-form-note">
-                      此操作仅清理已核验的原始路径、暂存路径及旧分类空目录，保留清单中的已发布文件。
-                      Worker 会再次核验权限、文件身份和清理记录。
+                      确认后将按清单释放占用路径、从已核验暂存文件完成目标发布，再清理多余原始路径和暂存数据。
+                      清单中标为保留的文件与目标目录会保留。Worker 会再次核验权限、文件身份和执行记录。
                     </p>
                     <ConsoleButton variant="danger" disabled={!canCleanup}
                       loading={startCleanup.isPending}
                       onClick={() => { void cleanupCurrentUnit(); }}>
-                      确认并提交独立清理
+                      {cleanupPlan.total_deferred_publications > 0 || cleanupPlan.total_released_original_links > 0
+                        ? '确认并完成发布与清理' : '确认并提交独立清理'}
                     </ConsoleButton>
                   </div>
                 </>

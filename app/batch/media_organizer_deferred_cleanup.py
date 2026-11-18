@@ -22,6 +22,7 @@ from app.batch.media_organizer_manifest import (
     FrozenPreviewError, _checksum, load_frozen_preview_manifest,
 )
 from app.batch.media_organizer_planner import _check_scope
+from app.batch.media_organizer_path_roles import classify_path_roles, uses_path_roles
 from app.batch.media_organizer_publish import (
     PublishingConflict, _check_unit, _group_receipts, _validate_shape,
 )
@@ -35,10 +36,29 @@ class DeferredCleanupConflict(ValueError):
     """Safe publication cannot yet be handed off for manual cleanup."""
 
 
+def _publication_evidence(manifest: dict) -> dict:
+    rows = manifest["moves"]
+    if not uses_path_roles(manifest):
+        return {
+            "files_published": len(rows),
+            "published_targets": [row["final"] for row in rows],
+            "disposition": "retain_all_until_independent_manual_review",
+        }
+    deferred = classify_path_roles(manifest)["deferred_rows"]
+    pending = {row["final"] for row in deferred}
+    return {
+        "files_published": len(rows) - len(deferred),
+        "published_targets": [row["final"] for row in rows if row["final"] not in pending],
+        "deferred_targets": [row["final"] for row in deferred],
+        "publication_complete": not deferred,
+        "disposition": "retain_all_until_confirmed_layout_completion",
+    }
+
+
 def validate_deferred_publication(
     manifest: dict, *, namespace_custody=None,
 ) -> None:
-    """Refuse overlapping old groups and any grouped plan without real custody."""
+    """Require frozen path roles for overlaps and real custody for all groups."""
     if not isinstance(manifest, dict) or manifest.get("cleanup_policy") != "deferred":
         raise DeferredCleanupConflict("deferred cleanup policy is mandatory")
     unit = Path(manifest.get("unit", ""))
@@ -49,11 +69,14 @@ def validate_deferred_publication(
     groups = manifest.get("groups")
     if not isinstance(old_directories, dict) or not isinstance(groups, list):
         raise DeferredCleanupConflict("invalid frozen wrapper/group evidence")
+    role_mode = uses_path_roles(manifest)
+    if role_mode:
+        classify_path_roles(manifest)
     occupied = sorted(
         set(old_directories) &
         {str(unit / row["name"]) for row in groups}
     )
-    if occupied:
+    if occupied and not role_mode:
         # With cleanup disabled, a same-named historical group must not be
         # replaced. Block BEFORE staging source files or creating any job
         # directories; the user can resolve this in a separate safe plan.
@@ -76,7 +99,7 @@ def validate_deferred_publication(
     # Do this before staging as well. A retained original source may
     # otherwise occupy a flat target that the prior rename-first engine freed.
     retained = {str(row["source"]).casefold() for row in rows}
-    if any(str(row["final"]).casefold() in retained for row in rows):
+    if not role_mode and any(str(row["final"]).casefold() in retained for row in rows):
         raise DeferredCleanupConflict(
             "retained original source would occupy a final target"
         )
@@ -134,10 +157,8 @@ def read_deferred_cleanup_review(
             "stage_directory": str(stage),
             "staged_links_retained": len(rows),
             "original_sources_retained": len(rows),
-            "files_published": len(rows),
             "old_wrapper_identities": wrapper_ids,
-            "published_targets": [row["final"] for row in rows],
-            "disposition": "retain_all_until_independent_manual_review",
+            **_publication_evidence(manifest),
         }
         if not isinstance(saved, dict) or any(
             saved.get(key) != val for key, val in expected.items()
@@ -177,6 +198,8 @@ def read_deferred_cleanup_review(
 
         start = (page - 1) * page_size
         selected = rows[start:start + page_size]
+        deferred = ({row["final"] for row in classify_path_roles(manifest)["deferred_rows"]}
+                    if uses_path_roles(manifest) else set())
         items = []
         total_bytes = 0
         for original in rows:
@@ -188,7 +211,15 @@ def read_deferred_cleanup_review(
             identity = row["identity"]
             assert_frozen_file(row["source"], identity, "original source")
             assert_frozen_file(row["target"], identity, "private staged file")
-            assert_frozen_file(row["final"], identity, "public final file")
+            if row["final"] not in deferred:
+                assert_frozen_file(row["final"], identity, "public final file")
+            else:
+                # An occupied final remains a frozen ORIGINAL until separate
+                # cleanup approval. It must never be reported as published.
+                for original in rows:
+                    if original["source"].casefold() == row["final"].casefold():
+                        assert_frozen_file(original["source"], original["identity"],
+                                           "retained collision source")
             items.append({
                 "source": row["source"],
                 "stage": row["target"],
@@ -196,7 +227,8 @@ def read_deferred_cleanup_review(
                 "bytes": int(identity[2]),
                 "source_present": True,
                 "stage_present": True,
-                "target_present": True,
+                "target_present": row["final"] not in deferred,
+                "target_deferred": row["final"] in deferred,
                 "identity_matches": True,
             })
         for literal, identity in wrapper_ids.items():
@@ -220,6 +252,8 @@ def read_deferred_cleanup_review(
             "old_wrappers": sorted(wrapper_ids),
             "original_sources_retained": len(rows),
             "staged_links_retained": len(rows),
+            "publication_complete": not deferred,
+            "deferred_publication_count": len(deferred),
             "manual_cleanup_required": True,
             "finalized": False,
             "cleanup_authorized": False,
@@ -334,10 +368,15 @@ def record_deferred_cleanup_evidence(
         finally:
             os.close(stage_fd)
         group_bindings = _group_receipts(manifest, frozen_path)
-        _verify_public(
-            unit, manifest, rows, groups, _authority(manifest),
-            require_witness=True, group_bindings=group_bindings,
-        )
+        role_mode = uses_path_roles(manifest)
+        if role_mode:
+            from app.batch.media_organizer_publish import verify_prepared_publication
+            verify_prepared_publication(manifest, frozen_manifest_path=frozen_path)
+        else:
+            _verify_public(
+                unit, manifest, rows, groups, _authority(manifest),
+                require_witness=True, group_bindings=group_bindings,
+            )
         # Current V1.6 custody retains ALL original source names: verify each
         # still resolves to the same frozen inode before recording the handoff.
         for row in rows:
@@ -352,7 +391,7 @@ def record_deferred_cleanup_evidence(
                 os.close(parent_fd)
         # Every old wrapper must retain exactly its original frozen children,
         # including nested original wrappers. Never demand it be empty.
-        for literal, identity in manifest["wrapper_identities"].items():
+        for literal, identity in ({} if role_mode else manifest["wrapper_identities"]).items():
             directory = Path(literal)
             expected_names = set()
             for row in rows:
@@ -387,19 +426,19 @@ def record_deferred_cleanup_evidence(
             "stage_identity": [int(stat_stage.st_dev), int(stat_stage.st_ino)],
             "staged_links_retained": len(rows),
             "original_sources_retained": len(rows),
-            "files_published": len(rows),
             "old_wrapper_identities": manifest["wrapper_identities"],
             "public_group_identities": {
                 str(unit / name): list(identity)
                 for name, identity in group_bindings.items()
             },
-            "published_targets": [row["final"] for row in rows],
-            "disposition": "retain_all_until_independent_manual_review",
+            **_publication_evidence(manifest),
         }
         _write_report(_report_path(frozen_path), report)
         return {
             "manual_cleanup_required": True,
-            "files_published": len(rows),
+            "files_published": report["files_published"],
+            "publication_complete": report.get("publication_complete", True),
+            "deferred_publication_count": len(report.get("deferred_targets", [])),
             "old_wrapper_count": len(manifest["wrapper_identities"]),
             "staged_links_retained": len(rows),
             "original_sources_retained": len(rows),

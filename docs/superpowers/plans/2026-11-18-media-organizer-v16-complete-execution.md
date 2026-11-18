@@ -226,9 +226,96 @@ found no remaining Critical or Important findings in this delta, after the durab
 route handoff and pending-deletion directory flush were corrected. This is not
 external NAS safety approval or physical power-loss verification.
 
-The rule matrix contains 15 complete successful scenarios and one explicit
-safe-refusal regression. **Same-named canonical old-group reuse remains unsupported**:
-an existing canonical P group plus a new video still fails before mutation.
-This is a remaining completeness blocker, not a successfully organized scenario.
+At that checkpoint the matrix contained 15 complete successful scenarios and one
+explicit same-named canonical-group safe-refusal regression. The continuation
+below replaces that known limitation with full retained-group finalization; the
+legacy authority refusal tests remain in place.
 Actual NAS custody/content-writer exclusion, configuration migration and backup,
 disposable SATA acceptance and external review are still required before release.
+
+## Continuation — retained finals and confirmed layout completion
+
+The isolated matrix exposed existing completeness defects: exact-self flat names,
+canonical source groups that remain final groups, and original names occupied by
+another frozen row's final destination. Separately, lexical bucket ordering makes
+`P_10` precede `P_2` and breaks zero-change rescanning of large canonical units.
+
+Design decision within the existing approved workflow: retain final-role names
+and inode-bound source groups, publish unoccupied targets, and defer true occupied
+targets to the already separately confirmed cleanup WorkJob. That job releases
+only frozen collision names after checking every staged copy, publishes those
+targets using the existing pinned-inode no-replace primitive, verifies all final
+files, then removes remaining obsolete links and directories. Original names
+remain untouched before that separate approval. Moving collision names during
+initial execution would violate this boundary; blanket refusal would leave the
+required feature incomplete. The production custody issuer remains unchanged.
+
+New manifests opt into `path_role_policy=confirmed_relayout_v1` only when these
+roles are needed. Legacy manifests and immutable plans retain their prior meaning.
+The deterministic plan explicitly lists retained finals/groups and deferred
+publications. Journal recovery must check the latest authorized role at its
+frontier: a released original name may later hold its separately authorized final
+inode. A completed release is never a second permission to unlink that final.
+Prepared or partial publication must be reported accurately in the UI.
+
+- [x] Reproduce and fix numeric canonical bucket order without changing filename
+  ordering or semantic boundaries.
+- [x] Add pure frozen path-role classification and versioned immutable plan tests.
+- [x] Publish retained canonical groups and exact-self files with bound inventory;
+  preserve the old refusal behavior for legacy authority.
+- [x] Add confirmed collision release/publication and frontier-aware journal replay,
+  including interruption before/after each operation, replacement and revocation.
+- [x] Verify exact final paths, multiplicity, bytes, hashes and zero-change rescans
+  through authenticated API and real Worker, then independently review the batch.
+
+The role-aware lifecycle has 24 passing end-to-end cases, including all 11
+mutation interruption frontiers of an occupied-target chain, cross-200 insertion,
+P/V/Other reuse and empty-wrapper-only cleanup. The complete rule matrix now has
+16 successful scenarios. Eight new ordering cases cover canonical 2201-file P/V
+units and preserve ordinary filename ordering. Path-role/plan tests preserve the
+exact legacy schema-1 serialization while validating schema-2 review fields.
+
+Nineteen adversarial cases cover replaced parents, future names changed before
+BEGIN, scoped custody revocation, staged-copy fsync and pending-publication fsync,
+foreign no-replace targets, and last-copy preservation. Observed RED cases exposed
+an inherited copy-deletion defect: the surviving final's parent was not fenced at
+the final unlink boundary. Both original and staged-link removal now retain the
+final-parent FD, recheck both scopes, validate the bound final parent, and recheck
+the final inode before unlink. Independent current-tree review passed 98 selected
+tests and found no remaining Critical or Important finding. This remains a code
+review of synthetic tests, not independent live NAS approval.
+
+### Shared API / Worker handoff
+
+Actual distinct UIDs cannot use an API-side live audit of the Worker's 0700 stage
+or 0600 receipts. In explicitly configured shared-GID mode, the completed Worker
+checkpoint now binds the frozen manifest, shared review report and cleanup-plan
+digests. The API reads only the bounded 0640 artifacts and labels them as the last
+Worker-verified snapshot. It never falls back from a permission error to weaker
+checks. The Worker still performs the complete live inventory, private-evidence,
+lease and custody checks before any media mutation. Private stage/progress/receipt
+permissions remain unchanged. Newly created final groups alone receive shared
+read/execute access (0750), without group write or changes to existing media modes.
+
+Older completed shared-GID jobs without these checkpoint digests are deliberately
+refused; there is no automatic backfill or assumption that their saved artifacts
+were verified. Legacy non-shared review behavior and schema-1 plans remain intact.
+
+The new CI-only setpriv lifecycle runs actual API UID 10001 and Worker UID 10002,
+shared GID 10000, no supplementary groups and zero effective capabilities. It
+checks authenticated queues, interrupted cleanup, lease takeover, explicit
+recovery, private-evidence denial, API media-read/write boundaries and zero rescan
+for flat, grouped and retained-group fixtures. Its hosted result must be checked
+at the pushed commit; it cannot run in the local single-UID namespace. This script
+asserts the production issuer is denied and injects custody only inside its own
+disposable CI processes; it is not a NAS deployment utility.
+
+Final local verification for this batch: the whole backend run passed 2770 tests
+with 38 existing skips and no failures. The latest shared-handoff/publication/
+cleanup regression passed 89 tests, including 15 shared-mode cases. The frontend
+main compiled suite passed 1263 tests; the final focused UI command passed 22,
+including snapshot-versus-live review wording. Typecheck, production build,
+shell/Python syntax checks and `git diff --check` passed. The 38 backend skips
+remain 30 deferred legacy purge release cases, 4 missing local 7-Zip cases and
+4 missing local Docker Compose checks. Hosted Docker/actual-UID execution and
+actual NAS acceptance remain distinct gates.

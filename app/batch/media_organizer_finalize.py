@@ -32,6 +32,9 @@ from app.batch.media_organizer_manifest import (
 )
 from app.batch.media_organizer_planner import _check_scope, preview_semantic_unit
 from app.batch.media_organizer_publish import _group_receipts
+from app.batch.media_organizer_path_roles import (
+    POLICY, classify_path_roles, cleanup_plan_path_role_fields, uses_path_roles,
+)
 from app.batch.media_organizer_stage import _authority, _assert_private_stage_fd
 
 _MAX_JOURNAL_BYTES = 16 * 1024 * 1024
@@ -71,6 +74,65 @@ def _journal_path(frozen: Path) -> Path:
 
 
 def _operations(manifest: dict, plan: dict) -> list[dict]:
+    if not uses_path_roles(manifest):
+        return _legacy_operations(manifest, plan)
+    unit = Path(manifest["unit"])
+    if (plan.get("schema_version") != 2 or plan.get("path_role_policy") != POLICY
+            or plan.get("job_id") != manifest["job_id"]
+            or plan.get("unit") != str(unit)
+            or plan.get("manifest_checksum") != _checksum(manifest)
+            or plan.get("cleanup_authorized") is not False
+            or plan.get("plan_kind") != "review_only"):
+        raise CleanupExecutionBlocked("layout completion plan is not bound to frozen authority")
+    fields = cleanup_plan_path_role_fields(manifest)
+    if any(plan.get(key) != value for key, value in fields.items()):
+        raise CleanupExecutionBlocked("layout completion path roles changed")
+    roles = classify_path_roles(manifest)
+    ops = []
+    for row in roles["released_sources"]:
+        ops.append({"kind": "release-source", "path": row["source"],
+                    "identity": row["identity"], "stage_path": row["target"]})
+    for row in roles["deferred_rows"]:
+        ops.append({"kind": "publish-final", "path": row["final"],
+                    "identity": row["identity"], "stage_path": row["target"]})
+    # A released basename can now hold another row's final. Never include it
+    # among the later ordinary deletions. Exact-self sources also stay final.
+    for row in roles["ordinary_sources"]:
+        ops.append({"kind": "original", "path": row["source"],
+                    "identity": row["identity"], "published": row["final"]})
+    for item in fields["wrapper_directories"]:
+        ops.append({"kind": "wrapper", **item})
+    for item in fields["staged_links"]:
+        ops.append({"kind": "stage-link", "path": item["path"],
+                    "identity": item["identity"], "published": item["published_path"]})
+    partial_groups = {Path(row["final"]).parent for row in roles["deferred_rows"]}
+    for group in manifest["groups"]:
+        folder = unit / group["name"]
+        # A partial group was prepared with only an owner marker. The plan
+        # never invents authority to remove a completion marker not created.
+        markers = ((_GROUP_OWNER,) if folder in partial_groups
+                   else (_GROUP_COMPLETE, _GROUP_OWNER))
+        for marker in markers:
+            ops.append({"kind": "group-marker", "path": str(folder / marker),
+                        "group_name": group["name"]})
+    stage = unit / manifest["stage_directory"]
+    identity = plan.get("stage", {}).get("identity")
+    if (plan.get("stage", {}).get("path") != str(stage)
+            or not isinstance(identity, list) or len(identity) != 2
+            or not all(type(value) is int for value in identity)
+            or identity[0] != manifest["unit_dev"]):
+        raise CleanupExecutionBlocked("layout completion stage binding changed")
+    ops.extend([
+        {"kind": "stage-marker", "path": str(stage / _COMPLETE)},
+        {"kind": "stage-marker", "path": str(stage / _OWNER)},
+        {"kind": "stage-directory", "path": str(stage), "identity": identity},
+    ])
+    for op in ops:
+        op["stage_identity"] = identity
+    return ops
+
+
+def _legacy_operations(manifest: dict, plan: dict) -> list[dict]:
     unit = Path(manifest["unit"])
     rows = manifest["moves"]
     stages = plan["staged_links"]
@@ -358,7 +420,8 @@ def _file_matches(info, identity) -> bool:
              int(info.st_mtime_ns)] == identity)
 
 
-def _check_public(manifest: dict, group_receipts: dict[str, tuple[int, int]]) -> None:
+def _check_public(manifest: dict, group_receipts: dict[str, tuple[int, int]], *,
+                  skipped_finals: set[str] | None = None) -> None:
     unit = Path(manifest["unit"])
     for name, identity in group_receipts.items():
         folder = unit / name
@@ -379,6 +442,8 @@ def _check_public(manifest: dict, group_receipts: dict[str, tuple[int, int]]) ->
         finally:
             os.close(fd)
     for row in manifest["moves"]:
+        if skipped_finals and row["final"] in skipped_finals:
+            continue
         final = Path(row["final"])
         parent_fd = _open_directory_nofollow(final.parent)
         try:
@@ -441,6 +506,12 @@ def _check_replay_inventory(
     Parent bindings and later operations are checked before any earlier unlink,
     so foreign replacement wrappers/stages cannot donate matching hardlinks.
     """
+    if uses_path_roles(manifest):
+        _check_layout_replay_inventory(
+            manifest, ops, completed=completed, pending=pending,
+            witness=witness, receipts=receipts,
+        )
+        return
     unit = Path(manifest["unit"])
     _check_public(manifest, receipts)
     _check_direct_unrecognized(manifest)
@@ -509,6 +580,134 @@ def _check_replay_inventory(
             os.close(fd)
 
 
+def _check_layout_replay_inventory(
+    manifest: dict, ops: list[dict], *, completed: int, pending: int | None,
+    witness: bytes, receipts: dict[str, tuple[int, int]],
+) -> None:
+    """Project frozen names through the journal frontier before any new BEGIN.
+
+    A completed release can later be an authorized final file. The projected
+    state, rather than historical absence, is the authority for that pathname.
+    Only the one durable pending operation may be in its before/after state.
+    """
+    unit = Path(manifest["unit"])
+    roles = classify_path_roles(manifest)
+    deferred = {row["final"] for row in roles["deferred_rows"]}
+    expected: dict[Path, dict] = {}
+
+    def bind(path: Path, kind: str, identity=None, *, private=False) -> None:
+        if not path.is_relative_to(unit) or path == unit or ".." in path.parts:
+            raise CleanupExecutionBlocked("layout inventory escaped frozen unit")
+        value = {"kind": kind, "identity": identity, "private": private}
+        if path in expected and expected[path] != value:
+            raise CleanupExecutionBlocked("inconsistent frozen pathname roles")
+        expected[path] = value
+
+    for row in manifest["moves"]:
+        bind(Path(row["source"]), "file", row["identity"])
+        bind(Path(row["target"]), "file", row["identity"])
+        if row["final"] not in deferred:
+            bind(Path(row["final"]), "file", row["identity"])
+    for path, identity in manifest["wrapper_identities"].items():
+        bind(Path(path), "directory", list(identity))
+    for name, identity in receipts.items():
+        bind(unit / name, "directory", list(identity))
+    for op in ops:
+        if op["kind"] in ("group-marker", "stage-marker"):
+            bind(Path(op["path"]), "marker")
+        elif op["kind"] == "stage-directory":
+            bind(Path(op["path"]), "directory", op["identity"], private=True)
+
+    def advance(op: dict) -> None:
+        path = Path(op["path"])
+        if op["kind"] == "publish-final":
+            if path in expected:
+                raise CleanupExecutionBlocked("deferred target was not released")
+            bind(path, "file", op["identity"])
+        else:
+            before = expected.pop(path, None)
+            if before is None:
+                raise CleanupExecutionBlocked("cleanup journal deletes an unbound pathname")
+            if "identity" in op and before["identity"] != op["identity"]:
+                raise CleanupExecutionBlocked("cleanup journal pathname role changed")
+
+    for op in ops[:completed]:
+        advance(op)
+    if pending is not None:
+        if pending != completed or pending >= len(ops):
+            raise CleanupExecutionBlocked("invalid pending layout operation")
+        op = ops[pending]
+        path = Path(op["path"])
+        fd = None
+        try:
+            try:
+                fd = _open_directory_nofollow(path.parent)
+                info = _entry(fd, path.name)
+            except FileNotFoundError:
+                info = None
+            if op["kind"] == "publish-final":
+                if info is not None:
+                    if not _file_matches(info, op["identity"]):
+                        raise CleanupExecutionBlocked("pending final publication was replaced")
+                    advance(op)
+            elif info is None:
+                advance(op)
+        finally:
+            if fd is not None:
+                os.close(fd)
+
+    _check_direct_unrecognized(manifest)
+    # Every touched name not in the current projection must be absent, even
+    # when a removed wrapper would otherwise look like a protected root child.
+    for path in {Path(op["path"]) for op in ops} - expected.keys():
+        fd = None
+        try:
+            try:
+                fd = _open_directory_nofollow(path.parent)
+                info = _entry(fd, path.name)
+            except FileNotFoundError:
+                info = None
+            if info is not None:
+                raise CleanupExecutionBlocked("inactive cleanup pathname was replaced")
+        finally:
+            if fd is not None:
+                os.close(fd)
+
+    children: dict[Path, set[str]] = {}
+    for path in expected:
+        children.setdefault(path.parent, set()).add(path.name)
+    for path, spec in expected.items():
+        parent_fd = _open_directory_nofollow(path.parent)
+        try:
+            info = _entry(parent_fd, path.name)
+            if spec["kind"] == "file":
+                if not _file_matches(info, spec["identity"]):
+                    raise CleanupExecutionBlocked("frozen layout file role changed")
+            elif spec["kind"] == "marker":
+                if info is None or not stat.S_ISREG(info.st_mode):
+                    raise CleanupExecutionBlocked("frozen layout marker changed")
+                _verify_marker(parent_fd, path.name, witness)
+            else:
+                if (info is None or not stat.S_ISDIR(info.st_mode)
+                        or [int(info.st_dev), int(info.st_ino)] != spec["identity"]):
+                    raise CleanupExecutionBlocked("frozen layout directory role changed")
+                fd = os.open(path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                             dir_fd=parent_fd)
+                try:
+                    opened = (_assert_private_stage_fd(fd) if spec["private"]
+                              else os.fstat(fd))
+                    if [int(opened.st_dev), int(opened.st_ino)] != spec["identity"]:
+                        raise CleanupExecutionBlocked("opened layout directory changed")
+                    with os.scandir(fd) as entries:
+                        found = {entry.name for entry in entries}
+                    if found != children.get(path, set()):
+                        raise CleanupExecutionBlocked("unrecognized retained layout entry")
+                finally:
+                    os.close(fd)
+        finally:
+            os.close(parent_fd)
+
+
 def _mutate_one(op: dict, *, previously_begun: bool,
                 custody: ExclusiveNamespaceCustody, witness: bytes,
                 manifest: dict, receipts: dict[str, tuple[int, int]]) -> None:
@@ -517,8 +716,19 @@ def _mutate_one(op: dict, *, previously_begun: bool,
     if not path.is_relative_to(Path(manifest["unit"])):
         raise CleanupExecutionBlocked("cleanup mutation escaped frozen unit")
     assert_exclusive_custody(custody, (path.parent,))
+    role_mode = uses_path_roles(manifest)
+    if role_mode:
+        _assert_layout_parent_bindings(path.parent, op, manifest, receipts)
+    if kind == "publish-final":
+        _publish_layout_final(
+            op, previously_begun=previously_begun, custody=custody,
+            witness=witness, manifest=manifest, receipts=receipts,
+        )
+        return
     parent_fd = _open_directory_nofollow(path.parent)
     try:
+        if role_mode:
+            _assert_layout_parent_bindings(path.parent, op, manifest, receipts, parent_fd)
         info = _entry(parent_fd, path.name)
         if info is None:
             if previously_begun:
@@ -529,22 +739,59 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                 os.fsync(parent_fd)
                 return
             raise CleanupExecutionBlocked("source vanished without cleanup journal")
-        if kind in ("original", "stage-link"):
+        if kind == "release-source":
+            if not _file_matches(info, op["identity"]):
+                raise CleanupExecutionBlocked("collision source identity changed")
+            stage = Path(op["stage_path"])
+            stage_fd = _open_directory_nofollow(stage.parent)
+            staged_file_fd = None
+            try:
+                _assert_layout_stage(stage_fd, op, manifest, witness)
+                staged_file_fd = os.open(
+                    stage.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    dir_fd=stage_fd,
+                )
+                if (not _file_matches(os.fstat(staged_file_fd), op["identity"])
+                        or not _file_matches(_entry(stage_fd, stage.name), op["identity"])):
+                    raise CleanupExecutionBlocked("collision source has no verified staged copy")
+                # The immutable staged copy must be durable before releasing
+                # the original basename, including pending crash recovery.
+                os.fsync(staged_file_fd)
+                os.fsync(stage_fd)
+                assert_exclusive_custody(custody, (stage.parent, path.parent))
+                _assert_layout_parent_bindings(path.parent, op, manifest, receipts, parent_fd)
+                _assert_layout_stage(stage_fd, op, manifest, witness)
+                if (not _file_matches(_entry(stage_fd, stage.name), op["identity"])
+                        or not _file_matches(_entry(parent_fd, path.name), op["identity"])):
+                    raise CleanupExecutionBlocked("collision source changed at mutation boundary")
+                os.unlink(path.name, dir_fd=parent_fd)
+            finally:
+                if staged_file_fd is not None:
+                    os.close(staged_file_fd)
+                os.close(stage_fd)
+        elif kind in ("original", "stage-link"):
             if not _file_matches(info, op["identity"]):
                 raise CleanupExecutionBlocked("frozen source identity changed")
             final = Path(op["published"])
             final_fd = _open_directory_nofollow(final.parent)
             try:
+                _assert_surviving_final_parent(final.parent, final_fd, manifest, receipts)
                 if not _file_matches(_entry(final_fd, final.name), op["identity"]):
                     raise CleanupExecutionBlocked("final hardlink changed before unlink")
+                # Both the removed name and the copy that makes removal safe
+                # must stay under custody until this unlink. A source-only
+                # fence could leave the last staged copy unprotected.
+                assert_exclusive_custody(custody, (path.parent, final.parent))
+                if role_mode:
+                    _assert_layout_parent_bindings(path.parent, op, manifest, receipts, parent_fd)
+                _assert_surviving_final_parent(final.parent, final_fd, manifest, receipts)
+                if not _file_matches(_entry(final_fd, final.name), op["identity"]):
+                    raise CleanupExecutionBlocked("surviving final changed at unlink boundary")
+                if not _file_matches(_entry(parent_fd, path.name), op["identity"]):
+                    raise CleanupExecutionBlocked("source identity changed at mutation boundary")
+                os.unlink(path.name, dir_fd=parent_fd)
             finally:
                 os.close(final_fd)
-            # A named unlink cannot atomically compare inode. This is allowed
-            # solely INSIDE the externally established exclusive namespace.
-            assert_exclusive_custody(custody, (path.parent,))
-            if not _file_matches(_entry(parent_fd, path.name), op["identity"]):
-                raise CleanupExecutionBlocked("source identity changed at mutation boundary")
-            os.unlink(path.name, dir_fd=parent_fd)
         elif kind in ("wrapper", "stage-directory"):
             if (not stat.S_ISDIR(info.st_mode) or
                     [int(info.st_dev), int(info.st_ino)] != op["identity"]):
@@ -563,6 +810,8 @@ def _mutate_one(op: dict, *, previously_begun: bool,
             finally:
                 os.close(directory_fd)
             assert_exclusive_custody(custody, (path.parent,))
+            if role_mode:
+                _assert_layout_parent_bindings(path.parent, op, manifest, receipts, parent_fd)
             bound = _entry(parent_fd, path.name)
             if bound is None or [int(bound.st_dev), int(bound.st_ino)] != op["identity"]:
                 raise CleanupExecutionBlocked("cleanup directory rebound")
@@ -583,6 +832,8 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                     raise CleanupExecutionBlocked("public group binding changed")
             _verify_marker(parent_fd, path.name, witness)
             assert_exclusive_custody(custody, (path.parent,))
+            if role_mode:
+                _assert_layout_parent_bindings(path.parent, op, manifest, receipts, parent_fd)
             _verify_marker(parent_fd, path.name, witness)
             os.unlink(path.name, dir_fd=parent_fd)
         else:
@@ -590,6 +841,175 @@ def _mutate_one(op: dict, *, previously_begun: bool,
         os.fsync(parent_fd)
     finally:
         os.close(parent_fd)
+
+
+def _assert_surviving_final_parent(parent: Path, fd: int, manifest: dict,
+                                   receipts: dict[str, tuple[int, int]]) -> None:
+    unit = Path(manifest["unit"])
+    expected = ((manifest["unit_dev"], manifest["unit_ino"]) if parent == unit
+                else receipts.get(parent.name) if parent.parent == unit else None)
+    if expected is None:
+        raise CleanupExecutionBlocked("surviving final parent has no frozen receipt")
+    opened = os.fstat(fd)
+    if (int(opened.st_dev), int(opened.st_ino)) != tuple(expected):
+        raise CleanupExecutionBlocked("opened surviving final parent changed")
+    for directory, identity in (
+        (unit, (manifest["unit_dev"], manifest["unit_ino"])), (parent, expected),
+    ):
+        current_fd = _open_directory_nofollow(directory)
+        try:
+            current = os.fstat(current_fd)
+            if (int(current.st_dev), int(current.st_ino)) != tuple(identity):
+                raise CleanupExecutionBlocked("surviving final parent pathname changed")
+        finally:
+            os.close(current_fd)
+
+
+def _assert_layout_parent_bindings(
+    parent: Path, op: dict, manifest: dict,
+    receipts: dict[str, tuple[int, int]], opened_parent_fd: int | None = None,
+) -> None:
+    """Recheck each frozen parent at the mutation boundary, including the unit."""
+    unit = Path(manifest["unit"])
+    stage = unit / manifest["stage_directory"]
+    bindings = {Path(path): list(identity)
+                for path, identity in manifest["wrapper_identities"].items()}
+    bindings[unit] = [manifest["unit_dev"], manifest["unit_ino"]]
+    bindings[stage] = op["stage_identity"]
+    for name, identity in receipts.items():
+        group = unit / name
+        if group in bindings and bindings[group] != list(identity):
+            raise CleanupExecutionBlocked("retained group authority changed")
+        bindings[group] = list(identity)
+    current = parent
+    while current.is_relative_to(unit):
+        identity = bindings.get(current)
+        if identity is None:
+            raise CleanupExecutionBlocked("mutation parent has no frozen binding")
+        fd = _open_directory_nofollow(current)
+        try:
+            info = os.fstat(fd)
+            if (not stat.S_ISDIR(info.st_mode)
+                    or [int(info.st_dev), int(info.st_ino)] != identity):
+                raise CleanupExecutionBlocked("layout mutation parent binding changed")
+            if current == parent and opened_parent_fd is not None:
+                opened = os.fstat(opened_parent_fd)
+                if [int(opened.st_dev), int(opened.st_ino)] != identity:
+                    raise CleanupExecutionBlocked("opened layout parent binding changed")
+        finally:
+            os.close(fd)
+        if current == unit:
+            return
+        current = current.parent
+    raise CleanupExecutionBlocked("layout mutation parent escaped frozen unit")
+
+
+def _check_unbegun_layout_operation(
+    op: dict, *, custody: ExclusiveNamespaceCustody, manifest: dict,
+    receipts: dict[str, tuple[int, int]], witness: bytes,
+) -> None:
+    """Never issue a new BEGIN for a name that has already changed externally."""
+    path = Path(op["path"])
+    assert_exclusive_custody(custody, (Path(manifest["unit"]), path.parent))
+    _assert_layout_parent_bindings(path.parent, op, manifest, receipts)
+    fd = _open_directory_nofollow(path.parent)
+    try:
+        _assert_layout_parent_bindings(path.parent, op, manifest, receipts, fd)
+        info = _entry(fd, path.name)
+        kind = op["kind"]
+        if kind == "publish-final":
+            if info is not None:
+                raise CleanupExecutionBlocked("unbegun final target is already occupied")
+        elif kind in ("release-source", "original", "stage-link"):
+            if not _file_matches(info, op["identity"]):
+                raise CleanupExecutionBlocked("unbegun frozen source changed or disappeared")
+        elif kind in ("group-marker", "stage-marker"):
+            if info is None or not stat.S_ISREG(info.st_mode):
+                raise CleanupExecutionBlocked("unbegun completion marker changed")
+            _verify_marker(fd, path.name, witness)
+        elif kind in ("wrapper", "stage-directory"):
+            if (info is None or not stat.S_ISDIR(info.st_mode)
+                    or [int(info.st_dev), int(info.st_ino)] != op["identity"]):
+                raise CleanupExecutionBlocked("unbegun cleanup directory changed")
+            child_fd = os.open(path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                               dir_fd=fd)
+            try:
+                opened = os.fstat(child_fd)
+                if [int(opened.st_dev), int(opened.st_ino)] != op["identity"]:
+                    raise CleanupExecutionBlocked("unbegun opened directory changed")
+                with os.scandir(child_fd) as entries:
+                    if next(entries, None) is not None:
+                        raise CleanupExecutionBlocked("unbegun cleanup directory is not empty")
+            finally:
+                os.close(child_fd)
+        else:
+            raise CleanupExecutionBlocked("unknown layout operation")
+    finally:
+        os.close(fd)
+    if kind in ("release-source", "publish-final"):
+        stage = Path(op["stage_path"])
+        stage_fd = _open_directory_nofollow(stage.parent)
+        try:
+            _assert_layout_stage(stage_fd, op, manifest, witness)
+            if not _file_matches(_entry(stage_fd, stage.name), op["identity"]):
+                raise CleanupExecutionBlocked("unbegun operation lost its staged copy")
+        finally:
+            os.close(stage_fd)
+
+
+def _assert_layout_stage(fd: int, op: dict, manifest: dict, witness: bytes) -> None:
+    info = _assert_private_stage_fd(fd)
+    stage = Path(manifest["unit"]) / manifest["stage_directory"]
+    if (Path(op["stage_path"]).parent != stage
+            or [int(info.st_dev), int(info.st_ino)] != op["stage_identity"]):
+        raise CleanupExecutionBlocked("layout stage inode binding changed")
+    parent_fd = _open_directory_nofollow(stage.parent)
+    try:
+        named = _entry(parent_fd, stage.name)
+        if (named is None or not stat.S_ISDIR(named.st_mode)
+                or [int(named.st_dev), int(named.st_ino)] != op["stage_identity"]):
+            raise CleanupExecutionBlocked("layout stage pathname binding changed")
+    finally:
+        os.close(parent_fd)
+    _verify_marker(fd, _OWNER, witness)
+    _verify_marker(fd, _COMPLETE, witness)
+
+
+def _publish_layout_final(op: dict, *, previously_begun: bool,
+                          custody: ExclusiveNamespaceCustody, witness: bytes,
+                          manifest: dict, receipts: dict[str, tuple[int, int]]) -> None:
+    from app.batch.media_organizer_publish import _link_one
+    unit = Path(manifest["unit"])
+    stage = unit / manifest["stage_directory"]
+    dest = Path(op["path"])
+    row = next((item for item in manifest["moves"] if item["final"] == str(dest)), None)
+    if (row is None or row["target"] != op["stage_path"]
+            or row["identity"] != op["identity"]):
+        raise CleanupExecutionBlocked("deferred publication differs from frozen row")
+    fd = _open_directory_nofollow(stage)
+    try:
+        _assert_layout_stage(fd, op, manifest, witness)
+
+        def fence() -> None:
+            assert_exclusive_custody(custody, (unit, stage, dest.parent))
+            _assert_layout_parent_bindings(dest.parent, op, manifest, receipts)
+            _assert_layout_stage(fd, op, manifest, witness)
+
+        fence()
+        _link_one(row, stage=stage, unit=unit, witness=witness, manifest=manifest,
+                  fence=fence, resume=previously_begun, group_bindings=receipts)
+        # A pending BEGIN may already have linked the exact inode but crashed
+        # before flushing its parent. Its recovered DONE must not outrun fsync.
+        parent_fd = _open_directory_nofollow(dest.parent)
+        try:
+            fence()
+            if not _file_matches(_entry(parent_fd, dest.name), op["identity"]):
+                raise CleanupExecutionBlocked("deferred final changed before durable completion")
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+    finally:
+        os.close(fd)
 
 
 def _verify_finished_scan(manifest: dict, frozen: Path,
@@ -644,6 +1064,18 @@ def finish_deferred_cleanup(
         # may be absent on recovery after the final rmdir: do not regenerate it.
         plan = _read_existing(cleanup_plan_path(frozen))
         ops = _operations(manifest, plan)
+        role_mode = uses_path_roles(manifest)
+        custody_parents = {unit}
+        custody_parents.update(Path(op["path"]).parent for op in ops)
+        custody_parents.update(
+            Path(row[field]).parent for row in manifest["moves"]
+            for field in ("source", "target", "final")
+        )
+        custody_scope = tuple(sorted(custody_parents))
+
+        def fence_all() -> None:
+            assert_exclusive_custody(custody, custody_scope)
+
         if confirmation != cleanup_confirmation(
                 manifest["job_id"], str(unit), plan["plan_sha256"]):
             raise CleanupExecutionBlocked("exact separate cleanup confirmation required")
@@ -671,9 +1103,11 @@ def finish_deferred_cleanup(
                 allowed_roots=allowed_roots, quarantine_root=quarantine_root,
             )
             _check_direct_unrecognized(manifest)
-            _check_public(manifest, receipts)
+            deferred = ({row["final"] for row in classify_path_roles(manifest)["deferred_rows"]}
+                        if role_mode else None)
+            _check_public(manifest, receipts, skipped_finals=deferred)
             try:
-                assert_exclusive_custody(custody, (unit,))
+                fence_all()
                 chain = _new_journal(path, header)
             except FileExistsError as exc:
                 raise CleanupExecutionBlocked("cleanup journal appeared during preflight") from exc
@@ -689,13 +1123,25 @@ def finish_deferred_cleanup(
             manifest, ops, completed=completed, pending=pending,
             witness=witness, receipts=receipts,
         )
+        public_verified = not role_mode
         for i, op in enumerate(ops):
             if i < completed:
-                if os.path.lexists(op["path"]):
+                if not role_mode and os.path.lexists(op["path"]):
                     raise CleanupExecutionBlocked("completed cleanup pathname was replaced")
                 continue
+            if not public_verified and op["kind"] not in ("release-source", "publish-final"):
+                # No ordinary original/stage cleanup can start until every
+                # deferred final is published and every final inode verifies.
+                _check_public(manifest, receipts)
+                public_verified = True
             if pending != i:
-                assert_exclusive_custody(custody, (unit,))
+                fence_all()
+                if role_mode:
+                    _check_unbegun_layout_operation(
+                        op, custody=custody, manifest=manifest,
+                        receipts=receipts, witness=witness,
+                    )
+                fence_all()
                 chain = _append(path, chain, {"kind": "begin", "index": i})
             # A replayed BEGIN must still refer to this exact private journal;
             # it must not skip evidence validation merely because it is durable.
@@ -707,7 +1153,7 @@ def finish_deferred_cleanup(
             )
             if after_mutation is not None:
                 after_mutation(i)
-            assert_exclusive_custody(custody, (unit,))
+            fence_all()
             chain = _append(path, chain, {"kind": "done", "index": i})
             pending = None
         # No staging/old wrappers remain. The second scan must now find the
@@ -715,7 +1161,7 @@ def finish_deferred_cleanup(
         scanned = _verify_finished_scan(
             manifest, frozen, [Path(p) for p in allowed_roots], quarantine_root,
         )
-        assert_exclusive_custody(custody, (unit,))
+        fence_all()
         _assert_journal_cursor(path, chain)
         if not finished:
             _append(path, chain, {"kind": "finalized", "count": len(ops)})
@@ -726,8 +1172,8 @@ def finish_deferred_cleanup(
             "already_organized": True,
             "needed_moves": int(scanned["needed_moves"]),
             "renamed_count": int(scanned["renamed_count"]),
-            "originals_removed": len(manifest["moves"]),
-            "old_wrappers_removed": len(manifest["wrapper_identities"]),
+            "originals_removed": len(plan["original_links"]),
+            "old_wrappers_removed": len(plan["wrapper_directories"]),
             "groups_verified": len(manifest["groups"]),
             "stage_removed": True,
             "namespace_exclusive_custody_proven": False,

@@ -23,9 +23,10 @@ from app.batch.media_organizer_execute_jobs import (
 from app.batch.media_organizer_finalize import (
     cleanup_confirmation, finish_deferred_cleanup, _operations,
 )
-from app.batch.media_organizer_manifest import load_frozen_preview_manifest
+from app.batch.media_organizer_manifest import _checksum, load_frozen_preview_manifest
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.config import Settings
+from app.config_sharing import shared_config_gid
 from app.models import WorkJob
 from app.tasks.context import JobContext
 from app.tasks.handlers_base import TaskHandler, register_handler
@@ -179,7 +180,9 @@ def enqueue_media_organizer_cleanup(
         if existing is not None:
             return _approved_existing(session, existing, confirmation, settings)
 
-    # Read-only *full* frozen inventory audit and trusted original WorkJob.
+    # Explicit shared mode reads the completed Worker's bound snapshot;
+    # legacy mode retains the live audit. The Worker always audits again.
+    shared = shared_config_gid() is not None
     review = get_media_organizer_cleanup_plan(
         session_factory, settings, execution_job_id, page=1, page_size=1,
     )
@@ -194,6 +197,8 @@ def enqueue_media_organizer_cleanup(
     manifest = load_frozen_preview_manifest(
         manifest_path, job_id=frozen_id, unit=unit,
     )
+    if _checksum(manifest) != review["manifest_checksum"]:
+        raise ValueError("frozen manifest changed after cleanup review")
     proof = namespace_custody.verified_namespace_custody(settings, unit)
     namespace_custody.assert_exclusive_custody(
         proof, _cleanup_scope(manifest),
@@ -204,9 +209,16 @@ def enqueue_media_organizer_cleanup(
         prior = session.get(WorkJob, execution_job_id)
         if prior is None or prior.kind != EXECUTE_KIND:
             raise KeyError(execution_job_id)
-        phase = json.loads(prior.checkpoint_json or "{}").get("phase")
+        checkpoint = json.loads(prior.checkpoint_json or "{}")
+        phase = checkpoint.get("phase")
         if prior.status != "completed" or phase != "manual_cleanup_required":
             raise ValueError("cleanup is not ready for separate confirmation")
+        if shared and (
+                checkpoint.get("manifest_checksum") != review["manifest_checksum"]
+                or checkpoint.get("cleanup_plan_sha256") != review["plan_sha256"]
+                or checkpoint.get("frozen_job_id") != frozen_id
+                or checkpoint.get("unit") != str(unit)):
+            raise ValueError("completed Worker snapshot changed before cleanup queue")
         existing = _existing_cleanup(session, execution_job_id)
         if existing is not None:
             return _approved_existing(session, existing, confirmation, settings)

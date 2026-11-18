@@ -12,6 +12,7 @@ from pathlib import Path
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_manifest import MANIFEST_VERSION
 from app.batch.media_organizer_planner import _check_scope, preview_semantic_unit, _normalized_excluded_dir_names
+from app.batch.media_organizer_path_roles import classify_path_roles, uses_path_roles
 
 
 class ExecutionPreflightError(ValueError):
@@ -71,8 +72,18 @@ def validate_execution_preflight(manifest: dict, *, allowed_roots: list[Path],
         frozen_moves = manifest.get("moves")
         if not isinstance(frozen_moves, list) or not frozen_moves:
             raise ExecutionPreflightError("frozen move list missing")
-        if manifest.get("needed_moves", 0) < 1:
-            raise ExecutionPreflightError("no changes to execute")
+        needed = manifest.get("needed_moves")
+        if type(needed) is not int or needed < 0:
+            raise ExecutionPreflightError("invalid frozen change count")
+        if needed == 0:
+            # Empty historical classification wrappers are real cleanup work.
+            # Only the explicitly versioned retained-final workflow may stage
+            # these files, and the fresh exact comparison below must confirm it.
+            if (not uses_path_roles(manifest) or not manifest.get("wrapper_cleanup")
+                    or any(not isinstance(row, dict) or row.get("source") != row.get("final")
+                           for row in frozen_moves)
+                    or not classify_path_roles(manifest)["removed_wrappers"]):
+                raise ExecutionPreflightError("no changes to execute")
         sources: set[str] = set()
         targets: set[str] = set()
         for index, move in enumerate(frozen_moves, 1):

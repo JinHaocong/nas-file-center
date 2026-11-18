@@ -88,6 +88,8 @@ export interface SemanticExecutionStatus {
   recovery_of_job_id: number | null;
   manual_cleanup_required: boolean;
   finalized: boolean;
+  publication_complete: boolean;
+  deferred_publication_count: number;
   execution_enabled: boolean;
   cleanup: SemanticCleanupStatus | null;
   progress: {
@@ -111,7 +113,20 @@ export interface SemanticCleanupLink {
   identity: [number, number, number, number];
 }
 
+export interface SemanticDeferredPublication {
+  path: string;
+  stage_path: string;
+  source_path: string;
+  identity: [number, number, number, number];
+}
+
+export interface SemanticReleasedOriginalLink extends SemanticCleanupLink {
+  stage_path: string;
+}
+
 export interface SemanticCleanupPlan {
+  verification_scope?: 'worker_handoff_snapshot' | 'live_frozen_inventory';
+  live_inventory_verified?: boolean;
   job_id: number;
   reviewed_execution_job_id: number;
   unit: string;
@@ -122,9 +137,16 @@ export interface SemanticCleanupPlan {
   page_size: number;
   total_original_links: number;
   total_staged_links: number;
+  total_deferred_publications: number;
+  total_released_original_links: number;
+  total_retained_original_links: number;
   original_links: SemanticCleanupLink[];
   staged_links: SemanticCleanupLink[];
+  deferred_publications: SemanticDeferredPublication[];
+  released_original_links: SemanticReleasedOriginalLink[];
+  retained_original_links: SemanticCleanupLink[];
   wrapper_directories: { path: string; identity: [number, number] }[];
+  retained_wrapper_directories: { path: string; identity: [number, number] }[];
   stage: { path: string; identity: [number, number] };
   cleanup_authorized: false;
   finalized: false;

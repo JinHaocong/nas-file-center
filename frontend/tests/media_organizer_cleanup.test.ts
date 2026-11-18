@@ -9,6 +9,7 @@ const fixtureExecution = (): SemanticExecutionStatus => ({
   job_id: 17, status: 'completed', error: null, preview_job_id: 12,
   unit: '/synthetic/Collection/NO.001', recovery_of_job_id: null,
   manual_cleanup_required: true, finalized: false, execution_enabled: true,
+  publication_complete: true, deferred_publication_count: 0,
   progress: { current: 4, total: 4, message: null, phase: 'manual_cleanup_required' },
   cleanup: null,
 });
@@ -18,6 +19,9 @@ const fixturePlan = (): SemanticCleanupPlan => ({
   unit: '/synthetic/Collection/NO.001', plan_sha256: 'a'.repeat(64),
   manifest_checksum: 'b'.repeat(64), plan_kind: 'review_only', page: 2, page_size: 50,
   total_original_links: 51, total_staged_links: 51,
+  total_deferred_publications: 0, total_released_original_links: 0,
+  total_retained_original_links: 0,
+  deferred_publications: [], released_original_links: [], retained_original_links: [],
   original_links: [{
     path: '/synthetic/Collection/NO.001/photos/last.jpg',
     published_path: '/synthetic/Collection/NO.001/051.jpg',
@@ -29,6 +33,7 @@ const fixturePlan = (): SemanticCleanupPlan => ({
     identity: [7, 31, 8, 99],
   }],
   wrapper_directories: [{ path: '/synthetic/Collection/NO.001/photos', identity: [7, 30] }],
+  retained_wrapper_directories: [],
   stage: { path: '/synthetic/Collection/NO.001/.nfc-media-organizer-stage-17', identity: [7, 40] },
   cleanup_authorized: false, finalized: false, zero_change_rescan_verified: false,
   namespace_exclusive_custody_proven: false, read_only: true,
@@ -155,6 +160,9 @@ test('cleanup confirmation binds the reviewed execution, unit, and exact indepen
   const execution = fixtureExecution();
   const plan = fixturePlan();
   assert.equal(features.canConfirmSemanticCleanup(execution, plan, plan.confirmation), true);
+  assert.equal(features.canConfirmSemanticCleanup({
+    ...execution, publication_complete: false, deferred_publication_count: 2,
+  }, plan, plan.confirmation), true, 'prepared output must still support separate confirmation');
   for (const confirmation of ['', 'EXECUTE_APPROVAL', `${plan.confirmation} `]) {
     assert.equal(features.canConfirmSemanticCleanup(execution, plan, confirmation), false);
   }

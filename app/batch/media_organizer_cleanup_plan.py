@@ -15,6 +15,9 @@ import stat
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_manifest import _checksum
+from app.batch.media_organizer_path_roles import (
+    POLICY, PathRoleConflict, cleanup_plan_path_role_fields, uses_path_roles,
+)
 from app.config_sharing import shared_config_gid, require_shared_directory
 
 _MAX_BYTES = 16 * 1024 * 1024
@@ -43,6 +46,11 @@ def build_cleanup_plan(manifest: dict) -> dict:
     """
     if not isinstance(manifest, dict) or manifest.get("cleanup_policy") != "deferred":
         raise CleanupPlanConflict("only deferred frozen manifests can be planned")
+    try:
+        role_fields = (cleanup_plan_path_role_fields(manifest)
+                       if uses_path_roles(manifest) else None)
+    except PathRoleConflict as exc:
+        raise CleanupPlanConflict(str(exc)) from exc
     unit = Path(manifest["unit"])
     rows = manifest["moves"]
     if not unit.is_absolute() or not isinstance(rows, list) or not rows:
@@ -101,6 +109,9 @@ def build_cleanup_plan(manifest: dict) -> dict:
         "zero_change_rescan_verified": False,
         "namespace_exclusive_custody_proven": False,
     }
+    if role_fields is not None:
+        payload.update(schema_version=2, path_role_policy=POLICY)
+        payload.update(role_fields)
     payload["plan_sha256"] = hashlib.sha256(_canonical(payload)).hexdigest()
     return payload
 
