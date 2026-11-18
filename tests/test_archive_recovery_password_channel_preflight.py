@@ -1,6 +1,8 @@
 """Synthetic archive channel preflight tests: no NAS, task, or output writes."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 import zipfile
 
@@ -90,7 +92,7 @@ def test_start_enqueues_without_creating_media_directory_in_api(tmp_path):
         job = session.get(WorkJob, body["work_job_id"])
         assert job is not None
         assert job.kind == "archive-recovery"
-        state = __import__("json").loads(job.state_json)
+        state = json.loads(job.state_json)
         parent_stat = archive.parent.stat()
         assert state["parent_identity"] == [str(parent_stat.st_dev), str(parent_stat.st_ino)]
         assert state["source"] == str(archive)
