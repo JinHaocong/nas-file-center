@@ -1,63 +1,112 @@
-# Real NAS acceptance entry
+# V1.6 real NAS acceptance
 
-Status: **ENTRY READY IN SOURCE; ACTUAL NAS RUNNER / EVIDENCE STILL REQUIRED**
+Status: **READY FOR DIRECT NAS EXECUTION — NO GITHUB SELF-HOSTED RUNNER REQUIRED**
 
-This repository has two closure gates that cannot be satisfied by GitHub-hosted runners:
+The final V1.6 filesystem gate is intentionally executed **on the NAS itself** as a one-shot Docker Compose task. GitHub Actions remains responsible for repository CI and synthetic tests, but the real-NAS gate does not need to be routed through GitHub Actions.
 
-- Organizer Advanced Rules C5;
-- Scheduler S5.
+This avoids installing or maintaining a GitHub Actions runner on the NAS. Docker Compose's `run --rm` mode is appropriate for one-off test/administrative workloads and removes the temporary container after completion. The acceptance service uses a read-only container root filesystem, no network, and only one writable bind mount: the owner-created SATA acceptance root. citeturn202967search0turn118607search0
 
-Both require their existing acceptance harness to execute against an **actual target NAS filesystem** while using only fresh synthetic fixtures. Production NAS data must never be used.
+## Required host layout
 
-## Workflow
-
-Use `.github/workflows/real-nas-acceptance.yml` only after a repository self-hosted runner is registered on the target NAS, or on a host that mounts the exact target NAS filesystem being accepted.
-
-The runner must carry all of these labels:
+The owner-created root must already exist and contain exactly these two child directories:
 
 ```text
-self-hosted
-linux
-x64
-nas-file-center-acceptance
+<your SATA root>/
+└── nas-file-center-v1.6-acceptance/
+    ├── nfc-organizer-c5-acceptance/
+    └── nfc-scheduler-s5-acceptance/
 ```
 
-The custom `nas-file-center-acceptance` label is a hard separation boundary. GitHub-hosted runners cannot satisfy this workflow.
+The directories must be real directories, not symlinks. The scheduler child must remain empty. The organizer child may contain only previous `.nfc-v16-run-*` evidence directories.
 
-## Required isolated roots
+**Never point this test at the production media root.**
 
-Create two **already-existing, empty, non-symlink** directories on the actual NAS filesystem:
+## What the Compose task can touch
+
+The acceptance container receives exactly:
 
 ```text
-.../nfc-organizer-c5-acceptance
-.../nfc-scheduler-s5-acceptance
+HOST: <your SATA>/nas-file-center-v1.6-acceptance
+  -> CONTAINER: /nas/v16-acceptance
 ```
 
-Never point either input at a media library, downloads directory, production Organizer root, application config directory, quarantine directory, backup directory, or any directory containing user data.
+It does **not** mount the production `/data` root, the application config directory, the quarantine directory, or the rest of the SATA tree.
 
-The underlying harnesses create only owned synthetic children inside those roots and require the roots to be empty again after completion.
+The bind mount is intentionally read-write because the test must exercise real filesystem publication primitives. Docker bind mounts are host filesystem access, so the host path is restricted to the disposable acceptance root and the container filesystem itself is read-only. citeturn707171search3turn118607search0
 
-## Dispatch inputs
+The container also runs with `network_mode: none` and `no-new-privileges`.
 
-From **Actions → Real NAS Acceptance → Run workflow**, provide:
+## Run
 
-- `candidate_sha`: the exact merged `main` commit being accepted;
-- `organizer_root`: the absolute real-NAS path ending in `nfc-organizer-c5-acceptance`;
-- `scheduler_root`: the absolute real-NAS path ending in `nfc-scheduler-s5-acceptance`;
-- `confirmation`: exactly `I_UNDERSTAND_REAL_NAS_ISOLATED_SYNTHETIC_ONLY`.
+From the repository checkout on the NAS, on the exact candidate commit:
 
-The workflow checks out exactly `candidate_sha`, builds that exact linux/amd64 Docker candidate, and refuses non-empty, symlinked, wrongly named, or non-absolute test roots.
+```bash
+export V16_ACCEPTANCE_HOST_ROOT="/absolute/path/to/nas-file-center-v1.6-acceptance"
+export V16_EVIDENCE_HOST_DIR="./v16-nas-evidence"
+export CANDIDATE_SHA="$(git rev-parse HEAD)"
 
-## Acceptance performed
+bash scripts/run_v16_real_nas_acceptance.sh
+```
 
-The workflow runs:
+The wrapper first validates the two existing child directories, their names, symlink status, device identity, and reserved scheduler root. It refuses to create or clean the acceptance root.
 
-1. Organizer C5 full staged synthetic fixture on the actual NAS filesystem;
-2. Scheduler S5 scheduled index + fclones scan synthetic fixture on the actual NAS filesystem;
-3. zero-residue checks for both roots;
-4. evidence binding to the exact candidate SHA where supported by the harness;
-5. artifact upload containing runner identity, observed filesystem type, Docker version/build evidence, logs, and JSON acceptance evidence.
+Before the one-shot run, it also executes:
 
-Passing this workflow is evidence collection, not an automatic roadmap state mutation. After a successful run, the observed artifact data must be reviewed and committed into the Organizer C5 and Scheduler S5 closure records before either gate is marked CLOSED.
+```bash
+docker compose -f compose.v16-real-nas-acceptance.yaml config -q
+```
 
-Until a labeled self-hosted NAS runner actually completes this workflow successfully, repository CI/synthetic evidence must not be described as real-NAS acceptance.
+so the resolved Compose model is checked before the container starts. Compose supports required interpolation such as `${VAR:?message}`, and `config -q` validates the resolved model without starting services. citeturn595651search0turn595651search1
+
+The actual execution is:
+
+```bash
+docker compose -f compose.v16-real-nas-acceptance.yaml \
+  run --rm --build v16-real-nas-acceptance
+```
+
+Compose's `run` is a one-off service command and `--rm` removes that temporary container after the command exits. citeturn202967search1
+
+## Acceptance result
+
+A successful run must report:
+
+```text
+PASS_FLAT_AND_GROUP_HOLD
+```
+
+and prove:
+
+- actual SATA/filesystem capability probe passed;
+- no-replace publication primitives are usable;
+- pure-image flat publication preserves SHA-256 across original/stage/public paths;
+- original/stage/public paths share the frozen inode identity;
+- the second preview is blocked with zero needed moves until deferred cleanup is explicitly completed;
+- mixed P/V publication is rejected before public group promotion;
+- original mixed-media fixtures remain byte-exact;
+- no public P/V group is created;
+- grouped publication remains explicitly unauthorized.
+
+The acceptance script deliberately retains its uniquely named evidence directory for manual inspection. It does not delete test artifacts automatically.
+
+## After the run
+
+The generated evidence is kept in:
+
+```text
+nfc-organizer-c5-acceptance/
+└── .nfc-v16-run-<candidate>-<random>/
+    ├── acceptance.json
+    ├── private/
+    └── ...
+```
+
+and the host-side report is written under `v16-nas-evidence/`.
+
+Review the report and logs, then remove the entire `nas-file-center-v1.6-acceptance` directory when you are satisfied. Do not use broad Docker/host cleanup commands such as `docker system prune` or filesystem-wide delete commands for this acceptance.
+
+## Important release limitation
+
+This gate is **not** evidence that grouped P/V publication is ready. The current safety contract intentionally keeps grouped publication disabled. It validates the real filesystem primitives and proves that mixed P/V publication fails closed.
+
+The V1.6 release therefore remains blocked until the repository CI gates, this direct NAS acceptance, and the final disposable end-to-end dry run are all green.

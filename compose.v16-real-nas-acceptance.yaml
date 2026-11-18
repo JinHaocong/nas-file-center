@@ -1,0 +1,55 @@
+name: nas-file-center-v16-real-nas-acceptance
+
+services:
+  v16-real-nas-acceptance:
+    build:
+      context: .
+      args:
+        FCLONES_VERSION: ${FCLONES_VERSION:-0.35.0}
+    image: nas-file-center:${V16_IMAGE_TAG:-v16-real-nas-acceptance}
+    working_dir: /app
+    read_only: true
+    network_mode: none
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:mode=1777
+    environment:
+      CONFIG_DIR: /tmp/nfc-v16-config
+      DATA_MOUNT: /nas/v16-acceptance
+      ALLOWED_ROOTS: /nas/v16-acceptance
+      QUARANTINE_ROOT: /nas/v16-acceptance/.nas-file-center-trash
+      ALLOW_MUTATION: "false"
+      ALLOW_DELETE: "false"
+      PROTECT_LAST_FILE: "true"
+      FCLONES_BINARY: /usr/local/bin/fclones
+    volumes:
+      - type: bind
+        source: ${V16_ACCEPTANCE_HOST_ROOT:?Set V16_ACCEPTANCE_HOST_ROOT to the existing SATA acceptance root}
+        target: /nas/v16-acceptance
+        read_only: false
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./scripts/media_organizer_v16_real_nas_acceptance.py
+        target: /tmp/media_organizer_v16_real_nas_acceptance.py
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${V16_EVIDENCE_HOST_DIR:-./v16-nas-evidence}
+        target: /evidence
+        read_only: false
+        bind:
+          create_host_path: false
+    command:
+      - python
+      - /tmp/media_organizer_v16_real_nas_acceptance.py
+      - --root
+      - /nas/v16-acceptance
+      - --organizer-root
+      - /nas/v16-acceptance/nfc-organizer-c5-acceptance
+      - --candidate-sha
+      - ${CANDIDATE_SHA:?Set CANDIDATE_SHA to the exact Git candidate being accepted}
+      - --report
+      - /evidence/v16-real-nas-acceptance.json
