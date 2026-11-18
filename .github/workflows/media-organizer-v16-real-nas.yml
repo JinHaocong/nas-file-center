@@ -23,7 +23,7 @@ jobs:
   actual-nas-v16-scratch:
     # Only this same-repository PR is allowed to use the dedicated runner.
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feature/media-organizer-v16-sdd-foundation'
-    runs-on: [self-hosted, linux, x64, nas-file-center-acceptance]
+    runs-on: [self-hosted, linux, x64, nfc-v16-sata-accept-20261118]
     timeout-minutes: 60
     env:
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
