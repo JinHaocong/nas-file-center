@@ -247,3 +247,18 @@ This is *not* a cleanup command or confirmation. `cleanup_authorized=false`, `fi
 ## #402 Scoped namespace custody injection — integration not deployment approval
 
 The grouped API/Worker path is now wired to a **fail-closed external custody issuer**. No production implementation of the issuer exists yet, because on the owner's NAS we have not proved exclusions of hostile concurrent same-UID/root/SMB writers and actual mount ACL mapping. The provider raises SEC-12 by default, even if the operator sets all execution/quiescence flags. Synthetic tests can inject a `tmp_path`-limited provider and prove the full grouped P/V WorkJob, no-replace direct group creation, retained originals, durable cleanup plan and 0-change rescan only under that controlled boundary. A Boolean ACK, missing proof or revoked proof never queues/stages grouped jobs. Keep PR #397 Draft, no merge or NAS execution until the actual issuer, reviewer sign-off, and approved disposable SATA validation are complete.
+
+
+## #400 WorkJob wiring — still no live NAS authorization
+
+A second, admin-only `POST /api/media-organizer/executions/{job_id}/cleanup`
+now exists and queues only a `media-organizer-cleanup` WorkJob with an exact
+job/unit/plan checksum confirmation; no HTTP media writes occur. The registered
+non-root Worker rechecks the external namespace-custody grant, frozen plan,
+source/final identities and lease before each cleanup step. It uses a chained
+durable progress journal and sets `finalized=true` on the original execution
+only AFTER real cleanup and read-only canonical rescan have proved 0 moves and
+0 renames. In production this endpoint **fails closed** because there is no
+approved NAS custody issuer; do not treat the new route as authority to
+run a destructive task. Owner-approved same-mount tests, independent review,
+full recovery handling and original `/config` migration are still mandatory.

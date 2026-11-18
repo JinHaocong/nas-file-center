@@ -159,3 +159,8 @@ from app.batch.media_organizer_jobs import MediaOrganizerPreviewHandler as Media
 
 # Opt-in semantic execution Worker; disabled unless independent mutation gates are enabled.
 from app.batch.media_organizer_execute_jobs import MediaOrganizerExecuteHandler as MediaOrganizerExecuteHandler
+
+
+# Separate explicitly confirmed semantic cleanup/finalization WorkJob.
+# Its production namespace-custody issuer is deliberately fail-closed.
+from app.batch.media_organizer_cleanup_jobs import MediaOrganizerCleanupHandler as MediaOrganizerCleanupHandler

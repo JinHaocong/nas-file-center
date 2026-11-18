@@ -25,6 +25,11 @@ class MediaOrganizerRecoveryRequest(BaseModel):
     confirmation: str = Field(min_length=1, max_length=256)
 
 
+class MediaOrganizerCleanupRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    confirmation: str = Field(min_length=1, max_length=256)
+
+
 @router.post('/previews')
 def start_media_organizer_preview(request: Request, payload: MediaOrganizerPreviewRequest,
                                   _admin=Depends(require_admin_user)):
@@ -161,6 +166,24 @@ def read_media_organizer_cleanup_plan(
         )
     except KeyError as exc:
         raise HTTPException(404, 'Execution not found') from exc
+    except (ValueError, PermissionError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post('/executions/{job_id}/cleanup')
+def start_media_organizer_cleanup(
+    request: Request, job_id: int, payload: MediaOrganizerCleanupRequest,
+    _admin=Depends(require_admin_user),
+):
+    """Queue an independently confirmed WorkJob; NEVER delete in HTTP."""
+    from app.batch.media_organizer_cleanup_jobs import enqueue_media_organizer_cleanup
+    try:
+        return enqueue_media_organizer_cleanup(
+            request.app.state.service.SessionLocal, request.app.state.settings,
+            execution_job_id=job_id, confirmation=payload.confirmation,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, 'Original execution not found') from exc
     except (ValueError, PermissionError, OSError) as exc:
         raise HTTPException(409, str(exc)) from exc
 

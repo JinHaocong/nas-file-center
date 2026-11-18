@@ -150,3 +150,22 @@ GREEN implementation candidate: before `manual_cleanup_required` is stamped, the
 ## #402 end-to-end grouping requires external custody issuer
 
 The production default issuer `app/batch/media_organizer_custody.py:verified_namespace_custody` **always fails closed** until a separately reviewed implementation can prove supported NAS-mount/ACL writer exclusion. A boolean namespace ACK or WorkJob lease is not an issuer. The admin API must obtain scoped proof before queueing grouped plans, the Worker reacquires proof before staging, the Worker lease fence revalidates all frozen source/stage/target parents, and deferred publication/handoff require the same proof. Direct public mkdir + pinned-FD links are the only Worker grouped publication path. Isolated synthetic unit tests may inject a test-only scoped issuer to exercise the complete admin→Worker→deferred publication→separate confirmed finalization→second scan zero path; this does not authorize deployment. Absent/revoked/unscoped/boolean proof remains a hard SEC-12 refusal before staging.
+
+
+## #400 separately confirmed cleanup Worker — wired but issuer fail-closed
+
+A dedicated `media-organizer-cleanup` WorkJob is registered. Admin-only
+`POST /api/media-organizer/executions/{job_id}/cleanup` requires a **second**
+token bound to frozen job ID, unit and exact cleanup plan SHA-256, validates the
+entire read-only frozen inventory and separately acquires effective scoped
+namespace custody. The API only queues the job. The non-root Worker rechecks
+the original publication, token, immutable plan, Worker lease and all
+source/stage/final parents before entering the crash-resumable cleanup engine.
+An internal custody wrapper revalidates the Worker lease on each name-based
+mutation. Only after durable finalization and the canonical 0/0 second scan
+does the original WorkJob switch from `manual_cleanup_required` to
+`finalized=true`. The default issuer refuses ALL cleanup in production;
+synthetic tmp_path tests inject it for end-to-end verification. Interrupted
+cleanup needs a distinct explicit recovery workflow before release, and all
+host NAS writer exclusions, independent review and same-mount acceptance
+remain outstanding.
