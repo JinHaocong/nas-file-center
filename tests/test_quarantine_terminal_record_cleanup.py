@@ -160,11 +160,21 @@ def test_terminal_record_cleanup_accepts_abandoned_and_conflict(maintenance_env)
         _seed(service, data, trash, state="abandoned", name="abandoned"),
         _seed(service, data, trash, state="conflict", name="conflict"),
     ]
+    job_ids = []
     for entry_id in ids:
         response = admin.delete(
             f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
         )
-        assert response.status_code == 200
+        assert response.status_code == 202
+        assert response.json()["status"] == "queued"
+        job_ids.append(int(response.json()["work_job_id"]))
+
+    with service.SessionLocal() as session:
+        for entry_id in ids:
+            assert session.get(QuarantineEntry, entry_id) is not None
+
+    for job_id in job_ids:
+        assert _run_cleanup_job(env, job_id) is True
 
     with service.SessionLocal() as session:
         for entry_id in ids:
@@ -186,10 +196,16 @@ def test_conflict_record_cleanup_blocks_when_tx_artifact_exists(maintenance_env)
     response = admin.delete(
         f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
     )
-    assert response.status_code == 409
+    assert response.status_code == 202
+    job_id = int(response.json()["work_job_id"])
+    assert _run_cleanup_job(env, job_id) is False
+    assert (tx_dir / "anchor").read_text(encoding="utf-8") == "evidence"
 
     with service.SessionLocal() as session:
         assert session.get(QuarantineEntry, entry_id) is not None
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        assert job.status == "failed"
 
 
 def test_bulk_terminal_record_cleanup_accepts_mixed_states(maintenance_env):
@@ -209,8 +225,11 @@ def test_bulk_terminal_record_cleanup_accepts_mixed_states(maintenance_env):
         json={"entry_ids": ids, "confirmation": "DELETE_RECORDS"},
         headers={"Origin": "http://testserver"},
     )
-    assert response.status_code == 200
-    assert response.json()["deleted_ids"] == ids
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    assert response.json()["entry_ids"] == ids
+    job_id = int(response.json()["work_job_id"])
+    assert _run_cleanup_job(env, job_id) is True
 
     with service.SessionLocal() as session:
         assert list(
@@ -240,7 +259,7 @@ def test_bulk_cleanup_restored_same_storage_reclaims_private_artifacts(maintenan
         json={"entry_ids": [entry_id], "confirmation": "DELETE_RECORDS"},
         headers={"Origin": "http://testserver"},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
     body = response.json()
     assert body["status"] == "queued"
     assert body["entry_ids"] == [entry_id]
@@ -378,7 +397,10 @@ def test_abandoned_record_cleanup_removes_empty_transaction_residue(maintenance_
     response = admin.delete(
         f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
+    job_id = int(response.json()["work_job_id"])
+    assert tx_entry_root.exists()
+    assert _run_cleanup_job(env, job_id) is True
     assert not tx_entry_root.exists()
 
     with service.SessionLocal() as session:
@@ -437,7 +459,10 @@ def test_abandoned_cross_storage_verified_staging_is_reclaimed_on_record_delete(
     response = admin.delete(
         f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
+    job_id = int(response.json()["work_job_id"])
+    assert staging.exists()
+    assert _run_cleanup_job(env, job_id) is True
 
     assert source.read_bytes() == payload
     assert not (trash / ".tx" / f"entry-{entry_id}").exists()
@@ -494,10 +519,15 @@ def test_abandoned_cross_storage_staging_cleanup_blocks_if_source_changed(mainte
     response = admin.delete(
         f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
     )
-    assert response.status_code == 409
+    assert response.status_code == 202
+    job_id = int(response.json()["work_job_id"])
+    assert _run_cleanup_job(env, job_id) is False
     assert staging.exists()
     with service.SessionLocal() as session:
         assert session.get(QuarantineEntry, entry_id) is not None
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        assert job.status == "failed"
 
 def _seed_abandoned_cross_storage_verified_missing_source(
     service,
@@ -548,7 +578,9 @@ def test_abandoned_cross_storage_missing_source_without_tx_namespace_allows_reco
     response = admin.delete(
         f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
     )
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
+    job_id = int(response.json()["work_job_id"])
+    assert _run_cleanup_job(env, job_id) is True
     assert not (trash / ".tx" / f"entry-{entry_id}").exists()
 
     with service.SessionLocal() as session:
@@ -576,7 +608,10 @@ def test_abandoned_cross_storage_missing_source_with_empty_tx_namespace_allows_r
     response = admin.delete(
         f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
     )
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
+    job_id = int(response.json()["work_job_id"])
+    assert tx_entry_root.exists()
+    assert _run_cleanup_job(env, job_id) is True
     assert not tx_entry_root.exists()
 
     with service.SessionLocal() as session:
@@ -615,8 +650,9 @@ def test_abandoned_cross_storage_missing_source_with_verified_staging_remains_bl
     response = admin.delete(
         f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
     )
-    assert response.status_code == 409
-    assert "staging may be the only remaining copy" in response.text
+    assert response.status_code == 202
+    job_id = int(response.json()["work_job_id"])
+    assert _run_cleanup_job(env, job_id) is False
     assert staging.exists()
     assert staging.read_bytes() == payload
 
@@ -640,7 +676,10 @@ def test_purged_record_cleanup_removes_empty_transaction_residue(maintenance_env
     response = admin.delete(
         f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
     )
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
+    job_id = int(response.json()["work_job_id"])
+    assert tx_entry_root.exists()
+    assert _run_cleanup_job(env, job_id) is True
     assert not tx_entry_root.exists()
     assert not (trash / ".tx").exists()
 
@@ -665,7 +704,10 @@ def test_purged_record_cleanup_preserves_nonempty_transaction_evidence(maintenan
     response = admin.delete(
         f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
     )
-    assert response.status_code == 200, response.text
+    assert response.status_code == 202, response.text
+    job_id = int(response.json()["work_job_id"])
+    assert evidence.exists()
+    assert _run_cleanup_job(env, job_id) is True
     assert evidence.exists()
 
     with service.SessionLocal() as session:
