@@ -45,11 +45,19 @@ run_phase() {
 }
 
 run_phase 10002 fixtures
-for fixture_kind in flat grouped reused; do
+for fixture_kind in flat grouped reused flat-stage-recovery grouped-publish-recovery \
+  reused-published-recovery grouped-handoff-recovery; do
   run_phase 10001 queue-preview "$fixture_kind"
   run_phase 10002 preview "$fixture_kind"
   run_phase 10001 queue-execution "$fixture_kind"
-  run_phase 10002 execute "$fixture_kind"
+  if [[ "$fixture_kind" == *-recovery ]]; then
+    run_phase 10002 interrupt-execution "$fixture_kind"
+    run_phase 10002 mark-execution-interrupted "$fixture_kind"
+    run_phase 10001 queue-execution-recovery "$fixture_kind"
+    run_phase 10002 recover-execution "$fixture_kind"
+  else
+    run_phase 10002 execute "$fixture_kind"
+  fi
   run_phase 10001 review-and-queue "$fixture_kind"
   run_phase 10002 interrupt-cleanup "$fixture_kind"
   run_phase 10002 mark-interrupted "$fixture_kind"

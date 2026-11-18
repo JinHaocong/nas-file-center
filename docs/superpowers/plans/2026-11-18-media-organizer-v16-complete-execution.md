@@ -319,3 +319,61 @@ shell/Python syntax checks and `git diff --check` passed. The 38 backend skips
 remain 30 deferred legacy purge release cases, 4 missing local 7-Zip cases and
 4 missing local Docker Compose checks. Hosted Docker/actual-UID execution and
 actual NAS acceptance remain distinct gates.
+
+Hosted verification for code commit
+`ae95b60e8c11fb6e38a377039547291f1cd37f81` is now complete: V1.6 run
+`44364472632` passed both jobs, including every real distinct-UID flat, grouped
+and retained-group execution/cleanup/recovery phase. Scheduler closure run
+`44364473023` passed its full backend/frontend regression, typecheck, build and
+Docker checks. All nine non-release workflows succeeded; Release Validation
+was skipped by its existing Draft-PR condition. The PR remains Draft/unmerged.
+
+Read-only traceability review confirmed direct full-lifecycle coverage of the
+minimum 1P/1V/200P/201P/401P/1P+1V/200P+1V matrix and the representative wrapper,
+collision, extension, Other and semantic-boundary cases. Larger original examples
+are covered through equivalent classification, bucketing and lifecycle cases,
+not literal execution of every example. Generic date-named sibling boundaries
+share the tested non-wrapper discovery branch; dedicated date selection tests
+also remain in the separate existing MediaPackage suite.
+
+The existing deployment runbooks now distinguish the limited NAS primitive
+harness from complete V1.6 acceptance and specify stopped whole-config backup,
+WAL/SHM-consistent candidate validation, scoped permission conversion and rollback.
+No host backup, candidate startup, media mutation, custody issuance or release
+has been performed. Actual host evidence, enforced writer exclusion, disposable
+SATA acceptance and independent non-author review remain outstanding.
+
+## Continuation — shared execution recovery and terminal handoff
+
+Final traceability review found that the separate execution-recovery API still
+opened the Worker's private stage, although cleanup recovery already respected
+the shared-UID boundary. It also excluded an interrupted final handoff checkpoint
+before the execution status was committed. These are execution-recovery defects,
+not reasons to relax stage permissions or skip live Worker verification.
+
+Observed RED tests reproduce denied API stage reads, the terminal phase refusal
+and unbound recovery checkpoint/state changes. The correction records frozen
+manifest authority at each Worker checkpoint, binds a newly confirmed recovery
+to the failed predecessor's exact digest/phase and rechecks it in the Worker.
+The shared API reads only its allowed manifest; no PermissionError fallback or
+legacy digest backfill is allowed. Queueing a new grouped/path-role recovery
+also requires current scoped custody, without weakening the Worker's fresh proof.
+
+The real-UID CI lifecycle preserves its three original direct-execution fixtures
+and adds four execution-interruption fixtures: after a staged link, after a public
+link, before handoff creation, and after the durable handoff checkpoint. They
+verify fresh-lease refusal and expiry takeover, API confirmation/idempotency,
+failed-original versus recovered-execution identities, then cleanup interruption,
+explicit cleanup recovery and final zero rescan. The extended actual-UID result
+must be verified on the pushed commit. Execution recovery remains a single
+assisted attempt; repeated cleanup recovery has its separate predecessor chain.
+
+Verification before the grouped recovery correction commit: 27 new recovery
+cases and related regressions passed together (89 tests). Independent review
+passed 79 focused tests plus a positive single-UID terminal-handoff recovery
+probe, with no remaining Critical/Important/Minor finding. The final whole
+backend run exited successfully with 2799 passes, 38 existing skips and no
+failures; it also includes two shared-handoff cases added after the preceding
+full-run collection. Frontend source is unchanged from the verified 1263-test
+suite and 22-case final UI focus. Shell/AST syntax and diff checks passed. The
+seven-fixture actual-UID CI sequence remains to be checked after this push.

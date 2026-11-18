@@ -22,7 +22,7 @@ from app.batch.media_organizer_jobs import (
     PREVIEW_KIND, _validate_selection, _excluded_names, report_files,
 )
 from app.batch.media_organizer_manifest import (
-    build_frozen_preview_manifest, load_frozen_preview_manifest,
+    _checksum, build_frozen_preview_manifest, load_frozen_preview_manifest,
     save_frozen_preview_manifest,
 )
 from app.batch.media_organizer_stage import stage_frozen_sources
@@ -47,6 +47,7 @@ EXECUTE_KIND = "media-organizer-execute"
 MUTATION_KINDS = (EXECUTE_KIND, "media-organizer-cleanup")
 ACTIVE = ("queued", "running", "paused", "cancel_requested")
 MAX_REPORT_UNITS_FOR_EXECUTION = 5000
+RECOVERABLE_PHASES = ("frozen", "staged", "published", "manual_cleanup_required")
 
 
 def approval_token(preview_job_id: int, unit: str) -> str:
@@ -445,6 +446,111 @@ def get_media_organizer_cleanup_plan(
     }
 
 
+def _original_recovery_authority(original: WorkJob, settings: Settings):
+    """Read the failed original's approval; never treat a recovery as original."""
+    if original.kind != EXECUTE_KIND or original.status != "failed":
+        raise ValueError("only a failed original execution can be recovered")
+    state = json.loads(original.state_json or "{}")
+    checkpoint = json.loads(original.checkpoint_json or "{}")
+    if not isinstance(state, dict) or not isinstance(checkpoint, dict):
+        raise ValueError("invalid original recovery authority")
+    if state.get("recovery_of_job_id") is not None:
+        raise ValueError("nested recovery is forbidden; manual review required")
+    phase = checkpoint.get("phase")
+    if phase not in RECOVERABLE_PHASES:
+        raise ValueError("no recoverable frozen phase recorded")
+    unit = _literal_unit(state.get("unit"), settings)
+    if type(state.get("preview_job_id")) is not int or state["preview_job_id"] <= 0:
+        raise ValueError("recovery preview identity missing")
+    # Earlier legacy phases retain their private-read authorization path.
+    # The newly supported terminal gap always requires frozen digest binding.
+    bound = shared_config_gid() is not None or phase == "manual_cleanup_required"
+    if bound:
+        selection = _literal_unit(state.get("selection"), settings)
+        if original.retry_of is not None or not unit.is_relative_to(selection):
+            raise ValueError("original recovery approval is not bound to its selection")
+    return state, checkpoint, unit, bound
+
+
+def _recovery_manifest_authority(manifest: dict, checkpoint: dict, *,
+                                 frozen_id: int, preview_id: int, unit: Path,
+                                 phases=RECOVERABLE_PHASES) -> str:
+    """Bind a readable immutable manifest to an existing Worker checkpoint."""
+    if (type(checkpoint.get("schema_version")) is not int
+            or checkpoint["schema_version"] != 1
+            or checkpoint.get("phase") not in phases
+            or type(checkpoint.get("frozen_job_id")) is not int
+            or checkpoint["frozen_job_id"] != frozen_id
+            or type(checkpoint.get("preview_job_id")) is not int
+            or checkpoint["preview_job_id"] != preview_id
+            or checkpoint.get("unit") != str(unit)
+            or manifest.get("cleanup_policy") != "deferred"
+            or type(manifest.get("job_id")) is not int
+            or manifest["job_id"] != frozen_id
+            or manifest.get("unit") != str(unit)):
+        raise ValueError("recovery checkpoint differs from original frozen authority")
+    digest = checkpoint.get("manifest_checksum")
+    if not isinstance(digest, str) or digest != _checksum(manifest):
+        raise ValueError("recovery requires the original Worker-issued manifest checksum")
+    return digest
+
+
+def _recovery_job_binding(recovery: WorkJob, original: WorkJob,
+                          original_state: dict, checkpoint: dict, digest: str) -> None:
+    """A queued or repeated request must name the same immutable approval."""
+    state = json.loads(recovery.state_json or "{}")
+    if (not isinstance(state, dict) or recovery.kind != EXECUTE_KIND
+            or int(recovery.id) <= int(original.id)
+            or recovery.retry_of != original.id
+            or type(state.get("recovery_of_job_id")) is not int
+            or state["recovery_of_job_id"] != original.id
+            or type(state.get("preview_job_id")) is not int
+            or state["preview_job_id"] != original_state["preview_job_id"]
+            or state.get("unit") != original_state["unit"]
+            or state.get("selection") != original_state.get("selection")
+            or state.get("recovery_manifest_checksum") != digest
+            or state.get("recovery_phase") != checkpoint["phase"]):
+        raise ValueError("recovery WorkJob differs from its original frozen approval")
+
+
+def _validate_private_recovery_stage(manifest: dict, manifest_path: Path, phase: str) -> None:
+    """Worker live check, also retained by the no-shared-GID legacy API."""
+    stage = Path(manifest["unit"]) / manifest["stage_directory"]
+    if not stage.is_dir() or stage.is_symlink():
+        raise ValueError("trusted staged custody is absent; manual review required")
+    from app.batch.file_rename import _open_directory_nofollow
+    from app.batch.media_organizer_stage import (
+        _read_marker, _authority, _assert_private_stage_fd,
+    )
+    from app.batch.media_organizer_retire import (
+        _read_retirement_receipt, _retirement_receipt_path,
+    )
+    fd = _open_directory_nofollow(stage)
+    try:
+        _assert_private_stage_fd(fd)
+        owner_present = _read_marker(fd, ".nfc-stage-authority", _authority(manifest))
+        if not owner_present:
+            if phase != "published":
+                raise ValueError("original staged ownership witness is missing")
+            # Retain the legacy published last-marker/rmdir-gap check. The
+            # deferred Worker still verifies all stage/source/final inventory.
+            with os.scandir(fd) as entries:
+                if next(entries, None) is not None:
+                    raise ValueError("unwitnessed stage is not empty; manual recovery required")
+            _read_retirement_receipt(
+                _retirement_receipt_path(manifest_path), manifest, os.fstat(fd),
+            )
+    finally:
+        os.close(fd)
+
+
+def _frozen_custody_scope(manifest: dict) -> tuple[Path, ...]:
+    parents = {Path(manifest["unit"])}
+    for row in manifest["moves"]:
+        parents.update(Path(row[key]).parent for key in ("source", "target", "final"))
+    return tuple(sorted(parents))
+
+
 def enqueue_media_organizer_recovery(
     session_factory, settings: Settings, *, failed_job_id: int,
     confirmation: str,
@@ -458,18 +564,28 @@ def enqueue_media_organizer_recovery(
         original = session.get(WorkJob, failed_job_id)
         if original is None or original.kind != EXECUTE_KIND:
             raise KeyError(failed_job_id)
-        if original.status != "failed":
-            raise ValueError("only a failed original execution can be recovered")
-        state = json.loads(original.state_json or "{}")
-        if state.get("recovery_of_job_id") is not None:
-            raise ValueError("nested recovery is forbidden; manual review required")
-        phase = json.loads(original.checkpoint_json or "{}").get("phase")
-        if phase not in ("frozen", "staged", "published"):
-            raise ValueError("no recoverable frozen phase recorded")
-        unit = str(_literal_unit(state.get("unit"), settings))
-        original_preview_id = state.get("preview_job_id")
-        if not isinstance(original_preview_id, int) or original_preview_id <= 0:
-            raise ValueError("recovery preview identity missing")
+        state, checkpoint, selected, bound = _original_recovery_authority(original, settings)
+        phase = checkpoint["phase"]
+        unit = str(selected)
+        original_preview_id = state["preview_job_id"]
+        shared = shared_config_gid() is not None
+        manifest_path = _manifest_file(settings, failed_job_id)
+        manifest = None
+        digest = None
+        if bound:
+            # An explicit shared-GID API may read only shared frozen evidence.
+            # It cannot inspect Worker 0700/0600 custody. No error fallback and
+            # no digest backfill can turn old/unbound artifacts into authority.
+            manifest = load_frozen_preview_manifest(
+                manifest_path, job_id=failed_job_id, unit=selected,
+            )
+            digest = _recovery_manifest_authority(
+                manifest, checkpoint, frozen_id=failed_job_id,
+                preview_id=original_preview_id, unit=selected,
+            )
+            if shared and phase == "manual_cleanup_required":
+                from app.batch.media_organizer_shared_handoff import read_shared_cleanup_handoff
+                read_shared_cleanup_handoff(manifest, manifest_path, checkpoint)
         # Idempotent retransmission of an already-authorized recovery must
         # not demand a staging directory that successful cleanup has removed.
         existing = session.scalar(select(WorkJob).where(
@@ -478,42 +594,34 @@ def enqueue_media_organizer_recovery(
         ).order_by(WorkJob.id.desc()).limit(1))
         if existing is not None:
             if existing.status in (*ACTIVE, "completed"):
+                if bound:
+                    _recovery_job_binding(existing, original, state, checkpoint, digest)
+                    if existing.status == "completed":
+                        completed = json.loads(existing.checkpoint_json or "{}")
+                        if not isinstance(completed, dict):
+                            raise ValueError("invalid completed recovery checkpoint")
+                        _recovery_manifest_authority(
+                            manifest, completed, frozen_id=failed_job_id,
+                            preview_id=original_preview_id, unit=selected,
+                            phases=("manual_cleanup_required", "completed"),
+                        )
                 return {"job_id": int(existing.id), "status": existing.status,
                         "recovery_of_job_id": failed_job_id}
             raise ValueError("prior recovery failed; manual review required")
-        manifest_path = _manifest_file(settings, failed_job_id)
-        manifest = load_frozen_preview_manifest(
-            manifest_path, job_id=failed_job_id, unit=Path(unit),
-        )
+        if manifest is None:
+            manifest = load_frozen_preview_manifest(
+                manifest_path, job_id=failed_job_id, unit=selected,
+            )
         if manifest.get("job_id") != failed_job_id:
             raise ValueError("frozen job identity changed")
-        stage = Path(unit) / manifest["stage_directory"]
-        if not stage.is_dir() or stage.is_symlink():
-            raise ValueError("trusted staged custody is absent; manual review required")
-        # New recovery authorization proves the original stage witness.
-        # A PUBLISHED task may also have entered the last-marker/rmdir gap:
-        # in that special case ONLY a completely empty, inode-bound stage
-        # plus the independently durable private receipt is acceptable.
-        from app.batch.file_rename import _open_directory_nofollow
-        from app.batch.media_organizer_stage import _read_marker, _authority
-        from app.batch.media_organizer_retire import (
-            _read_retirement_receipt, _retirement_receipt_path,
-        )
-        fd = _open_directory_nofollow(stage)
-        try:
-            owner_present = _read_marker(fd, ".nfc-stage-authority", _authority(manifest))
-            if not owner_present:
-                if phase != "published":
-                    raise ValueError("original staged ownership witness is missing")
-                with os.scandir(fd) as entries:
-                    if next(entries, None) is not None:
-                        raise ValueError("unwitnessed stage is not empty; manual recovery required")
-                _read_retirement_receipt(
-                    _retirement_receipt_path(manifest_path),
-                    manifest, os.fstat(fd),
-                )
-        finally:
-            os.close(fd)
+        if not shared:
+            _validate_private_recovery_stage(manifest, manifest_path, phase)
+        if manifest.get("groups") or uses_path_roles(manifest):
+            # A known missing/revoked scope must not consume the one assisted
+            # recovery attempt. This assertion reads no private stage evidence;
+            # the Worker independently reacquires custody before any mutation.
+            proof = namespace_custody.verified_namespace_custody(settings, selected)
+            namespace_custody.assert_exclusive_custody(proof, _frozen_custody_scope(manifest))
         active = session.scalar(select(WorkJob.id).where(
             WorkJob.kind.in_(MUTATION_KINDS), WorkJob.status.in_(ACTIVE),
         ).limit(1))
@@ -528,6 +636,8 @@ def enqueue_media_organizer_recovery(
                 "preview_job_id": original_preview_id, "unit": unit,
                 "selection": state.get("selection"),
                 "recovery_of_job_id": failed_job_id,
+                **({"recovery_manifest_checksum": digest, "recovery_phase": phase}
+                   if bound else {}),
             }, ensure_ascii=False),
             retry_of=failed_job_id,
         )
@@ -551,6 +661,8 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             raise PermissionError("exclusive Worker lease required for media mutation")
         _require_nonroot_mutation_worker()
         state = json.loads(job.state_json or "{}")
+        if not isinstance(state, dict):
+            raise ValueError("invalid execution WorkJob approval")
         original_id = state.get("recovery_of_job_id")
         preview_id = state.get("preview_job_id")
         unit = _literal_unit(state.get("unit"), settings)
@@ -569,11 +681,7 @@ class MediaOrganizerExecuteHandler(TaskHandler):
         def bind_frozen_group_custody(manifest: dict) -> None:
             nonlocal custody, custody_parents
             if manifest.get("groups") or uses_path_roles(manifest):
-                parents = {unit}
-                parents.update(Path(row["source"]).parent for row in manifest["moves"])
-                parents.update(Path(row["target"]).parent for row in manifest["moves"])
-                parents.update(Path(row["final"]).parent for row in manifest["moves"])
-                custody_parents = tuple(sorted(parents))
+                custody_parents = _frozen_custody_scope(manifest)
                 custody = namespace_custody.verified_namespace_custody(settings, unit)
                 namespace_custody.assert_exclusive_custody(custody, custody_parents)
             else:
@@ -583,18 +691,19 @@ class MediaOrganizerExecuteHandler(TaskHandler):
         frozen_job_id = int(job.id) if original_id is None else original_id
         phase = "new"
         if original_id is not None:
+            if type(original_id) is not int or original_id <= 0:
+                raise ValueError("invalid original failed execution identity")
             with context.SessionLocal() as session:
                 original = session.get(WorkJob, original_id)
-                if (original is None or original.kind != EXECUTE_KIND
-                        or original.status != "failed"):
+                if original is None:
                     raise ValueError("original failed job no longer provides recovery authority")
-                original_state = json.loads(original.state_json or "{}")
-                if (original_state.get("unit") != str(unit)
-                        or original_state.get("preview_job_id") != preview_id):
+                original_state, original_checkpoint, original_unit, bound = (
+                    _original_recovery_authority(original, settings)
+                )
+                if (original_unit != unit
+                        or original_state["preview_job_id"] != preview_id):
                     raise ValueError("recovery binding differs from original approval")
-                phase = json.loads(original.checkpoint_json or "{}").get("phase")
-                if phase not in ("frozen", "staged", "published"):
-                    raise ValueError("unsupported original recovery phase")
+                phase = original_checkpoint["phase"]
         folder = _execution_folder(settings, frozen_job_id)
         manifest_path = _manifest_file(settings, frozen_job_id)
         handoff_checkpoint = {}
@@ -649,10 +758,28 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             manifest = load_frozen_preview_manifest(
                 manifest_path, job_id=frozen_job_id, unit=unit,
             )
+            if bound:
+                digest = _recovery_manifest_authority(
+                    manifest, original_checkpoint, frozen_id=frozen_job_id,
+                    preview_id=preview_id, unit=unit,
+                )
+                _recovery_job_binding(job, original, original_state, original_checkpoint, digest)
+                if (shared_config_gid() is not None
+                        and phase == "manual_cleanup_required"):
+                    from app.batch.media_organizer_shared_handoff import read_shared_cleanup_handoff
+                    read_shared_cleanup_handoff(manifest, manifest_path, original_checkpoint)
             bind_frozen_group_custody(manifest)
+            # Shared API authorization was a frozen-artifact snapshot only.
+            # Every recovery still proves private custody in the Worker,
+            # followed by the complete phase-specific live inventory checks.
+            _validate_private_recovery_stage(manifest, manifest_path, phase)
         validate_deferred_publication(manifest, namespace_custody=custody)
+        # The Worker records this immutable authority before staging. All new
+        # phases retain it, including interruption before the completed commit.
+        # Existing checkpoints are never repaired/backfilled by the API.
+        handoff_checkpoint = {"manifest_checksum": _checksum(manifest)}
         checkpoint(1, "frozen", "冻结清单已经验证")
-        if phase != "published":
+        if phase not in ("published", "manual_cleanup_required"):
             # An interruption in staging or publication retains all private
             # source links, so retry those phases only with the original
             # checksum-validated manifest and owner witness.

@@ -19,7 +19,10 @@ KIND = sys.argv[2] if len(sys.argv) > 2 else None
 ROOT = Path(os.environ["NFC_SYNTH_ROOT"])
 assert ROOT.is_absolute() and str(ROOT).startswith("/tmp/nfc-v16-cleanup-crossuid-")
 assert os.environ.get("GITHUB_ACTIONS") == "true", "isolated CI only"
-API_PHASES = {"queue-preview", "queue-execution", "review-and-queue", "queue-recovery", "final-read"}
+API_PHASES = {
+    "queue-preview", "queue-execution", "queue-execution-recovery",
+    "review-and-queue", "queue-recovery", "final-read",
+}
 EXPECTED_UID = 10001 if PHASE in API_PHASES else 10003 if PHASE == "foreign-denied" else 10002
 assert os.getuid() == os.geteuid() == EXPECTED_UID
 assert os.getgid() == os.getegid() == 10000
@@ -38,6 +41,15 @@ EXPECTED = {
     "grouped": {"P [1 5B]/001.jpg": b"photo", "V [1 5B]/001.mp4": b"video"},
     "reused": {"P [2 2B]/001.jpg": b"a", "P [2 2B]/002.jpg": b"b", "V [1 1B]/001.mp4": b"v"},
 }
+RECOVERY_CASES = {
+    "flat-stage-recovery": ("flat", "frozen"),
+    "grouped-publish-recovery": ("grouped", "staged"),
+    "reused-published-recovery": ("reused", "published"),
+    "grouped-handoff-recovery": ("grouped", "manual_cleanup_required"),
+}
+for case_name, (base_kind, _phase) in RECOVERY_CASES.items():
+    FIXTURES[case_name] = dict(FIXTURES[base_kind])
+    EXPECTED[case_name] = dict(EXPECTED[base_kind])
 
 
 def denied(operation):
@@ -62,7 +74,7 @@ if PHASE == "foreign-denied":
 
 from app.batch import media_organizer_custody as custody
 from app.batch import media_organizer_cleanup_jobs as cleanup_jobs
-from app.batch.media_organizer_execute_jobs import approval_token
+from app.batch.media_organizer_execute_jobs import approval_token, recovery_token
 from app.batch.media_organizer_planner import preview_semantic_unit
 from app.config import Settings
 from app.db import create_engine_and_session
@@ -149,6 +161,16 @@ def run_job(job_id, worker_id):
         engine.dispose()
 
 
+def capture_frozen_execution(case, frozen_job_id):
+    frozen = settings.reports_dir / "media_organizer-executions" / str(frozen_job_id) / "manifest.json"
+    manifest = json.loads(frozen.read_text())["manifest"]
+    case["frozen"] = str(frozen)
+    case["stage"] = str(Path(case["unit"]) / manifest["stage_directory"])
+    assert stat.S_IMODE(Path(case["stage"]).stat().st_mode) & 0o777 == 0o700
+    for path in frozen.parent.glob("*.group-*.json"):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
 if PHASE == "fixtures":
     state = {"worker_id": "cross-uid-worker", "cases": {}}
     for index, (kind, files) in enumerate(FIXTURES.items(), 1):
@@ -160,7 +182,7 @@ if PHASE == "fixtures":
             path.write_bytes(payload)
             path.chmod(0o640)  # Newly created synthetic payload: API reads via shared GID.
         state["cases"][kind] = {"unit": str(unit)}
-        if kind == "reused":
+        if RECOVERY_CASES.get(kind, (kind, None))[0] == "reused":
             state["cases"][kind]["retained_group_inode"] = (unit / "P [2 2B]").stat().st_ino
     write_control(state)
     print("WORKER_UID_CREATED_DISPOSABLE_FIXTURES")
@@ -188,16 +210,95 @@ elif PHASE == "queue-execution":
     })
     assert response.status_code == 200, response.text
     case["execution_id"] = response.json()["job_id"]
-elif PHASE == "execute":
+elif PHASE == "interrupt-execution":
+    from app.batch import media_organizer_execute_jobs as execution_jobs
+    from app.batch import media_organizer_publish as publishing
+    from app.batch import media_organizer_stage as staging
+
+    crash_phase = RECOVERY_CASES[KIND][1]
+    message = "synthetic execution interruption at " + crash_phase
+    if crash_phase in {"frozen", "staged"}:
+        owner, name = ((staging, "_move_one") if crash_phase == "frozen"
+                       else (publishing, "_link_one"))
+        mutate = getattr(owner, name)
+
+        def stop_after_mutation(*args, **kwargs):
+            mutate(*args, **kwargs)
+            raise SystemExit(message)
+
+        setattr(owner, name, stop_after_mutation)
+    elif crash_phase == "published":
+        def stop_before_handoff(*args, **kwargs):
+            raise SystemExit(message)
+
+        execution_jobs.record_deferred_cleanup_evidence = stop_before_handoff
+    else:
+        save_checkpoint = execution_jobs.JobContext.checkpoint
+
+        def stop_after_handoff(context, *args, **kwargs):
+            result = save_checkpoint(context, *args, **kwargs)
+            if kwargs.get("checkpoint_data", {}).get("phase") == "manual_cleanup_required":
+                raise SystemExit(message)
+            return result
+
+        execution_jobs.JobContext.checkpoint = stop_after_handoff
+    try:
+        run_job(case["execution_id"], state["worker_id"])
+    except SystemExit as exc:
+        assert str(exc) == message
+    else:
+        raise AssertionError("execution did not reach the injected interruption")
+    case["failed_execution_id"] = case["execution_id"]
+    capture_frozen_execution(case, case["failed_execution_id"])
+    case["execution_interrupted_snapshot"] = media_snapshot(unit)
+    engine, factory = create_engine_and_session(settings.database_path)
+    try:
+        with factory() as session:
+            original = session.get(WorkJob, case["failed_execution_id"])
+            assert original.status == "running"
+            checkpoint = json.loads(original.checkpoint_json)
+            assert checkpoint["phase"] == crash_phase
+            case["failed_execution_checkpoint"] = checkpoint
+    finally:
+        engine.dispose()
+elif PHASE == "queue-execution-recovery":
+    api = client()
+    denied(lambda: os.open(case["stage"], os.O_RDONLY | os.O_DIRECTORY))
+    before = visible_snapshot(unit)
+    failed_id = case["failed_execution_id"]
+    status = api.get(f"/api/media-organizer/executions/{failed_id}")
+    assert status.status_code == 200, status.text
+    assert status.json()["status"] == "failed"
+    payload = {"confirmation": recovery_token(failed_id)}
+    endpoint = f"/api/media-organizer/executions/{failed_id}/recover"
+    response = api.post(endpoint, json=payload)
+    assert response.status_code == 200, response.text
+    case["execution_id"] = response.json()["job_id"]
+    assert case["execution_id"] != failed_id
+    repeated = api.post(endpoint, json=payload)
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["job_id"] == case["execution_id"]
+    assert visible_snapshot(unit) == before
+elif PHASE in {"execute", "recover-execution"}:
+    if PHASE == "recover-execution":
+        assert media_snapshot(unit) == case["execution_interrupted_snapshot"], "API changed interrupted execution"
     assert run_job(case["execution_id"], state["worker_id"])
-    frozen = settings.reports_dir / "media_organizer-executions" / str(case["execution_id"]) / "manifest.json"
-    manifest = json.loads(frozen.read_text())["manifest"]
-    case["frozen"] = str(frozen)
-    case["stage"] = str(unit / manifest["stage_directory"])
+    frozen_id = case.get("failed_execution_id", case["execution_id"])
+    capture_frozen_execution(case, frozen_id)
     case["prepared_snapshot"] = media_snapshot(unit)
-    assert stat.S_IMODE(Path(case["stage"]).stat().st_mode) & 0o777 == 0o700
-    for path in frozen.parent.glob("*.group-*.json"):
-        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if PHASE == "recover-execution":
+        engine, factory = create_engine_and_session(settings.database_path)
+        try:
+            with factory() as session:
+                original = session.get(WorkJob, frozen_id)
+                recovered = session.get(WorkJob, case["execution_id"])
+                assert original.status == "failed"
+                assert json.loads(original.checkpoint_json) == case["failed_execution_checkpoint"]
+                assert recovered.status == "completed"
+                assert json.loads(recovered.checkpoint_json)["frozen_job_id"] == frozen_id
+                assert json.loads(recovered.state_json)["recovery_of_job_id"] == frozen_id
+        finally:
+            engine.dispose()
 elif PHASE == "review-and-queue":
     api = client()
     frozen = Path(case["frozen"])
@@ -241,15 +342,22 @@ elif PHASE == "interrupt-cleanup":
     journal = Path(case["frozen"] + ".cleanup-progress.jsonl")
     assert stat.S_IMODE(journal.stat().st_mode) == 0o600
     case["interrupted_journal_sha256"] = hashlib.sha256(journal.read_bytes()).hexdigest()
-elif PHASE == "mark-interrupted":
+elif PHASE in {"mark-interrupted", "mark-execution-interrupted"}:
     engine, factory = create_engine_and_session(settings.database_path)
     try:
+        interrupted_id = (case["cleanup_id"] if PHASE == "mark-interrupted"
+                          else case["failed_execution_id"])
+        next_worker = f"cross-uid-{PHASE}-{KIND}"
         with factory() as session:
-            assert session.get(WorkJob, case["cleanup_id"]).status == "running"
+            assert session.get(WorkJob, interrupted_id).status == "running"
+            session.get(TaskLock, 1).acquired_at = utcnow()
+            session.commit()
+        assert not acquire_worker_ownership(engine, factory, worker_id=next_worker), "live lease was stolen"
+        with factory() as session:
             # Deterministic disposable crash clock; no sleep and no live lease.
             session.get(TaskLock, 1).acquired_at = utcnow() - timedelta(seconds=31)
             session.commit()
-        state["worker_id"] = f"cross-uid-recovery-{KIND}"
+        state["worker_id"] = next_worker
         assert acquire_worker_ownership(engine, factory, worker_id=state["worker_id"])
         recovered = recover_interrupted_jobs(engine, factory, worker_id=state["worker_id"])
         assert recovered["failed_interrupted"] == 1
@@ -299,9 +407,19 @@ elif PHASE == "final-read":
     final_sample = unit / next(iter(EXPECTED[KIND]))
     denied(lambda: os.open(final_sample, os.O_WRONLY | os.O_TRUNC))
     assert final_sample.read_bytes() == EXPECTED[KIND][str(final_sample.relative_to(unit))]
-    if KIND == "reused":
+    if "retained_group_inode" in case:
         assert (unit / "P [2 2B]").stat().st_ino == case["retained_group_inode"]
     denied(lambda: os.open(case["frozen"] + ".cleanup-progress.jsonl", os.O_RDONLY))
+    if "failed_execution_id" in case:
+        failed_id = case["failed_execution_id"]
+        original = api.get(f"/api/media-organizer/executions/{failed_id}")
+        assert original.status_code == 200, original.text
+        assert original.json()["status"] == "failed"
+        repeated = api.post(f"/api/media-organizer/executions/{failed_id}/recover", json={
+            "confirmation": recovery_token(failed_id),
+        })
+        assert repeated.status_code == 200, repeated.text
+        assert repeated.json()["job_id"] == case["execution_id"]
 else:
     raise AssertionError(f"unknown synthetic phase {PHASE}")
 
