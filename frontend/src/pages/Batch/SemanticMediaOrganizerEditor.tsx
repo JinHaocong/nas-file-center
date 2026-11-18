@@ -368,9 +368,16 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                   执行中断：{executionStatus.error || '请检查任务记录'}。不得手动修改暂存目录。
                 </p>
               )}
-              {executionStatus.status === 'completed' && (
+              {executionStatus.manual_cleanup_required && (
+                <p className="nfc-v2-batch-error" role="alert">
+                  媒体文件已发布，但旧分类目录与私有暂存文件仍已安全保留，
+                  等待人工核查清理。请不要自行删除暂存数据或将本次任务视为彻底完成。
+                </p>
+              )}
+              {executionStatus.status === 'completed' &&
+                !executionStatus.manual_cleanup_required && executionStatus.finalized && (
                 <p className="nfc-form-note">
-                  本次执行已完成。请重新只读扫描，核对已整理状态和文件数量。
+                  任务已核对完成，请重新只读扫描确认最终文件结构。
                 </p>
               )}
               {executionStatus.status === 'failed' &&
