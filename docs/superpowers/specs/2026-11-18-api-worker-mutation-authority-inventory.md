@@ -1,7 +1,7 @@
 # API / Worker mutation-authority inventory
 
-Status: **INITIAL ROUTE + SERVICE INVENTORY — NOT A RELEASE APPROVAL**  
-Date: 2026-11-18  
+Status: **INITIAL ROUTE + SERVICE INVENTORY — NOT A RELEASE APPROVAL**
+Date: 2026-11-18
 Related: PR #397, issue #403, blockers #399/#400/#401/#402
 
 ## Goal
