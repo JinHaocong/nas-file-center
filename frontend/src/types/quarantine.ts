@@ -71,11 +71,13 @@ export interface QuarantineRestoreRequest {
 
 export interface QuarantineRestoreResponse {
   id: number;
-  state: 'restored' | 'skipped';
-  status: 'restored' | 'skipped';
-  restored_to_path: string | null;
-  conflict_policy: string;
-  conflict_resolved: boolean;
+  entry_id?: number;
+  state: 'queued' | 'restored' | 'skipped';
+  status: 'queued' | 'restored' | 'skipped';
+  work_job_id?: number;
+  restored_to_path?: string | null;
+  conflict_policy?: string;
+  conflict_resolved?: boolean;
   reason?: string;
 }
 
