@@ -31,5 +31,8 @@ RUN PIP_DEFAULT_TIMEOUT=120 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     python -m pip install .
 RUN mkdir -p /config /data
+# Non-root image fallback; Compose overrides the UID for the dedicated Worker.
+# Host bind-mount permissions must be provisioned separately, never changed here.
+USER 10001:10000
 EXPOSE 8080
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

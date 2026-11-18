@@ -81,9 +81,13 @@ def test_local_compose_separates_media_mutation_principals(tmp_path: Path) -> No
     # An isolated test .env is necessary because the project does not commit
     # local deploy secrets. docker compose config does NOT start containers.
     (tmp_path / ".env").write_text("", encoding="utf-8")
+    local_compose = tmp_path / "compose.yaml"
+    local_compose.write_text(
+        (ROOT / "compose.yaml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
     model = _compose_model(
-        ROOT / "compose.yaml",
-        cwd=ROOT,
+        local_compose,
+        cwd=tmp_path,
         extra_env={
             "HOST_DATA_DIR": str(tmp_path),
             "HOST_CONFIG_DIR": str(tmp_path),

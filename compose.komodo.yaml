@@ -1,11 +1,19 @@
 services:
   nas-file-center-api:
     image: kerwinjhc/nas-file-center:1.4.6
+    user: "${NFC_API_UID:-10001}:${NFC_SHARED_GID:-10000}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:mode=1777
     pull_policy: missing
     container_name: nas-file-center-api
     volumes:
       - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
-      - /tmp/zfsv3/sata11/15246330601/data:/data:rw
+      - /tmp/zfsv3/sata11/15246330601/data:/data:ro
     networks:
       - nginx_network
     environment:
@@ -16,6 +24,8 @@ services:
       - ALLOW_MUTATION=true
       - ALLOW_DELETE=true
       - PROTECT_LAST_FILE=true
+      - MEDIA_ORGANIZER_EXECUTION_ENABLED=false
+      - MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK=false
       - FCLONES_BINARY=/usr/local/bin/fclones
       - MTIME_REFRESH_DELAY_SECONDS=2
       - SESSION_COOKIE_SECURE=true
@@ -31,6 +41,14 @@ services:
 
   nas-file-center-worker:
     image: kerwinjhc/nas-file-center:1.4.6
+    user: "${NFC_WORKER_UID:-10002}:${NFC_SHARED_GID:-10000}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:mode=1777
     pull_policy: missing
     container_name: nas-file-center-worker
     command:
@@ -50,6 +68,8 @@ services:
       - ALLOW_MUTATION=true
       - ALLOW_DELETE=true
       - PROTECT_LAST_FILE=true
+      - MEDIA_ORGANIZER_EXECUTION_ENABLED=false
+      - MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK=false
       - FCLONES_BINARY=/usr/local/bin/fclones
       - MTIME_REFRESH_DELAY_SECONDS=2
     depends_on:
