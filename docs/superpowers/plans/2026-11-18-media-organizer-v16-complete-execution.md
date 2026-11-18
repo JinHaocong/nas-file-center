@@ -93,3 +93,17 @@ Files: `scripts/media_organizer_v16_real_nas_acceptance.py`, `docs/media-organiz
 - Do not change production bind-mount ownership/ACLs automatically.
 - Next: design and test a dedicated non-root Worker identity, separate API read-only access to `/data`, compatible shared database/report permissions, and explicit supported ACL/mount validation. If the actual NAS cannot prove that only this Worker principal can mutate the selected unit namespace during a job, keep grouped execution blocked.
 - Task 1 remains OPEN until those deployment and mount-level checks exist. #402 remains OPEN; #400 cleanup and true second-scan-zero remain separate blockers.
+
+
+## Follow-up ticket created — #403 API/Worker mutation-authority split
+
+The audit found that changing only the API container's `/data` mount to read-only would break existing behavior:
+- `POST /quarantine/{id}/restore` can execute a non-transactional restore directly in `service.restore_quarantine_entry` when no transactional Worker authority is supplied.
+- `POST /quarantine/{id}/purge` directly removes the selected quarantine payload in `service.purge_quarantine_entry`.
+- `DELETE /quarantine/{id}/record` and bulk record deletion call terminal transaction-artifact cleanup before metadata retirement; restored entries may then enqueue Worker cleanup.
+- Plan and MediaPackage execution routes already enqueue WorkJobs, but they are not the only filesystem-mutation paths.
+
+Ticket **#403** now tracks the complete route/service mutation inventory, migration of direct mutations to Worker jobs, dedicated non-root Worker UID/GID, API read-only media access, shared SQLite/report permissions, and supported NAS ACL validation:
+https://github.com/JinHaocong/nas-file-center/issues/403
+
+**Do not simply flip the API bind mount to read-only** until #403's inventory and migrations are complete. That would be a compatibility regression. #403 is a prerequisite for a defensible least-privilege namespace-custody model under #402.
