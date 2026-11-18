@@ -32,6 +32,23 @@ RETRY_WHITELISTS: dict[str, set[str]] = {
     "media-analysis": {"root_keys"},
 }
 
+_ORGANIZER_AUTHORITY_KINDS = ("media-organizer-execute", "media-organizer-cleanup")
+
+
+def _dismiss_organizer_authority(job: WorkJob) -> bool:
+    """Hide history while retaining frozen approvals, ancestry and audit events."""
+    try:
+        checkpoint = json.loads(job.checkpoint_json or "{}")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Organizer recovery authority is malformed; history retained") from exc
+    if not isinstance(checkpoint, dict):
+        raise ValueError("Organizer recovery authority is malformed; history retained")
+    if checkpoint.get("_task_queue_dismissed") == 1:
+        return False
+    checkpoint["_task_queue_dismissed"] = True
+    job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+    return True
+
 
 def filter_retry_payload(kind: str, state_json: str | None) -> str:
     if not state_json:
@@ -139,8 +156,8 @@ class TaskService:
             stmt = select(WorkJob)
             count_stmt = select(func.count(WorkJob.id))
 
-            # A dismissed failed media-package execution remains durable for recovery,
-            # but is no longer part of the user-facing task queue.
+            # Dismissed execution authority remains durable for recovery, but
+            # is no longer part of the user-facing task queue.
             visible = func.coalesce(func.json_extract(WorkJob.checkpoint_json, "$._task_queue_dismissed"), 0) != 1
             stmt = stmt.where(visible)
             count_stmt = count_stmt.where(visible)
@@ -397,6 +414,11 @@ class TaskService:
         def _transition(session: Session, job: WorkJob, *args: Any):
             if job.status not in TERMINAL_STATES:
                 raise ValueError(f"Only terminal jobs can be deleted (current status is '{job.status}')")
+            if job.kind in _ORGANIZER_AUTHORITY_KINDS:
+                # Completed publication and cleanup rows still anchor a failed
+                # successor or the crash gap before its terminal DB commit.
+                _dismiss_organizer_authority(job)
+                return {"deleted": True, "id": task_id}
             if job.kind == "media_package-package-execute" and job.status == "failed":
                 # Hide from the task queue without destroying the execution audit,
                 # frozen manifest references, checkpoints, or event history.
@@ -429,15 +451,24 @@ class TaskService:
                 raise ValueError(f"Cannot clear non-terminal status '{s}'")
 
         with self.SessionLocal() as session:
+            # Do not overwrite a newly committed recovery checkpoint with a
+            # stale history snapshot while another Worker is finalizing it.
+            session.execute(text("BEGIN IMMEDIATE"))
+            retained = session.scalars(select(WorkJob).where(
+                WorkJob.status.in_(list(target_statuses)),
+                WorkJob.kind.in_(_ORGANIZER_AUTHORITY_KINDS),
+            )).all()
+            dismissed = sum(_dismiss_organizer_authority(job) for job in retained)
             del_stmt = delete(WorkJob).where(
                 WorkJob.status.in_(list(target_statuses)),
+                WorkJob.kind.not_in(_ORGANIZER_AUTHORITY_KINDS),
                 (WorkJob.kind != "media_package-package-execute") |
                 (WorkJob.status != "failed"),
             )
             # Failed media-package execution records retain the only durable
             # link between an interrupted stage and its frozen manifest.
             result = session.execute(del_stmt)
-            count = result.rowcount
+            count = result.rowcount + dismissed
             session.commit()
             return {"deleted_count": count}
 

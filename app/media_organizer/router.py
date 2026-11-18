@@ -106,9 +106,12 @@ def read_media_organizer_execution(request: Request, job_id: int,
     try:
         return get_media_organizer_execution(
             request.app.state.service.SessionLocal, job_id,
+            settings=request.app.state.settings,
         )
     except KeyError as exc:
         raise HTTPException(404, 'Execution not found') from exc
+    except (ValueError, PermissionError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.get('/executions/{job_id}/cleanup-review')
@@ -200,5 +203,23 @@ def recover_media_organizer_execution(request: Request, job_id: int,
         )
     except KeyError as exc:
         raise HTTPException(404, 'Original failed execution not found') from exc
+    except (ValueError, PermissionError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post('/cleanups/{job_id}/recover')
+def recover_media_organizer_cleanup(
+    request: Request, job_id: int, payload: MediaOrganizerCleanupRequest,
+    _admin=Depends(require_admin_user),
+):
+    """Approve one failed cleanup attempt; journal replay runs only in Worker."""
+    from app.batch.media_organizer_cleanup_jobs import enqueue_media_organizer_cleanup_recovery
+    try:
+        return enqueue_media_organizer_cleanup_recovery(
+            request.app.state.service.SessionLocal, request.app.state.settings,
+            failed_job_id=job_id, confirmation=payload.confirmation,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, 'Failed cleanup not found') from exc
     except (ValueError, PermissionError, OSError) as exc:
         raise HTTPException(409, str(exc)) from exc

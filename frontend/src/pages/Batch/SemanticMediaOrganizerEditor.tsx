@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { Link, useSearchParams } from 'react-router-dom';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
@@ -12,7 +13,12 @@ import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
 import { tasksApi } from '../../api/tasks';
 import { getStructuredApiError } from '../../api/errors';
-import { mediaOrganizerApi, type SemanticUnitPreview } from '../../api/media_organizer';
+import {
+  mediaOrganizerApi, executableSemanticUnits, semanticExecutionNeedsPolling,
+  canConfirmSemanticCleanup, canRecoverSemanticCleanup,
+  semanticExecutionIdFromSearch, withSemanticExecutionId,
+  type SemanticUnitPreview, type SemanticCleanupLink,
+} from '../../api/media_organizer';
 
 const isRunning = (status: string | undefined) =>
   status === 'queued' || status === 'running' ||
@@ -32,9 +38,32 @@ const kindDescription = (item: SemanticUnitPreview) => {
   return item.reason || '当前目录无待处理文件';
 };
 
+const CleanupLinks: React.FC<{ title: string; links: SemanticCleanupLink[] }> = ({ title, links }) => (
+  <div className="nfc-v2-batch-media-scroll">
+    <table className="nfc-v2-batch-media-table">
+      <caption>{title}</caption>
+      <thead><tr><th scope="col">待清理路径</th><th scope="col">已发布文件</th></tr></thead>
+      <tbody>
+        {links.map(link => (
+          <tr key={link.path}>
+            <td><CodePath value={link.path} /></td>
+            <td><CodePath value={link.published_path} /></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
 /** Preview-first workflow. Execution is default-off and requires explicit unit approval. */
 export const SemanticMediaOrganizerEditor: React.FC = () => {
   const toast = useConsoleToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const executionJobId = semanticExecutionIdFromSearch(searchParams);
+  const invalidExecutionId = searchParams.has('execution') && executionJobId === null;
+  const setExecutionJobId = (id: number | null) => {
+    setSearchParams(current => withSemanticExecutionId(current, id), { replace: true });
+  };
   const [selection, setSelection] = useState('');
   const [jobId, setJobId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
@@ -42,8 +71,13 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedUnit, setSelectedUnit] = useState('');
   const [executionConfirmation, setExecutionConfirmation] = useState('');
-  const [executionJobId, setExecutionJobId] = useState<number | null>(null);
   const [recoveryConfirmation, setRecoveryConfirmation] = useState('');
+  const [cleanupReviewOpen, setCleanupReviewOpen] = useState(false);
+  const [cleanupPage, setCleanupPage] = useState(1);
+  const [cleanupPageSize, setCleanupPageSize] = useState(25);
+  const [cleanupConfirmation, setCleanupConfirmation] = useState('');
+  const [cleanupRecoveryConfirmation, setCleanupRecoveryConfirmation] = useState('');
+  const [expectedCleanupJobId, setExpectedCleanupJobId] = useState<number | null>(null);
   const [mappingSelection, setMappingSelection] = useState<{ unit: string; mappingId: string } | null>(null);
   const [mappingPage, setMappingPage] = useState(1);
   const [mappingPageSize, setMappingPageSize] = useState(50);
@@ -57,6 +91,14 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     mutationFn: ({ executionId, confirmation }: {
       executionId: number; confirmation: string;
     }) => mediaOrganizerApi.recoverExecution(executionId, confirmation),
+  });
+  const startCleanup = useMutation({
+    mutationFn: ({ executionId, confirmation }: { executionId: number; confirmation: string }) =>
+      mediaOrganizerApi.startCleanup(executionId, confirmation),
+  });
+  const recoverCleanup = useMutation({
+    mutationFn: ({ cleanupId, confirmation }: { cleanupId: number; confirmation: string }) =>
+      mediaOrganizerApi.recoverCleanup(cleanupId, confirmation),
   });
   const cancel = useMutation({ mutationFn: tasksApi.cancelTask });
   const { data, isError, error, isFetching } = useQuery({
@@ -74,17 +116,49 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     enabled: jobId !== null && mappingSelection !== null && data?.status === 'completed',
   });
   const { data: executionStatus, isError: executionLoadFailed,
-    error: executionLoadError } = useQuery({
+    error: executionLoadError, refetch: refetchExecution } = useQuery({
     queryKey: ['semanticMediaExecution', executionJobId],
     queryFn: () => mediaOrganizerApi.getExecution(executionJobId!),
     enabled: executionJobId !== null,
-    refetchInterval: query => isRunning(query.state.data?.status) ? 1500 : false,
+    retry: false,
+    refetchInterval: query => query.state.status === 'error' && !query.state.data ? false :
+      semanticExecutionNeedsPolling(query.state.data, expectedCleanupJobId) ? 1500 : false,
   });
-  const busy = enqueue.isPending || isRunning(data?.status) ||
-    isRunning(executionStatus?.status) || (jobId !== null && data == null);
+  useEffect(() => {
+    setCleanupReviewOpen(false);
+    setCleanupPage(1);
+    setCleanupConfirmation('');
+    setCleanupRecoveryConfirmation('');
+    setRecoveryConfirmation('');
+    setExpectedCleanupJobId(null);
+  }, [executionJobId]);
+  useEffect(() => {
+    if (jobId === null && executionStatus?.job_id === executionJobId) {
+      setSelection(executionStatus.unit);
+    }
+  }, [executionJobId, executionStatus?.job_id, executionStatus?.unit, jobId]);
+  useEffect(() => {
+    if (expectedCleanupJobId !== null && executionStatus?.cleanup?.job_id === expectedCleanupJobId) {
+      setExpectedCleanupJobId(null);
+    }
+  }, [expectedCleanupJobId, executionStatus?.cleanup?.job_id]);
+  const cleanupReviewAvailable = executionStatus?.status === 'completed' &&
+    executionStatus.manual_cleanup_required && !executionStatus.finalized && !executionStatus.cleanup;
+  const { data: cleanupPlan, isError: cleanupPlanFailed, error: cleanupPlanError,
+    isFetching: cleanupPlanFetching, refetch: refetchCleanupPlan } = useQuery({
+    queryKey: ['semanticMediaCleanupPlan', executionJobId, cleanupPage, cleanupPageSize],
+    queryFn: () => mediaOrganizerApi.getCleanupPlan(executionJobId!, cleanupPage, cleanupPageSize),
+    enabled: executionJobId !== null && cleanupReviewOpen && cleanupReviewAvailable,
+    retry: false,
+  });
+  const busy = enqueue.isPending || startExecution.isPending || recoverExecution.isPending ||
+    startCleanup.isPending || recoverCleanup.isPending || isRunning(data?.status) ||
+    (executionJobId !== null && (executionStatus
+      ? semanticExecutionNeedsPolling(executionStatus, expectedCleanupJobId) : !executionLoadFailed)) ||
+    (jobId !== null && data == null);
   const summary = data?.summary;
-  const readyUnit = data?.units.find(row => row.unit === selectedUnit &&
-    row.status === 'ready' && row.groups.length === 0);
+  const executableUnits = executableSemanticUnits(data);
+  const readyUnit = executableUnits.find(row => row.unit === selectedUnit);
   const expectedConfirmation = data?.confirmation_tokens?.[selectedUnit] || '';
   const canExecute = Boolean(data?.execution_enabled && data?.status === 'completed' &&
     summary && summary.blocked_count === 0 && readyUnit && expectedConfirmation &&
@@ -92,10 +166,22 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     !startExecution.isPending && executionJobId === null);
   const recoveryToken = executionJobId === null ? '' :
     `RECOVER_MEDIA_ORGANIZER_EXECUTION_${executionJobId}`;
-  const canRecover = Boolean(data?.execution_enabled && executionJobId !== null &&
+  const canRecover = Boolean(executionStatus?.execution_enabled && executionJobId !== null &&
     executionStatus?.status === 'failed' &&
     executionStatus.recovery_of_job_id == null &&
-    recoveryConfirmation === recoveryToken && !recoverExecution.isPending);
+    recoveryConfirmation === recoveryToken && !busy && !recoverExecution.isPending);
+  const canCleanup = Boolean(!busy && !cleanupPlanFetching &&
+    canConfirmSemanticCleanup(executionStatus, cleanupPlan, cleanupConfirmation));
+  const canRecoverCleanup = Boolean(!busy &&
+    canRecoverSemanticCleanup(executionStatus, cleanupRecoveryConfirmation));
+
+  const resetCleanup = () => {
+    setCleanupReviewOpen(false);
+    setCleanupPage(1);
+    setCleanupConfirmation('');
+    setCleanupRecoveryConfirmation('');
+    setExpectedCleanupJobId(null);
+  };
 
   const changeSelection = (next: string | string[]) => {
     if (busy) return;
@@ -105,6 +191,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     setExecutionConfirmation('');
     setExecutionJobId(null);
     setRecoveryConfirmation('');
+    resetCleanup();
     setMappingSelection(null);
     setMappingPage(1);
     setPage(1);
@@ -123,6 +210,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     setExecutionConfirmation('');
     setExecutionJobId(null);
     setRecoveryConfirmation('');
+    resetCleanup();
     setMappingSelection(null);
     setMappingPage(1);
     setPage(1);
@@ -169,14 +257,58 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
       });
       setExecutionJobId(response.job_id);
       setRecoveryConfirmation('');
+      resetCleanup();
       toast.success(`恢复任务 #${response.job_id} 已提交 Worker`);
     } catch (e: unknown) {
       toast.error(getStructuredApiError(e).message || '恢复请求被拒绝');
     }
   };
 
+  const cleanupCurrentUnit = async () => {
+    if (!canCleanup || executionJobId === null) return;
+    try {
+      const response = await startCleanup.mutateAsync({
+        executionId: executionJobId, confirmation: cleanupConfirmation,
+      });
+      setExpectedCleanupJobId(response.job_id);
+      setCleanupConfirmation('');
+      setCleanupReviewOpen(false);
+      void refetchExecution();
+      toast.success(`独立清理任务 #${response.job_id} 已提交 Worker`);
+    } catch (e: unknown) {
+      toast.error(getStructuredApiError(e).message || '清理请求被拒绝');
+    }
+  };
+
+  const recoverCurrentCleanup = async () => {
+    if (!canRecoverCleanup || !executionStatus?.cleanup) return;
+    try {
+      const response = await recoverCleanup.mutateAsync({
+        cleanupId: executionStatus.cleanup.job_id, confirmation: cleanupRecoveryConfirmation,
+      });
+      setExpectedCleanupJobId(response.job_id);
+      setCleanupRecoveryConfirmation('');
+      void refetchExecution();
+      toast.success(`清理恢复任务 #${response.job_id} 已提交 Worker`);
+    } catch (e: unknown) {
+      toast.error(getStructuredApiError(e).message || '清理恢复请求被拒绝');
+    }
+  };
+
   return (
     <>
+      {invalidExecutionId && (
+        <p className="nfc-v2-batch-error" role="alert">
+          执行任务编号无效，请从<Link to="/tasks">任务中心</Link>重新打开对应任务。
+        </p>
+      )}
+      {executionJobId !== null && (
+        <p className="nfc-form-note">
+          当前整理任务 #{executionJobId} ·{' '}
+          <Link to={`/tasks?task=${executionJobId}`}>查看任务记录</Link>
+          {' '}· 刷新页面后可继续核查、清理或恢复，无需重新扫描。
+        </p>
+      )}
       <DataPanel title="智能媒体整理 · 只读分析"
         description="识别作者、合集和作品边界；按 V1.6 规则预览平铺、编号和分组。默认只读；仅管理员启用独立安全开关后才可逐作品确认执行。"
         className="nfc-v2-batch-media-panel nfc-tool-workbench">
@@ -370,10 +502,10 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
         <DataPanel title="单个作品 · 安全确认执行" variant="dense"
           className="nfc-v2-batch-media-panel"
           description="每次仅处理一个已预览作品；重新校验和冻结后才允许 Worker 修改文件。">
-          {data.units.some(row => row.status === 'ready' && row.groups.length > 0) && (
-            <p className="nfc-v2-batch-error" role="status">
-              SEC-12 安全暂停：需要新建 P/V/Other 分组目录的作品暂不允许执行。
-              只读预览仍可使用；待目录发布的并发安全机制完成验收后再开放。
+          {data.units.some(row => row.status === 'ready' && row.groups.length > 0 &&
+            !data.confirmation_tokens[row.unit]) && (
+            <p className="nfc-form-note" role="status">
+              部分分组作品尚未满足服务器执行条件。只有服务器提供执行确认码的作品可以提交。
             </p>
           )}
           {!data.execution_enabled ? (
@@ -399,7 +531,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                     setExecutionConfirmation('');
                   }}>
                   <option value="">请选择一个作品目录</option>
-                  {data.units.filter(x => x.status === 'ready' && x.groups.length === 0).map(item => (
+                  {executableUnits.map(item => (
                     <option value={item.unit} key={item.unit}>{item.unit}</option>
                   ))}
                 </select>
@@ -444,20 +576,26 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                   执行中断：{executionStatus.error || '请检查任务记录'}。不得手动修改暂存目录。
                 </p>
               )}
-              {executionStatus.manual_cleanup_required && (
+              {executionStatus.manual_cleanup_required && !executionStatus.cleanup && expectedCleanupJobId === null && (
                 <p className="nfc-v2-batch-error" role="alert">
                   媒体文件已发布，但原始文件、旧分类目录与私有暂存文件均已保留，
-                  等待人工核查清理。请不要自行删除暂存数据或将本次任务视为彻底完成。
+                  等待人工核查清理。请核对下方清单，再单独确认清理；无需自行删除暂存文件。
+                </p>
+              )}
+              {executionStatus.manual_cleanup_required && (executionStatus.cleanup || expectedCleanupJobId !== null) && (
+                <p className="nfc-form-note" role="status">
+                  {executionStatus.cleanup?.status === 'failed' ? '清理任务已中断。' : '已进入独立清理流程。'}
+                  部分原始路径或暂存数据可能已清理，请以下方任务状态和核验结果为准。
                 </p>
               )}
               {executionStatus.status === 'completed' &&
                 !executionStatus.manual_cleanup_required && executionStatus.finalized && (
                 <p className="nfc-form-note">
-                  任务已核对完成，请重新只读扫描确认最终文件结构。
+                  服务器已完成清理，并验证再次扫描为零路径调整、零改名。
                 </p>
               )}
               {executionStatus.status === 'failed' &&
-                executionStatus.recovery_of_job_id == null && data?.execution_enabled && (
+                executionStatus.recovery_of_job_id == null && executionStatus.execution_enabled && (
                 <div className="nfc-v2-batch-form">
                   <div className="nfc-v2-batch-field">
                     <label htmlFor="semantic-recovery-confirmation">人工恢复确认码</label>
@@ -480,10 +618,150 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
               )}
             </>
           ) : (
+            <div>
+              <p className="nfc-form-note" role={executionLoadFailed ? 'alert' : 'status'}>
+                {executionLoadFailed ? getStructuredApiError(executionLoadError).message :
+                  '正在核验执行任务并查询 Worker 状态…'}
+              </p>
+              {executionLoadFailed && (
+                <ConsoleButton variant="secondary" onClick={() => { void refetchExecution(); }}>
+                  重新读取执行任务
+                </ConsoleButton>
+              )}
+            </div>
+          )}
+        </DataPanel>
+      )}
+
+      {executionJobId !== null && executionStatus &&
+        (cleanupReviewAvailable || executionStatus.cleanup || expectedCleanupJobId !== null) && (
+        <DataPanel title="独立清理与恢复" variant="dense"
+          className="nfc-v2-batch-media-panel"
+          description="核对原始路径、暂存路径和已发布文件后，单独确认清理。清理完成以服务器验证零变更复扫为准。">
+          <p className="nfc-form-note">整理单元：<CodePath value={executionStatus.unit} /></p>
+          {expectedCleanupJobId !== null && executionStatus.cleanup?.job_id !== expectedCleanupJobId && (
             <p className="nfc-form-note" role="status">
-              {executionLoadFailed ? getStructuredApiError(executionLoadError).message :
-                '正在查询 Worker 执行状态…'}
+              清理任务 #{expectedCleanupJobId} 已提交，正在查询 Worker 状态…
             </p>
+          )}
+          {executionLoadFailed && (
+            <p className="nfc-v2-batch-error" role="alert">
+              {getStructuredApiError(executionLoadError).message || '无法更新清理任务状态'}
+            </p>
+          )}
+          {executionStatus.cleanup && (
+            <>
+              <p className="nfc-form-note">
+                清理任务 #{executionStatus.cleanup.job_id} ·{' '}
+                <StatusBadge status={executionStatus.cleanup.status} />
+              </p>
+              {isRunning(executionStatus.cleanup.status) && (
+                <p className="nfc-form-note" role="status">后台正在清理或核对恢复记录，完成前不能更改当前整理范围。</p>
+              )}
+              {executionStatus.cleanup.status === 'failed' && (
+                <>
+                  <p className="nfc-v2-batch-error" role="alert">
+                    清理任务中断：{executionStatus.cleanup.error || '请检查任务记录'}
+                  </p>
+                  {executionStatus.cleanup.recovery_confirmation ? (
+                    <div className="nfc-v2-batch-form">
+                      <div className="nfc-v2-batch-field">
+                        <label htmlFor="semantic-cleanup-recovery-confirmation">本次清理恢复确认码</label>
+                        <code>{executionStatus.cleanup.recovery_confirmation}</code>
+                        <input id="semantic-cleanup-recovery-confirmation"
+                          value={cleanupRecoveryConfirmation} autoComplete="off" spellCheck={false}
+                          disabled={busy} placeholder="输入服务器提供的完整恢复确认码"
+                          onChange={event => setCleanupRecoveryConfirmation(event.target.value)} />
+                      </div>
+                      <ConsoleButton variant="danger" disabled={!canRecoverCleanup}
+                        loading={recoverCleanup.isPending}
+                        onClick={() => { void recoverCurrentCleanup(); }}>
+                        确认并恢复本次清理
+                      </ConsoleButton>
+                    </div>
+                  ) : (
+                    <p className="nfc-form-note">服务器尚未提供可用的恢复确认码，请保留现有文件并检查任务记录。</p>
+                  )}
+                </>
+              )}
+              {executionStatus.cleanup.status === 'completed' && executionStatus.finalized && (
+                <p className="nfc-form-note" role="status">清理完成；服务器已确认零路径调整、零改名。</p>
+              )}
+            </>
+          )}
+          {cleanupReviewAvailable && !cleanupReviewOpen && (
+            <ConsoleButton variant="secondary" disabled={busy}
+              onClick={() => {
+                setCleanupPage(1);
+                setCleanupConfirmation('');
+                setCleanupReviewOpen(true);
+              }}>
+              核查清理清单
+            </ConsoleButton>
+          )}
+          {cleanupReviewAvailable && cleanupReviewOpen && (
+            <>
+              {cleanupPlanFailed ? (
+                <div>
+                  <p className="nfc-v2-batch-error" role="alert">
+                    {getStructuredApiError(cleanupPlanError).message || '无法核查清理清单'}
+                  </p>
+                  <ConsoleButton disabled={busy || cleanupPlanFetching}
+                    onClick={() => { setCleanupConfirmation(''); void refetchCleanupPlan(); }}>
+                    重新核查清单
+                  </ConsoleButton>
+                </div>
+              ) : cleanupPlanFetching && !cleanupPlan ? (
+                <p className="nfc-form-note" role="status">正在核对冻结清单和全部已发布文件…</p>
+              ) : cleanupPlan ? (
+                <>
+                  <div className="nfc-v2-batch-media-stats" role="status">
+                    <span>原始路径 <strong>{cleanupPlan.total_original_links.toLocaleString()}</strong></span>
+                    <span>暂存路径 <strong>{cleanupPlan.total_staged_links.toLocaleString()}</strong></span>
+                    <span>旧分类目录 <strong>{cleanupPlan.wrapper_directories.length.toLocaleString()}</strong></span>
+                  </div>
+                  <CleanupLinks title="原始路径清理清单" links={cleanupPlan.original_links} />
+                  <CleanupLinks title="暂存路径清理清单" links={cleanupPlan.staged_links} />
+                  <ConsolePagination page={cleanupPage} pageSize={cleanupPageSize}
+                    total={Math.max(cleanupPlan.total_original_links, cleanupPlan.total_staged_links)}
+                    pageSizes={[25, 50, 100]}
+                    onChange={(next, size) => {
+                      if (busy) return;
+                      setCleanupConfirmation('');
+                      setCleanupPage(next);
+                      setCleanupPageSize(size);
+                    }} />
+                  <div className="nfc-v2-batch-field">
+                    <span>待清理的旧分类目录</span>
+                    {cleanupPlan.wrapper_directories.length ? (
+                      <ul>{cleanupPlan.wrapper_directories.map(folder => (
+                        <li key={folder.path}><CodePath value={folder.path} /></li>
+                      ))}</ul>
+                    ) : <small>没有需要移除的旧分类目录。</small>}
+                    <span>暂存目录：<CodePath value={cleanupPlan.stage.path} /></span>
+                  </div>
+                  <div className="nfc-v2-batch-form">
+                    <div className="nfc-v2-batch-field">
+                      <label htmlFor="semantic-cleanup-confirmation">独立清理确认码</label>
+                      <code>{cleanupPlan.confirmation}</code>
+                      <input id="semantic-cleanup-confirmation"
+                        value={cleanupConfirmation} autoComplete="off" spellCheck={false}
+                        disabled={busy || cleanupPlanFetching} placeholder="核对清单后输入完整清理确认码"
+                        onChange={event => setCleanupConfirmation(event.target.value)} />
+                    </div>
+                    <p className="nfc-form-note">
+                      此操作仅清理已核验的原始路径、暂存路径及旧分类空目录，保留清单中的已发布文件。
+                      Worker 会再次核验权限、文件身份和清理记录。
+                    </p>
+                    <ConsoleButton variant="danger" disabled={!canCleanup}
+                      loading={startCleanup.isPending}
+                      onClick={() => { void cleanupCurrentUnit(); }}>
+                      确认并提交独立清理
+                    </ConsoleButton>
+                  </div>
+                </>
+              ) : null}
+            </>
           )}
         </DataPanel>
       )}

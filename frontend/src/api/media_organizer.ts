@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { TaskDetail } from '../types/task';
 
 export type SemanticPreviewStatus = 'queued' | 'running' | 'completed' | 'failed' |
   'cancelled' | 'cancel_requested' | 'paused';
@@ -87,12 +88,121 @@ export interface SemanticExecutionStatus {
   recovery_of_job_id: number | null;
   manual_cleanup_required: boolean;
   finalized: boolean;
+  execution_enabled: boolean;
+  cleanup: SemanticCleanupStatus | null;
   progress: {
     current: number;
     total: number;
     message: string | null;
     phase?: string;
   };
+}
+
+export interface SemanticCleanupStatus {
+  job_id: number;
+  status: SemanticPreviewStatus;
+  error: string | null;
+  recovery_confirmation: string | null;
+}
+
+export interface SemanticCleanupLink {
+  path: string;
+  published_path: string;
+  identity: [number, number, number, number];
+}
+
+export interface SemanticCleanupPlan {
+  job_id: number;
+  reviewed_execution_job_id: number;
+  unit: string;
+  plan_sha256: string;
+  manifest_checksum: string;
+  plan_kind: 'review_only';
+  page: number;
+  page_size: number;
+  total_original_links: number;
+  total_staged_links: number;
+  original_links: SemanticCleanupLink[];
+  staged_links: SemanticCleanupLink[];
+  wrapper_directories: { path: string; identity: [number, number] }[];
+  stage: { path: string; identity: [number, number] };
+  cleanup_authorized: false;
+  finalized: false;
+  zero_change_rescan_verified: false;
+  namespace_exclusive_custody_proven: false;
+  read_only: true;
+  confirmation: string;
+}
+
+const taskIsActive = (status: SemanticPreviewStatus | undefined) =>
+  status === 'queued' || status === 'running' ||
+  status === 'cancel_requested' || status === 'paused';
+
+const positiveJobId = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+
+export function semanticExecutionIdFromSearch(search: URLSearchParams): number | null {
+  const values = search.getAll('execution');
+  if (values.length !== 1 || !/^[1-9]\d*$/.test(values[0])) return null;
+  const id = Number(values[0]);
+  return positiveJobId(id) ? id : null;
+}
+
+export function withSemanticExecutionId(search: URLSearchParams, id: number | null): URLSearchParams {
+  const next = new URLSearchParams(search);
+  next.set('operation', 'semantic-media-organize');
+  if (id === null) next.delete('execution');
+  else {
+    if (!positiveJobId(id)) throw new Error('Invalid semantic execution ID');
+    next.set('execution', String(id));
+  }
+  return next;
+}
+
+export function semanticOrganizerTaskHref(
+  task: Pick<TaskDetail, 'id' | 'job_type' | 'payload'>,
+): string | null {
+  const id = task.job_type === 'media-organizer-execute' ? task.id :
+    task.job_type === 'media-organizer-cleanup' ? task.payload?.execution_job_id : null;
+  return positiveJobId(id) ? `/batch?${withSemanticExecutionId(new URLSearchParams(), id)}` : null;
+}
+
+export function executableSemanticUnits(page: SemanticPreviewPage | undefined): SemanticUnitPreview[] {
+  if (!page?.execution_enabled || page.status !== 'completed' ||
+    !page.summary || page.summary.blocked_count !== 0) return [];
+  return page.units.filter(unit => unit.status === 'ready' &&
+    Boolean(page.confirmation_tokens[unit.unit]));
+}
+
+/** Keep the original execution observable while its separate cleanup runs. */
+export function semanticExecutionNeedsPolling(
+  execution: SemanticExecutionStatus | undefined,
+  expectedCleanupJobId: number | null = null,
+): boolean {
+  return execution === undefined || taskIsActive(execution.status) ||
+    taskIsActive(execution.cleanup?.status) ||
+    (expectedCleanupJobId !== null && execution.cleanup?.job_id !== expectedCleanupJobId);
+}
+
+export function canConfirmSemanticCleanup(
+  execution: SemanticExecutionStatus | undefined,
+  plan: SemanticCleanupPlan | undefined,
+  confirmation: string,
+): boolean {
+  return Boolean(execution?.execution_enabled && execution.status === 'completed' && execution.manual_cleanup_required &&
+    !execution.finalized && !execution.cleanup && plan?.read_only &&
+    plan.plan_kind === 'review_only' && !plan.cleanup_authorized &&
+    plan.reviewed_execution_job_id === execution.job_id && plan.unit === execution.unit &&
+    plan.confirmation && confirmation === plan.confirmation);
+}
+
+export function canRecoverSemanticCleanup(
+  execution: SemanticExecutionStatus | undefined,
+  confirmation: string,
+): boolean {
+  const cleanup = execution?.cleanup;
+  return Boolean(execution?.execution_enabled && cleanup?.status === 'failed' && cleanup.recovery_confirmation &&
+    confirmation === cleanup.recovery_confirmation);
 }
 
 export const mediaOrganizerApi = {
@@ -103,6 +213,20 @@ export const mediaOrganizerApi = {
     ),
   getExecution: (jobId: number) =>
     api.get<SemanticExecutionStatus>(`/api/media-organizer/executions/${jobId}`),
+  getCleanupPlan: (jobId: number, page = 1, pageSize = 25) => {
+    const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    return api.get<SemanticCleanupPlan>(
+      `/api/media-organizer/executions/${jobId}/cleanup-plan?${query}`,
+    );
+  },
+  startCleanup: (jobId: number, confirmation: string) =>
+    api.post<{ job_id: number; status: SemanticPreviewStatus; execution_job_id: number }>(
+      `/api/media-organizer/executions/${jobId}/cleanup`, { confirmation },
+    ),
+  recoverCleanup: (cleanupJobId: number, confirmation: string) =>
+    api.post<{ job_id: number; status: SemanticPreviewStatus; execution_job_id: number }>(
+      `/api/media-organizer/cleanups/${cleanupJobId}/recover`, { confirmation },
+    ),
   recoverExecution: (jobId: number, confirmation: string) =>
     api.post<{ job_id: number; status: SemanticPreviewStatus; recovery_of_job_id: number }>(
       `/api/media-organizer/executions/${jobId}/recover`,

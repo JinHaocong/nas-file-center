@@ -48,10 +48,12 @@ def assert_exclusive_custody(
             if not isinstance(folder, Path) or not folder.is_absolute():
                 raise NamespaceCustodyUnavailable("SEC-12: noncanonical custody scope")
             result = proof.assert_exclusive(folder)
-            # Do not accept an API that merely returns False or an unscoped
-            # truthy Boolean instead of raising on lost exclusive authority.
-            if result is False:
-                raise NamespaceCustodyUnavailable("SEC-12: namespace custody revoked")
+            # Successful assertions return only None. Booleans, status values
+            # and evidence records are not a verified assertion of custody.
+            if result is not None:
+                raise NamespaceCustodyUnavailable(
+                    "SEC-12: invalid namespace custody assertion result"
+                )
     except (OSError, PermissionError) as exc:
         raise NamespaceCustodyUnavailable(
             "SEC-12: namespace custody unavailable at mutation boundary"

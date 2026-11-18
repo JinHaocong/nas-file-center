@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { plansApi } from '../../api/domain';
 import { getStructuredApiError } from '../../api/errors';
 import { useTitle } from '../../hooks/useTitle';
@@ -32,9 +32,12 @@ const operations: readonly { op: BatchMode; title: string; detail: string }[] = 
 export const BatchPage: React.FC = () => {
   useTitle('批量处理');
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const toast = useConsoleToast();
   const [name, setName] = useState('批量处理');
-  const [operation, setOperation] = useState<BatchMode>('quarantine');
+  const [operation, setOperation] = useState<BatchMode>(() =>
+    searchParams.get('operation') === 'semantic-media-organize' || searchParams.has('execution')
+      ? 'semantic-media-organize' : 'quarantine');
   const [paths, setPaths] = useState<string[]>([]);
   const [mappingsText, setMappingsText] = useState('');
   const [planLoading, setPlanLoading] = useState(false);
@@ -42,6 +45,12 @@ export const BatchPage: React.FC = () => {
   const mountedRef = useRef(true);
   const planGuard = useRef(false);
   const planMutation = useMutation({ mutationFn: plansApi.createPlan });
+
+  useEffect(() => {
+    if (searchParams.get('operation') === 'semantic-media-organize' || searchParams.has('execution')) {
+      setOperation('semantic-media-organize');
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -78,6 +87,15 @@ export const BatchPage: React.FC = () => {
   const onOperationChange = (next: BatchMode) => {
     if (planGuard.current) return;
     setOperation(next);
+    setSearchParams(current => {
+      const params = new URLSearchParams(current);
+      if (next === 'semantic-media-organize') params.set('operation', next);
+      else {
+        params.delete('operation');
+        params.delete('execution');
+      }
+      return params;
+    }, { replace: true });
     setValidationError('');
   };
   const onPathsChange = (next: string | string[]) => {
@@ -96,7 +114,7 @@ export const BatchPage: React.FC = () => {
            : operation === 'media_package-organize'
              ? '只读扫描 MediaPackage/年月/日期/作者/资源包，并展示固定 200 文件分组和冲突。'
              : operation === 'semantic-media-organize'
-               ? '递归识别作品边界，预览编号、P/V 分桶和异常；当前只读，不执行文件操作。'
+               ? '递归识别作品边界，预览编号与 P/V 分组；已确认任务可继续查看执行、独立清理与恢复。'
                : '选择操作类型并明确输入源路径/映射。这里创建 Plan，不会立即执行文件系统变更。'}
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
         <div className="nfc-batch-form nfc-v2-batch-form">

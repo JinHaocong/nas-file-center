@@ -169,3 +169,66 @@ synthetic tmp_path tests inject it for end-to-end verification. Interrupted
 cleanup needs a distinct explicit recovery workflow before release, and all
 host NAS writer exclusions, independent review and same-mount acceptance
 remain outstanding.
+
+## Continuation — 2026-11-19: explicit cleanup recovery
+
+Baseline verified from GitHub: `0d325393fe21a797ef98b770d0a72613b23b8beb`.
+The preceding commit's three lease failures reproduce locally; the existing
+same-owner correction passes all six cleanup-job tests. Continue Task 3 using
+the existing frozen plan and journal, without changing namespace authorization.
+
+- [x] Verify a different Worker is refused while the lease is fresh, takes over
+  only after expiry, and fences the previous Worker before cleanup or status writes.
+- [x] Add separately confirmed `POST /api/media-organizer/cleanups/{job_id}/recover`
+  for a failed cleanup. Bind approval to that attempt, original frozen unit and
+  immutable plan. Queue a new WorkJob; never delete or read the Worker-private
+  progress journal in the API process. Keep automatic retry/resume disabled.
+- [x] Validate the complete remaining journal inventory before recording another
+  BEGIN: all pending parents retain their original identity, completed names stay
+  absent, and unbegun names remain present. Refuse out-of-range journal events.
+- [x] Recover source-unlink, final-stage and database-commit crash windows; verify
+  original finalized status only after durable journal completion and zero rescan.
+- [x] Verify idempotent requests/execution, revoked proof, changed frozen state,
+  foreign replacements, symmetric publication/cleanup exclusion and lease loss.
+- [x] Run isolated rule acceptance with exact paths, counts, bytes and SHA-256,
+  then focused and full regressions and independent code review before one grouped push.
+
+Ruling: the API verifies immutable approval and queues recovery; only the Worker
+reconciles its private 0600 journal. This preserves the distinct-UID evidence
+boundary. A queued recovery never means that partially cleaned media passed audit.
+Use the fresh isolated checkout of the existing feature branch; no production
+media, permissions, custody issuer, execution defaults or PR readiness change.
+
+The read-only review now exposes the distinct cleanup confirmation; execution
+status exposes the current cleanup attempt and its bound recovery confirmation.
+The UI provides paginated review, explicit cleanup/recovery approval and polling
+of the independent cleanup job. Task details link back to an execution-bound URL;
+refreshing or returning later restores authenticated cleanup/recovery state without
+requiring a new preview. Partial cleanup is described accurately in the UI.
+Task-history removal dismisses organizer records
+without deleting frozen authority or predecessor links. Private progress journals
+pin the report parent and journal inode, validate the exact previously read chain
+and tail before append/replay, and reject replacements or non-regular entries.
+
+Verification before the final combined review: the legacy lease defect reproduced
+as 3 failures / 3 passes, while the verified baseline passed all 6 cleanup tests.
+New recovery, replay, journal-binding, custody-return and history tests each had
+observed RED failures before implementation. Latest focused backend/compatibility
+run passed 423 tests, with 4 Docker Compose checks skipped because the local CLI
+is absent and 4 existing 7zip-filtered cases. The final whole-project run passed
+2648 tests with 38 skips (4 missing 7-Zip, 4 missing Docker Compose, 30 existing
+deferred legacy purge release cases). A subsequent observed RED durability test
+proved that replay of a pending deletion must fsync its parent before writing
+DONE; the fix passed all 45 replay, journal-binding and actual-finalization tests.
+The frontend focused command passed 19 tests; its full main compiled suite passed
+1260 tests, typecheck and production build passed. A separate code-review agent
+found no remaining Critical or Important findings in this delta, after the durable
+route handoff and pending-deletion directory flush were corrected. This is not
+external NAS safety approval or physical power-loss verification.
+
+The rule matrix contains 15 complete successful scenarios and one explicit
+safe-refusal regression. **Same-named canonical old-group reuse remains unsupported**:
+an existing canonical P group plus a new video still fails before mutation.
+This is a remaining completeness blocker, not a successfully organized scenario.
+Actual NAS custody/content-writer exclusion, configuration migration and backup,
+disposable SATA acceptance and external review are still required before release.

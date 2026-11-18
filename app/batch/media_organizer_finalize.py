@@ -1,4 +1,4 @@
-"""Crash-resumable V1.6 *real* cleanup engine, NOT YET A PRODUCTION ENDPOINT.
+"""Crash-resumable V1.6 cleanup engine with a fail-closed production issuer.
 
 Unlike the read-only audit and cleanup plan this module actually unlinks
 frozen original/stage hardlinks and rmdirs emptied classification wrappers.
@@ -8,13 +8,15 @@ a WorkJob lease or an ordinary inode recheck is NOT such a provider.
 
 The injected provider is used only in disposable synthetic acceptance until
 the NAS filesystem/ACL and concurrent writer threat model has independently
-proven enforceable custody. No API/Worker route calls this function.
+proven enforceable custody. The separately confirmed cleanup Worker calls
+this engine; the HTTP API only queues that work and never performs cleanup.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 import stat
 from typing import Callable, Protocol
@@ -24,12 +26,13 @@ from app.batch.media_organizer_cleanup_audit import audit_deferred_cleanup_inven
 from app.batch.media_organizer_cleanup_plan import (
     _read_existing, cleanup_plan_path,
 )
+from app.batch.media_organizer_custody import assert_exclusive_custody
 from app.batch.media_organizer_manifest import (
     _checksum, load_frozen_preview_manifest,
 )
 from app.batch.media_organizer_planner import _check_scope, preview_semantic_unit
 from app.batch.media_organizer_publish import _group_receipts
-from app.batch.media_organizer_stage import _authority
+from app.batch.media_organizer_stage import _authority, _assert_private_stage_fd
 
 _MAX_JOURNAL_BYTES = 16 * 1024 * 1024
 _OWNER = ".nfc-stage-authority"
@@ -130,22 +133,133 @@ def _line(previous: str, event: dict) -> tuple[bytes, str]:
     return _canonical({**event, "chain_sha256": signature}) + b"\n", signature
 
 
-def _load_journal(path: Path, header: dict, operation_count: int) -> tuple[str, int, int | None, bool]:
-    """Return (chain,last_finished,pending,finalized); check chained sequence."""
-    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+@dataclass
+class _JournalBinding:
+    """Keep both inodes pinned for this invocation; never adopt a replacement."""
+    path: Path
+    parent_fd: int
+    journal_fd: int
+    parent_identity: tuple[int, int]
+    journal_identity: tuple[int, int]
+
+    def close(self) -> None:
+        for field in ("journal_fd", "parent_fd"):
+            descriptor = getattr(self, field, -1)
+            setattr(self, field, -1)
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+    def __del__(self):
+        # Helpers are also used for read-only journal checks. Their last
+        # cursor releasing the binding must not leave pinned descriptors.
+        self.close()
+
+
+@dataclass(frozen=True)
+class _JournalCursor:
+    binding: _JournalBinding
+    chain: str
+    contents: bytes
+
+
+def _inode(info) -> tuple[int, int]:
+    return int(info.st_dev), int(info.st_ino)
+
+
+def _open_bound_journal(path: Path, *, create: bool = False) -> _JournalBinding:
     parent_fd = _open_directory_nofollow(path.parent)
+    fd = None
     try:
-        fd = os.open(path.name, flags, dir_fd=parent_fd)
-        with os.fdopen(fd, "rb") as stream:
-            info = os.fstat(stream.fileno())
-            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-                    or not 1 <= info.st_size <= _MAX_JOURNAL_BYTES
-                    or info.st_uid != os.geteuid()
-                    or stat.S_IMODE(info.st_mode) != 0o600):
-                raise CleanupExecutionBlocked("private cleanup progress journal is untrusted")
-            lines = stream.readlines()
-    finally:
+        flags = os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0) | os.O_NONBLOCK
+        flags |= (os.O_RDWR | os.O_CREAT | os.O_EXCL) if create else os.O_RDONLY
+        fd = os.open(path.name, flags, 0o600, dir_fd=parent_fd)
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or info.st_uid != os.geteuid()):
+            raise CleanupExecutionBlocked("private cleanup progress journal is untrusted")
+        if create:
+            # Only the inode just created with O_EXCL, never an existing file.
+            os.fchmod(fd, 0o600)
+        binding = _JournalBinding(
+            Path(path), parent_fd, fd, _inode(os.fstat(parent_fd)), _inode(info),
+        )
+    except BaseException:
+        if fd is not None:
+            os.close(fd)
         os.close(parent_fd)
+        raise
+    try:
+        _assert_journal_binding(binding)
+        return binding
+    except BaseException:
+        binding.close()
+        raise
+
+
+def _assert_journal_binding(binding: _JournalBinding, fd: int | None = None) -> None:
+    if binding.parent_fd < 0 or binding.journal_fd < 0:
+        raise CleanupExecutionBlocked("cleanup journal binding is closed")
+    opened = os.fstat(binding.journal_fd if fd is None else fd)
+    if (not stat.S_ISREG(opened.st_mode)
+            or _inode(opened) != binding.journal_identity
+            or opened.st_nlink != 1 or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != 0o600):
+        raise CleanupExecutionBlocked("cleanup journal inode or permissions changed")
+    # Rewalk every parent component without following symlinks, then compare
+    # against the pinned parent. A moved journal in a cloned parent is unsafe.
+    named_parent = _open_directory_nofollow(binding.path.parent)
+    try:
+        if (_inode(os.fstat(named_parent)) != binding.parent_identity
+                or _inode(os.fstat(binding.parent_fd)) != binding.parent_identity):
+            raise CleanupExecutionBlocked("cleanup journal parent binding changed")
+    finally:
+        os.close(named_parent)
+    named = _entry(binding.parent_fd, binding.path.name)
+    if (named is None or not stat.S_ISREG(named.st_mode)
+            or _inode(named) != binding.journal_identity):
+        raise CleanupExecutionBlocked("cleanup journal basename was replaced")
+
+
+def _read_bound_journal(binding: _JournalBinding, fd: int | None = None) -> bytes:
+    _assert_journal_binding(binding, fd)
+    descriptor = binding.journal_fd if fd is None else fd
+    before = os.fstat(descriptor)
+    if not 0 <= before.st_size <= _MAX_JOURNAL_BYTES:
+        raise CleanupExecutionBlocked("cleanup journal size limit exceeded")
+    raw = os.pread(descriptor, _MAX_JOURNAL_BYTES + 1, 0)
+    after = os.fstat(descriptor)
+    if (len(raw) != before.st_size or
+            (after.st_size, after.st_mtime_ns, after.st_ctime_ns) !=
+            (before.st_size, before.st_mtime_ns, before.st_ctime_ns)):
+        raise CleanupExecutionBlocked("cleanup journal changed while being read")
+    _assert_journal_binding(binding, fd)
+    return raw
+
+
+def _assert_journal_cursor(path: Path, cursor: _JournalCursor) -> None:
+    if not isinstance(cursor, _JournalCursor) or Path(path) != cursor.binding.path:
+        raise CleanupExecutionBlocked("bound cleanup journal authority required")
+    if _read_bound_journal(cursor.binding) != cursor.contents:
+        raise CleanupExecutionBlocked("cleanup journal contents or current tail changed")
+
+
+def _load_journal(path: Path, header: dict, operation_count: int) -> tuple[_JournalCursor, int, int | None, bool]:
+    """Return (bound cursor,last_finished,pending,finalized); check sequence."""
+    binding = _open_bound_journal(path)
+    try:
+        raw = _read_bound_journal(binding)
+        previous, completed, pending, finished = _parse_journal(raw, header, operation_count)
+        return _JournalCursor(binding, previous, raw), completed, pending, finished
+    except BaseException:
+        binding.close()
+        raise
+
+
+def _parse_journal(raw: bytes, header: dict, operation_count: int) -> tuple[str, int, int | None, bool]:
+    lines = raw.splitlines(keepends=True)
     previous = "0" * 64
     completed = 0
     pending = None
@@ -166,6 +280,13 @@ def _load_journal(path: Path, header: dict, operation_count: int) -> tuple[str, 
         if digest != expected:
             raise CleanupExecutionBlocked("cleanup progress journal hash chain changed")
         previous = expected
+        if index and record.get("kind") in ("begin", "done"):
+            step = record.get("index")
+            if type(step) is not int or not 0 <= step < operation_count:
+                raise CleanupExecutionBlocked("cleanup journal operation index is invalid")
+        if (index and record.get("kind") == "finalized"
+                and type(record.get("count")) is not int):
+            raise CleanupExecutionBlocked("cleanup journal operation count is invalid")
         if index == 0:
             if record != header:
                 raise CleanupExecutionBlocked("cleanup journal does not bind frozen plan")
@@ -182,50 +303,46 @@ def _load_journal(path: Path, header: dict, operation_count: int) -> tuple[str, 
     return previous, completed, pending, finished
 
 
-def _append(path: Path, previous: str, event: dict) -> str:
-    line, chained = _line(previous, event)
+def _append(path: Path, previous: _JournalCursor, event: dict) -> _JournalCursor:
+    _assert_journal_cursor(path, previous)
+    line, chained = _line(previous.chain, event)
+    binding = previous.binding
     fd = os.open(
-        path, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW |
-        getattr(os, "O_CLOEXEC", 0),
+        path.name, os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK |
+        getattr(os, "O_CLOEXEC", 0), dir_fd=binding.parent_fd,
     )
     try:
-        info = os.fstat(fd)
-        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-                or info.st_uid != os.geteuid()
-                or stat.S_IMODE(info.st_mode) != 0o600):
-            raise CleanupExecutionBlocked("cleanup journal changed during append")
-        if info.st_size + len(line) > _MAX_JOURNAL_BYTES:
+        if _read_bound_journal(binding, fd) != previous.contents:
+            raise CleanupExecutionBlocked("cleanup journal changed before append")
+        expected = previous.contents + line
+        if len(expected) > _MAX_JOURNAL_BYTES:
             raise CleanupExecutionBlocked("cleanup journal size limit exceeded")
         written = os.write(fd, line)
         if written != len(line):
             raise CleanupExecutionBlocked("partial cleanup journal write; manual review")
         os.fsync(fd)
+        if _read_bound_journal(binding, fd) != expected:
+            raise CleanupExecutionBlocked("cleanup journal changed during append")
     finally:
         os.close(fd)
-    return chained
+    return _JournalCursor(binding, chained, expected)
 
 
-def _new_journal(path: Path, header: dict) -> str:
+def _new_journal(path: Path, header: dict) -> _JournalCursor:
     line, digest = _line("0" * 64, header)
-    folder_fd = _open_directory_nofollow(path.parent)
+    binding = _open_bound_journal(path, create=True)
     try:
-        fd = os.open(
-            path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-            0o600, dir_fd=folder_fd,
-        )
-        with os.fdopen(fd, "wb") as stream:
-            st = os.fstat(stream.fileno())
-            if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
-                    or st.st_nlink != 1):
-                raise CleanupExecutionBlocked("new progress journal ownership unsafe")
-            os.fchmod(stream.fileno(), 0o600)
-            stream.write(line)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.fsync(folder_fd)
-    finally:
-        os.close(folder_fd)
-    return digest
+        _assert_journal_binding(binding)
+        if os.write(binding.journal_fd, line) != len(line):
+            raise CleanupExecutionBlocked("partial cleanup journal header; manual review")
+        os.fsync(binding.journal_fd)
+        os.fsync(binding.parent_fd)
+        if _read_bound_journal(binding) != line:
+            raise CleanupExecutionBlocked("cleanup journal header changed during creation")
+        return _JournalCursor(binding, digest, line)
+    except BaseException:
+        binding.close()
+        raise
 
 
 def _entry(parent_fd: int, name: str):
@@ -314,6 +431,84 @@ def _verify_marker(parent_fd: int, name: str, authority: bytes) -> None:
             raise CleanupExecutionBlocked("completion marker witness changed")
 
 
+def _check_replay_inventory(
+    manifest: dict, ops: list[dict], *, completed: int, pending: int | None,
+    witness: bytes, receipts: dict[str, tuple[int, int]],
+) -> None:
+    """Validate the entire retained inventory before extending journal authority.
+
+    A failed validation must never create BEGIN for an already missing name.
+    Parent bindings and later operations are checked before any earlier unlink,
+    so foreign replacement wrappers/stages cannot donate matching hardlinks.
+    """
+    unit = Path(manifest["unit"])
+    _check_public(manifest, receipts)
+    _check_direct_unrecognized(manifest)
+    present: set[Path] = set()
+    directories: dict[Path, tuple[tuple[int, int], str]] = {
+        unit / name: (identity, "group") for name, identity in receipts.items()
+    }
+    for index, op in enumerate(ops):
+        path = Path(op["path"])
+        if not path.is_relative_to(unit) or path == unit or ".." in path.parts:
+            raise CleanupExecutionBlocked("cleanup operation escaped frozen unit")
+        parent_fd = None
+        try:
+            try:
+                parent_fd = _open_directory_nofollow(path.parent)
+                info = _entry(parent_fd, path.name)
+            except FileNotFoundError:
+                info = None
+            if index < completed:
+                if info is not None:
+                    raise CleanupExecutionBlocked("completed cleanup pathname was replaced")
+                continue
+            if info is None:
+                if index == pending:
+                    continue
+                raise CleanupExecutionBlocked("source vanished without cleanup journal")
+            present.add(path)
+            kind = op["kind"]
+            if kind in ("original", "stage-link"):
+                if not _file_matches(info, op["identity"]):
+                    raise CleanupExecutionBlocked("frozen source identity changed")
+            elif kind in ("wrapper", "stage-directory"):
+                if (not stat.S_ISDIR(info.st_mode)
+                        or [int(info.st_dev), int(info.st_ino)] != op["identity"]):
+                    raise CleanupExecutionBlocked("cleanup directory identity changed")
+                directories[path] = (tuple(op["identity"]), kind)
+            elif kind in ("group-marker", "stage-marker"):
+                if not stat.S_ISREG(info.st_mode):
+                    raise CleanupExecutionBlocked("untrusted completion marker")
+                _verify_marker(parent_fd, path.name, witness)
+            else:
+                raise CleanupExecutionBlocked("unknown cleanup operation")
+        finally:
+            if parent_fd is not None:
+                os.close(parent_fd)
+
+    # A retained wrapper or stage may still contain authorized earlier steps;
+    # it need not be empty yet. Every *other* child still blocks all cleanup.
+    retained = present | {Path(row["final"]) for row in manifest["moves"]}
+    expected_children: dict[Path, set[str]] = {}
+    for path in retained:
+        expected_children.setdefault(path.parent, set()).add(path.name)
+    for directory, (identity, kind) in directories.items():
+        fd = _open_directory_nofollow(directory)
+        try:
+            info = (_assert_private_stage_fd(fd) if kind == "stage-directory"
+                    else os.fstat(fd))
+            if (not stat.S_ISDIR(info.st_mode)
+                    or (int(info.st_dev), int(info.st_ino)) != identity):
+                raise CleanupExecutionBlocked("cleanup parent directory changed")
+            with os.scandir(fd) as entries:
+                actual = {entry.name for entry in entries}
+            if actual != expected_children.get(directory, set()):
+                raise CleanupExecutionBlocked("unrecognized retained cleanup entry")
+        finally:
+            os.close(fd)
+
+
 def _mutate_one(op: dict, *, previously_begun: bool,
                 custody: ExclusiveNamespaceCustody, witness: bytes,
                 manifest: dict, receipts: dict[str, tuple[int, int]]) -> None:
@@ -321,7 +516,7 @@ def _mutate_one(op: dict, *, previously_begun: bool,
     kind = op["kind"]
     if not path.is_relative_to(Path(manifest["unit"])):
         raise CleanupExecutionBlocked("cleanup mutation escaped frozen unit")
-    custody.assert_exclusive(path.parent)
+    assert_exclusive_custody(custody, (path.parent,))
     parent_fd = _open_directory_nofollow(path.parent)
     try:
         info = _entry(parent_fd, path.name)
@@ -329,6 +524,9 @@ def _mutate_one(op: dict, *, previously_begun: bool,
             if previously_begun:
                 # Crash between unlink/rmdir and durable DONE. Missing name is
                 # reconciled ONLY with a durable, chained BEGIN record.
+                # The old Worker may have died before flushing the deletion.
+                # Make its absence durable before recovery can append DONE.
+                os.fsync(parent_fd)
                 return
             raise CleanupExecutionBlocked("source vanished without cleanup journal")
         if kind in ("original", "stage-link"):
@@ -343,7 +541,7 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                 os.close(final_fd)
             # A named unlink cannot atomically compare inode. This is allowed
             # solely INSIDE the externally established exclusive namespace.
-            custody.assert_exclusive(path.parent)
+            assert_exclusive_custody(custody, (path.parent,))
             if not _file_matches(_entry(parent_fd, path.name), op["identity"]):
                 raise CleanupExecutionBlocked("source identity changed at mutation boundary")
             os.unlink(path.name, dir_fd=parent_fd)
@@ -364,7 +562,7 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                         raise CleanupExecutionBlocked("cleanup directory not empty")
             finally:
                 os.close(directory_fd)
-            custody.assert_exclusive(path.parent)
+            assert_exclusive_custody(custody, (path.parent,))
             bound = _entry(parent_fd, path.name)
             if bound is None or [int(bound.st_dev), int(bound.st_ino)] != op["identity"]:
                 raise CleanupExecutionBlocked("cleanup directory rebound")
@@ -384,7 +582,7 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                 if (int(opened_fd.st_dev), int(opened_fd.st_ino)) != binding:
                     raise CleanupExecutionBlocked("public group binding changed")
             _verify_marker(parent_fd, path.name, witness)
-            custody.assert_exclusive(path.parent)
+            assert_exclusive_custody(custody, (path.parent,))
             _verify_marker(parent_fd, path.name, witness)
             os.unlink(path.name, dir_fd=parent_fd)
         else:
@@ -421,8 +619,8 @@ def finish_deferred_cleanup(
 ) -> dict:
     """Execute real cleanup ONLY with separate approval and external custody.
 
-    There is intentionally NO production caller/issuer for namespace custody.
-    Testing code may inject a fixture that has exclusive control of tmp_path.
+    The cleanup Worker calls this only after acquiring a custody grant, whose
+    production issuer still refuses. Tests inject control of a private tmp_path.
     """
     if custody is None or not callable(getattr(custody, "assert_exclusive", None)):
         raise CleanupExecutionBlocked("verified exclusive namespace custody required")
@@ -430,6 +628,7 @@ def finish_deferred_cleanup(
         raise CleanupExecutionBlocked("invalid test interruption callback")
     if os.geteuid() == 0:
         raise CleanupExecutionBlocked("dedicated non-root Worker required for cleanup")
+    chain = None
     try:
         unit = Path(manifest["unit"])
         frozen = Path(frozen_manifest_path)
@@ -449,8 +648,8 @@ def finish_deferred_cleanup(
                 manifest["job_id"], str(unit), plan["plan_sha256"]):
             raise CleanupExecutionBlocked("exact separate cleanup confirmation required")
         for op in ops:
-            custody.assert_exclusive(Path(op["path"]).parent)
-        custody.assert_exclusive(unit)
+            assert_exclusive_custody(custody, (Path(op["path"]).parent,))
+        assert_exclusive_custody(custody, (unit,))
         receipts = _group_receipts(manifest, frozen)
         path = _journal_path(frozen)
         header = {
@@ -474,6 +673,7 @@ def finish_deferred_cleanup(
             _check_direct_unrecognized(manifest)
             _check_public(manifest, receipts)
             try:
+                assert_exclusive_custody(custody, (unit,))
                 chain = _new_journal(path, header)
             except FileExistsError as exc:
                 raise CleanupExecutionBlocked("cleanup journal appeared during preflight") from exc
@@ -484,16 +684,22 @@ def finish_deferred_cleanup(
             chain, completed, pending, finished = _load_journal(
                 path, header, len(ops),
             )
-        _check_public(manifest, receipts)
-        _check_direct_unrecognized(manifest)
         witness = _authority(manifest)
+        _check_replay_inventory(
+            manifest, ops, completed=completed, pending=pending,
+            witness=witness, receipts=receipts,
+        )
         for i, op in enumerate(ops):
             if i < completed:
                 if os.path.lexists(op["path"]):
                     raise CleanupExecutionBlocked("completed cleanup pathname was replaced")
                 continue
             if pending != i:
+                assert_exclusive_custody(custody, (unit,))
                 chain = _append(path, chain, {"kind": "begin", "index": i})
+            # A replayed BEGIN must still refer to this exact private journal;
+            # it must not skip evidence validation merely because it is durable.
+            _assert_journal_cursor(path, chain)
             _mutate_one(
                 op, previously_begun=(pending == i),
                 custody=custody, witness=witness,
@@ -501,6 +707,7 @@ def finish_deferred_cleanup(
             )
             if after_mutation is not None:
                 after_mutation(i)
+            assert_exclusive_custody(custody, (unit,))
             chain = _append(path, chain, {"kind": "done", "index": i})
             pending = None
         # No staging/old wrappers remain. The second scan must now find the
@@ -508,6 +715,8 @@ def finish_deferred_cleanup(
         scanned = _verify_finished_scan(
             manifest, frozen, [Path(p) for p in allowed_roots], quarantine_root,
         )
+        assert_exclusive_custody(custody, (unit,))
+        _assert_journal_cursor(path, chain)
         if not finished:
             _append(path, chain, {"kind": "finalized", "count": len(ops)})
         return {
@@ -530,3 +739,6 @@ def finish_deferred_cleanup(
         raise CleanupExecutionBlocked(
             f"frozen cleanup proof failed or namespace changed: {exc}"
         ) from exc
+    finally:
+        if isinstance(chain, _JournalCursor):
+            chain.binding.close()

@@ -12,6 +12,7 @@ on:
       - 'app/api/router.py'
       - 'app/service.py'
       - 'app/tasks/handlers_base.py'
+      - 'app/tasks/service.py'
       - 'tests/test_archive_recovery_*.py'
       - 'scripts/test_v16_shared_secret_tmpfs_docker.sh'
       - 'scripts/test_v16_media_bind_mount_boundary.sh'
@@ -23,7 +24,11 @@ on:
       - 'frontend/src/pages/Batch/index.tsx'
       - 'frontend/src/pages/Batch/SemanticMediaOrganizerEditor.tsx'
       - 'frontend/src/api/media_organizer.ts'
+      - 'frontend/src/components/tasks/TaskDetailDrawer.tsx'
       - 'frontend/tests/media_organizer_preview.test.ts'
+      - 'frontend/tests/media_organizer_cleanup.test.ts'
+      - 'frontend/tests/media_organizer_resume.test.tsx'
+      - 'frontend/scripts/run-tests.mjs'
       - 'frontend/tests/quarantine_worker_mutation.test.ts'
       - 'tests/test_media_organizer_*.py'
       - '.github/workflows/media-organizer-v16-tdd.yml'
@@ -84,9 +89,15 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
-      - name: Read-only preview UI behavior contracts
+      - name: Preview and confirmed cleanup UI behavior contracts
         working-directory: frontend
-        run: node --experimental-strip-types --test tests/media_organizer_preview.test.ts tests/quarantine_worker_mutation.test.ts
+        run: |
+          ./node_modules/.bin/tsc --outDir /tmp/nfc-media-ui-tests \
+            --module commonjs --target es2022 --moduleResolution node --esModuleInterop \
+            --skipLibCheck --jsx react-jsx tests/media_organizer_preview.test.ts \
+            tests/media_organizer_cleanup.test.ts tests/media_organizer_resume.test.tsx \
+            tests/quarantine_worker_mutation.test.ts
+          NODE_PATH="$PWD/node_modules" node --test /tmp/nfc-media-ui-tests/tests/*.test.js
       - name: Typecheck frontend
         working-directory: frontend
         run: npm run typecheck

@@ -43,6 +43,7 @@ from app.tasks.context import JobContext
 from app.tasks.handlers_base import TaskHandler, register_handler
 
 EXECUTE_KIND = "media-organizer-execute"
+MUTATION_KINDS = (EXECUTE_KIND, "media-organizer-cleanup")
 ACTIVE = ("queued", "running", "paused", "cancel_requested")
 MAX_REPORT_UNITS_FOR_EXECUTION = 5000
 
@@ -206,7 +207,7 @@ def enqueue_media_organizer_execution(
                 return {"job_id": int(old.id), "status": old.status}
             raise ValueError("prior execution failed; explicit recovery is required")
         active = session.scalar(select(WorkJob.id).where(
-            WorkJob.kind == EXECUTE_KIND,
+            WorkJob.kind.in_(MUTATION_KINDS),
             WorkJob.status.in_(ACTIVE),
         ).limit(1))
         if active is not None:
@@ -226,21 +227,57 @@ def enqueue_media_organizer_execution(
         return {"job_id": int(job.id), "status": job.status}
 
 
-def get_media_organizer_execution(session_factory, job_id: int) -> dict:
+def get_media_organizer_execution(
+    session_factory, job_id: int, *, settings: Settings | None = None,
+) -> dict:
+    from app.batch.media_organizer_cleanup_jobs import (
+        CLEANUP_KIND, cleanup_recovery_confirmation,
+    )
+    execution_enabled = False
+    if settings is not None:
+        try:
+            _require_enabled(settings)
+        except ValueError:
+            pass
+        else:
+            execution_enabled = True
     with session_factory() as session:
         job = session.get(WorkJob, job_id)
         if job is None or job.kind != EXECUTE_KIND:
             raise KeyError(job_id)
         state = json.loads(job.state_json or "{}")
         checkpoint = json.loads(job.checkpoint_json or "{}")
+        cleanup = session.scalar(select(WorkJob).where(
+            WorkJob.kind == CLEANUP_KIND,
+            func.json_extract(WorkJob.state_json, "$.execution_job_id") == job_id,
+        ).order_by(WorkJob.id.desc()).limit(1))
+        cleanup_status = None
+        if cleanup is not None:
+            cleanup_state = json.loads(cleanup.state_json or "{}")
+            recovery_confirmation = None
+            if (cleanup.status == "failed" and isinstance(cleanup_state, dict)
+                    and cleanup_state.get("unit") == state.get("unit")
+                    and type(cleanup_state.get("frozen_job_id")) is int
+                    and cleanup_state["frozen_job_id"] == checkpoint.get("frozen_job_id")):
+                recovery_confirmation = cleanup_recovery_confirmation(
+                    int(cleanup.id), cleanup_state["frozen_job_id"],
+                    cleanup_state["unit"], cleanup_state.get("plan_sha256"),
+                )
+            cleanup_status = {
+                "job_id": int(cleanup.id), "status": cleanup.status,
+                "error": cleanup.error_text,
+                "recovery_confirmation": recovery_confirmation,
+            }
         return {
             "job_id": int(job.id), "status": job.status,
+            "execution_enabled": execution_enabled,
             "error": job.error_text,
             "preview_job_id": state.get("preview_job_id"),
             "unit": state.get("unit"),
             "recovery_of_job_id": state.get("recovery_of_job_id"),
             "manual_cleanup_required": checkpoint.get("phase") == "manual_cleanup_required",
             "finalized": checkpoint.get("phase") == "completed",
+            "cleanup": cleanup_status,
             "progress": {
                 "current": int(job.progress_current or 0),
                 "total": int(job.progress_total or 0),
@@ -322,6 +359,7 @@ def get_media_organizer_cleanup_plan(
     if (not isinstance(page, int) or page < 1
             or not isinstance(page_size, int) or not 1 <= page_size <= 100):
         raise ValueError("invalid cleanup plan pagination")
+    from app.batch.media_organizer_finalize import cleanup_confirmation
     audit = get_media_organizer_cleanup_audit(session_factory, settings, job_id)
     frozen_id = int(audit["job_id"])
     path = _manifest_file(settings, frozen_id)
@@ -335,6 +373,7 @@ def get_media_organizer_cleanup_plan(
         "reviewed_execution_job_id": job_id,
         "unit": plan["unit"],
         "plan_sha256": plan["plan_sha256"],
+        "confirmation": cleanup_confirmation(frozen_id, plan["unit"], plan["plan_sha256"]),
         "manifest_checksum": plan["manifest_checksum"],
         "plan_kind": "review_only",
         "page": page,
@@ -423,7 +462,7 @@ def enqueue_media_organizer_recovery(
         finally:
             os.close(fd)
         active = session.scalar(select(WorkJob.id).where(
-            WorkJob.kind == EXECUTE_KIND, WorkJob.status.in_(ACTIVE),
+            WorkJob.kind.in_(MUTATION_KINDS), WorkJob.status.in_(ACTIVE),
         ).limit(1))
         if active is not None:
             raise ValueError("another semantic execution is active")
