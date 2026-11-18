@@ -64,6 +64,27 @@ def _acquire_lease(service: FileCenterService, worker_id: str):
         session.commit()
 
 
+def _run_worker_job(
+    service: FileCenterService,
+    settings: Settings,
+    job_id: int,
+    worker_id: str,
+):
+    _acquire_lease(service, worker_id)
+    with service.SessionLocal() as session:
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        job.status = "running"
+        session.commit()
+        context = JobContext(service.engine, service.SessionLocal, job.id, worker_id=worker_id)
+        handler = get_handler(job.kind)
+        assert handler is not None
+        handler.run(job, context, settings)
+        job.status = "completed"
+        job.finished_at = utcnow()
+        session.commit()
+
+
 def test_undo_plan_generation_and_execution_restores_files(tmp_path: Path):
     client, service, settings, data_dir, trash_dir = _setup_app_and_service(tmp_path)
     file1 = data_dir / "orig1.txt"
@@ -256,9 +277,12 @@ def test_quarantine_restore_records_operation_journal(tmp_path: Path):
         assert q_entry is not None
         eid = q_entry.id
 
-    # Restore via API
+    # Restore via API; the filesystem mutation is owned by the Worker.
     rest_resp = client.post(f"/api/quarantine/{eid}/restore", json={"conflict_policy": "rename"})
-    assert rest_resp.status_code == 200, rest_resp.text
+    assert rest_resp.status_code == 202, rest_resp.text
+    restore_job_id = int(rest_resp.json()["work_job_id"])
+    _run_worker_job(service, settings, restore_job_id, "worker-quarantine-restore")
+    assert file_q.exists()
 
     # Verify OperationJournal has a 'restore' entry
     with service.SessionLocal() as session:
