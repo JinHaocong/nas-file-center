@@ -432,8 +432,9 @@ def test_transactional_single_purge_api_only_enqueues_worker_and_preserves_paylo
             anchor = entry_attempt / "anchor"
             captured = entry_attempt / "captured_source"
             entry.authoritative_anchor_path = str(anchor)
-        public_view = trash / f"single-purge.q-{entry_id}.bin"
-        public_view.rename(public_view)
+        final_public_view = trash / f"single-purge.q-{entry_id}.bin"
+        public_view.rename(final_public_view)
+        public_view = final_public_view
         entry.quarantine_path = str(public_view)
         session.commit()
 
