@@ -62,3 +62,61 @@ def test_worker_refuses_selection_inside_excluded_directory_name(tmp_path):
     with pytest.raises(ValueError, match="excluded|protected"):
         _validate_selection(str(blocked), settings)
     assert (blocked / "private.jpg").is_file()
+
+
+def test_worker_persists_and_pages_the_complete_mapping_for_a_ready_unit(tmp_path):
+    from app.batch.media_organizer_jobs import (
+        MediaOrganizerPreviewHandler, get_media_organizer_mapping,
+        mapping_report_root, report_files,
+    )
+    from app.batch.media_organizer_jobs import PREVIEW_KIND
+
+    root, settings, job = setup(tmp_path)
+    work = root / "author" / "NO.003"
+    for index in range(37):
+        item(work / f"photo-{index:03d}.jpg")
+
+    ctx = FakeContext()
+    MediaOrganizerPreviewHandler().run(job, ctx, settings)
+    data, summary = report_files(settings, int(job.id))
+    records = [json.loads(line) for line in data.read_text(encoding="utf-8").splitlines()]
+    record = next(row for row in records if row["unit"] == str(work))
+    assert record["total_proposals"] == 37
+    assert len(record["sample_moves"]) == 10
+    assert record["truncated"] is True
+    assert len(record["mapping_id"]) == 64
+
+    mapping_root = mapping_report_root(settings, int(job.id))
+    assert mapping_root.is_dir()
+    assert mapping_root.stat().st_mode & 0o777 == 0o700
+    assert (mapping_root / f"{record['mapping_id']}.jsonl").is_file()
+
+    class Session:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return None
+        def get(self, _model, _job_id):
+            return SimpleNamespace(kind=PREVIEW_KIND, status="completed")
+
+    def factory():
+        return Session()
+
+    first = get_media_organizer_mapping(
+        factory, settings, int(job.id), record["mapping_id"],
+        page=1, page_size=10,
+    )
+    second = get_media_organizer_mapping(
+        factory, settings, int(job.id), record["mapping_id"],
+        page=2, page_size=10,
+    )
+    last = get_media_organizer_mapping(
+        factory, settings, int(job.id), record["mapping_id"],
+        page=4, page_size=10,
+    )
+    assert first["total_moves"] == second["total_moves"] == last["total_moves"] == 37
+    assert len(first["moves"]) == len(second["moves"]) == 10
+    assert len(last["moves"]) == 7
+    assert first["moves"][0]["target_name"] == "001.jpg"
+    assert last["moves"][-1]["target_name"] == "037.jpg"
+    assert all("identity" not in row for row in first["moves"] + last["moves"])
