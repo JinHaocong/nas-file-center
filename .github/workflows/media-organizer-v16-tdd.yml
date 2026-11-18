@@ -12,6 +12,7 @@ on:
       - 'frontend/src/pages/Batch/SemanticMediaOrganizerEditor.tsx'
       - 'frontend/src/api/media_organizer.ts'
       - 'frontend/tests/media_organizer_preview.test.ts'
+      - 'frontend/tests/quarantine_worker_mutation.test.ts'
       - 'tests/test_media_organizer_*.py'
       - '.github/workflows/media-organizer-v16-tdd.yml'
   workflow_dispatch:
@@ -57,7 +58,7 @@ jobs:
         working-directory: frontend
       - name: Read-only preview UI behavior contracts
         working-directory: frontend
-        run: node --experimental-strip-types --test tests/media_organizer_preview.test.ts
+        run: node --experimental-strip-types --test tests/media_organizer_preview.test.ts tests/quarantine_worker_mutation.test.ts
       - name: Typecheck frontend
         working-directory: frontend
         run: npm run typecheck
