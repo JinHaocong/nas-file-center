@@ -28,6 +28,9 @@ from app.batch.media_organizer_manifest import (
 from app.batch.media_organizer_stage import stage_frozen_sources
 from app.batch.media_organizer_publish import publish_frozen_stage
 from app.batch.media_organizer_retire import retire_published_stage
+from app.batch.media_organizer_deferred_cleanup import (
+    validate_deferred_publication, record_deferred_cleanup_evidence,
+)
 from app.config import Settings
 from app.models import WorkJob
 from app.tasks.context import JobContext
@@ -213,6 +216,8 @@ def get_media_organizer_execution(session_factory, job_id: int) -> dict:
             "preview_job_id": state.get("preview_job_id"),
             "unit": state.get("unit"),
             "recovery_of_job_id": state.get("recovery_of_job_id"),
+            "manual_cleanup_required": checkpoint.get("phase") == "manual_cleanup_required",
+            "finalized": checkpoint.get("phase") == "completed",
             "progress": {
                 "current": int(job.progress_current or 0),
                 "total": int(job.progress_total or 0),
@@ -379,6 +384,10 @@ class MediaOrganizerExecuteHandler(TaskHandler):
                 quarantine_root=settings.quarantine_root, job_id=frozen_job_id,
                 exclude_dir_names=_excluded_names(settings),
             )
+            manifest["cleanup_policy"] = "deferred"
+            # A same-named old media bucket cannot be replaced without
+            # deleting the original directory. Reject BEFORE touching files.
+            validate_deferred_publication(manifest)
             folder.mkdir(parents=True, exist_ok=True, mode=0o700)
             fence()
             save_frozen_preview_manifest(manifest_path, manifest)
@@ -386,6 +395,7 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             manifest = load_frozen_preview_manifest(
                 manifest_path, job_id=frozen_job_id, unit=unit,
             )
+        validate_deferred_publication(manifest)
         checkpoint(1, "frozen", "冻结清单已经验证")
         if phase != "published":
             # An interruption in staging or publication retains all private
@@ -405,16 +415,20 @@ class MediaOrganizerExecuteHandler(TaskHandler):
                 allowed_roots=settings.allowed_roots,
                 quarantine_root=settings.quarantine_root, lease_fence=fence,
                 resume=original_id is not None,
+                defer_directory_cleanup=True,
             )
-        # Retirement may have already removed one or more staged hardlinks.
+        # The safe execution path never removes original classification
+        # wrappers, private staged hardlinks or recovery witnesses.
         # Its durable marker, not the source layout, governs continuation:
         # never attempt restaging after the original job reached published.
-        checkpoint(3, "published", "已验证发布阶段，准备核验并移除暂存链接")
+        checkpoint(3, "published", "已发布文件，正在核验人工清理凭证")
         fence()
-        retire_published_stage(
+        record_deferred_cleanup_evidence(
             manifest, frozen_manifest_path=manifest_path,
             allowed_roots=settings.allowed_roots,
             quarantine_root=settings.quarantine_root, lease_fence=fence,
-            resume=original_id is not None,
         )
-        checkpoint(4, "completed", "已完成执行并核对目标结构")
+        checkpoint(
+            4, "manual_cleanup_required",
+            "媒体文件已发布；旧分类目录和暂存文件已保留，等待人工核查清理",
+        )
