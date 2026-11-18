@@ -436,7 +436,7 @@ def test_worker_requires_manual_cleanup_without_deleting_old_wrapper_or_stage(
     assert result["progress"]["phase"] == "manual_cleanup_required"
     assert result["finalized"] is False
     assert (work / "P1").is_dir()
-    assert list((work / "P1").iterdir()) == []
+    assert (work / "P1" / "second.jpg").read_bytes() == b"second-image"
     stage = work / f".nfc-media-organizer-stage-{job_id}"
     assert stage.is_dir()
     assert (stage / ".nfc-stage-authority").is_file()
@@ -445,7 +445,7 @@ def test_worker_requires_manual_cleanup_without_deleting_old_wrapper_or_stage(
     assert (report / "manifest.json.manual-cleanup.json").is_file()
     assert any(group.name.startswith("P [") and list(group.glob("*.jpg"))
                for group in work.iterdir() if group.is_dir())
-    assert (work / "photo.jpg").exists() is False
+    assert (work / "photo.jpg").read_bytes() == b"photo-1"
 
 
 def test_worker_refuses_unsafe_same_named_old_bucket_before_staging_anything(tmp_path):

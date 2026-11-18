@@ -23,7 +23,7 @@ from app.batch.media_organizer_publish import (
 )
 from app.batch.media_organizer_retire import _verify_public
 from app.batch.media_organizer_stage import (
-    StagingConflict, _authority, _inspect_stage,
+    StagingConflict, _authority, _inspect_stage, _check_identity,
 )
 
 
@@ -38,7 +38,14 @@ def validate_deferred_publication(manifest: dict) -> None:
     unit = Path(manifest.get("unit", ""))
     if not unit.is_absolute():
         raise DeferredCleanupConflict("organizing unit must be absolute")
-    _validate_shape(manifest, unit)
+    rows, _ = _validate_shape(manifest, unit)
+    # Retained original source names may occupy flat final targets. Under
+    # deferred no-delete semantics, publishing into such names is forbidden.
+    retained = {str(row["source"]).casefold() for row in rows}
+    if any(str(row["final"]).casefold() in retained for row in rows):
+        raise DeferredCleanupConflict(
+            "retained original source would occupy a final target"
+        )
     old_directories = manifest.get("wrapper_identities")
     groups = manifest.get("groups")
     if not isinstance(old_directories, dict) or not isinstance(groups, list):
@@ -147,18 +154,40 @@ def record_deferred_cleanup_evidence(
             unit, manifest, rows, groups, _authority(manifest),
             require_witness=True, group_bindings=group_bindings,
         )
-        # Every old media-classification wrapper must still be at its
-        # frozen inode and empty; never rename or delete it here.
+        # Current V1.6 custody retains ALL original source names: verify each
+        # still resolves to the same frozen inode before recording the handoff.
+        for row in rows:
+            original = Path(row["source"])
+            parent_fd = _open_directory_nofollow(original.parent)
+            try:
+                source_info = os.stat(
+                    original.name, dir_fd=parent_fd, follow_symlinks=False,
+                )
+                _check_identity(source_info, row["identity"], original)
+            finally:
+                os.close(parent_fd)
+        # Every old wrapper must retain exactly its original frozen children,
+        # including nested original wrappers. Never demand it be empty.
         for literal, identity in manifest["wrapper_identities"].items():
             directory = Path(literal)
+            expected_names = set()
+            for row in rows:
+                original = Path(row["source"])
+                if original.is_relative_to(directory):
+                    expected_names.add(original.relative_to(directory).parts[0])
+            for nested_literal in manifest["wrapper_identities"]:
+                nested = Path(nested_literal)
+                if nested != directory and nested.is_relative_to(directory):
+                    expected_names.add(nested.relative_to(directory).parts[0])
             fd = _open_directory_nofollow(directory)
             try:
                 st = os.fstat(fd)
                 if [int(st.st_dev), int(st.st_ino)] != identity:
                     raise DeferredCleanupConflict("old wrapper identity changed")
                 with os.scandir(fd) as scan:
-                    if next(scan, None) is not None:
-                        raise DeferredCleanupConflict("old wrapper is not empty")
+                    observed = {entry.name for entry in scan}
+                if observed != expected_names:
+                    raise DeferredCleanupConflict("old wrapper differs from retained original layout")
             finally:
                 os.close(fd)
         _check_unit(unit, manifest, lease_fence)
@@ -173,6 +202,7 @@ def record_deferred_cleanup_evidence(
             "stage_directory": str(stage),
             "stage_identity": [int(stat_stage.st_dev), int(stat_stage.st_ino)],
             "staged_links_retained": len(rows),
+            "original_sources_retained": len(rows),
             "files_published": len(rows),
             "old_wrapper_identities": manifest["wrapper_identities"],
             "public_group_identities": {
@@ -188,6 +218,7 @@ def record_deferred_cleanup_evidence(
             "files_published": len(rows),
             "old_wrapper_count": len(manifest["wrapper_identities"]),
             "staged_links_retained": len(rows),
+            "original_sources_retained": len(rows),
             "manual_cleanup_record": str(_report_path(frozen_path)),
         }
     except (OSError, KeyError, TypeError, ValueError, FrozenPreviewError,

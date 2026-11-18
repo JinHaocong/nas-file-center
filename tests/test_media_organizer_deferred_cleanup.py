@@ -56,7 +56,8 @@ def test_deferred_publication_preserves_old_empty_wrapper_and_stage_payloads(tmp
     work, manifest, frozen = prepare(tmp_path, old_wrapper=True)
     execute_deferred(tmp_path, manifest, frozen)
     assert (work / "P1").is_dir()
-    assert list((work / "P1").iterdir()) == []
+    assert [p.name for p in (work / "P1").iterdir()] == ["a.jpg"]
+    assert (work / "P1" / "a.jpg").read_bytes() == b"image"
     assert all(Path(row["final"]).read_bytes() in (b"image", b"video")
                for row in manifest["moves"])
     assert all(Path(row["target"]).is_file() for row in manifest["moves"])

@@ -29,6 +29,7 @@ from app.batch.media_organizer_stage import (
 )
 from app.batch.media_organizer_planner import _check_scope
 from app.fs_ops import rename_noreplace_at
+from app.batch.media_organizer_fd_link import link_pinned_inode_noreplace
 
 _PUBLIC_OWNER = ".nfc-publish-owner"
 _PUBLIC_COMPLETE = ".nfc-publish-complete"
@@ -508,10 +509,12 @@ def _assert_public_group_binding(unit: Path, group: Path, group_fd: int,
 def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
               manifest: dict, fence: Callable[[], None], resume: bool,
               group_bindings: dict[str, tuple[int, int]]) -> bool:
+    """Link the frozen OPEN staged inode; never resolve its raced source basename."""
     source_name = Path(row["target"]).name
     dest = Path(row["final"])
     stage_fd = _open_directory_nofollow(stage)
     target_fd = _open_directory_nofollow(dest.parent)
+    source_file_fd = None
     try:
         if (int(os.fstat(stage_fd).st_dev) != manifest["unit_dev"]
                 or int(os.fstat(target_fd).st_dev) != manifest["unit_dev"]):
@@ -525,6 +528,16 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
             )
         source_stat = _entry(stage_fd, source_name)
         _check_identity(source_stat, row["identity"], stage / source_name)
+        # Open and verify the actual file FD before the LAST basename check.
+        source_file_fd = os.open(
+            source_name, os.O_RDONLY | os.O_NOFOLLOW |
+            getattr(os, "O_CLOEXEC", 0), dir_fd=stage_fd,
+        )
+        opened = os.fstat(source_file_fd)
+        if (not stat.S_ISREG(opened.st_mode) or
+                [int(opened.st_dev), int(opened.st_ino),
+                 int(opened.st_size), int(opened.st_mtime_ns)] != row["identity"]):
+            raise PublishingConflict("opened staged inode changed since freeze")
         already = _entry(target_fd, dest.name)
         if already is not None:
             if not resume:
@@ -539,11 +552,13 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
             )
         _check_identity(_entry(stage_fd, source_name), row["identity"], stage / source_name)
         try:
-            os.link(source_name, dest.name,
-                    src_dir_fd=stage_fd, dst_dir_fd=target_fd, follow_symlinks=False)
+            # Linux linkat(AT_EMPTY_PATH) is exclusive and source-fd bound.
+            # No os.link(source_name) fallback can operate on a replacement.
+            link_pinned_inode_noreplace(source_file_fd, target_fd, dest.name)
         except FileExistsError as exc:
             raise PublishingConflict("foreign public target raced with publication") from exc
         _check_identity(_entry(target_fd, dest.name), row["identity"], dest)
+        _check_identity(_entry(stage_fd, source_name), row["identity"], stage / source_name)
         if dest.parent != unit:
             _assert_public_group_binding(
                 unit, dest.parent, target_fd, witness,
@@ -552,6 +567,8 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
         os.fsync(target_fd)
         return True
     finally:
+        if source_file_fd is not None:
+            os.close(source_file_fd)
         os.close(target_fd)
         os.close(stage_fd)
 

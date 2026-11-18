@@ -1,8 +1,9 @@
 """Frozen-file staging with exclusive custody and fail-closed reconciliation.
 
 The guarded execution Worker calls this module only after immutable freeze.
-Staged files are moved to a private, verified workspace; no directory or
-staged-link deletion occurs here. Cleanup is deferred for current V1.6 jobs.
+In deferred V1.6 jobs the stage is an exclusive inode-bound hardlink; the
+original source pathname is never renamed or unlinked. Legacy synthetic code
+paths retain historical behavior, but are never called by the V1.6 Worker.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from typing import Callable
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_package_execution import MediaPackageExecutionConflict
 from app.fs_ops import rename_noreplace_at
+from app.batch.media_organizer_fd_link import link_pinned_inode_noreplace
 from app.batch.media_organizer_execution import (
     _absolute_literal, validate_execution_preflight,
     ExecutionPreflightError,
@@ -78,7 +80,7 @@ def _read_marker(stage_fd: int, name: str, expected: bytes) -> bool:
 
 def _move_one(move: dict, *, lease_fence: Callable[[], None],
               ignore_final: bool, stage_binding: tuple[int, int],
-              stage_witness: bytes) -> str:
+              stage_witness: bytes, preserve_source: bool = False) -> str:
     """Use a PINNED verified private directory FD for the actual mutation.
 
     The existing generic file mover reopens its destination pathname inside
@@ -107,35 +109,62 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None],
                     if not _read_marker(stage_fd, _OWNER, stage_witness):
                         raise StagingConflict("private staging owner witness is missing")
 
-                check_stage_binding()
-                _check_identity(_entry(src_fd, src.name), identity, src)
-                if _entry(stage_fd, target.name) is not None:
-                    raise StagingConflict("private stage target unexpectedly occupied")
-                if int(os.fstat(stage_fd).st_dev) != identity[0]:
-                    raise StagingConflict("cross-filesystem stage refused")
-                lease_fence()
-                check_stage_binding()
-                _check_identity(_entry(src_fd, src.name), identity, src)
+                source_file_fd = None
                 try:
-                    rename_noreplace_at(src_fd, src.name, stage_fd, target.name)
-                except OSError as exc:
-                    if exc.errno != errno.EOPNOTSUPP:
-                        raise
-                    # Only use the no-overwrite same-filesystem hardlink
-                    # fallback. An interruption yielding two pathnames is
-                    # intentionally blocked on resume, never unlinked blindly.
-                    os.link(src.name, target.name, src_dir_fd=src_fd,
-                            dst_dir_fd=stage_fd, follow_symlinks=False)
-                    _check_identity(_entry(stage_fd, target.name), identity, target)
+                    check_stage_binding()
                     _check_identity(_entry(src_fd, src.name), identity, src)
+                    if _entry(stage_fd, target.name) is not None:
+                        raise StagingConflict("private stage target unexpectedly occupied")
+                    if int(os.fstat(stage_fd).st_dev) != identity[0]:
+                        raise StagingConflict("cross-filesystem stage refused")
+                    if preserve_source:
+                        # The FD is pinned BEFORE the last name check. A writer
+                        # replacing src.name cannot redirect the following link.
+                        source_file_fd = os.open(
+                            src.name, os.O_RDONLY | os.O_NOFOLLOW |
+                            getattr(os, "O_CLOEXEC", 0), dir_fd=src_fd,
+                        )
+                        opened = os.fstat(source_file_fd)
+                        if (not stat.S_ISREG(opened.st_mode) or
+                                [int(opened.st_dev), int(opened.st_ino),
+                                 int(opened.st_size), int(opened.st_mtime_ns)] != identity):
+                            raise StagingConflict("opened source inode changed since freeze")
                     lease_fence()
                     check_stage_binding()
-                    os.unlink(src.name, dir_fd=src_fd)
-                _check_identity(_entry(stage_fd, target.name), identity, target)
-                check_stage_binding()
-                os.fsync(stage_fd)
-                os.fsync(src_fd)
-                return "moved"
+                    _check_identity(_entry(src_fd, src.name), identity, src)
+                    if preserve_source:
+                        # No source rename and NO source unlink. Retain the
+                        # original name until independently audited cleanup.
+                        link_pinned_inode_noreplace(
+                            source_file_fd, stage_fd, target.name,
+                        )
+                    else:
+                        # Historical synthetic legacy path only. The production
+                        # Worker MUST stamp cleanup_policy=deferred.
+                        try:
+                            rename_noreplace_at(src_fd, src.name, stage_fd, target.name)
+                        except OSError as exc:
+                            if exc.errno != errno.EOPNOTSUPP:
+                                raise
+                            os.link(src.name, target.name, src_dir_fd=src_fd,
+                                    dst_dir_fd=stage_fd, follow_symlinks=False)
+                            _check_identity(_entry(stage_fd, target.name), identity, target)
+                            _check_identity(_entry(src_fd, src.name), identity, src)
+                            lease_fence()
+                            check_stage_binding()
+                            os.unlink(src.name, dir_fd=src_fd)
+                    _check_identity(_entry(stage_fd, target.name), identity, target)
+                    if preserve_source:
+                        # Postcheck diagnoses an adversarial swap; the new
+                        # staged hardlink still points to our pinned inode.
+                        _check_identity(_entry(src_fd, src.name), identity, src)
+                    check_stage_binding()
+                    os.fsync(stage_fd)
+                    os.fsync(src_fd)
+                    return "linked" if preserve_source else "moved"
+                finally:
+                    if source_file_fd is not None:
+                        os.close(source_file_fd)
             finally:
                 os.close(unit_fd)
         finally:
@@ -308,6 +337,7 @@ def stage_frozen_sources(
                 os.close(fd)
             lease_fence()
 
+        preserve_source = manifest.get("cleanup_policy") == "deferred"
         staged = reconciled = 0
         for row in moves:
             guard()
@@ -317,9 +347,15 @@ def stage_frozen_sources(
             source_stat = os.lstat(source) if os.path.lexists(source) else None
             if stage_stat is not None:
                 _check_identity(stage_stat, row["identity"], target)
-                if source_stat is not None:
-                    # Could be an interrupted hardlink fallback. Without a
-                    # persisted per-file witness we cannot unlink either name.
+                if preserve_source:
+                    # V1.6 preserves the original on purpose. Both names MUST
+                    # still refer to the frozen inode, not two arbitrary files.
+                    _check_identity(source_stat, row["identity"], source)
+                    if (int(source_stat.st_dev), int(source_stat.st_ino)) != (
+                            int(stage_stat.st_dev), int(stage_stat.st_ino)):
+                        raise StagingConflict("retained source and stage inode differ")
+                elif source_stat is not None:
+                    # Historical rename-fallback duplicates need manual review.
                     raise StagingConflict("source and staged file both exist; manual review")
                 reconciled += 1
             else:
@@ -327,8 +363,9 @@ def stage_frozen_sources(
                 outcome = _move_one(
                     row, lease_fence=guard, ignore_final=True,
                     stage_binding=stage_binding, stage_witness=expected,
+                    preserve_source=preserve_source,
                 )
-                if outcome != "moved":
+                if outcome != ("linked" if preserve_source else "moved"):
                     raise StagingConflict("unexpected staging reconciliation state")
                 staged += 1
 
