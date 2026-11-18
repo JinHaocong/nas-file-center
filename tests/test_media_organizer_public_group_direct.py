@@ -123,3 +123,63 @@ def test_deferred_grouped_publication_uses_direct_group_creation_in_synthetic_cu
         assert publishing._owned_public(directory, _authority(manifest))
         assert directory.is_dir()
     assert not list((unit / manifest["stage_directory"]).glob(".nfc-publish-pending-*"))
+
+
+def test_direct_group_recovery_with_existing_valid_inode_receipt(tmp_path, monkeypatch):
+    """Crash just after group provisioning may resume with its original receipt."""
+    from app.batch import media_organizer_deferred_cleanup as guard
+
+    unit, manifest, frozen = _prepare(tmp_path)
+    first_group = manifest["groups"][0]["name"]
+    publishing._create_public_group_direct(
+        unit, first_group, manifest, _authority(manifest), lambda: None,
+        frozen_manifest_path=frozen,
+    )
+    monkeypatch.setattr(guard, "validate_deferred_publication", lambda _m: None)
+
+    def never_rename(*_args, **_kwargs):
+        raise AssertionError("unexpected source-directory rename during recovery")
+
+    monkeypatch.setattr(publishing, "rename_noreplace_at", never_rename)
+    result = publishing.publish_frozen_stage(
+        manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
+        lease_fence=lambda: None, defer_directory_cleanup=True, resume=True,
+    )
+    assert result["file_count"] == len(manifest["moves"])
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
+    assert all(Path(row["source"]).is_file() for row in manifest["moves"])
+
+
+def test_direct_group_rejects_replaced_public_name_after_inode_bound(
+    tmp_path, monkeypatch,
+):
+    """A raced public basename cannot become the directory behind our receipt."""
+    import os
+
+    unit, manifest, frozen = _prepare(tmp_path)
+    name = manifest["groups"][0]["name"]
+    expected = unit / name
+    detached = unit / "detached-public-owner-for-audit"
+    original_write_receipt = publishing._write_group_receipt
+    swapped = []
+
+    def replace_name_after_receipt(*args, **kwargs):
+        result = original_write_receipt(*args, **kwargs)
+        if not swapped:
+            expected.rename(detached)
+            expected.mkdir()
+            (expected / "foreign.txt").write_bytes(b"foreign-stays")
+            swapped.append(True)
+        return result
+
+    monkeypatch.setattr(publishing, "_write_group_receipt", replace_name_after_receipt)
+    with pytest.raises(publishing.PublishingConflict, match="binding|identity"):
+        publishing._create_public_group_direct(
+            unit, name, manifest, _authority(manifest), lambda: None,
+            frozen_manifest_path=frozen,
+        )
+    assert swapped
+    assert (expected / "foreign.txt").read_bytes() == b"foreign-stays"
+    assert detached.is_dir()
+    assert publishing._owned_public(detached, _authority(manifest))
+    assert not (detached / "foreign.txt").exists()
