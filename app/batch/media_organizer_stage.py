@@ -1,9 +1,8 @@
 """Frozen-file staging with exclusive custody and fail-closed reconciliation.
 
-This module is deliberately NOT registered as a Worker execute handler.
-A future executor must publish staged files with crash-safe no-replace rules.
-The only filesystem mutations in this slice are within an explicitly frozen
-organizing unit: exclusive private workspace creation and staging its sources.
+The guarded execution Worker calls this module only after immutable freeze.
+Staged files are moved to a private, verified workspace; no directory or
+staged-link deletion occurs here. Cleanup is deferred for current V1.6 jobs.
 """
 from __future__ import annotations
 
