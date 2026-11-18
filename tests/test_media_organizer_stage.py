@@ -1,4 +1,5 @@
 """Synthetic staging TDD: frozen custody, no replacement, and interruption recovery."""
+import os
 from pathlib import Path
 
 import pytest
@@ -179,5 +180,43 @@ def test_staging_rejects_empty_replacement_with_forged_owner_marker(tmp_path, mo
     with pytest.raises(StagingConflict, match="stage|workspace|identity|binding"):
         stage(manifest, frozen, tmp_path)
     assert injected
+    assert all(Path(row["source"]).is_file() for row in manifest["moves"])
+    assert all(not Path(row["target"]).exists() for row in manifest["moves"])
+
+
+def test_resume_refuses_widened_stage_permissions_without_touching_files(tmp_path):
+    """A witnessed inode is not safe custody when private stage becomes 0777."""
+    unit, manifest, frozen = fixture(tmp_path)
+    stage(manifest, frozen, tmp_path)
+    private = unit / manifest["stage_directory"]
+    old_names = {str(m["target"]): Path(m["target"]).read_bytes() for m in manifest["moves"]}
+    private.chmod(0o777)
+    with pytest.raises(StagingConflict, match="stage|private|permission|owner"):
+        stage(manifest, frozen, tmp_path, resume=True)
+    assert {str(m["target"]): Path(m["target"]).read_bytes()
+            for m in manifest["moves"]} == old_names
+
+
+def test_stage_rejects_permission_relaxation_before_first_source_mutation(
+    tmp_path, monkeypatch,
+):
+    """Inject chmod after owner witness fsync but before first stage operation."""
+    from app.batch import media_organizer_stage as staging
+
+    unit, manifest, frozen = fixture(tmp_path)
+    original = staging._write_marker
+    widened = []
+
+    def widen_after_witness(stage_fd, name, witness):
+        result = original(stage_fd, name, witness)
+        if name == ".nfc-stage-authority":
+            os.fchmod(stage_fd, 0o777)
+            widened.append(True)
+        return result
+
+    monkeypatch.setattr(staging, "_write_marker", widen_after_witness)
+    with pytest.raises(StagingConflict, match="stage|private|permission|owner"):
+        stage(manifest, frozen, tmp_path)
+    assert widened, "permission fault injection was not executed"
     assert all(Path(row["source"]).is_file() for row in manifest["moves"])
     assert all(not Path(row["target"]).exists() for row in manifest["moves"])

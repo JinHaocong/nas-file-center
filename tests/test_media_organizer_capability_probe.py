@@ -100,3 +100,41 @@ def test_missing_pinned_inode_link_is_not_mistaken_for_ordinary_hardlink_support
     assert report["cleanup_complete"] is True
     assert original.read_bytes() == b"keep-me"
     assert list(tmp_path.iterdir()) == [original]
+
+
+def test_probe_distinguishes_basic_filesystem_support_from_grouped_security(tmp_path):
+    """A successful NOREPLACE probe MUST NOT promise safe source-dir promotion."""
+    report = probe_semantic_organizer_mount(tmp_path)
+    assert report["compatible"] is True
+    assert report["flat_filesystem_capabilities_compatible"] is True
+    assert report["private_stage_owner_verified"] is True
+    assert report["private_stage_mode_verified"] is True
+    assert report["grouped_promotion_proven"] is False
+    assert report["grouped_publication_authorized"] is False
+    assert report["namespace_exclusive_custody_proven"] is False
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_probe_rejects_widened_private_stage_even_with_noreplace(tmp_path, monkeypatch):
+    """Mode-0777 stage cannot count as private, even if rename/link work."""
+    import os
+    from app.batch import media_organizer_capability_probe as probe_module
+
+    original_mkdir = probe_module.os.mkdir
+    widened = []
+
+    def widen_stage_after_creation(path, *args, **kwargs):
+        result = original_mkdir(path, *args, **kwargs)
+        if path == "stage" and kwargs.get("dir_fd") is not None:
+            os.chmod(path, 0o777, dir_fd=kwargs["dir_fd"])
+            widened.append(True)
+        return result
+
+    monkeypatch.setattr(probe_module.os, "mkdir", widen_stage_after_creation)
+    report = probe_semantic_organizer_mount(tmp_path)
+    assert widened
+    assert report["private_stage_mode_verified"] is False
+    assert report["compatible"] is False
+    assert report["grouped_publication_authorized"] is False
+    assert report["cleanup_complete"] is True
+    assert list(tmp_path.iterdir()) == []
