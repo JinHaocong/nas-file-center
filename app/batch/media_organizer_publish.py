@@ -727,9 +727,22 @@ def publish_frozen_stage(
                     raise PublishingConflict("foreign group cannot be adopted without resume")
                 _inspect_existing_group(folder, part, witness, require_owner=True)
             else:
-                _create_public_group(unit, name, manifest, witness, lease_fence,
-                                     resume=resume,
-                                     frozen_manifest_path=Path(frozen_manifest_path))
+                if defer_directory_cleanup:
+                    # Future grouped Worker path: never rename a private group
+                    # source pathname. The SEC-12 custody gate above still
+                    # refuses grouped production execution until the OS
+                    # namespace boundary is independently proven.
+                    _create_public_group_direct(
+                        unit, name, manifest, witness, lease_fence,
+                        frozen_manifest_path=Path(frozen_manifest_path),
+                    )
+                else:
+                    # Historical non-deferred synthetic library path only.
+                    _create_public_group(
+                        unit, name, manifest, witness, lease_fence,
+                        resume=resume,
+                        frozen_manifest_path=Path(frozen_manifest_path),
+                    )
         group_bindings = _group_receipts(manifest, Path(frozen_manifest_path))
         published = reconciled = 0
         for row in rows:
