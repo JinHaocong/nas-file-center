@@ -5,14 +5,24 @@
 ## Verified library order
 
 1. Review the independent organizing-unit preview; require status ready, actual P/V/Other counts/bytes and a stable source-to-target map.
-2. Build a complete frozen manifest from a fresh scan, storing it as a checksum-protected, exclusive, private file. Retain source file identities and the device/inode binding of every old classification directory the plan may retire.
+2. Build a complete frozen manifest from a fresh scan, storing it as a checksum-protected, exclusive, private file. The Worker sets `cleanup_policy=deferred`; old classification directory identities are retained as evidence, **not** as automatic deletion authority.
 3. Use an administrator-only API to queue **one named organizing unit** from a completed, conflict-free preview, after typing the exact unit-bound confirmation token. Require MEDIA_ORGANIZER_EXECUTION_ENABLED, ALLOW_MUTATION and ALLOW_DELETE **plus** MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK. The independent execution and namespace flags default to false. The Worker independently checks all permissions and requires an exclusive lease. The namespace flag is only an operator acknowledgement of externally established isolation; it does NOT create filesystem exclusion or solve an uncooperative writer race.
 4. **validate_execution_preflight:** re-check unit identity, source rows, target occupancy, classification grouping and frozen values.
 5. **stage_frozen_sources:** create an exclusive private staging directory with an owner witness and stage every frozen file through no-replace moves. Resume only with the same immutable manifest and lease; never adopt an unknown staged directory.
-6. **publish_frozen_stage:** verify all staged entries; retire only original empty classification wrappers by frozen device/inode identity. Prepare each P/V/Other directory with its owner witness INSIDE the verified private stage, and durably write a separate 0600 private group identity receipt (manifest checksum, group ordinal/name and original directory dev/inode) BEFORE atomic no-replace promotion. Resume requires that exact receipt; copied owner markers alone cannot authorize adopting another directory. Every public hardlink rechecks its original group inode receipt, ownership and directory binding. On interruption, prove already published identities before continuing missing entries.
-7. **retire_published_stage:** verify every public output AND every public GROUP's original private inode receipt before removing staged hardlinks or public witnesses; copied owner markers and copied/hardlinked media in a foreign directory do not suffice. Persist retirement intent; unlink only staged links proven to have exact published counterparts; durably save an independent private stage-retirement receipt (manifest checksum plus stage device/inode) before removing the final in-stage witness. After safely retiring the empty staging directory, re-scan to confirm already_organized and zero changes.
+6. **publish_frozen_stage (deferred mode):** verify all staged entries and **NEVER rename or delete any old classification wrapper**. If an already-named historical P/V group occupies a proposed final group name, fail before the first source move; do not remove the original group. Prepare new P/V/Other folders privately with an owner witness and 0600 inode receipt before atomic NOREPLACE promotion. The published media links are checked against original stage and public-group identities.
+7. **record_deferred_cleanup_evidence (production Worker path):** verify every final media file, public-group inode receipt, untouched old wrapper directory, and retained private staging inode/file links. Write an immutable 0600 manual-cleanup record in the private report directory. The WorkJob ends with checkpoint phase `manual_cleanup_required`, **not** finalized; do not call `retire_published_stage`, remove stage hardlinks/markers, or run `rmdir`/old-wrapper rename. A fresh read-only preview can report `blocked` due to the deliberately retained private stage. Manual inspection and separately approved cleanup are required before claiming zero-change idempotency.
 
 The new code is now wired into dedicated execution and manual recovery WorkJobs plus a gated Batch UI. Production NAS use remains prohibited until the release gates below are met. **No automatic batch-wide execution:** each request authorizes a single ready organizing unit, and any blocked unit in the original preview disallows execution. All tests use disposable synthetic directories.
+
+## Deferred cleanup disposition (current safe WorkJob)
+
+- The supported Worker now **only publishes final media and records a manual cleanup handoff**. It retains every staged hardlink, owner marker, old classification directory and private inode receipt.
+- No user-facing automatic directory cleanup endpoint is registered. The legacy library-level `retire_published_stage` and `_retire_wrappers` code remain for isolated historical tests but are **not invoked by the V1.6 WorkJob**. Those old paths are still considered unsafe under uncooperative concurrent writers; they must not be routed into production.
+- If an existing old classification bucket has the exact final P/V group name, `validate_deferred_publication` blocks the plan before staging. Users must resolve that conflict separately. Do not silently delete or overwrite it.
+- The manual-cleanup record is `<manifest.json>.manual-cleanup.json` inside the private execution report directory and is not a deletion command. It contains the frozen authority checksum, original wrapper identities, final group identities and counts of preserved staged media links.
+- Job `status=completed` means the **publication phase** finished, not that disk cleanup finished. Check `manual_cleanup_required=true`, `finalized=false`, and checkpoint phase `manual_cleanup_required`. The Batch UI shows a warning and does not claim a canonical zero-change rescan.
+- Safe recovery from a publish-phase interruption can re-enter this read-only handoff with the original frozen manifest. Unknown stage entries, changed identity, missing owner witness or altered private journal always block further action.
+- A future separately reviewed manual-cleanup workflow must verify directory identity and provide an independently approved plan; no cleanup operation is implemented or authorized in this PR.
 
 ## Required failure behavior
 
@@ -25,6 +35,8 @@ The new code is now wired into dedicated execution and manual recovery WorkJobs 
 - Interrupted publication retains the staged source link, and retirement never removes the last verified link.
 - **Last-marker recovery:** an empty stage after the last internal witness is deleted may be reconciled ONLY when an independently fsynced private receipt proves the original frozen manifest and the exact stage device/inode, and all published file identities are intact. Missing, tampered, or mismatched receipts require manual review. Synthetic crash tests verify this restriction; real NAS durability has not been established.
 - A fully finished second scan must show zero planned moves and zero renamed media files.
+
+**Current production Worker:** recovery to phase `published` resumes only the verified deferred cleanup record, never the old automatic retirement code. Historical library crash-recovery tests remain as synthetic evidence and do not grant NAS deployment permission.
 
 ## Assisted recovery semantics
 
@@ -102,10 +114,12 @@ relevant parent directories are enforceably excluded, including during
 recovery and cleanup. If that cannot be demonstrated, do not enable it.
 No production NAS execution is authorized by this document or by passing CI.
 
-Issue #399 remains OPEN until source-name cleanup can be guaranteed safe or
-the executor is redesigned to defer those deletions and report a manual
-cleanup state. Neither a reviewer-free self-audit nor an affirmative flag is
-proof that the race has been removed.
+The active Worker now uses deferred directory cleanup, so it no longer
+invokes the known-unsafe name-based wrapper rename / final-stage rmdir paths.
+**Issue #399 remains OPEN** for independent verification that all production
+entry points are permanently disconnected from those legacy helpers and for
+the design of separately reviewed manual cleanup. Neither a self-audit nor
+an affirmative quiescence flag proves the underlying race is removed.
 
 ## Gates before live deployment / production NAS execution
 
