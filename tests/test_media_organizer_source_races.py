@@ -150,3 +150,18 @@ def test_deferred_publication_source_swap_never_links_foreign_to_public(
     assert Path(row["source"]).read_bytes() == b"frozen-photo"
     if final.exists():
         assert final.read_bytes() == b"frozen-photo", "foreign inode was publicly linked"
+
+def test_pinned_hardlink_rejects_unsafe_destination_names(tmp_path):
+    from app.batch.media_organizer_fd_link import link_pinned_inode_noreplace
+    source = tmp_path / "original.bin"
+    source.write_bytes(b"verified")
+    src_fd = __import__("os").open(source, __import__("os").O_RDONLY)
+    folder_fd = __import__("os").open(tmp_path, __import__("os").O_RDONLY | __import__("os").O_DIRECTORY)
+    try:
+        for name in ("../escape", ".", "", "file\\x00suffix"):
+            with pytest.raises(ValueError, match="unsafe"):
+                link_pinned_inode_noreplace(src_fd, folder_fd, name)
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["original.bin"]
+    finally:
+        __import__("os").close(folder_fd)
+        __import__("os").close(src_fd)

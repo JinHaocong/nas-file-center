@@ -29,7 +29,7 @@ def link_pinned_inode_noreplace(source_fd: int, destination_dir_fd: int,
     """
     if not isinstance(destination_basename, str) or (
         destination_basename in ("", ".", "..")
-        or "/" in destination_basename or "\\u0000" in destination_basename
+        or "/" in destination_basename or "\x00" in destination_basename
     ):
         raise ValueError("unsafe destination basename for pinned hardlink")
     if not sys.platform.startswith("linux"):
