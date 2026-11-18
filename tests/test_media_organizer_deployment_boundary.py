@@ -51,7 +51,8 @@ def _assert_isolation(model: dict, *, api_name: str, worker_name: str) -> None:
     assert worker["user"] == f"{WORKER_UID}:{SHARED_GID}"
     assert API_UID != WORKER_UID
     assert _data_mount(api)["read_only"] is True
-    assert _data_mount(worker)["read_only"] is False
+    # Compose JSON omits read_only for a normal writable bind.
+    assert _data_mount(worker).get("read_only", False) is False
 
     for service in (api, worker):
         assert service["read_only"] is True, "Container root filesystem must be read-only"
