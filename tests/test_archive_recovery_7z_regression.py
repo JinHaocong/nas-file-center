@@ -284,6 +284,9 @@ def test_no_files_report_retains_deep_unsupported_reason(tmp_path, monkeypatch):
     assert report["deep_capability"] == "aes_lzma2_crc_reset"
     assert len(report["items"]) == 1
     assert source.exists()
+    persisted_state = json.loads(job.state_json)
+    assert len(persisted_state["output_identity"]) == 2
+    assert not output.exists()  # Failed empty output is removed by its owning Worker.
 
 
 
@@ -371,3 +374,8 @@ def test_limit_aborted_recovery_still_lists_unvisited_header_files(tmp_path, mon
         "reason"
     ] == "DECLARED_SIZE_MISMATCH"
     assert source.exists()
+    assert (output / "broken.bin").read_bytes() == b"some extracted bytes"
+    persisted_state = json.loads(job.state_json)
+    assert persisted_state["output_identity"] == [
+        str(output.stat().st_dev), str(output.stat().st_ino)
+    ]
