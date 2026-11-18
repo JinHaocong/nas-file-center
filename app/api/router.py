@@ -2181,7 +2181,7 @@ def delete_quarantine_record(
         raise HTTPException(400, str(exc)) from exc
 
 
-@router.post("/quarantine/{id}/purge")
+@router.post("/quarantine/{id}/purge", status_code=202)
 def purge_quarantine_entry(
     request: Request,
     id: int,
@@ -2193,6 +2193,7 @@ def purge_quarantine_entry(
             id,
             confirmation=payload.confirmation,
             is_admin=True,
+            user_id=admin_user.id,
         )
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
