@@ -237,3 +237,53 @@ def test_direct_group_rechecks_parent_mode_after_lease_fence(
         assert (unit / "movie.mp4").read_bytes() == b"movie-original"
     finally:
         unit.chmod(0o700)
+
+
+def test_direct_group_refuses_writable_parent_of_organizing_unit(tmp_path):
+    """A second writer of the unit's parent could rebind the entire unit name."""
+    import stat
+
+    unit, manifest, frozen = _prepare(tmp_path)
+    parent = unit.parent
+    original_mode = stat.S_IMODE(parent.stat().st_mode)
+    parent.chmod(0o777)
+    try:
+        with pytest.raises(publishing.PublishingConflict, match="public unit parent.*permission"):
+            publishing._create_public_group_direct(
+                unit, manifest["groups"][0]["name"], manifest,
+                _authority(manifest), lambda: None,
+                frozen_manifest_path=frozen,
+            )
+        assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
+        assert not publishing._group_receipt_path(frozen, 1).exists()
+    finally:
+        parent.chmod(original_mode)
+
+
+def test_direct_group_rechecks_unit_parent_after_fence(tmp_path):
+    """Late chmod of the unit parent must be checked before exclusive mkdir."""
+    import stat
+
+    unit, manifest, frozen = _prepare(tmp_path)
+    parent = unit.parent
+    original_mode = stat.S_IMODE(parent.stat().st_mode)
+    calls = 0
+
+    def loosen_parent():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            parent.chmod(0o777)
+
+    try:
+        with pytest.raises(publishing.PublishingConflict, match="public unit parent.*permission"):
+            publishing._create_public_group_direct(
+                unit, manifest["groups"][0]["name"], manifest,
+                _authority(manifest), loosen_parent,
+                frozen_manifest_path=frozen,
+            )
+        assert calls >= 2
+        assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
+        assert not publishing._group_receipt_path(frozen, 1).exists()
+    finally:
+        parent.chmod(original_mode)
