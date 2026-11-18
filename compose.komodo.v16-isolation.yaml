@@ -1,0 +1,28 @@
+# OPTIONAL Komodo override for compose.komodo.yaml. Do not enable on NAS
+# until operator proves UID/GID/config SQLite WAL/report and mounted-media ACLs.
+# This override is not a published V1.6 image, NAS migration, or permission fix.
+# An independent review and same-mount custody test are still required.
+services:
+  nas-file-center-api:
+    user: "${NFC_API_UID:?Set dedicated non-root API UID}:${NFC_SHARED_GID:?Set shared config/database group GID}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - "${NFC_KOMODO_DATA_DIR:?Set validated NAS data bind mount}:/data:ro"
+    environment:
+      MEDIA_ORGANIZER_EXECUTION_ENABLED: "false"
+      MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"
+
+  nas-file-center-worker:
+    user: "${NFC_WORKER_UID:?Set distinct non-root Worker UID}:${NFC_SHARED_GID:?Set shared config/database group GID}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - "${NFC_KOMODO_DATA_DIR:?Set validated NAS data bind mount}:/data:rw"
+    environment:
+      MEDIA_ORGANIZER_EXECUTION_ENABLED: "false"
+      MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"
