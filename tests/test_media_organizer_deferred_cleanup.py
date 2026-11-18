@@ -29,7 +29,7 @@ def prepare(tmp_path, *, old_wrapper=False):
         (work / "P1" / "a.jpg").write_bytes(b"image")
     else:
         (work / "a.jpg").write_bytes(b"image")
-    (work / "b.mp4").write_bytes(b"video")
+    (work / "b.png").write_bytes(b"image-two")
     preview = preview_semantic_unit(work, allowed_roots=[tmp_path])
     assert preview["status"] == "ready"
     manifest = build_frozen_preview_manifest(
@@ -59,7 +59,7 @@ def test_deferred_publication_preserves_old_empty_wrapper_and_stage_payloads(tmp
     assert (work / "P1").is_dir()
     assert [p.name for p in (work / "P1").iterdir()] == ["a.jpg"]
     assert (work / "P1" / "a.jpg").read_bytes() == b"image"
-    assert all(Path(row["final"]).read_bytes() in (b"image", b"video")
+    assert all(Path(row["final"]).read_bytes() in (b"image", b"image-two")
                for row in manifest["moves"])
     assert all(Path(row["target"]).is_file() for row in manifest["moves"])
     assert (work / manifest["stage_directory"] / ".nfc-stage-authority").is_file()
@@ -95,17 +95,19 @@ def test_manual_cleanup_evidence_is_idempotent_and_never_unlinks_staging(tmp_pat
     assert all(Path(row["final"]).is_file() for row in manifest["moves"])
 
 
-def test_replaced_public_group_blocks_deferred_evidence_without_removing_links(tmp_path):
+def test_replaced_public_file_blocks_deferred_evidence_without_removing_links(tmp_path):
     work, manifest, frozen = prepare(tmp_path)
     execute_deferred(tmp_path, manifest, frozen)
-    folder = work / manifest["groups"][0]["name"]
-    folder.rename(work / "detached-group")
-    folder.mkdir()
-    with pytest.raises(DeferredCleanupConflict, match="identity|receipt|foreign"):
+    public = Path(manifest["moves"][0]["final"])
+    public.rename(work / "detached-owned-final.jpg")
+    public.write_bytes(b"foreign")
+    with pytest.raises(DeferredCleanupConflict, match="identity|receipt|foreign|changed"):
         record_deferred_cleanup_evidence(
             manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
             lease_fence=lambda: None,
         )
+    assert public.read_bytes() == b"foreign"
+    assert all(Path(row["source"]).is_file() for row in manifest["moves"])
     assert all(Path(row["target"]).is_file() for row in manifest["moves"])
     assert not frozen.with_name(frozen.name + ".manual-cleanup.json").exists()
 

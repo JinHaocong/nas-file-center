@@ -54,6 +54,19 @@ def validate_deferred_publication(manifest: dict) -> None:
         raise DeferredCleanupConflict(
             "public group would require deleting an old classification wrapper"
         )
+    # SEC-12: a POSIX no-replace directory rename protects only the TARGET.
+    # The private pending group SOURCE can be replaced by a concurrent writer
+    # between its last dev/inode check and name-based rename. Post-checks
+    # detect a swap too late to prevent relocating that foreign directory.
+    # Until enforceable namespace custody or source-inode-bound directory
+    # publication is independently established, do not enter that path at all.
+    # This safeguard is unconditional: an operator ACK or Worker lease is NOT
+    # a substitute for a safe kernel primitive.
+    if groups:
+        raise DeferredCleanupConflict(
+            "SEC-12: grouped directory publication is held pending "
+            "audited source namespace isolation"
+        )
     # Do this before staging as well. A retained original source may
     # otherwise occupy a flat target that the prior rename-first engine freed.
     retained = {str(row["source"]).casefold() for row in rows}

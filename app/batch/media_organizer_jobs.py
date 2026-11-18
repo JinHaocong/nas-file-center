@@ -130,7 +130,7 @@ def get_media_organizer_preview(session_factory, settings: Settings, job_id: int
         from app.batch.media_organizer_execute_jobs import approval_token
         confirmation_tokens = {
             row['unit']: approval_token(job_id, row['unit'])
-            for row in units if row.get('status') == 'ready'
+            for row in units if row.get('status') == 'ready' and not row.get('groups')
         }
     return {'job_id': job_id, 'status': status, 'error': error,
             'selection': state.get('selection', ''), 'progress': progress,

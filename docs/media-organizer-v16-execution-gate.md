@@ -2,6 +2,32 @@
 
 **Status: single-unit Worker/API/UI integration exists behind an independent default-OFF feature gate. This is a Draft PR, not approved for NAS deployment.**
 
+## SEC-12 temporary execution hold — grouped P/V/Other outputs
+
+**Release blocked.** The current V1.6 Worker/API refuses **all new grouped
+output directories** before staging, including mixed P/V and >200-file groups.
+Read-only preview remains available, but the UI does not offer a confirmation
+token for those units. Only eligible **pure-media <=200 flat** plans with
+no source/final-name collisions may proceed through synthetic tests behind
+the existing default-OFF execution and namespace gates. This is a deliberate
+**loss of grouped execution functionality**, not a completed feature launch.
+
+Reason: pending-source directory promotion uses
+`rename_noreplace_at(stage_fd, pending_name, unit_fd, public_name)`. POSIX
+NOREPLACE makes the **target** collision-safe, but does NOT constrain the
+**source inode** against a concurrent writer replacing `pending_name`.
+Checking `pending_fd` or the tombstone afterward is insufficient to prevent
+moving a foreign directory. A synthetic last-check-to-rename fault injection
+demonstrated this in RED. A separate source-inode-bound directory promotion
+primitive or enforceable namespace exclusion requires independent approval
+before group execution can be reinstated.
+
+The historical library function remains only for legacy synthetic regression;
+any manifest stamped `cleanup_policy=deferred` is now rejected before that
+directory promotion. Do not bypass via an environment acknowledgement, direct
+function invocation, ad-hoc cleanup or changing the freeze manifest. #402 is
+**not closed**; this is fail-closed containment pending a functional fix.
+
 ## Verified library order
 
 1. Review the independent organizing-unit preview; require status ready, actual P/V/Other counts/bytes and a stable source-to-target map.
@@ -9,7 +35,7 @@
 3. Use an administrator-only API to queue **one named organizing unit** from a completed, conflict-free preview, after typing the exact unit-bound confirmation token. Require MEDIA_ORGANIZER_EXECUTION_ENABLED, ALLOW_MUTATION and ALLOW_DELETE **plus** MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK. The independent execution and namespace flags default to false. The Worker independently checks all permissions and requires an exclusive lease. The namespace flag is only an operator acknowledgement of externally established isolation; it does NOT create filesystem exclusion or solve an uncooperative writer race.
 4. **validate_execution_preflight:** re-check unit identity, source rows, target occupancy, classification grouping and frozen values.
 5. **stage_frozen_sources:** create an exclusive private staging directory with an owner witness and stage every frozen file by exclusive FD-bound hardlink, **retaining each original source path**. A missing Linux `linkat(AT_EMPTY_PATH)` capability fails closed, never falls back to a source-name rename/unlink. Resume only with the same immutable manifest and lease; never adopt an unknown staged directory.
-6. **publish_frozen_stage (deferred mode):** verify all staged entries and **NEVER rename or delete any old classification wrapper**. If an already-named historical P/V group occupies a proposed final group name, fail before the first source move; do not remove the original group. Prepare new P/V/Other folders privately with an owner witness and 0600 inode receipt before atomic NOREPLACE promotion. The published media links are checked against original stage and public-group identities.
+6. **publish_frozen_stage (deferred mode):** verify staged entries and **NEVER rename or delete any old classification wrapper**. **SEC-12 holds every grouped plan at API/preflight before staging.** Eligible pure-media flattening uses pinned FD hardlinks for files only, with originals retained. The historical private-folder + NOREPLACE group-promotion routine remains in the library for non-deferred regression cases but must NOT be reachable from the active V1.6 Worker.
 7. **record_deferred_cleanup_evidence (production Worker path):** verify every final media file, public-group inode receipt, untouched old wrapper directory, and retained private staging inode/file links. Write an immutable 0600 manual-cleanup record in the private report directory. The WorkJob ends with checkpoint phase `manual_cleanup_required`, **not** finalized; do not call `retire_published_stage`, remove stage hardlinks/markers, or run `rmdir`/old-wrapper rename. A fresh read-only preview can report `blocked` due to the deliberately retained private stage. Manual inspection and separately approved cleanup are required before claiming zero-change idempotency.
 
 The new code is now wired into dedicated execution and manual recovery WorkJobs plus a gated Batch UI. Production NAS use remains prohibited until the release gates below are met. **No automatic batch-wide execution:** each request authorizes a single ready organizing unit, and any blocked unit in the original preview disallows execution. All tests use disposable synthetic directories.
@@ -125,6 +151,7 @@ an affirmative quiescence flag proves the underlying race is removed.
 
 ## Gates before live deployment / production NAS execution
 
+- [ ] Independently resolve grouped source-name directory promotion risk in SEC-12 #402 (currently held before staging). Do not release full P/V/Other regrouping while this is unresolved.
 - [ ] Independently resolve the source-name cleanup race in #399, or provide a verifiable exclusive namespace mechanism. Do not treat the new acknowledgement as a fix.
 - [ ] Independent review and owner-approved NAS capability proof for the SEC-11 source-file race #401. Deferred mode now retains original source names and creates stage/public hardlinks from verified open file descriptors; non-deferred historical rename logic is NOT a production authorization.
 - [ ] Independent security review of private pending group promotion, directory rename races, destination binding checks, same-name old bucket replacement and receipt-backed stage retirement.

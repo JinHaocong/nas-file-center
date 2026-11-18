@@ -73,7 +73,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     isRunning(executionStatus?.status) || (jobId !== null && data == null);
   const summary = data?.summary;
   const readyUnit = data?.units.find(row => row.unit === selectedUnit &&
-    row.status === 'ready');
+    row.status === 'ready' && row.groups.length === 0);
   const expectedConfirmation = data?.confirmation_tokens?.[selectedUnit] || '';
   const canExecute = Boolean(data?.execution_enabled && data?.status === 'completed' &&
     summary && summary.blocked_count === 0 && readyUnit && expectedConfirmation &&
@@ -300,6 +300,12 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
         <DataPanel title="单个作品 · 安全确认执行" variant="dense"
           className="nfc-v2-batch-media-panel"
           description="每次仅处理一个已预览作品；重新校验和冻结后才允许 Worker 修改文件。">
+          {data.units.some(row => row.status === 'ready' && row.groups.length > 0) && (
+            <p className="nfc-v2-batch-error" role="status">
+              SEC-12 安全暂停：需要新建 P/V/Other 分组目录的作品暂不允许执行。
+              只读预览仍可使用；待目录发布的并发安全机制完成验收后再开放。
+            </p>
+          )}
           {!data.execution_enabled ? (
             <p className="nfc-form-note" role="status">
               当前只读。执行功能默认关闭，需要管理员在部署端审核并同时开启独立开关和文件修改权限。
@@ -323,7 +329,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                     setExecutionConfirmation('');
                   }}>
                   <option value="">请选择一个作品目录</option>
-                  {data.units.filter(x => x.status === 'ready').map(item => (
+                  {data.units.filter(x => x.status === 'ready' && x.groups.length === 0).map(item => (
                     <option value={item.unit} key={item.unit}>{item.unit}</option>
                   ))}
                 </select>

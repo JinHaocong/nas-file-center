@@ -22,7 +22,7 @@ def _frozen(tmp_path):
     work = tmp_path / "work"
     work.mkdir()
     (work / "photo.jpg").write_bytes(b"frozen-photo")
-    (work / "video.mp4").write_bytes(b"frozen-video")
+    (work / "video.png").write_bytes(b"frozen-video")
     preview = preview_semantic_unit(work, allowed_roots=[tmp_path])
     assert preview["status"] == "ready"
     manifest = build_frozen_preview_manifest(
@@ -77,7 +77,7 @@ def test_deferred_staging_never_unlinks_source_on_unsupported_rename(
         raise OSError(errno.EOPNOTSUPP, "synthetic rename unsupported")
 
     def prohibit_source_unlink(path, *args, **kwargs):
-        if kwargs.get("dir_fd") is not None and str(path) in {"photo.jpg", "video.mp4"}:
+        if kwargs.get("dir_fd") is not None and str(path) in {"photo.jpg", "video.png"}:
             raise AssertionError("deferred mode must not unlink original source")
         return original_unlink(path, *args, **kwargs)
 

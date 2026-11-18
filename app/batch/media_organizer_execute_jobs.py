@@ -168,7 +168,14 @@ def enqueue_media_organizer_execution(
         selection = _literal_unit(preview_state.get("selection"), settings)
         if not Path(unit).is_relative_to(selection):
             raise ValueError("unit must remain within the original preview selection")
-        _ready_unit_record(settings, preview_job_id, unit, summary)
+        ready = _ready_unit_record(settings, preview_job_id, unit, summary)
+        if ready.get("groups"):
+            # Reject at the admin API boundary BEFORE queueing any Worker.
+            # The Worker also rechecks frozen group safety before staging.
+            raise ValueError(
+                "SEC-12: grouped directory publication is blocked until "
+                "source namespace isolation is independently established"
+            )
         matches = session.scalars(select(WorkJob).where(
             WorkJob.kind == EXECUTE_KIND,
             func.json_extract(WorkJob.state_json, "$.preview_job_id") == preview_job_id,

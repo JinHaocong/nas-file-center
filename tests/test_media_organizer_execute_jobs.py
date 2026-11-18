@@ -36,7 +36,7 @@ def setup(tmp_path, *, enabled=False, mutation=True, deletion=True,
     work = data / "archive" / "Collection" / "NO.001"
     work.mkdir(parents=True)
     (work / "photo.jpg").write_bytes(b"photo-1")
-    (work / "clip.mp4").write_bytes(b"video-1")
+    (work / "clip.png").write_bytes(b"image-2")
     return client, settings, work
 
 
@@ -132,7 +132,7 @@ def test_without_worker_lease_no_file_is_touched(tmp_path):
     assert queued.status_code == 200
     assert process_work_job(settings, queued.json()["job_id"]) is False
     assert (work / "photo.jpg").read_bytes() == b"photo-1"
-    assert (work / "clip.mp4").read_bytes() == b"video-1"
+    assert (work / "clip.png").read_bytes() == b"image-2"
 
 
 def test_confirmed_worker_publishes_only_one_unit_and_defers_manual_cleanup(tmp_path):
@@ -152,12 +152,12 @@ def test_confirmed_worker_publishes_only_one_unit_and_defers_manual_cleanup(tmp_
     assert state["manual_cleanup_required"] is True
     assert state["finalized"] is False
     assert state["progress"]["phase"] == "manual_cleanup_required"
-    images = [p for folder in work.iterdir() if folder.is_dir()
-              and folder.name.startswith("P [") for p in folder.glob("*.jpg")]
-    videos = [p for folder in work.iterdir() if folder.is_dir()
-              and folder.name.startswith("V [") for p in folder.glob("*.mp4")]
-    assert [f.read_bytes() for f in images] == [b"photo-1"]
-    assert [f.read_bytes() for f in videos] == [b"video-1"]
+    # Only the flat pure-media path remains enabled during SEC-12 hold.
+    assert sorted(p.read_bytes() for p in work.glob("00*.*")) == [
+        b"image-2", b"photo-1",
+    ]
+    assert not any(p.name.startswith(("P [", "V ["))
+                   for p in work.iterdir() if p.is_dir())
     assert (sibling / "untouched.jpg").read_bytes() == b"untouched"
     private = work / f".nfc-media-organizer-stage-{job_id}"
     assert private.is_dir()
@@ -218,10 +218,9 @@ def test_explicit_recovery_reuses_frozen_manifest_after_stage_interruption(tmp_p
     # can renew it, but an unrelated owner must never take over early.
     assert worker(settings, recovered_id, name="first-owner")
     assert client.get(f"/api/media-organizer/executions/{recovered_id}").json()["status"] == "completed"
-    assert any(folder.name.startswith("P [") and list(folder.glob("*.jpg"))
-               for folder in work.iterdir() if folder.is_dir())
-    assert any(folder.name.startswith("V [") and list(folder.glob("*.mp4"))
-               for folder in work.iterdir() if folder.is_dir())
+    assert sorted(p.read_bytes() for p in work.glob("00*.*")) == [
+        b"image-2", b"photo-1",
+    ]
 
 
 def test_recovery_after_deferred_cleanup_record_interruption_keeps_staging(
@@ -261,8 +260,9 @@ def test_recovery_after_deferred_cleanup_record_interruption_keeps_staging(
     assert current["status"] == "completed"
     assert current["manual_cleanup_required"] is True
     assert stage.is_dir()
-    assert any(folder.name.startswith("P [") and list(folder.glob("*.jpg"))
-               for folder in work.iterdir() if folder.is_dir())
+    assert sorted(p.read_bytes() for p in work.glob("00*.*")) == [
+        b"image-2", b"photo-1",
+    ]
     assert (settings.reports_dir / "media_organizer-executions" /
             str(original_id) / "manifest.json.manual-cleanup.json").is_file()
 
@@ -297,7 +297,7 @@ def test_execution_worker_rechecks_independent_permission_switch(tmp_path):
     settings.media_organizer_execution_enabled = False
     assert worker(settings, queued.json()["job_id"], name="guarded-worker") is False
     assert (work / "photo.jpg").read_bytes() == b"photo-1"
-    assert (work / "clip.mp4").read_bytes() == b"video-1"
+    assert (work / "clip.png").read_bytes() == b"image-2"
     assert not any(path.name.startswith(".nfc-") for path in work.iterdir())
 
 
@@ -394,7 +394,7 @@ def test_namespace_quiescence_ack_is_required_even_when_other_permission_gates_o
     response = execute_request(client, pid, work)
     assert response.status_code == 409
     assert (work / "photo.jpg").read_bytes() == b"photo-1"
-    assert (work / "clip.mp4").read_bytes() == b"video-1"
+    assert (work / "clip.png").read_bytes() == b"image-2"
     assert not any(x.name.startswith(".nfc-") for x in work.iterdir())
 
 
@@ -407,7 +407,7 @@ def test_worker_rechecks_quiescence_ack_after_job_was_queued(tmp_path):
     settings.media_organizer_namespace_quiescence_ack = False
     assert worker(settings, queued.json()["job_id"], name="quiescence-guard") is False
     assert (work / "photo.jpg").read_bytes() == b"photo-1"
-    assert (work / "clip.mp4").read_bytes() == b"video-1"
+    assert (work / "clip.png").read_bytes() == b"image-2"
     assert not any(x.name.startswith(".nfc-") for x in work.iterdir())
 
 
@@ -443,22 +443,24 @@ def test_worker_requires_manual_cleanup_without_deleting_old_wrapper_or_stage(
     assert list(stage.glob("*.jpg"))
     report = settings.reports_dir / "media_organizer-executions" / str(job_id)
     assert (report / "manifest.json.manual-cleanup.json").is_file()
-    assert any(group.name.startswith("P [") and list(group.glob("*.jpg"))
-               for group in work.iterdir() if group.is_dir())
+    assert len(list(work.glob("00*.jpg"))) >= 2
     assert (work / "photo.jpg").read_bytes() == b"photo-1"
 
 
-def test_worker_refuses_unsafe_same_named_old_bucket_before_staging_anything(tmp_path):
+def test_grouped_execute_request_blocks_before_queue_and_staging(tmp_path):
     client, settings, work = setup(tmp_path, enabled=True)
-    original = work / "photo.jpg"
+    (work / "movie.mp4").write_bytes(b"video-original")
     old = work / "P [1 7B]"
     old.mkdir()
     (old / "001.jpg").write_bytes(b"picture")
-    original.unlink()
     pid = preview(client, settings, work)
-    queued = execute_request(client, pid, work)
-    assert queued.status_code == 200
-    assert worker(settings, queued.json()["job_id"]) is False
+    report = client.get(f"/api/media-organizer/previews/{pid}").json()
+    assert str(work) not in report["confirmation_tokens"]
+    refused = execute_request(client, pid, work)
+    assert refused.status_code == 409
+    assert "SEC-12" in refused.text
     assert (old / "001.jpg").read_bytes() == b"picture"
-    assert (work / "clip.mp4").read_bytes() == b"video-1"
+    assert (work / "movie.mp4").read_bytes() == b"video-original"
+    assert (work / "photo.jpg").read_bytes() == b"photo-1"
+    assert (work / "clip.png").read_bytes() == b"image-2"
     assert not any(p.name.startswith(".nfc-") for p in work.iterdir())
