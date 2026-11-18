@@ -24,6 +24,9 @@ from app.batch.plans import OperationItem
 from app.batch.rename import RenameCollisionError, RenameRule, _matches_source_extension, _new_name, build_rename_plan
 from app.batch.stats import collect_tree_stats
 from app.config import Settings
+from app.config_sharing import (
+    shared_config_gid, require_shared_directory, ensure_shared_report_directory,
+)
 from app.db import create_engine_and_session, init_db
 from app.execution.executor import execute_item
 from app.execution.verifier import verify_duplicate_pair
@@ -443,8 +446,25 @@ class FileCenterService:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._quarantine_service_started_at = utcnow()
-        for directory in (settings.config_dir, settings.reports_dir, settings.backups_dir, settings.logs_dir, settings.fclones_home):
-            directory.mkdir(parents=True, exist_ok=True)
+        shared_gid = shared_config_gid()
+        if shared_gid is None:
+            # Preserve historical single-UID behavior when group sharing is
+            # not configured; do not change ownership/modes of existing paths.
+            for directory in (
+                settings.config_dir, settings.reports_dir, settings.backups_dir,
+                settings.logs_dir, settings.fclones_home,
+            ):
+                directory.mkdir(parents=True, exist_ok=True)
+        else:
+            # Only the pre-provisioned /config root is trusted. Create new
+            # shared subdirectories with setgid 2770, and refuse incompatible
+            # existing directories instead of chmod/chown on the host NAS.
+            require_shared_directory(settings.config_dir, shared_gid)
+            for directory in (
+                settings.reports_dir, settings.backups_dir, settings.logs_dir,
+                settings.fclones_home,
+            ):
+                ensure_shared_report_directory(directory, shared_gid)
         self.engine, self.SessionLocal = create_engine_and_session(settings.database_path)
         init_db(
             self.engine,
