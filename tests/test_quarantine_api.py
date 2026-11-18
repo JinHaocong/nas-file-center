@@ -380,4 +380,3 @@ def test_legacy_purging_diagnostic_requires_verification_not_forced_purged(tmp_p
     assert path.read_bytes() == b"still present"
     with env["service"].SessionLocal() as session:
         assert session.get(QuarantineEntry, eid).state == "purging"
-
