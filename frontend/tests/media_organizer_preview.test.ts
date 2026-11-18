@@ -57,3 +57,17 @@ test('published media must be clearly labelled as awaiting manual cleanup', () =
   assert.match(view, /等待人工核查清理/);
   assert.doesNotMatch(view, /本次执行已完成。请重新只读扫描/);
 });
+
+
+test('the complete source-target mapping is available in bounded pages', () => {
+  const view = read('src/pages/Batch/SemanticMediaOrganizerEditor.tsx');
+  const api = read('src/api/media_organizer.ts');
+  assert.match(view, /查看完整映射/);
+  assert.match(view, /完整源 → 目标映射/);
+  assert.match(view, /mappingData\.moves\.map/);
+  assert.match(view, /mappingPageSize/);
+  assert.match(view, /total_moves/);
+  assert.match(api, /getMapping/);
+  assert.match(api, /\/mappings\//);
+  assert.match(api, /SemanticMappingPage/);
+});
