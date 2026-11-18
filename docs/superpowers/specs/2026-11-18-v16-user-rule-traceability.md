@@ -1,7 +1,7 @@
 # V1.6 user-rule traceability and implementation status
 
-**Authoritative product source:** [NAS File Center｜Luolcy 与非 Luolcy 智能整理规则 V1.6（已确认）](https://chatgpt.com/space/page_9fe339e8ac288191b3868fd4dbd5062a)  
-**Status:** source rules checked against PR #397 code on 2026-11-18.  
+**Authoritative product source:** [NAS File Center｜Luolcy 与非 Luolcy 智能整理规则 V1.6（已确认）](https://chatgpt.com/space/page_9fe339e8ac288191b3868fd4dbd5062a)
+**Status:** source rules checked against PR #397 code on 2026-11-18.
 **Candidate at time of review:** `7846c263d8a6ddbaeeb739e7d9b093ef0c9a22af`.
 
 This matrix distinguishes **read-only planner conformance** from **end-to-end executable completion**. A rule appearing correctly in a preview does not mean it can safely mutate the NAS.
