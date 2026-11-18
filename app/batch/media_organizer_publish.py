@@ -390,6 +390,25 @@ def _retire_wrappers(unit: Path, manifest: dict, witness: bytes,
     return retired
 
 
+def _verify_group_parent_posix_permissions(unit_fd: int, manifest: dict) -> None:
+    """Necessary permissions check, NOT a proof of exclusive NAS namespace custody.
+
+    The opened unit must be owned by this Worker EUID and must not be writable
+    by its group or others. Same-UID/root, ACL and NAS-mapped writers remain
+    outside the guarantees of this check; SEC-12's production hold stays ON.
+    """
+    info = os.fstat(unit_fd)
+    if (not stat.S_ISDIR(info.st_mode)
+            or (int(info.st_dev), int(info.st_ino)) != (
+                manifest["unit_dev"], manifest["unit_ino"])):
+        raise PublishingConflict("public unit directory identity changed")
+    if (int(info.st_uid) != os.geteuid()
+            or stat.S_IMODE(info.st_mode) & 0o022):
+        raise PublishingConflict(
+            "public unit owner or writable permissions are unsafe"
+        )
+
+
 def _create_public_group_direct(
     unit: Path, name: str, manifest: dict, witness: bytes,
     fence: Callable[[], None], *, frozen_manifest_path: Path,
@@ -417,13 +436,14 @@ def _create_public_group_direct(
                 or not _read_marker(stage_fd, ".nfc-stage-authority", witness)
                 or not _read_marker(stage_fd, ".nfc-stage-complete", witness)):
             raise PublishingConflict("private stage ownership or completion is missing")
-        unit_info = os.fstat(unit_fd)
-        if (int(unit_info.st_dev), int(unit_info.st_ino)) != (
-                manifest["unit_dev"], manifest["unit_ino"]):
-            raise PublishingConflict("public unit identity no longer matches freeze")
+        _verify_group_parent_posix_permissions(unit_fd, manifest)
         if _entry(unit_fd, name) is not None:
             raise PublishingConflict("foreign public group already occupied")
         fence()
+        # A permissive chmod between preflight and the mutation boundary
+        # must fail closed. This check does not replace an OS-enforced
+        # exclusive namespace boundary for same-UID/root actors.
+        _verify_group_parent_posix_permissions(unit_fd, manifest)
         try:
             os.mkdir(name, mode=0o700, dir_fd=unit_fd)
         except FileExistsError as exc:
