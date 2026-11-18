@@ -6,6 +6,49 @@ The final V1.6 filesystem gate is intentionally executed **on the NAS itself** a
 
 This avoids installing or maintaining a GitHub Actions runner on the NAS. Docker Compose's `run --rm` mode is appropriate for one-off test/administrative workloads and removes the temporary container after completion. The acceptance service uses a read-only container root filesystem, no network, and only one writable bind mount: the owner-created SATA acceptance root. citeturn202967search0turn118607search0
 
+## Step 0: Zero-mutation NAS host permissions preflight (#403)
+
+Run this **read-only** diagnostic on the NAS host, from a checkout of the
+exact Draft PR candidate. It is not the acceptance test and does **not**
+start containers, create directories, fix permissions or touch media contents.
+
+Use the existing **host** bind-source paths for `/config` (NVMe) and
+`/data` (SATA). They are not the container's `/config` and `/data` paths.
+
+```bash
+python3 scripts/v16_nas_readonly_preflight.py \
+  --config-dir "/absolute/host/path/to/NasFileCenter" \
+  --data-dir "/absolute/host/path/to/SATA-media-root" \
+  --api-uid 10001 \
+  --worker-uid 10002 \
+  --shared-gid 10000
+```
+
+Requirements: Python 3.10+ on the NAS host; no external packages and no root
+privileges required for normal readable metadata. It only reads inode/mode/GID
+metadata for known configuration files/directories and mount information from
+`/proc/self/mountinfo`. It never lists or opens files below the SATA media
+root. Up to 1,000 archive **report directory** entries may be checked for
+file metadata; names, file contents and host paths are not included in JSON.
+
+The JSON result prints to standard output without writing a report file:
+
+- Exit `0`, `config_metadata=CHECKS_PASS`: the selected known POSIX
+  **metadata checks** passed. This is **not** a deployment approval.
+- Exit `2`, `config_metadata=BLOCKED`: incompatible existing modes/GIDs,
+  a symlink, missing mount, unreadable metadata or bounded audit uncertainty.
+  Inspect `blocking_checks`; do **not** auto-run chmod/chown scripts.
+- `media_exclusive_namespace=NOT_PROVEN`,
+  `nas_acl_and_smb_custody=NOT_PROVEN`, and `release_ready=false`
+  are **always** emitted, even when the known metadata passes.
+
+This gate intentionally refuses to claim that a same-GID or root/SMB process
+cannot mutate source names during organizer execution. Linux bind mounts and
+file-mode observations are insufficient to prove exclusive NAS namespace
+custody. A separate owner-approved disposable **same-mount** permission
+and actual filesystem end-to-end test is necessary before enabling V1.6.
+No production `/config`, SATA or NAS ACL change is performed here.
+
 ## Required host layout
 
 The owner-created root must already exist and contain exactly these two child directories:
