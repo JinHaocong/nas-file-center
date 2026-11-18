@@ -11,6 +11,8 @@ from app.main import create_app
 from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, User, WorkJob, utcnow
 from app.quarantine.paths import safe_quarantine_hash
 from app.service import FileCenterService
+from app.tasks.recovery import acquire_worker_ownership
+from app.worker import process_work_job
 
 
 def _setup_api_env(tmp_path: Path):
@@ -230,9 +232,40 @@ def test_api_restore_flow(tmp_path: Path):
         json={"conflict_policy": "skip"},
         headers={"Origin": "http://testserver"},
     )
-    assert resp.status_code == 200
-    assert resp.json()["state"] == "restored"
-    assert src.exists()
+    assert resp.status_code == 202
+    queued = resp.json()
+    assert queued["status"] == "queued"
+    assert queued["state"] == "queued"
+    assert isinstance(queued["work_job_id"], int)
+    assert tgt.exists()
+    assert not src.exists()
+
+    with service.SessionLocal() as session:
+        job = session.get(WorkJob, queued["work_job_id"])
+        assert job is not None
+        assert job.kind == "quarantine-restore"
+        assert job.status == "queued"
+
+    worker_id = f"worker-api-restore-{entry_id}"
+    assert acquire_worker_ownership(service.engine, service.SessionLocal, worker_id)
+    assert process_work_job(
+        service.settings,
+        queued["work_job_id"],
+        session_factory=service.SessionLocal,
+        engine=service.engine,
+        worker_id=worker_id,
+    )
+    assert src.read_text() == "api restore content"
+    assert not tgt.exists()
+    with service.SessionLocal() as session:
+        persisted = session.get(QuarantineEntry, entry_id)
+        job = session.get(WorkJob, queued["work_job_id"])
+        assert persisted is not None
+        assert persisted.state == "restored"
+        assert job is not None
+        assert job.status == "completed"
+        assert job.checkpoint_json
+        assert json.loads(job.checkpoint_json)["result"]["state"] == "restored"
 
 
 def test_api_purge_flow(tmp_path: Path):
