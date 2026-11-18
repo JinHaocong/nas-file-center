@@ -25,6 +25,8 @@ x-common: &common
     MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"
     # Distinct UIDs need group-shared SQLite and reports under a provisioned /config.
     NFC_SHARED_CONFIG_GID: ${NFC_SHARED_GID:-10000}
+    NFC_SECRET_OWNER_UID: ${NFC_API_UID:-10001}
+    NFC_SECRET_GROUP_GID: ${NFC_SHARED_GID:-10000}
     INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-}
     INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
   read_only: true
@@ -42,6 +44,7 @@ services:
     volumes:
       - ${HOST_CONFIG_DIR:-./config}:/config
       - ${HOST_DATA_DIR:?Set HOST_DATA_DIR in .env}:/data:ro
+      - nfc-recovery-secrets:/run/nfc-recovery-secrets
     ports:
       - "${WEB_PORT:-8080}:8080"
     healthcheck:
@@ -57,7 +60,18 @@ services:
     volumes:
       - ${HOST_CONFIG_DIR:-./config}:/config
       - ${HOST_DATA_DIR:?Set HOST_DATA_DIR in .env}:/data:${DATA_MODE:-ro}
+      - nfc-recovery-secrets:/run/nfc-recovery-secrets
     command: ["python", "-m", "app.worker"]
     depends_on:
       api:
         condition: service_healthy
+
+# A Docker local-driver tmpfs volume: shared between containers but never
+# persisted to SATA/config. Ordinary per-container tmpfs mounts are NOT shared.
+volumes:
+  nfc-recovery-secrets:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=1m,uid=${NFC_API_UID:-10001},gid=${NFC_SHARED_GID:-10000},mode=2770,noexec,nosuid,nodev"

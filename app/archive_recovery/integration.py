@@ -22,38 +22,169 @@ from app.tasks.state_machine import JobCancelRequested, JobLeaseLost
 
 SECRET_DIR = Path('/run/nfc-recovery-secrets')
 
+# A real tmpfs-backed *shared* Docker volume is required. Separate per-service
+# Docker tmpfs mounts do NOT share data across two container UIDs.
+def _secret_authority() -> tuple[int, int] | None:
+    raw_uid = os.environ.get("NFC_SECRET_OWNER_UID")
+    raw_gid = os.environ.get("NFC_SECRET_GROUP_GID")
+    if raw_uid is None and raw_gid is None:
+        # Explicit legacy configuration for a single-UID private tmpfs mount.
+        return None
+    if (
+        not raw_uid or not raw_gid
+        or not raw_uid.isascii() or not raw_uid.isdecimal()
+        or not raw_gid.isascii() or not raw_gid.isdecimal()
+    ):
+        raise RecoveryError("PASSWORD_CHANNEL_UNAVAILABLE")
+    uid, gid = int(raw_uid), int(raw_gid)
+    if uid <= 0 or gid <= 0 or gid != os.getegid():
+        raise RecoveryError("PASSWORD_CHANNEL_UNAVAILABLE")
+    return uid, gid
+
+
+def _assert_secret_token(token: str) -> None:
+    if (
+        type(token) is not str or len(token) != 32
+        or any(char not in "0123456789abcdef" for char in token)
+    ):
+        raise RecoveryError("PASSWORD_CHANNEL_INVALID")
+
+
+def _secret_file_valid(info: os.stat_result, authority: tuple[int, int] | None) -> bool:
+    if not stat.S_ISREG(info.st_mode) or info.st_size > 4096:
+        return False
+    if authority is None:
+        return info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) == 0o600
+    owner_uid, shared_gid = authority
+    return (
+        info.st_uid == owner_uid
+        and info.st_gid == shared_gid
+        and stat.S_IMODE(info.st_mode) == 0o640
+    )
+
 
 def tmpfs_available() -> bool:
-    """Require an explicit tmpfs mount shared by API and Worker, not /config."""
+    """Strict local mount/owner preflight; identical-mount proof is a Docker test."""
     try:
-        root = str(SECRET_DIR.resolve(strict=True))
-        with open('/proc/self/mountinfo', encoding='utf-8') as handle:
-            return any(line.split(' - ', 1)[1].split()[0] == 'tmpfs'
-                       and line.split(' - ', 1)[0].split()[4] == root
-                       for line in handle if ' - ' in line)
-    except (OSError, IndexError):
+        authority = _secret_authority()
+        info = os.lstat(SECRET_DIR)
+        if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            return False
+        mode = stat.S_IMODE(info.st_mode)
+        if authority is None:
+            if mode != 0o700 or info.st_uid != os.geteuid():
+                return False
+        else:
+            if (info.st_uid, info.st_gid, mode) != (authority[0], authority[1], 0o2770):
+                return False
+        path = str(SECRET_DIR)
+        # A fake directory placed under /run or /config is not a secret store.
+        with open("/proc/self/mountinfo", encoding="utf-8") as handle:
+            for line in handle:
+                if " - " not in line:
+                    continue
+                left, right = line.split(" - ", 1)
+                columns = left.split()
+                if len(columns) >= 5 and columns[4] == path and right.split()[0] == "tmpfs":
+                    return True
+        return False
+    except (OSError, IndexError, RecoveryError):
         return False
 
 
+def discard_one_time_password(token: str | None) -> bool:
+    """Delete only an authenticated, inode-matching token in the private RAM root.
+
+    Callers can treat False as a safe hold; this never chmods/chowns or scans
+    arbitrary files. The shared group must contain only trusted API/Worker UIDs.
+    """
+    if not token:
+        return False
+    try:
+        _assert_secret_token(token)
+        if not tmpfs_available():
+            return False
+        authority = _secret_authority()
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        root_flags = flags | getattr(os, "O_DIRECTORY", 0)
+        root_fd = os.open(SECRET_DIR, root_flags)
+        try:
+            fd = os.open(token, flags, dir_fd=root_fd)
+            try:
+                info = os.fstat(fd)
+                if not _secret_file_valid(info, authority):
+                    return False
+                current = os.stat(token, dir_fd=root_fd, follow_symlinks=False)
+                if not _secret_file_valid(current, authority):
+                    return False
+                if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+                    return False
+                os.unlink(token, dir_fd=root_fd)
+                return True
+            finally:
+                os.close(fd)
+        finally:
+            os.close(root_fd)
+    except (OSError, RecoveryError):
+        return False
+
+
+def store_one_time_password(token: str, password: str) -> None:
+    """Create a bounded, exclusive one-time RAM token; never store it in SQLite."""
+    _assert_secret_token(token)
+    if not isinstance(password, str):
+        raise RecoveryError("PASSWORD_CHANNEL_INVALID")
+    payload = password.encode("utf-8")
+    if len(payload) > 4096:
+        raise RecoveryError("PASSWORD_TOO_LONG")
+    if not tmpfs_available():
+        raise RecoveryError("PASSWORD_CHANNEL_UNAVAILABLE")
+    authority = _secret_authority()
+    if authority is not None and os.geteuid() != authority[0]:
+        raise RecoveryError("PASSWORD_CHANNEL_UNAVAILABLE")
+    mode = 0o640 if authority is not None else 0o600
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    fd = os.open(SECRET_DIR / token, flags, mode)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            os.fchmod(handle.fileno(), mode)
+            if not _secret_file_valid(os.fstat(handle.fileno()), authority):
+                raise RecoveryError("PASSWORD_CHANNEL_INVALID")
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        discard_one_time_password(token)
+        raise
+
+
 def read_one_time_password(token: str | None) -> str | None:
-    """Read and immediately unlink an API-supplied password in tmpfs."""
+    """Worker consumes only a verified API-owned, group-readable RAM secret."""
     if not token:
         return None
-    if len(token) != 32 or any(c not in '0123456789abcdef' for c in token) or not tmpfs_available():
-        raise RecoveryError('PASSWORD_CHANNEL_UNAVAILABLE')
-    path = SECRET_DIR / token
-    file_fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    _assert_secret_token(token)
+    if not tmpfs_available():
+        raise RecoveryError("PASSWORD_CHANNEL_UNAVAILABLE")
+    authority = _secret_authority()
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
-        st = os.fstat(file_fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_size > 4096 or st.st_mode & 0o077:
-            raise RecoveryError('PASSWORD_CHANNEL_INVALID')
-        data = os.read(file_fd, 4097)
-        if len(data) > 4096:
-            raise RecoveryError('PASSWORD_TOO_LONG')
-        return data.decode('utf-8')
-    finally:
-        os.close(file_fd)
-        os.unlink(path)
+        fd = os.open(SECRET_DIR / token, flags)
+    except OSError as exc:
+        raise RecoveryError("PASSWORD_CHANNEL_UNAVAILABLE") from exc
+    with os.fdopen(fd, "rb") as handle:
+        if not _secret_file_valid(os.fstat(handle.fileno()), authority):
+            raise RecoveryError("PASSWORD_CHANNEL_INVALID")
+        payload = handle.read(4097)
+        if len(payload) > 4096:
+            raise RecoveryError("PASSWORD_TOO_LONG")
+        try:
+            password = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise RecoveryError("PASSWORD_CHANNEL_INVALID") from exc
+        if not discard_one_time_password(token):
+            raise RecoveryError("PASSWORD_CHANNEL_INVALID")
+        return password
 
 
 def report_path(settings: Settings, job_id: int) -> Path:
@@ -323,8 +454,7 @@ class ArchiveRecoveryHandler(TaskHandler):
         finally:
             # All intermediate file descriptors close in core. Remove only
             # worker-owned temporary names under the same frozen parent/output inodes.
-            if token and tmpfs_available():
-                (SECRET_DIR / token).unlink(missing_ok=True)
+            discard_one_time_password(token)
             output_bound = False
             try:
                 parent_stat = os.stat(source.parent, follow_symlinks=False)
@@ -428,8 +558,7 @@ def cleanup_recovery_after_worker_restart(settings: Settings, session_factory, w
                 continue
             clean_interrupted_parts(output, state.get('output_identity', []))
             token = state.get('secret_token')
-            if token and len(token) == 32 and tmpfs_available():
-                (SECRET_DIR / token).unlink(missing_ok=True)
+            discard_one_time_password(token)
         except (KeyError, OSError, ValueError):
             # No cleanup authority can be derived from malformed/stale job state.
             continue
@@ -440,8 +569,7 @@ def cleanup_cancelled_queued_recovery(state_json: str) -> None:
     try:
         state = json.loads(state_json or '{}')
         token = state.get('secret_token')
-        if token and len(token) == 32 and all(c in '0123456789abcdef' for c in token) and tmpfs_available():
-            (SECRET_DIR / token).unlink(missing_ok=True)
+        discard_one_time_password(token)
         output = Path(state['output'])
         source = Path(state['source'])
         if output.parent != source.parent or output.is_symlink() or not output.is_dir():

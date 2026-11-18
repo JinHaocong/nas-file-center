@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.archive_recovery.core import RecoveryError, detect_format
-from app.archive_recovery.integration import SECRET_DIR, tmpfs_available, report_path
+from app.archive_recovery.integration import (
+    tmpfs_available, report_path, store_one_time_password, discard_one_time_password,
+)
 from app.auth.dependencies import require_admin_user
 from app.models import WorkJob
 from app.path_safety import require_allowed_path, require_unreserved_path
@@ -105,11 +107,10 @@ def start_archive(request: Request, payload: RecoveryRequest):
 
         if payload.password:
             token = uuid4().hex
-            secret_path = SECRET_DIR / token
-            secret_fd = os.open(secret_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            with os.fdopen(secret_fd, 'wb') as secret:
-                secret.write(payload.password.encode('utf-8'))
-                secret.flush()
+            try:
+                store_one_time_password(token, payload.password)
+            except (RecoveryError, OSError) as exc:
+                raise HTTPException(503, 'PASSWORD_CHANNEL_UNAVAILABLE') from exc
         with request.app.state.service.SessionLocal() as session:
             job = WorkJob(kind='archive-recovery', status='queued',
                           state_json=json.dumps({
@@ -124,8 +125,7 @@ def start_archive(request: Request, payload: RecoveryRequest):
             result_id = job.id
         return {'work_job_id': result_id, 'status': 'queued', 'output': str(output)}
     except BaseException:
-        if token:
-            (SECRET_DIR / token).unlink(missing_ok=True)
+        discard_one_time_password(token)
         raise
 
 

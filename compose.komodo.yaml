@@ -13,6 +13,7 @@ services:
     container_name: nas-file-center-api
     volumes:
       - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
+      - nfc-recovery-secrets:/run/nfc-recovery-secrets
       - /tmp/zfsv3/sata11/15246330601/data:/data:ro
     networks:
       - nginx_network
@@ -27,6 +28,8 @@ services:
       - MEDIA_ORGANIZER_EXECUTION_ENABLED=false
       - MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK=false
       - NFC_SHARED_CONFIG_GID=${NFC_SHARED_GID:-10000}
+      - NFC_SECRET_OWNER_UID=${NFC_API_UID:-10001}
+      - NFC_SECRET_GROUP_GID=${NFC_SHARED_GID:-10000}
       - FCLONES_BINARY=/usr/local/bin/fclones
       - MTIME_REFRESH_DELAY_SECONDS=2
       - SESSION_COOKIE_SECURE=true
@@ -58,6 +61,7 @@ services:
       - app.worker
     volumes:
       - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
+      - nfc-recovery-secrets:/run/nfc-recovery-secrets
       - /tmp/zfsv3/sata11/15246330601/data:/data:rw
     networks:
       - nginx_network
@@ -72,6 +76,8 @@ services:
       - MEDIA_ORGANIZER_EXECUTION_ENABLED=false
       - MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK=false
       - NFC_SHARED_CONFIG_GID=${NFC_SHARED_GID:-10000}
+      - NFC_SECRET_OWNER_UID=${NFC_API_UID:-10001}
+      - NFC_SECRET_GROUP_GID=${NFC_SHARED_GID:-10000}
       - FCLONES_BINARY=/usr/local/bin/fclones
       - MTIME_REFRESH_DELAY_SECONDS=2
     depends_on:
@@ -82,3 +88,12 @@ services:
 networks:
   nginx_network:
     external: true
+
+# Dedicated RAM-backed named volume; no SATA/config path is mounted for passwords.
+volumes:
+  nfc-recovery-secrets:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=1m,uid=${NFC_API_UID:-10001},gid=${NFC_SHARED_GID:-10000},mode=2770,noexec,nosuid,nodev"

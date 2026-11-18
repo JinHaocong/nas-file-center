@@ -88,7 +88,10 @@ def test_secret_channel_fails_closed_if_mount_is_ordinary_disk_directory(
     private_ram_scratch: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.undo()
-    # This is a normal temporary directory, *not* a tmpfs mount.
+    monkeypatch.setattr(archive, "SECRET_DIR", private_ram_scratch)
+    monkeypatch.setenv("NFC_SECRET_OWNER_UID", str(os.geteuid()))
+    monkeypatch.setenv("NFC_SECRET_GROUP_GID", str(os.getegid()))
+    # Even valid-looking ownership/mode is NOT proof that disk is RAM-backed.
     assert archive.tmpfs_available() is False
 
 
