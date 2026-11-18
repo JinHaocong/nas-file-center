@@ -19,15 +19,15 @@ This is an initial call-graph audit of the current PR #397 head. It is not a cla
 
 | Route | Current call path | Filesystem effect | Required change |
 |---|---|---|---|
-| `POST /api/quarantine/{id}/restore` | `app/api/router.py::restore_quarantine_entry` → `FileCenterService.restore_quarantine_entry` | For legacy/non-transactional entries, API creates `dest.parent` and calls `rename_noreplace(target, dest)`. The transactional branch requires `worker_id`, but the API route does not provide one and therefore cannot execute that branch. | Queue a single-entry restore WorkJob. Worker calls the existing restore implementation with its active lease; preserve conflict policy, custom target validation, audit/journal data and UI-visible result. |
-| `DELETE /api/quarantine/{id}/record` | `delete_quarantine_record` → `_cleanup_empty_terminal_tx_artifacts` | Before metadata retirement or restored-entry cleanup enqueue, the API can traverse `.tx/entry-{id}`, call `_cleanup_abandoned_cross_storage_staging` (including `os.unlink` / `os.rmdir`) and remove empty transaction directories. | Move all transaction-artifact cleanup and its final eligibility check into the Worker job. API may validate and enqueue only; no pre-enqueue cleanup. |
-| `POST /api/quarantine/records/bulk-delete` | `bulk_delete_quarantine_records` → `_cleanup_empty_terminal_tx_artifacts` for each entry | Same direct unlink/rmdir path as single-record deletion; a later restored-entry branch enqueues a Worker job, but the earlier cleanup already ran in the API. | Move the complete per-entry cleanup + metadata-retirement sequence into a bounded Worker job. Preserve all-or-nothing eligibility and per-entry audit evidence. |
+| `POST /api/quarantine/{id}/restore` | `app/api/router.py::restore_quarantine_entry` → `Gate6A2FileCenterService.enqueue_quarantine_restore` | **Migrated:** API validates the destination and freezes the quarantine-entry identity, then queues `quarantine-restore`; it does not rename or create media paths. Worker checks the frozen identity and active lease before invoking the existing integrity/conflict/journal restore implementation. | Worker-owned; focused restore, conflict-policy, journal and frontend tests pass. Full regression passed on the preceding candidate. |
+| `DELETE /api/quarantine/{id}/record` | `delete_quarantine_record` → `_enqueue_quarantine_record_cleanup` | **Migrated:** API validates terminal state and freezes the record identity; it does not remove `.tx` artifacts or retire the record. | Returns `202`; Worker revalidates the frozen record, performs bounded transaction-artifact cleanup, then retires metadata and records audit evidence. |
+| `POST /api/quarantine/records/bulk-delete` | `bulk_delete_quarantine_records` → `_enqueue_quarantine_record_cleanup` | **Migrated:** API validates the complete selection and freezes each record identity; it performs no transaction-artifact cleanup. | Returns `202`; Worker revalidates the full selection, performs bounded cleanup and all-or-nothing metadata retirement with per-entry audit evidence. |
 | `POST /api/archive-recovery/start` | `app/archive_recovery/router.py::start_archive` → `archive-recovery` WorkJob | **Migrated:** API now freezes source + parent device/inode and queues the job; it performs no media-root mkdir/rmdir. Worker validates the frozen identities, opens the parent with no-follow directory semantics, creates the sibling output exclusively at mode `0700`, and persists its device/inode before extraction. | Worker-owned. Keep the secret channel separate, bounded and readable by the Worker without granting API write access to media roots. |
 
 ### Important details
 
 - `Gate6A2FileCenterService.purge_quarantine_entry` already queues `quarantine-single-purge`; the API route returns `202 Accepted`. The actual unlink is performed by its Worker handler. Keep this boundary.
-- `delete_quarantine_record` and `bulk_delete_quarantine_records` are **not** API-safe merely because their final database-row deletion is metadata-only. Their preflight helper currently performs filesystem cleanup before it decides whether to enqueue.
+- Single and bulk terminal-record deletion now enqueue `quarantine-record-cleanup`; API preflight no longer calls filesystem cleanup. Worker owns artifact cleanup and metadata retirement. Keep this boundary covered by the API-no-write and worker-execution regression tests.
 - The `owner-deleted-record`, `orphan-transaction-record` and `missing-record` endpoints are currently metadata-only retirement paths. The orphan/missing checks inspect filesystem state but do not unlink or rename media. Keep them explicitly metadata-only and retain their no-filesystem-mutation audit fields.
 - `POST /api/quarantine/bulk-plan` creates a database draft; it does not execute restore or purge. Actual plan execution must remain Worker-owned.
 
@@ -42,7 +42,7 @@ The following API surfaces currently persist or enqueue work rather than directl
 | `POST /api/media-organizer/previews`, execute and recover | Worker jobs; grouped V1.6 execution remains blocked by SEC-12 |
 | `POST /api/scans` | Scan WorkJob |
 | `POST /api/download-verification` | Verification WorkJob |
-| `POST /api/archive-recovery/start` | Job is queued, but output-directory creation is still API-owned; see required change above |
+| `POST /api/archive-recovery/start` | API queues intent only; Worker creates and binds the output directory under the frozen source-parent identity |
 
 ## Read-only / metadata-only paths
 
@@ -61,10 +61,9 @@ The following API surfaces currently persist or enqueue work rather than directl
 
 ## TDD slices
 
-- [ ] RED: single restore API request queues a Worker job and does not create/rename/unlink anything under the media root before Worker execution.
-- [ ] GREEN: restore handler performs the existing verified restore under a valid Worker lease; conflict, custom-target, transaction and recovery tests remain green.
-- [ ] RED: single and bulk record deletion do not remove `.tx` artifacts before Worker execution.
-- [ ] GREEN: Worker performs bounded artifact cleanup, revalidates all entries and retires metadata only after successful cleanup; unknown entries remain untouched.
+- [x] RED/GREEN: single restore API queues a Worker job; frozen identity, active lease, SHA256/conflict behavior and journal evidence are covered.
+- [x] RED/GREEN: single and bulk terminal-record deletion queue Worker jobs; API leaves `.tx` artifacts untouched and Worker revalidates before cleanup/retirement.
+
 - [x] RED/GREEN: archive-recovery API request only queues; Worker creates the output directory with exclusive binding to the frozen parent/source identity and persists the created inode before extraction.
 - [x] Worker failure cleanup and restart cleanup are fenced to the frozen parent + output directory identities.
 - [ ] RED: API container with `/data:ro` cannot mutate media through any registered API route or startup hook.
