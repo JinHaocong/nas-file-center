@@ -1,4 +1,5 @@
 name: V1.6 Real NAS Scratch Acceptance
+# Exact-HEAD, isolated SATA-only acceptance; never mounts production media paths.
 
 on:
   pull_request:
