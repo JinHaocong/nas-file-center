@@ -55,7 +55,7 @@ def test_separate_cleanup_worker_performs_real_finalization_and_zero_rescan(
     # The HTTP request must queue only; no unlink happens in API process.
     assert old.is_dir()
     assert (unit / "photo.jpg").is_file()
-    assert worker(settings, cleanup_id, name="synthetic-cleanup-owner")
+    assert worker(settings, cleanup_id, name="synthetic-original-worker")
     result = client.get(f"/api/media-organizer/executions/{jid}").json()
     assert result["status"] == "completed"
     assert result["finalized"] is True
@@ -117,7 +117,7 @@ def test_revoked_custody_after_cleanup_queue_refuses_worker_before_unlink(
                          json={"confirmation": token})
     assert queued.status_code == 200
     state["allowed"] = False
-    assert worker(settings, queued.json()["job_id"], name="revoked-cleanup-owner") is False
+    assert worker(settings, queued.json()["job_id"], name="synthetic-original-worker") is False
     assert (unit / "photo.jpg").read_bytes() == b"photo-1"
     assert (unit / "P1" / "legacy.jpg").read_bytes() == b"legacy-image"
     status = client.get(f"/api/media-organizer/executions/{jid}").json()
