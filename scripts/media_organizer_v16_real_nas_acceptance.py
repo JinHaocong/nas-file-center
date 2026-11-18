@@ -109,6 +109,9 @@ def run(root: Path, organizer_root: Path, candidate_sha: str) -> dict:
         raise RuntimeError("probe must not claim exclusive namespace custody")
     if probe.get("cleanup_complete") is not True:
         report["result"] = "FAIL_PROBE_RESIDUE"
+        (run_dir / "acceptance.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\\n"
+        )
         return report
 
     allowed_roots = [run_dir]
@@ -216,6 +219,19 @@ def run(root: Path, organizer_root: Path, candidate_sha: str) -> dict:
     else:
         raise RuntimeError("SEC-12 grouped publication was not blocked")
 
+    # The API/preflight boundary must reject the group before any stage or
+    # public path appears, and the synthetic originals must remain byte-exact.
+    for row in mixed_manifest["moves"]:
+        source, final = Path(row["source"]), Path(row["final"])
+        _assert_inside(source, run_dir)
+        _assert_inside(final, run_dir)
+        if not source.is_file() or _sha(source) != mixed_hashes[source.name]:
+            raise RuntimeError("mixed source changed during pre-stage rejection")
+        if (mixed_unit / mixed_manifest["stage_directory"]).exists():
+            raise RuntimeError("grouped rejection created a stage before staging")
+        if final.parent.exists():
+            raise RuntimeError("grouped rejection created a public group directory")
+
     # If flat filesystem capabilities are available, also stage the frozen
     # mixed sources and call the actual publisher. It must reject before any
     # public P/V directory promotion. The retained stage is evidence, not cleanup.
@@ -264,6 +280,9 @@ def run(root: Path, organizer_root: Path, candidate_sha: str) -> dict:
         "PASS_FLAT_AND_GROUP_HOLD"
         if probe.get("flat_filesystem_capabilities_compatible") is True
         else "FAIL_FLAT_FILESYSTEM_CAPABILITY"
+    )
+    (run_dir / "acceptance.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\\n"
     )
     return report
 
