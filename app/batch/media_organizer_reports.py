@@ -74,7 +74,9 @@ def read_preview_mapping(mapping_root: Path, mapping_id: str, *, page: int,
         raise ValueError("invalid mapping pagination")
     root = Path(mapping_root)
     root_stat = os.lstat(root)
-    if not stat.S_ISDIR(root_stat.st_mode) or stat.S_ISLNK(root_stat.st_mode):
+    if (not stat.S_ISDIR(root_stat.st_mode) or stat.S_ISLNK(root_stat.st_mode)
+            or int(root_stat.st_uid) != os.geteuid()
+            or stat.S_IMODE(root_stat.st_mode) & 0o077):
         raise ValueError("unsafe mapping report directory")
     path = root / f"{mapping_id}.jsonl"
     root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -84,7 +86,8 @@ def read_preview_mapping(mapping_root: Path, mapping_id: str, *, page: int,
         os.close(root_fd)
     try:
         info = os.fstat(fd)
-        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+        if (not stat.S_ISREG(info.st_mode) or int(info.st_uid) != os.geteuid()
+                or stat.S_IMODE(info.st_mode) & 0o077
                 or info.st_size > MAX_MAPPING_BYTES):
             raise ValueError("unsafe full mapping report")
         offset = (page - 1) * page_size

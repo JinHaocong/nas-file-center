@@ -91,7 +91,8 @@ def get_media_organizer_mapping(
         if job.status != "completed":
             raise ValueError("full mapping is available only after preview completion")
     data, summary = report_files(settings, job_id)
-    if not data.is_file() or not summary.is_file():
+    if (data.is_symlink() or summary.is_symlink()
+            or not data.is_file() or not summary.is_file()):
         raise ValueError("completed preview report is incomplete")
     found = False
     with data.open("r", encoding="utf-8") as stream:
