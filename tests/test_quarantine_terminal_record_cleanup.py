@@ -298,7 +298,7 @@ def test_bulk_cleanup_restored_cross_storage_hash_verifies_payload(maintenance_e
         json={"entry_ids": [entry_id], "confirmation": "DELETE_RECORDS"},
         headers={"Origin": "http://testserver"},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
     body = response.json()
     assert body["status"] == "queued"
     job_id = int(body["work_job_id"])
@@ -333,7 +333,7 @@ def test_restored_cleanup_blocks_when_restore_target_identity_changed(maintenanc
         json={"entry_ids": [entry_id], "confirmation": "DELETE_RECORDS"},
         headers={"Origin": "http://testserver"},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
     body = response.json()
     assert body["status"] == "queued"
     job_id = int(body["work_job_id"])
@@ -367,7 +367,7 @@ def test_restored_cleanup_blocks_unknown_private_artifact(maintenance_env):
         json={"entry_ids": [entry_id], "confirmation": "DELETE_RECORDS"},
         headers={"Origin": "http://testserver"},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
     body = response.json()
     assert body["status"] == "queued"
     job_id = int(body["work_job_id"])
