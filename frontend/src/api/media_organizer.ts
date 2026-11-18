@@ -32,6 +32,7 @@ export interface SemanticUnitPreview {
   total_files: number;
   total_proposals: number;
   sample_moves: SemanticMovePreview[];
+  mapping_id: string | null;
   truncated: boolean;
   input_fingerprint?: string | null;
   conflicts: string[];
@@ -65,6 +66,16 @@ export interface SemanticPreviewPage {
   read_only: true;
   execution_enabled: boolean;
   confirmation_tokens: Record<string, string>;
+}
+
+export interface SemanticMappingPage {
+  job_id: number;
+  mapping_id: string;
+  page: number;
+  page_size: number;
+  total_moves: number;
+  moves: SemanticMovePreview[];
+  read_only: true;
 }
 
 export interface SemanticExecutionStatus {
@@ -106,5 +117,13 @@ export const mediaOrganizerApi = {
       page: String(page), page_size: String(pageSize), status_filter: statusFilter,
     });
     return api.get<SemanticPreviewPage>(`/api/media-organizer/previews/${jobId}?${query}`);
+  },
+  getMapping: (jobId: number, mappingId: string, page = 1, pageSize = 50) => {
+    const query = new URLSearchParams({
+      page: String(page), page_size: String(pageSize),
+    });
+    return api.get<SemanticMappingPage>(
+      `/api/media-organizer/previews/${jobId}/mappings/${encodeURIComponent(mappingId)}?${query}`,
+    );
   },
 };
