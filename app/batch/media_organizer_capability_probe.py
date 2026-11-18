@@ -17,6 +17,7 @@ from pathlib import Path
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_package_zfuse_probe import probe as existing_media_probe
 from app.fs_ops import rename_noreplace_at
+from app.batch.media_organizer_fd_link import link_pinned_inode_noreplace
 
 
 def _check_parent(parent: Path) -> Path:
@@ -33,8 +34,10 @@ def _check_parent(parent: Path) -> Path:
 
 
 def _clear_owned(scratch: Path, original: tuple[int, int],
-                 created_inodes: set[tuple[int, int]]) -> tuple[bool, str | None]:
+                 created_inodes: set[tuple[int, int]],
+                 owned_files: dict[Path, tuple[int, int]] | None = None) -> tuple[bool, str | None]:
     """Remove only original, empty, locally-created disposable directories."""
+    owned_files = owned_files or {}
     try:
         if not stat.S_ISDIR(os.lstat(scratch).st_mode):
             return False, "scratch directory replaced"
@@ -46,6 +49,16 @@ def _clear_owned(scratch: Path, original: tuple[int, int],
             for child in list(parent.iterdir()):
                 info = os.lstat(child)
                 identity = (int(info.st_dev), int(info.st_ino))
+                if stat.S_ISREG(info.st_mode):
+                    if owned_files.get(child) != identity:
+                        raise ValueError("unknown scratch file preserved for manual review")
+                    now = os.lstat(child)
+                    if (not stat.S_ISREG(now.st_mode) or
+                            (int(now.st_dev), int(now.st_ino)) != identity):
+                        raise ValueError("scratch file identity changed during cleanup")
+                    # Only within our explicitly approved private 0700 scratch.
+                    child.unlink()
+                    continue
                 if not stat.S_ISDIR(info.st_mode) or identity not in created_inodes:
                     raise ValueError("unrecognized scratch entry preserved for manual review")
                 clear_children(child)
@@ -76,6 +89,8 @@ def probe_semantic_organizer_mount(parent: Path) -> dict:
         "directory_cross_parent_noreplace": False,
         "collision_preserved": False,
         "directory_fsync": False,
+        "source_fd_hardlink_noreplace": False,
+        "source_fd_name_swap_safe": False,
         "cleanup_complete": False,
         "compatible": False,
         "errors": [],
@@ -85,6 +100,7 @@ def probe_semantic_organizer_mount(parent: Path) -> dict:
     base = os.lstat(scratch)
     original = (int(base.st_dev), int(base.st_ino))
     owned: set[tuple[int, int]] = set()
+    owned_files: dict[Path, tuple[int, int]] = {}
     try:
         fd = _open_directory_nofollow(scratch)
         try:
@@ -143,12 +159,102 @@ def probe_semantic_organizer_mount(parent: Path) -> dict:
                         report["errors"].append(f"cross-parent group promotion: {exc}")
             finally:
                 os.close(stage_fd)
+
+            # The production file publication is from an OPEN source inode
+            # (linkat AT_EMPTY_PATH), NOT os.link(source pathname). Prove that
+            # same-mount capability separately from ordinary hardlink tests.
+            for name in ("fd-source", "fd-public"):
+                os.mkdir(name, mode=0o700, dir_fd=fd)
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                owned.add((int(info.st_dev), int(info.st_ino)))
+            source_dir_fd = os.open(
+                "fd-source", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd,
+            )
+            try:
+                target_dir_fd = os.open(
+                    "fd-public", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=fd,
+                )
+                try:
+                    original_path = scratch / "fd-source" / "frozen.bin"
+                    raw_fd = os.open(
+                        "frozen.bin", os.O_CREAT | os.O_EXCL | os.O_RDWR |
+                        os.O_NOFOLLOW, 0o600, dir_fd=source_dir_fd,
+                    )
+                    with os.fdopen(raw_fd, "wb+") as source:
+                        saved = os.fstat(source.fileno())
+                        original_identity = (int(saved.st_dev), int(saved.st_ino))
+                        owned_files[original_path] = original_identity
+                        source.write(b"verified-probe-original")
+                        source.flush()
+                        os.fsync(source.fileno())
+
+                        # Replace the SOURCE BASENAME after its file FD opens.
+                        # We must link the previously opened inode, never the
+                        # new disposable foreign probe file.
+                        os.rename("frozen.bin", "detached.bin",
+                                  src_dir_fd=source_dir_fd,
+                                  dst_dir_fd=source_dir_fd)
+                        del owned_files[original_path]
+                        owned_files[scratch / "fd-source" / "detached.bin"] = original_identity
+                        impostor_path = scratch / "fd-source" / "frozen.bin"
+                        impostor_fd = os.open(
+                            "frozen.bin", os.O_CREAT | os.O_EXCL | os.O_WRONLY |
+                            os.O_NOFOLLOW, 0o600, dir_fd=source_dir_fd,
+                        )
+                        with os.fdopen(impostor_fd, "wb") as impostor:
+                            impostor_info = os.fstat(impostor.fileno())
+                            owned_files[impostor_path] = (
+                                int(impostor_info.st_dev), int(impostor_info.st_ino),
+                            )
+                            impostor.write(b"foreign-probe-source")
+                            impostor.flush()
+                            os.fsync(impostor.fileno())
+                        try:
+                            link_pinned_inode_noreplace(
+                                source.fileno(), target_dir_fd, "published.bin",
+                            )
+                            linked = os.stat(
+                                "published.bin", dir_fd=target_dir_fd,
+                                follow_symlinks=False,
+                            )
+                            linked_identity = (int(linked.st_dev), int(linked.st_ino))
+                            owned_files[scratch / "fd-public" / "published.bin"] = linked_identity
+                            impostor_info = os.stat(
+                                "frozen.bin", dir_fd=source_dir_fd,
+                                follow_symlinks=False,
+                            )
+                            report["source_fd_name_swap_safe"] = (
+                                linked_identity == original_identity and
+                                (int(impostor_info.st_dev), int(impostor_info.st_ino))
+                                != original_identity
+                            )
+                            try:
+                                link_pinned_inode_noreplace(
+                                    source.fileno(), target_dir_fd, "published.bin",
+                                )
+                            except FileExistsError:
+                                report["source_fd_hardlink_noreplace"] = (
+                                    linked_identity == original_identity
+                                )
+                            else:
+                                report["errors"].append(
+                                    "pinned file link unexpectedly replaced existing output"
+                                )
+                            os.fsync(source_dir_fd)
+                            os.fsync(target_dir_fd)
+                        except (OSError, ValueError) as exc:
+                            report["errors"].append(f"pinned source hardlink: {exc}")
+                finally:
+                    os.close(target_dir_fd)
+            finally:
+                os.close(source_dir_fd)
         except OSError as exc:
             report["errors"].append(f"disposable directory/metadata test: {exc}")
         finally:
             os.close(fd)
     finally:
-        cleaned, problem = _clear_owned(scratch, original, owned)
+        cleaned, problem = _clear_owned(scratch, original, owned, owned_files)
         report["cleanup_complete"] = cleaned
         if problem is not None:
             report["errors"].append(problem)
@@ -167,6 +273,7 @@ def probe_semantic_organizer_mount(parent: Path) -> dict:
         report.get(key) is True for key in (
             "directory_noreplace", "directory_cross_parent_noreplace",
             "collision_preserved", "directory_fsync",
+            "source_fd_hardlink_noreplace", "source_fd_name_swap_safe",
             "hardlink_noreplace", "cross_directory_hardlink",
             "original_probe_compatible", "cleanup_complete",
         )

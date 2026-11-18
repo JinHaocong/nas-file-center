@@ -39,13 +39,6 @@ def validate_deferred_publication(manifest: dict) -> None:
     if not unit.is_absolute():
         raise DeferredCleanupConflict("organizing unit must be absolute")
     rows, _ = _validate_shape(manifest, unit)
-    # Retained original source names may occupy flat final targets. Under
-    # deferred no-delete semantics, publishing into such names is forbidden.
-    retained = {str(row["source"]).casefold() for row in rows}
-    if any(str(row["final"]).casefold() in retained for row in rows):
-        raise DeferredCleanupConflict(
-            "retained original source would occupy a final target"
-        )
     old_directories = manifest.get("wrapper_identities")
     groups = manifest.get("groups")
     if not isinstance(old_directories, dict) or not isinstance(groups, list):
@@ -60,6 +53,13 @@ def validate_deferred_publication(manifest: dict) -> None:
         # directories; the user can resolve this in a separate safe plan.
         raise DeferredCleanupConflict(
             "public group would require deleting an old classification wrapper"
+        )
+    # Do this before staging as well. A retained original source may
+    # otherwise occupy a flat target that the prior rename-first engine freed.
+    retained = {str(row["source"]).casefold() for row in rows}
+    if any(str(row["final"]).casefold() in retained for row in rows):
+        raise DeferredCleanupConflict(
+            "retained original source would occupy a final target"
         )
 
 

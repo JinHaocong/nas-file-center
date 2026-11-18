@@ -8,7 +8,7 @@
 2. Build a complete frozen manifest from a fresh scan, storing it as a checksum-protected, exclusive, private file. The Worker sets `cleanup_policy=deferred`; old classification directory identities are retained as evidence, **not** as automatic deletion authority.
 3. Use an administrator-only API to queue **one named organizing unit** from a completed, conflict-free preview, after typing the exact unit-bound confirmation token. Require MEDIA_ORGANIZER_EXECUTION_ENABLED, ALLOW_MUTATION and ALLOW_DELETE **plus** MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK. The independent execution and namespace flags default to false. The Worker independently checks all permissions and requires an exclusive lease. The namespace flag is only an operator acknowledgement of externally established isolation; it does NOT create filesystem exclusion or solve an uncooperative writer race.
 4. **validate_execution_preflight:** re-check unit identity, source rows, target occupancy, classification grouping and frozen values.
-5. **stage_frozen_sources:** create an exclusive private staging directory with an owner witness and stage every frozen file through no-replace moves. Resume only with the same immutable manifest and lease; never adopt an unknown staged directory.
+5. **stage_frozen_sources:** create an exclusive private staging directory with an owner witness and stage every frozen file by exclusive FD-bound hardlink, **retaining each original source path**. A missing Linux `linkat(AT_EMPTY_PATH)` capability fails closed, never falls back to a source-name rename/unlink. Resume only with the same immutable manifest and lease; never adopt an unknown staged directory.
 6. **publish_frozen_stage (deferred mode):** verify all staged entries and **NEVER rename or delete any old classification wrapper**. If an already-named historical P/V group occupies a proposed final group name, fail before the first source move; do not remove the original group. Prepare new P/V/Other folders privately with an owner witness and 0600 inode receipt before atomic NOREPLACE promotion. The published media links are checked against original stage and public-group identities.
 7. **record_deferred_cleanup_evidence (production Worker path):** verify every final media file, public-group inode receipt, untouched old wrapper directory, and retained private staging inode/file links. Write an immutable 0600 manual-cleanup record in the private report directory. The WorkJob ends with checkpoint phase `manual_cleanup_required`, **not** finalized; do not call `retire_published_stage`, remove stage hardlinks/markers, or run `rmdir`/old-wrapper rename. A fresh read-only preview can report `blocked` due to the deliberately retained private stage. Manual inspection and separately approved cleanup are required before claiming zero-change idempotency.
 
@@ -16,7 +16,7 @@ The new code is now wired into dedicated execution and manual recovery WorkJobs 
 
 ## Deferred cleanup disposition (current safe WorkJob)
 
-- The supported Worker now **only publishes final media and records a manual cleanup handoff**. It retains every staged hardlink, owner marker, old classification directory and private inode receipt.
+- The supported Worker now **only publishes final media and records a manual cleanup handoff**. It also retains **every original source file at its original path**, every staged hardlink, owner marker, old classification directory and private inode receipt. Thus it is not a finished move/sort until audited cleanup under #400.
 - No user-facing automatic directory cleanup endpoint is registered. The legacy library-level `retire_published_stage` and `_retire_wrappers` code remain for isolated historical tests but are **not invoked by the V1.6 WorkJob**. Those old paths are still considered unsafe under uncooperative concurrent writers; they must not be routed into production.
 - If an existing old classification bucket has the exact final P/V group name, `validate_deferred_publication` blocks the plan before staging. Users must resolve that conflict separately. Do not silently delete or overwrite it.
 - The manual-cleanup record is `<manifest.json>.manual-cleanup.json` inside the private execution report directory and is not a deletion command. It contains the frozen authority checksum, original wrapper identities, final group identities and counts of preserved staged media links.
@@ -63,8 +63,9 @@ The new code is now wired into dedicated execution and manual recovery WorkJobs 
 ## Disposable filesystem capability test — not yet performed on the owner's NAS
 
 The current repository includes an opt-in synthetic probe which verifies
-directory no-replace rename against an existing **empty** directory, public
-hardlink no-clobber, fsync durability and exclusive scratch cleanup.
+directory no-replace rename against an existing **empty** directory, ordinary
+hardlink no-clobber, **Linux pinned-source FD hardlink no-clobber and name-swap
+resistance**, fsync durability and exclusive scratch cleanup.
 
 Run **only after the owner approves an existing disposable parent directory on
 the target NAS filesystem**, not on a real media package:
@@ -83,6 +84,7 @@ The CLI deliberately refuses to start without --ack-scratch-write.
 Require all fields to be true: directory_noreplace,
 directory_cross_parent_noreplace, collision_preserved, directory_fsync,
 hardlink_noreplace, cross_directory_hardlink,
+source_fd_hardlink_noreplace, source_fd_name_swap_safe,
 original_probe_compatible, cleanup_complete, and compatible.
 The cross-parent field specifically verifies a private stage child being
 atomically promoted to a public sibling of the stage folder, matching the
@@ -124,6 +126,7 @@ an affirmative quiescence flag proves the underlying race is removed.
 ## Gates before live deployment / production NAS execution
 
 - [ ] Independently resolve the source-name cleanup race in #399, or provide a verifiable exclusive namespace mechanism. Do not treat the new acknowledgement as a fix.
+- [ ] Independent review and owner-approved NAS capability proof for the SEC-11 source-file race #401. Deferred mode now retains original source names and creates stage/public hardlinks from verified open file descriptors; non-deferred historical rename logic is NOT a production authorization.
 - [ ] Independent security review of private pending group promotion, directory rename races, destination binding checks, same-name old bucket replacement and receipt-backed stage retirement.
 - [x] Dedicated Worker ownership, exact unit-bound confirmation, freeze/validate before mutation, lease checkpoints, and explicit single-attempt recovery: verified in synthetic focused CI. Production security review still pending.
 - [ ] No-replace / hardlink / directory fsync capability proved on the owner-approved disposable parent on the actual NAS mount using the probe above. GitHub-runner tests alone are insufficient.

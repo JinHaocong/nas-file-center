@@ -17,6 +17,8 @@ def test_temporary_probe_checks_directory_noreplace_without_touching_neighbor(tm
     assert report["directory_cross_parent_noreplace"] is True
     assert report["collision_preserved"] is True
     assert report["directory_fsync"] is True
+    assert report["source_fd_hardlink_noreplace"] is True
+    assert report["source_fd_name_swap_safe"] is True
     assert report["cleanup_complete"] is True
     assert report["compatible"] is True
     assert list(tmp_path.iterdir()) == [neighbor]
@@ -76,3 +78,25 @@ def test_probe_exercises_stage_child_to_unit_parent_noreplace(tmp_path, monkeypa
     assert any(other_parent and src == "pending" and dst == "published"
                for other_parent, src, dst in checked)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_missing_pinned_inode_link_is_not_mistaken_for_ordinary_hardlink_support(
+    tmp_path, monkeypatch,
+):
+    """Fail closed on filesystems that lack Linux source-FD linkat semantics."""
+    from app.batch import media_organizer_capability_probe as probe_module
+
+    original = tmp_path / "unrelated-media.jpg"
+    original.write_bytes(b"keep-me")
+
+    def unsupported(*_args, **_kwargs):
+        raise OSError(errno.EOPNOTSUPP, "synthetic missing linkat AT_EMPTY_PATH")
+
+    monkeypatch.setattr(probe_module, "link_pinned_inode_noreplace", unsupported)
+    report = probe_semantic_organizer_mount(tmp_path)
+    assert report["source_fd_hardlink_noreplace"] is False
+    assert report["source_fd_name_swap_safe"] is False
+    assert report["compatible"] is False
+    assert report["cleanup_complete"] is True
+    assert original.read_bytes() == b"keep-me"
+    assert list(tmp_path.iterdir()) == [original]

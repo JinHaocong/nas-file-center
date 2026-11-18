@@ -370,7 +370,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
               )}
               {executionStatus.manual_cleanup_required && (
                 <p className="nfc-v2-batch-error" role="alert">
-                  媒体文件已发布，但旧分类目录与私有暂存文件均已保留，
+                  媒体文件已发布，但原始文件、旧分类目录与私有暂存文件均已保留，
                   等待人工核查清理。请不要自行删除暂存数据或将本次任务视为彻底完成。
                 </p>
               )}
