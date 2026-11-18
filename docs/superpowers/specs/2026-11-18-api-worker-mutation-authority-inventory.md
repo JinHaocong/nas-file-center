@@ -78,7 +78,7 @@ The following API surfaces currently persist or enqueue work rather than directl
 - This inventory does not close #402: a dedicated Worker identity and real mount-level custody proof are prerequisites, not a substitute for independent review.
 - PR #397 remains Draft; no merge, deployment or Docker release until #398–#403 dependencies, complete cleanup/finalization, full CI and owner-approved same-mount acceptance are satisfied.
 
-## Progress — 2026-11-18: first API mutation moved behind Worker
+## Progress — 2026-11-18: API mutation paths migrated behind Worker
 
 ### Completed slice: single quarantine restore
 
@@ -89,20 +89,18 @@ The following API surfaces currently persist or enqueue work rather than directl
 - RED evidence: `test_legacy_restore_api_only_enqueues_worker_and_preserves_payload_until_worker_runs` failed on the old route because the API returned 200 and moved the file before the Worker ran.
 - GREEN evidence: `Semantic Media Organizer V1.6 TDD` passed both backend-focused tests and frontend typecheck on commit `2b95fb1f28d1f5574d6fe57dfcedf1f3ace3c720`.
 
-### Remaining direct API mutation paths
+### Completed slice: terminal quarantine-record cleanup
 
-- [ ] Single and bulk quarantine-record deletion still invoke `_cleanup_empty_terminal_tx_artifacts` before any Worker handoff. Move the complete cleanup + metadata retirement sequence behind a Worker job.
-- [ ] Archive recovery still creates its sibling output directory and removes it on API-side enqueue failure. Move output-directory creation/binding to the Worker.
+- Single and bulk terminal-record deletion now return `202 Accepted` and enqueue `quarantine-record-cleanup`.
+- API preflight no longer calls `_cleanup_empty_terminal_tx_artifacts`; the transaction tree remains unchanged until Worker execution.
+- The WorkJob freezes each selected record's identity. Worker revalidates the full selection under its active lease, performs bounded artifact cleanup, verifies no unknown artifacts remain, and only then retires metadata with audit evidence.
+- RED/GREEN coverage now checks API non-mutation, successful Worker cleanup, and fail-closed behavior for changed source / unknown artifacts.
+
+### Remaining #403 work
+
+- [ ] Finish a complete route/service mutation audit and add a regression gate so no API route or startup hook can mutate media roots.
 - [ ] Add API read-only mount regression coverage for every registered route and startup hook.
-- [ ] Implement dedicated non-root Worker identity, API read-only media mount, shared SQLite/report/secret permissions and supported NAS ACL validation. Do not change deployment mounts or host permissions before the inventory is complete.
+- [ ] Implement dedicated non-root Worker identity, API read-only media mount, shared SQLite/report/secret permissions and supported NAS ACL validation.
+- [ ] Validate the new Archive Recovery Worker-owned output path in the current full Release Validation and UI Validation runs.
 
-Full Release Validation and UI Validation are still required after the complete migration; focused V1.6 TDD success is not release approval.
-
-## Progress — 2026-11-18: Archive Recovery output creation migrated
-
-- API `POST /api/archive-recovery/start` no longer calls `mkdir` or `rmdir` beneath a media root. It stores the source identity, parent identity, output candidate and request intent only.
-- API preflight no longer claims that the API container's filesystem write permission proves Worker write capability. It reports `mutation_enabled` and `worker_write_check_required`; the Worker verifies actual access at execution time.
-- Worker creates the output directory with `mkdirat` semantics relative to the frozen parent directory descriptor, after a lease refresh and source inode/size/mtime check. It requires a same-device, Worker-owned, mode-`0700` directory.
-- The created directory device/inode is persisted in WorkJob state before archive extraction. Failure/restart cleanup checks both the frozen parent and output identities.
-- Added an API regression proving the queued request leaves the sibling output path absent and stores no output identity before Worker execution.
-- Full CI for this commit is pending; this is not yet a #403 closure or deployment approval.
+Do not change deployment mounts or host permissions before the inventory is complete. This PR remains Draft and no production NAS mount/ACL changes have been made.
