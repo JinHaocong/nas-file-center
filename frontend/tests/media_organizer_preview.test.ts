@@ -46,3 +46,14 @@ test('the semantic organizer executes only one approved unit with explicit confi
   assert.match(view, /确认并执行当前作品/);
   assert.doesNotMatch(view, /executePlan|freezePlan|validatePlan/);
 });
+
+
+test('published media must be clearly labelled as awaiting manual cleanup', () => {
+  const view = read('src/pages/Batch/SemanticMediaOrganizerEditor.tsx');
+  const api = read('src/api/media_organizer.ts');
+  assert.match(api, /manual_cleanup_required: boolean/);
+  assert.match(api, /finalized: boolean/);
+  assert.match(view, /executionStatus\.manual_cleanup_required/);
+  assert.match(view, /等待人工核查清理/);
+  assert.doesNotMatch(view, /本次执行已完成。请重新只读扫描/);
+});
