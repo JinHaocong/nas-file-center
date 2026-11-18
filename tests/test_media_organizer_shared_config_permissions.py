@@ -123,3 +123,84 @@ def test_shared_config_rejects_world_writable_root(
     with pytest.raises(PermissionError, match="SHARED_CONFIG"):
         create_engine_and_session(config / "app.db")
     assert not (config / "app.db").exists()
+
+
+def _file_center_settings(config: Path, data: Path):
+    from app.config import Settings
+    return Settings(
+        config_dir=config,
+        data_mount=data,
+        allowed_roots_raw=str(data),
+        quarantine_root=data / ".trash",
+        allow_mutation=False,
+        allow_delete=False,
+    )
+
+
+def test_shared_api_worker_service_creates_all_config_directories_group_writable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Group access must extend beyond app.db to reports, logs, backups and fclones."""
+    from app.service import FileCenterService
+
+    config = _shared_config(monkeypatch, tmp_path)
+    settings = _file_center_settings(config, tmp_path)
+    service = FileCenterService(settings)
+    try:
+        for directory in (
+            settings.reports_dir,
+            settings.backups_dir,
+            settings.logs_dir,
+            settings.fclones_home,
+        ):
+            st = directory.lstat()
+            assert (st.st_mode & 0o7777) == 0o2770, directory
+            assert st.st_gid == os.getegid(), directory
+    finally:
+        service.engine.dispose()
+
+
+def test_shared_service_refuses_existing_private_report_dir_before_db_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.service import FileCenterService
+
+    config = _shared_config(monkeypatch, tmp_path)
+    reports = config / "reports"
+    reports.mkdir(mode=0o700)
+    settings = _file_center_settings(config, tmp_path)
+    with pytest.raises(PermissionError, match="SHARED_CONFIG"):
+        FileCenterService(settings)
+    assert (reports.stat().st_mode & 0o777) == 0o700
+    assert not settings.database_path.exists()
+
+
+def test_shared_service_rejects_symlinked_config_child_without_touching_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.service import FileCenterService
+
+    config = _shared_config(monkeypatch, tmp_path)
+    foreign = tmp_path / "foreign-reports"
+    foreign.mkdir(mode=0o700)
+    (foreign / "leave-alone.txt").write_text("unchanged", encoding="utf-8")
+    (config / "reports").symlink_to(foreign, target_is_directory=True)
+    with pytest.raises(PermissionError, match="SHARED_CONFIG"):
+        FileCenterService(_file_center_settings(config, tmp_path))
+    assert (foreign / "leave-alone.txt").read_text(encoding="utf-8") == "unchanged"
+    assert not (config / "app.db").exists()
+
+
+def test_shared_service_refuses_unprovisioned_config_root_without_changing_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.service import FileCenterService
+
+    monkeypatch.setenv("NFC_SHARED_CONFIG_GID", str(os.getegid()))
+    config = tmp_path / "legacy-private-config"
+    config.mkdir(mode=0o700)
+    old_mode = config.stat().st_mode & 0o7777
+    with pytest.raises(PermissionError, match="SHARED_CONFIG"):
+        FileCenterService(_file_center_settings(config, tmp_path))
+    assert (config.stat().st_mode & 0o7777) == old_mode
+    assert list(config.iterdir()) == []
