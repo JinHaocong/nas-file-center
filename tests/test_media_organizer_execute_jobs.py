@@ -14,7 +14,8 @@ from app.tasks.recovery import acquire_worker_ownership
 from app.worker import process_work_job
 
 
-def setup(tmp_path, *, enabled=False, mutation=True, deletion=True):
+def setup(tmp_path, *, enabled=False, mutation=True, deletion=True,
+          namespace_quiescent=True):
     data = tmp_path / "data"
     config = tmp_path / "config"
     data.mkdir()
@@ -23,6 +24,7 @@ def setup(tmp_path, *, enabled=False, mutation=True, deletion=True):
         _env_file=None, CONFIG_DIR=str(config), DATA_MOUNT=str(data),
         ALLOWED_ROOTS=str(data), QUARANTINE_ROOT=str(data / ".trash"),
         MEDIA_ORGANIZER_EXECUTION_ENABLED=enabled,
+        MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK=namespace_quiescent,
         ALLOW_MUTATION=mutation, ALLOW_DELETE=deletion,
         INITIAL_ADMIN_USERNAME="admin", INITIAL_ADMIN_PASSWORD="test-password-123",
     )
@@ -379,3 +381,36 @@ def test_assisted_recovery_after_last_marker_gap_requires_durable_receipt(
     assert worker(settings, recovered_id, name="receipt-owner")
     assert not stage.exists()
     assert client.get(f"/api/media-organizer/executions/{recovered_id}").json()["status"] == "completed"
+
+
+def test_namespace_quiescence_ack_is_required_even_when_other_permission_gates_open(
+    tmp_path,
+):
+    """A shared-writable namespace is never authorized for mutating cleanup."""
+    client, settings, work = setup(
+        tmp_path, enabled=True, mutation=True, deletion=True,
+        namespace_quiescent=False,
+    )
+    assert settings.media_organizer_namespace_quiescence_ack is False
+    pid = preview(client, settings, work)
+    report = client.get(f"/api/media-organizer/previews/{pid}")
+    assert report.status_code == 200
+    assert report.json()["execution_enabled"] is False
+    response = execute_request(client, pid, work)
+    assert response.status_code == 409
+    assert (work / "photo.jpg").read_bytes() == b"photo-1"
+    assert (work / "clip.mp4").read_bytes() == b"video-1"
+    assert not any(x.name.startswith(".nfc-") for x in work.iterdir())
+
+
+def test_worker_rechecks_quiescence_ack_after_job_was_queued(tmp_path):
+    """A revoked namespace guarantee fails BEFORE staging any source."""
+    client, settings, work = setup(tmp_path, enabled=True)
+    pid = preview(client, settings, work)
+    queued = execute_request(client, pid, work)
+    assert queued.status_code == 200
+    settings.media_organizer_namespace_quiescence_ack = False
+    assert worker(settings, queued.json()["job_id"], name="quiescence-guard") is False
+    assert (work / "photo.jpg").read_bytes() == b"photo-1"
+    assert (work / "clip.mp4").read_bytes() == b"video-1"
+    assert not any(x.name.startswith(".nfc-") for x in work.iterdir())
