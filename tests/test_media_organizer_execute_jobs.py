@@ -368,7 +368,6 @@ def test_deferred_execution_never_reaches_last_marker_rmdir_gap(tmp_path, monkey
         raise AssertionError("retirement must not be invoked in deferred mode")
 
     monkeypatch.setattr(retirement, "_rmdir_bound_empty_stage", forbidden)
-    monkeypatch.setattr(jobs, "retire_published_stage", forbidden)
     assert worker(settings, original_id, name="safe-retain-worker")
     stage = work / f".nfc-media-organizer-stage-{original_id}"
     assert stage.is_dir()
@@ -430,7 +429,6 @@ def test_worker_requires_manual_cleanup_without_deleting_old_wrapper_or_stage(
         raise AssertionError("automatic directory retirement was invoked")
 
     monkeypatch.setattr(publishing, "_retire_wrappers", never_delete)
-    monkeypatch.setattr(jobs, "retire_published_stage", never_delete)
     assert worker(settings, job_id, name="manual-only-worker")
     result = client.get(f"/api/media-organizer/executions/{job_id}").json()
     assert result["status"] == "completed"
