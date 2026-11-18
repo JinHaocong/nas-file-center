@@ -74,6 +74,8 @@ export interface SemanticExecutionStatus {
   preview_job_id: number;
   unit: string;
   recovery_of_job_id: number | null;
+  manual_cleanup_required: boolean;
+  finalized: boolean;
   progress: {
     current: number;
     total: number;
