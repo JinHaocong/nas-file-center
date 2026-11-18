@@ -390,6 +390,79 @@ def _retire_wrappers(unit: Path, manifest: dict, witness: bytes,
     return retired
 
 
+def _create_public_group_direct(
+    unit: Path, name: str, manifest: dict, witness: bytes,
+    fence: Callable[[], None], *, frozen_manifest_path: Path,
+) -> None:
+    """Provision a no-overwrite public group without SOURCE-directory rename.
+
+    This primitive removes SEC-12's private pending-name rename path, but it
+    does NOT by itself prove custody against same-UID/root writers able to
+    replace the public basename between mkdirat and openat. The live V1.6
+    grouped Worker gate therefore remains closed until independently verified
+    namespace isolation is available. No error branch deletes an entry.
+    """
+    names = [row["name"] for row in manifest.get("groups", [])]
+    if name not in names or Path(name).name != name or name in (".", ".."):
+        raise PublishingConflict("group is not present in the frozen plan")
+    ordinal = names.index(name) + 1
+    stage = unit / manifest["stage_directory"]
+    _check_unit(unit, manifest, fence)
+    stage_fd = _open_directory_nofollow(stage)
+    unit_fd = _open_directory_nofollow(unit)
+    group_fd = None
+    try:
+        stage_info = _assert_private_stage_fd(stage_fd)
+        if (int(stage_info.st_dev) != manifest["unit_dev"]
+                or not _read_marker(stage_fd, ".nfc-stage-authority", witness)
+                or not _read_marker(stage_fd, ".nfc-stage-complete", witness)):
+            raise PublishingConflict("private stage ownership or completion is missing")
+        unit_info = os.fstat(unit_fd)
+        if (int(unit_info.st_dev), int(unit_info.st_ino)) != (
+                manifest["unit_dev"], manifest["unit_ino"]):
+            raise PublishingConflict("public unit identity no longer matches freeze")
+        if _entry(unit_fd, name) is not None:
+            raise PublishingConflict("foreign public group already occupied")
+        fence()
+        try:
+            os.mkdir(name, mode=0o700, dir_fd=unit_fd)
+        except FileExistsError as exc:
+            raise PublishingConflict("public group raced with exclusive creation") from exc
+        os.fsync(unit_fd)
+
+        # A created-but-not-yet-witnessed directory is intentionally left for
+        # manual reconciliation after a crash. Do not adopt unknown folders.
+        group_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY |
+                           os.O_NOFOLLOW, dir_fd=unit_fd)
+        created = os.fstat(group_fd)
+        bound = _entry(unit_fd, name)
+        if (bound is None or not stat.S_ISDIR(bound.st_mode)
+                or (int(bound.st_dev), int(bound.st_ino)) != (
+                    int(created.st_dev), int(created.st_ino))
+                or int(created.st_dev) != manifest["unit_dev"]
+                or int(created.st_uid) != os.geteuid()
+                or stat.S_IMODE(created.st_mode) & 0o077):
+            raise PublishingConflict("new public group inode/owner/mode untrusted")
+        with os.scandir(group_fd) as entries:
+            if next(entries, None) is not None:
+                raise PublishingConflict("new public group is not empty")
+        _write_marker(group_fd, _PUBLIC_OWNER, witness)
+        os.fsync(group_fd)
+        identity = (int(created.st_dev), int(created.st_ino))
+        _write_group_receipt(
+            _group_receipt_path(frozen_manifest_path, ordinal),
+            manifest, name, ordinal, identity,
+        )
+        _assert_public_group_binding(unit, unit / name, group_fd, witness, identity)
+        os.fsync(group_fd)
+        os.fsync(unit_fd)
+    finally:
+        if group_fd is not None:
+            os.close(group_fd)
+        os.close(unit_fd)
+        os.close(stage_fd)
+
+
 def _create_public_group(unit: Path, name: str, manifest: dict, witness: bytes,
                          fence: Callable[[], None], *, resume: bool = False,
                          frozen_manifest_path: Path) -> None:
