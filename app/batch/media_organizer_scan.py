@@ -55,7 +55,7 @@ def write_semantic_preview(selection: Path, *, allowed_roots: list[Path], out: T
                         )}
                         mapping.write(json.dumps(
                             row, ensure_ascii=False, separators=(",", ":"),
-                        ) + "\\n")
+                        ) + "\n")
                     mapping.flush()
                     os.fsync(mapping.fileno())
                 os.fsync(mapping_fd)
