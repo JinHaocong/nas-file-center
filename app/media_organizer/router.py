@@ -128,6 +128,23 @@ def read_media_organizer_cleanup_review(
         raise HTTPException(409, str(exc)) from exc
 
 
+@router.get('/executions/{job_id}/cleanup-audit')
+def read_media_organizer_cleanup_audit(
+    request: Request, job_id: int, _admin=Depends(require_admin_user),
+):
+    """Verify every frozen source/staged/final link without mutating media."""
+    from app.batch.media_organizer_execute_jobs import get_media_organizer_cleanup_audit
+    try:
+        return get_media_organizer_cleanup_audit(
+            request.app.state.service.SessionLocal,
+            request.app.state.settings, job_id,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, 'Execution not found') from exc
+    except (ValueError, PermissionError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.post('/executions/{job_id}/recover')
 def recover_media_organizer_execution(request: Request, job_id: int,
                                       payload: MediaOrganizerRecoveryRequest,

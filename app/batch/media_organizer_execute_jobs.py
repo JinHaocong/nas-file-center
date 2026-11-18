@@ -33,6 +33,7 @@ from app.batch.media_organizer_deferred_cleanup import (
 )
 from app.config import Settings
 from app.config_sharing import shared_config_gid, ensure_shared_report_directory
+from app.batch.media_organizer_cleanup_audit import audit_deferred_cleanup_inventory
 from app.models import WorkJob
 from app.tasks.context import JobContext
 from app.tasks.handlers_base import TaskHandler, register_handler
@@ -282,6 +283,30 @@ def get_media_organizer_cleanup_review(
     result = read_deferred_cleanup_review(
         manifest, frozen_manifest_path=manifest_file,
         page=page, page_size=page_size,
+    )
+    result["reviewed_execution_job_id"] = job_id
+    return result
+
+
+def get_media_organizer_cleanup_audit(
+    session_factory, settings: Settings, job_id: int,
+) -> dict:
+    """Admin-read entire frozen inventory; not a cleanup/finalize operation."""
+    # This existing reader already checks completed WorkJob, phase, checksum,
+    # read-only journal, the first frozen row and source→unit binding.
+    review = get_media_organizer_cleanup_review(
+        session_factory, settings, job_id, page=1, page_size=1,
+    )
+    frozen_id = int(review["job_id"])
+    unit = Path(review["unit"])
+    path = _manifest_file(settings, frozen_id)
+    manifest = load_frozen_preview_manifest(
+        path, job_id=frozen_id, unit=unit,
+    )
+    result = audit_deferred_cleanup_inventory(
+        manifest, frozen_manifest_path=path,
+        allowed_roots=settings.allowed_roots,
+        quarantine_root=settings.quarantine_root,
     )
     result["reviewed_execution_job_id"] = job_id
     return result

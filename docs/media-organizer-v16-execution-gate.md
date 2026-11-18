@@ -230,3 +230,8 @@ The authenticated admin can request `GET /api/media-organizer/executions/{job_id
 ### #400–#403 shared evidence permissions (candidate)
 
 When `NFC_SHARED_CONFIG_GID` is configured, the Worker creates **new** `reports/media_organizer-executions` and per-job directories with owner-controlled setgid 2770 modes, new frozen manifests at 0640 and new manual cleanup journals at 0640; this permits the trusted, separately UID'd API process to read verified evidence via the shared GID without making paths public. The existing single-UID default remains 0700 / 0600. Existing report roots/manifest/journals of an incompatible mode or GID fail closed; there is no automatic chmod/chown of existing host files. This only makes the **read-only reviewer** usable across trusted principals; it does not grant media cleanup, actual NAS authority, or V1.6 release permission. All permission assumptions require supported host ACL/mount proof and reviewer sign-off.
+
+
+### #400 Full read-only inventory audit
+
+After an already completed deferred WorkJob, the admin-only `GET /api/media-organizer/executions/{job_id}/cleanup-audit` checks all frozen file links, rather than one page. It validates the immutable journal, stage witness, public receipts, entire original/staged/final inode list and exact contents of old classification wrappers (basenames, not bytes). All mismatches cause HTTP 409 without changing files. Even a fully green response is **not** cleanup consent, proves no adversarial NAS namespace exclusion and does not demonstrate a zero-change rescan. It always reports `cleanup_authorized=false`, `finalized=false` and `zero_change_rescan_verified=false`. Existing #402/#399/#398/#403 release holds remain mandatory.
