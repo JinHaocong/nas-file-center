@@ -56,6 +56,26 @@ def read_media_organizer_preview(request: Request, job_id: int,
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.get('/previews/{job_id}/mappings/{mapping_id}')
+def read_media_organizer_full_mapping(
+    request: Request, job_id: int, mapping_id: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    _admin=Depends(require_admin_user),
+):
+    """Read the complete source→target mapping in bounded pages."""
+    from app.batch.media_organizer_jobs import get_media_organizer_mapping
+    try:
+        return get_media_organizer_mapping(
+            request.app.state.service.SessionLocal, request.app.state.settings,
+            job_id, mapping_id, page=page, page_size=page_size,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail='Preview mapping not found') from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post('/previews/{job_id}/execute')
 def start_media_organizer_execution(request: Request, job_id: int,
                                    payload: MediaOrganizerExecuteRequest,
