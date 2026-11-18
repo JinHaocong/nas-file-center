@@ -56,7 +56,10 @@ def check_archive(request: Request, payload: RecoveryRequest):
     import ctypes.util
     return {'format': fmt, 'source': str(source), 'free_bytes': free,
             'source_bytes': source.stat().st_size,
-            'can_write': request.app.state.settings.allow_mutation and os.access(source.parent, os.W_OK),
+            # The API is allowed to enqueue; the Worker validates actual parent
+            # write access immediately before exclusive output-directory creation.
+            'mutation_enabled': request.app.state.settings.allow_mutation,
+            'worker_write_check_required': True,
             'dependency_available': fmt in ('tar', 'zip') or bool(ctypes.util.find_library('archive')),
             # Read-only API-side RAM channel check; Worker must share the mount.
             'password_channel_available': tmpfs_available(),
@@ -69,13 +72,11 @@ def check_archive(request: Request, payload: RecoveryRequest):
 
 @router.post('/start', status_code=202)
 def start_archive(request: Request, payload: RecoveryRequest):
-    """Create an exclusive sibling output directory and enqueue one Worker job."""
+    """Freeze intent and enqueue; only the Worker creates the sibling output directory."""
     source = qualified_source(request, payload.source)
     settings = request.app.state.settings
     if not settings.allow_mutation:
         raise HTTPException(403, 'MUTATION_DISABLED')
-    if not os.access(source.parent, os.W_OK):
-        raise HTTPException(422, 'SOURCE_PARENT_NOT_WRITABLE')
     try:
         detect_format(source)
     except RecoveryError as exc:
@@ -84,22 +85,24 @@ def start_archive(request: Request, payload: RecoveryRequest):
         raise HTTPException(422, 'PASSWORD_TOO_LONG')
     if payload.password and not tmpfs_available():
         raise HTTPException(503, 'PASSWORD_CHANNEL_UNAVAILABLE: configure shared tmpfs')
-    # Explicit source identity and unique output directory; no overwrite.
-    st = source.stat()
+
+    # Freeze source and parent identities. The API performs no media-root writes.
+    source_stat = os.stat(source, follow_symlinks=False)
+    parent_stat = os.stat(source.parent, follow_symlinks=False)
+    if not stat.S_ISREG(source_stat.st_mode) or not stat.S_ISDIR(parent_stat.st_mode):
+        raise HTTPException(409, 'SOURCE_OR_PARENT_CHANGED')
     output = None
     token = None
     try:
         for _ in range(10):
             candidate = source.parent / (source.name[:60] + '_恢复结果_' + uuid4().hex[:8])
-            try:
-                candidate.mkdir(mode=0o700)
+            # Read-only collision observation only. Worker still uses exclusive mkdir.
+            if not os.path.lexists(candidate):
                 output = candidate
                 break
-            except FileExistsError:
-                continue
         if output is None:
             raise HTTPException(409, 'OUTPUT_CONFLICT')
-        output_stat = output.stat()
+
         if payload.password:
             token = uuid4().hex
             secret_path = SECRET_DIR / token
@@ -111,9 +114,10 @@ def start_archive(request: Request, payload: RecoveryRequest):
             job = WorkJob(kind='archive-recovery', status='queued',
                           state_json=json.dumps({
                               'source': str(source), 'output': str(output),
-                              'identity': [str(st.st_dev), str(st.st_ino), str(st.st_size), str(st.st_mtime_ns)],
+                              'identity': [str(source_stat.st_dev), str(source_stat.st_ino),
+                                           str(source_stat.st_size), str(source_stat.st_mtime_ns)],
+                              'parent_identity': [str(parent_stat.st_dev), str(parent_stat.st_ino)],
                               'secret_token': token, 'deep': payload.deep,
-                              'output_identity': [str(output_stat.st_dev), str(output_stat.st_ino)],
                           }, ensure_ascii=False))
             session.add(job)
             session.commit()
@@ -122,8 +126,6 @@ def start_archive(request: Request, payload: RecoveryRequest):
     except BaseException:
         if token:
             (SECRET_DIR / token).unlink(missing_ok=True)
-        if output:
-            output.rmdir()  # Only the empty directory just registered by us.
         raise
 
 
