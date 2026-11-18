@@ -86,8 +86,9 @@ export interface QuarantinePurgeRequest {
 export interface QuarantinePurgeResponse {
   id: number;
   entry_id?: number;
-  state: 'purged';
-  status: 'purged';
+  state: 'active' | 'purging' | 'purged';
+  status: 'queued' | 'purged';
+  work_job_id?: number;
   purged?: boolean;
   purge_semantics?: 'unlink_v1' | string;
   removed_count?: number;
