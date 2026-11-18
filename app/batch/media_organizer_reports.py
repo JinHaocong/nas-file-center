@@ -28,8 +28,6 @@ def compact_preview_record(record: dict, *, max_items: int = 10,
     proposed = list(record.get("items", [])) if status == "ready" else []
     sample = [{k: item[k] for k in ("source", "target", "target_name", "kind", "bytes")
                if k in item} for item in proposed[:max_items]]
-    if proposed and (not isinstance(mapping_id, str) or not _MAPPING_ID.fullmatch(mapping_id)):
-        raise ValueError("complete mapping id is required for a ready unit with moves")
     return {
         "unit": record["unit"], "status": status, "reason": record.get("reason"),
         "operation": record.get("operation"), "totals": record.get("totals", {}),
@@ -79,7 +77,11 @@ def read_preview_mapping(mapping_root: Path, mapping_id: str, *, page: int,
     if not stat.S_ISDIR(root_stat.st_mode) or stat.S_ISLNK(root_stat.st_mode):
         raise ValueError("unsafe mapping report directory")
     path = root / f"{mapping_id}.jsonl"
-    fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
+    root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root_fd)
+    finally:
+        os.close(root_fd)
     try:
         info = os.fstat(fd)
         if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
