@@ -181,3 +181,40 @@ an affirmative quiescence flag proves the underlying race is removed.
 - [ ] User approval before enabling mutation permissions, merging or deploying.
 
 **References:** docs/superpowers/specs/2026-11-17-media-organizer-v1.6-design.md and docs/superpowers/plans/2026-11-17-media-organizer-v1.6.md.
+
+
+## V1.6 real-SATA scratch acceptance (owner-created disposable root)
+
+The current Komodo Compose binds host `/tmp/zfsv3/sata11/15246330601/data`
+to container `/data`. The owner-created test root is therefore expected at:
+
+```text
+/tmp/zfsv3/sata11/15246330601/data/nas-file-center-v1.6-acceptance
+├── nfc-organizer-c5-acceptance
+└── nfc-scheduler-s5-acceptance
+```
+
+The dedicated PR workflow
+`.github/workflows/media-organizer-v16-real-nas.yml` checks out the exact PR
+HEAD and runs only on a self-hosted NAS runner carrying labels
+`self-hosted, linux, x64, nas-file-center-acceptance`. Its preflight verifies
+the expected path, real directories (no symlinks), same-device SATA placement,
+the two child names, and empty/reserved contents before any test write.
+
+The V1.6 harness records capability evidence and synthetic flat-file
+publication under a unique `.nfc-v16-run-<sha>-*` directory inside
+`nfc-organizer-c5-acceptance`. It deliberately leaves those test fixtures and
+receipts for the owner to inspect and remove by deleting the single parent
+`nas-file-center-v1.6-acceptance` after acceptance. The Scheduler root remains
+unused and empty. The capability probe's own random scratch is removed only
+when its exact ownership evidence still matches.
+
+**This is NOT P/V group acceptance.** The report must retain
+`grouped_publication_authorized=false` and
+`namespace_exclusive_custody_proven=false`; mixed P/V plans remain blocked.
+The flat deferred handoff retains originals/stage/public hardlinks and does
+not yet satisfy a zero-change second scan; #400 remains open.
+
+The workflow requires an online self-hosted runner with the labels above.
+A pending/queued job with no assigned runner means the real NAS test has NOT
+started. GitHub-hosted CI and Docker builds cannot substitute for this mount.
