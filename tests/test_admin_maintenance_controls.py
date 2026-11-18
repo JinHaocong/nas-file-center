@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from app.auth.password import hash_password
 from app.config import Settings
 from app.main import create_app
-from app.models import AuditEvent, BatchPlan, QuarantineEntry, User, Workflow, WorkflowRevision, utcnow
+from app.models import AuditEvent, BatchPlan, QuarantineEntry, User, WorkJob, Workflow, WorkflowRevision, utcnow
 import app.service as service_module
 from app.service import FileCenterService
 
@@ -195,14 +195,21 @@ def test_quarantine_purged_record_delete_is_metadata_only_admin_and_payload_abse
     deleted = admin.delete(
         f"/api/quarantine/{purged_id}/record?confirmation=DELETE_RECORD"
     )
-    assert deleted.status_code == 200
-    assert deleted.json() == {"status": "ok", "deleted": True, "id": purged_id}
+    assert deleted.status_code == 202
+    queued = deleted.json()
+    assert queued["status"] == "queued"
+    assert queued["entry_ids"] == [purged_id]
+    job_id = int(queued["work_job_id"])
 
     with service.SessionLocal() as session:
-        assert session.get(QuarantineEntry, purged_id) is None
+        assert session.get(QuarantineEntry, purged_id) is not None
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        assert job.kind == "quarantine-record-cleanup"
+        assert job.status == "queued"
         audit = session.scalar(
             select(AuditEvent)
-            .where(AuditEvent.operation == "quarantine.record_delete")
+            .where(AuditEvent.operation == "quarantine.record_cleanup_enqueue")
             .order_by(AuditEvent.id.desc())
         )
         assert audit is not None
@@ -272,12 +279,17 @@ def test_quarantine_bulk_record_delete_is_explicit_all_or_nothing(maintenance_en
         json={"entry_ids": [first, second], "confirmation": "DELETE_RECORDS"},
         headers={"Origin": "http://testserver"},
     )
-    assert response.status_code == 200
-    assert response.json()["deleted_count"] == 2
-    assert response.json()["deleted_ids"] == [first, second]
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    assert response.json()["entry_ids"] == [first, second]
+    job_id = int(response.json()["work_job_id"])
     with service.SessionLocal() as session:
-        assert session.get(QuarantineEntry, first) is None
-        assert session.get(QuarantineEntry, second) is None
+        assert session.get(QuarantineEntry, first) is not None
+        assert session.get(QuarantineEntry, second) is not None
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        assert job.kind == "quarantine-record-cleanup"
+        assert job.status == "queued"
 
 
 def test_audit_history_clear_requires_admin_confirmation_and_keeps_one_self_audit(maintenance_env):
