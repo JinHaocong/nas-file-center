@@ -3,9 +3,18 @@ name: Semantic Media Organizer V1.6 TDD
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'app/batch/media_organizer_*.py'
       - 'app/media_organizer/**'
+      - 'app/archive_recovery/**'
+      - 'app/quarantine/service_adapter.py'
+      - 'app/api/router.py'
+      - 'app/service.py'
+      - 'app/tasks/handlers_base.py'
+      - 'tests/test_archive_recovery_*.py'
+      - 'tests/test_api_route_media_mutation_boundary.py'
+      - 'tests/test_quarantine_*.py'
       - 'app/main.py'
       - 'app/tasks/handlers.py'
       - 'frontend/src/pages/Batch/index.tsx'
@@ -43,7 +52,13 @@ jobs:
       - name: Safe read-only planner and manifest TDD
         env:
           PYTHONPATH: .
-        run: pytest -q tests/test_media_organizer_*.py
+        run: |
+          pytest -q tests/test_media_organizer_*.py \
+            tests/test_api_route_media_mutation_boundary.py \
+            tests/test_archive_recovery_password_channel_preflight.py \
+            tests/test_quarantine_api.py \
+            tests/test_quarantine_terminal_record_cleanup.py \
+            tests/test_archive_recovery_7z_regression.py -k 'not real_7zip_default_header'
   frontend-focused:
     runs-on: ubuntu-latest
     timeout-minutes: 15

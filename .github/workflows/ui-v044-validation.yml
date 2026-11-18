@@ -10,6 +10,7 @@ on:
   pull_request:
     branches:
       - main
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'frontend/**'
       - '.github/workflows/ui-v044-validation.yml'
@@ -24,6 +25,9 @@ concurrency:
 
 jobs:
   backend-regression:
+    # Draft PRs use focused checks; full gates run when marked Ready,
+    # on subsequent Ready updates, protected pushes and workflow_dispatch.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -110,6 +114,9 @@ jobs:
   # Bound the whole job to 35m rather than truncating tests or treating
   # cancellation as success; keep every existing fail-closed step intact.
   browser-overlay-smoke:
+    # Draft PRs use focused checks; full gates run when marked Ready,
+    # on subsequent Ready updates, protected pushes and workflow_dispatch.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     # Playwright 1.56.1 Chromium is not supported on ubuntu-26.04.
     # Pin the browser-only jobs; keep the actual Chromium gates enabled.
     runs-on: ubuntu-24.04
@@ -275,6 +282,9 @@ jobs:
   # Every router path with read-only mock APIs, 8 viewports x 4 themes.
   # Captures actual React screenshots and JSON diagnostics, NOT owner sign-off.
   full-route-visual-audit:
+    # Draft PRs use focused checks; full gates run when marked Ready,
+    # on subsequent Ready updates, protected pushes and workflow_dispatch.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
@@ -357,6 +367,9 @@ jobs:
   # Consolidate the eight already-successful, exact-HEAD Chromium screenshot
   # artifacts into ONE downloadable offline human-review bundle. No approval.
   human-visual-review-pack:
+    # Draft PRs use focused checks; full gates run when marked Ready,
+    # on subsequent Ready updates, protected pushes and workflow_dispatch.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     needs: full-route-visual-audit
     runs-on: ubuntu-latest
     timeout-minutes: 15
