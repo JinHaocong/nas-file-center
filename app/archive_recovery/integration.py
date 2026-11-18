@@ -14,6 +14,7 @@ from app.archive_recovery.core import (
     RecoveryError, recover_archive, clean_interrupted_parts, reconcile_failed_archive_items,
 )
 from app.config import Settings
+from app.config_sharing import shared_config_gid, ensure_shared_report_directory
 from app.models import WorkJob
 from app.tasks.context import JobContext
 from app.tasks.handlers_base import TaskHandler, register_handler
@@ -63,10 +64,23 @@ def report_path(settings: Settings, job_id: int) -> Path:
 def write_report(settings: Settings, job_id: int, report: dict) -> None:
     """Publish report metadata atomically under config; no password is stored."""
     directory = settings.config_dir / 'archive-recovery-reports'
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    gid = shared_config_gid()
+    if gid is None:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    else:
+        ensure_shared_report_directory(directory, gid)
     candidate = directory / f'.{job_id}-{os.urandom(12).hex()}.json'
-    fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    fd = os.open(
+        candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        0o640 if gid is not None else 0o600,
+    )
     try:
+        if gid is not None:
+            created = os.fstat(fd)
+            if created.st_gid != gid or not stat.S_ISREG(created.st_mode):
+                raise PermissionError('SHARED_CONFIG: report file owner/group mismatch')
+            # Group can read the result; no world access, and no host-file repair.
+            os.fchmod(fd, 0o640)
         with os.fdopen(fd, 'w', encoding='utf-8') as handle:
             json.dump(report, handle, ensure_ascii=False)
             handle.flush()

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import text
 
-from app.db import create_engine_and_session
+from app.db import create_engine_and_session, _db_init_lock
 from app.archive_recovery.integration import write_report, report_path
 
 
@@ -103,3 +103,23 @@ def test_legacy_report_mode_remains_private_without_shared_config(
     settings = SimpleNamespace(config_dir=tmp_path)
     write_report(settings, 33, {"private": True})
     assert (report_path(settings, 33).stat().st_mode & 0o777) == 0o600
+
+
+def test_shared_db_init_lock_is_group_writable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _shared_config(monkeypatch, tmp_path)
+    lock = config / ".db-init.lock"
+    with _db_init_lock(lock):
+        assert (lock.stat().st_mode & 0o777) == 0o660
+        assert lock.stat().st_gid == os.getegid()
+
+
+def test_shared_config_rejects_world_writable_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _shared_config(monkeypatch, tmp_path)
+    config.chmod(0o2777)
+    with pytest.raises(PermissionError, match="SHARED_CONFIG"):
+        create_engine_and_session(config / "app.db")
+    assert not (config / "app.db").exists()

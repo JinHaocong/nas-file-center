@@ -4,8 +4,15 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
 import json
+import os
 from pathlib import Path
 import sqlite3
+
+from app.config_sharing import (
+    shared_config_gid,
+    ensure_shared_database,
+    ensure_shared_init_lock,
+)
 
 from sqlalchemy import Engine, create_engine, delete, event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
@@ -18,7 +25,15 @@ from app.download_verification.models import DownloadVerificationRun, DownloadVe
 @contextmanager
 def _db_init_lock(lock_file_path: Path):
     lock_file_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(lock_file_path, "w") as lock_file:
+    gid = shared_config_gid()
+    if gid is not None:
+        ensure_shared_init_lock(lock_file_path, gid)
+        flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+        file_descriptor = os.open(lock_file_path, flags)
+        lock = os.fdopen(file_descriptor, "r+")
+    else:
+        lock = open(lock_file_path, "w")
+    with lock as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
             yield
@@ -32,6 +47,9 @@ def _db_init_lock(lock_file_path: Path):
 def create_engine_and_session(db_path: Path | str):
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    gid = shared_config_gid()
+    if gid is not None:
+        ensure_shared_database(db_path, gid)
     engine = create_engine(
         f"sqlite:///{db_path}",
         connect_args={"check_same_thread": False},

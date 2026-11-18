@@ -104,3 +104,12 @@ The following API surfaces currently persist or enqueue work rather than directl
 - [ ] Validate the new Archive Recovery Worker-owned output path in the current full Release Validation and UI Validation runs.
 
 Do not change deployment mounts or host permissions before the inventory is complete. This PR remains Draft and no production NAS mount/ACL changes have been made.
+
+
+## #403 RED→GREEN shared-config permission slice
+
+- On distinct container UIDs (API 10001, Worker 10002), the pre-existing DB / WAL and per-job report assumptions are insufficient: SQLite opens new DBs without a group-write bit, and archive reports default to 0700 directories / 0600 files. A shared numeric GID alone does not grant access.
+- `NFC_SHARED_CONFIG_GID` opts **only** the config permission check/creation into a dedicated group-bound mode; Compose sets it to the expected shared GID. Newly created `app.db` / `.db-init.lock` use 0660 and new `archive-recovery-reports` uses 2770 with 0640 report JSON. SQLite WAL/SHM must inherit 0660 from the DB. Existing files/directories failing owner/group/mode/no-follow preflight **stop** rather than being silently chmod/chowned.
+- Host operator must provision a separate trusted config mount with owner-controlled group 10000 and appropriate 2770 directories, convert **existing** database/sidecar/lock and reports only after separate backup/maintenance approval, and establish the exact NAS ACL and mapping semantics; the application does not modify pre-existing host ownership or media ACLs.
+- The archive password tmpfs channel remains a separate unresolved cross-UID design: API presently uses 0600 token files, which a different Worker UID cannot read. Do not weaken that file mode or claim password-protected archive recovery is cross-UID-ready. Keep #403 open until an independently reviewed, owner-authorized shared ephemeral secret mechanism and real Docker tests exist.
+- This is a necessary functional preflight, not exclusive namespace custody. The media organizer execution/quiescence gates remain OFF; NAS media have not been tested.
