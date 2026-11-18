@@ -22,8 +22,10 @@ from app.quarantine.unlink_purge import (
     OPERATION_ID,
     SEMANTICS_VERSION,
     _journal_records_for_entry,
+    _durable_authority_manifest,
     build_unlink_manifest,
     execute_journaled_unlink_purge,
+    revalidate_unlink_manifest,
 )
 
 
@@ -361,10 +363,15 @@ def _persist_single_terminal_audit(
     entry_id: int,
     entry_snapshot: dict[str, Any],
     details: dict[str, Any],
+    worker_id: str,
 ) -> None:
-    """Publish one Single Clear success audit, repairing a crash gap idempotently."""
+    """Publish one Single Clear success audit under the active Worker lease."""
+    from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
+
+    renew_and_assert_worker_lease(service.SessionLocal, worker_id)
     with service.SessionLocal() as session:
         session.execute(text("BEGIN IMMEDIATE"))
+        assert_active_worker_lease(session, worker_id)
         entry = session.get(QuarantineEntry, entry_id)
         if entry is None:
             session.rollback()
@@ -421,16 +428,23 @@ def purge_single_transactional_entry(
     *,
     confirmation: str,
     is_admin: bool,
+    worker_id: str,
+    frozen_manifest: dict[str, Any],
+    user_id: int | None = None,
 ) -> dict[str, Any]:
-    """Run the public single Clear action through Gate6-A2 unlink semantics."""
+    """Execute or resume one frozen Gate6-A2 purge under Worker authority."""
     if not is_admin:
         raise PermissionError("Only administrator can purge quarantine entries")
+    if not worker_id or not str(worker_id).strip():
+        raise PermissionError("Single quarantine purge requires active Worker authority")
     if not service.settings.allow_mutation:
         raise ValueError("Filesystem mutation is disabled")
     if not service.settings.allow_delete:
         raise ValueError("Permanent deletion is disabled")
     if confirmation != "DELETE":
         raise ValueError("Confirmation token must be 'DELETE'")
+    if not isinstance(frozen_manifest, dict):
+        raise StateConflictError("UNLINK_FROZEN_AUTHORITY_REQUIRED")
 
     with service.SessionLocal() as session:
         entry = session.get(QuarantineEntry, entry_id)
@@ -438,24 +452,42 @@ def purge_single_transactional_entry(
             raise KeyError(f"Quarantine entry #{entry_id} not found")
         entry_snapshot = {
             "id": int(entry.id),
-            "device": int(entry.device),
-            "inode": int(entry.inode),
-            "size": int(entry.size),
-            "mtime_ns": int(entry.mtime_ns),
+            "device": int(entry.device or 0),
+            "inode": int(entry.inode or 0),
+            "size": int(entry.size or 0),
+            "mtime_ns": int(entry.mtime_ns or 0),
             "content_hash": entry.content_hash,
             "original_path": entry.original_path,
             "quarantine_path": entry.quarantine_path,
         }
 
         if entry.state == "active" and entry.tx_phase == "active":
-            manifest = build_unlink_manifest(entry, service.settings.quarantine_root)
+            validation = revalidate_unlink_manifest(
+                entry, service.settings.quarantine_root, frozen_manifest,
+            )
+            if not validation["valid"]:
+                raise StateConflictError(
+                    "UNLINK_MANIFEST_INVALID:" + ",".join(validation["blockers"])
+                )
+            manifest = frozen_manifest
             recovery_evidence: dict[str, Any] | None = None
+        elif entry.state == "purging" and entry.tx_phase == "purging":
+            durable = _durable_authority_manifest(
+                session, entry_id,
+                attempt_generation=int(entry.active_attempt_generation or 0),
+            )
+            if durable != frozen_manifest:
+                raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_CHANGED")
+            manifest = durable
+            recovery_evidence = None
         elif entry.state == "purged" and entry.tx_phase == "purged":
             manifest, recovery_evidence = _durable_terminal_recovery_evidence(
                 session,
                 entry=entry,
                 quarantine_root=service.settings.quarantine_root,
             )
+            if manifest != frozen_manifest:
+                raise StateConflictError("UNLINK_TERMINAL_AUTHORITY_CHANGED")
         else:
             raise StateConflictError(
                 f"Cannot unlink-purge quarantine entry in state '{entry.state}' phase '{entry.tx_phase}'"
@@ -470,6 +502,7 @@ def purge_single_transactional_entry(
         entry_id=entry_id,
         quarantine_root=service.settings.quarantine_root,
         frozen_manifest=manifest,
+        worker_id=worker_id,
     )
     audit_mutation = recovery_evidence if recovery_evidence is not None else mutation
     advisory = _fresh_survivor_advisory(service, entry_snapshot=entry_snapshot)
@@ -478,6 +511,8 @@ def purge_single_transactional_entry(
         "operation": OPERATION_ID,
         "purge_semantics": SEMANTICS_VERSION,
         "quarantine_entry_id": entry_id,
+        "requested_by_user_id": user_id,
+        "work_job_worker_id": worker_id,
         "frozen_owned_roles": [str(item["role"]) for item in manifest["owned_paths"]],
         "removed_roles": list(audit_mutation.get("removed_roles") or []),
         "recovered_missing_roles": list(
@@ -496,6 +531,7 @@ def purge_single_transactional_entry(
         entry_id=entry_id,
         entry_snapshot=entry_snapshot,
         details=details,
+        worker_id=worker_id,
     )
 
     return {
