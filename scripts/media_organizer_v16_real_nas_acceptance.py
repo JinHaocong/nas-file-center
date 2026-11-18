@@ -150,7 +150,7 @@ def run(root: Path, organizer_root: Path, candidate_sha: str) -> dict:
                 or handoff.get("original_sources_retained") != 2
                 or handoff.get("staged_links_retained") != 2
                 or handoff.get("manual_cleanup_required") is not True
-                or handoff.get("finalized") is not False):
+                or handoff.get("finalized") is True):
             raise RuntimeError(f"unexpected deferred handoff: {handoff}")
         identities = []
         for row in flat_manifest["moves"]:
