@@ -107,3 +107,19 @@ Ticket **#403** now tracks the complete route/service mutation inventory, migrat
 https://github.com/JinHaocong/nas-file-center/issues/403
 
 **Do not simply flip the API bind mount to read-only** until #403's inventory and migrations are complete. That would be a compatibility regression. #403 is a prerequisite for a defensible least-privilege namespace-custody model under #402.
+
+
+## Progress log — 2026-11-18: API / Worker mutation-authority inventory
+
+- Added `docs/superpowers/specs/2026-11-18-api-worker-mutation-authority-inventory.md`.
+- Confirmed direct API media-root mutation paths that must move behind Worker jobs:
+  - `POST /api/quarantine/{id}/restore` (legacy/non-transactional restore path).
+  - `DELETE /api/quarantine/{id}/record` and `POST /api/quarantine/records/bulk-delete` (pre-enqueue transaction-artifact unlink/rmdir).
+  - `POST /api/archive-recovery/start` (API creates/removes the sibling output directory before/around enqueue).
+- Confirmed `POST /api/quarantine/{id}/purge` already queues `quarantine-single-purge`; do not regress this boundary.
+- Confirmed owner-deleted, orphan-transaction and missing-record retirement endpoints are explicitly metadata-only; keep their no-filesystem-mutation contract.
+- Confirmed startup reconciliation currently reads media state and writes SQLite metadata only; added it to the required regression guard so it cannot silently gain API-side writes.
+- Confirmed deployment gap: Dockerfile has no `USER`; Komodo gives both API and Worker `/data:rw` and does not set a non-root `user:`.
+- No production data, NAS paths, ownership or ACLs were modified by this inventory.
+
+**Task 1 status:** initial route/service inventory recorded. RED→GREEN migration tests, Worker handlers, deployment split and actual NAS ACL/mount evidence remain open. #403 remains OPEN and is a prerequisite for a defensible #402 custody boundary.
