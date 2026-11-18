@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     media_organizer_execution_enabled: bool = Field(
         default=False, validation_alias="MEDIA_ORGANIZER_EXECUTION_ENABLED",
     )
+    # SECURITY HOLD: inode checks cannot make rename/rmdir source-name
+    # operations atomic against uncooperative concurrent writers. Keep this
+    # independent acknowledgement OFF unless exclusive namespace ownership
+    # is externally demonstrated and independently reviewed.
+    media_organizer_namespace_quiescence_ack: bool = Field(
+        default=False, validation_alias="MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK",
+    )
     # Private deployment value: exact comma-separated directory basenames.
     # Not an exclusion for files with similar names.
     media_organizer_excluded_dir_names_raw: str = Field(
