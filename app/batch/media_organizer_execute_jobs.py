@@ -60,6 +60,15 @@ def _require_enabled(settings: Settings) -> None:
             "Execution requires MEDIA_ORGANIZER_EXECUTION_ENABLED, "
             "ALLOW_MUTATION and ALLOW_DELETE"
         )
+    # A file-identity check followed by name-based directory rename/rmdir
+    # cannot exclude an uncooperative concurrent writer. An independently
+    # reviewed/exclusively quiescent namespace is an additional REQUIREMENT.
+    # This acknowledgement is deliberately false in every default deploy.
+    if not getattr(settings, "media_organizer_namespace_quiescence_ack", False):
+        raise ValueError(
+            "Execution blocked: MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK "
+            "requires verified exclusive namespace custody"
+        )
 
 
 def _literal_unit(value: str, settings: Settings) -> Path:
