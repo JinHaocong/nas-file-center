@@ -11,6 +11,8 @@ from app.config import Settings
 from app.main import create_app
 from app.models import QuarantineEntry, User, WorkJob, utcnow
 from app.service import FileCenterService
+from app.tasks.recovery import acquire_worker_ownership
+from app.worker import process_work_job
 
 
 def test_transactional_single_purge_api_only_enqueues_worker_and_preserves_payload_until_worker_runs(
@@ -104,3 +106,24 @@ def test_transactional_single_purge_api_only_enqueues_worker_and_preserves_paylo
         assert state["entry_id"] == entry_id
         assert state["confirmation"] == "DELETE"
         assert state["frozen_manifest"]["selected_entry_id"] == entry_id
+
+    worker_id = "worker-single-purge-test"
+    assert acquire_worker_ownership(service.engine, service.SessionLocal, worker_id)
+    assert process_work_job(
+        settings,
+        result["work_job_id"],
+        session_factory=service.SessionLocal,
+        engine=service.engine,
+        worker_id=worker_id,
+    )
+
+    assert not anchor.exists()
+    assert not captured.exists()
+    assert not public_view.exists()
+    with service.SessionLocal() as session:
+        persisted = session.get(QuarantineEntry, entry_id)
+        job = session.get(WorkJob, result["work_job_id"])
+        assert persisted is not None
+        assert persisted.state == "purged"
+        assert job is not None
+        assert job.status == "completed"
