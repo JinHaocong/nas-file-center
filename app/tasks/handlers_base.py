@@ -4134,6 +4134,110 @@ class BatchPlanExecuteHandler(TaskHandler):
 
 
 @register_handler
+class QuarantineRestoreHandler(TaskHandler):
+    """Execute a frozen single-entry restore under the active Worker lease."""
+
+    job_type = "quarantine-restore"
+    supports_pause = False
+    supports_cancel = False
+    # The existing legacy restore operation has no durable mid-syscall journal.
+    # Do not advertise blind retry/resume after an interrupted filesystem move.
+    supports_retry = False
+    supports_resume = False
+
+    @staticmethod
+    def _identity(entry: QuarantineEntry) -> dict[str, Any]:
+        return {
+            "original_path": str(entry.original_path),
+            "quarantine_path": str(entry.quarantine_path),
+            "state": str(entry.state),
+            "tx_phase": entry.tx_phase,
+            "transaction_mode": entry.transaction_mode,
+            "authoritative_anchor_path": entry.authoritative_anchor_path,
+            "active_attempt_generation": int(entry.active_attempt_generation or 0),
+            "size": int(entry.size or 0),
+            "content_hash": entry.content_hash,
+            "mtime_ns": int(entry.mtime_ns or 0),
+            "device": int(entry.device or 0),
+            "inode": int(entry.inode or 0),
+            "quarantine_device": (
+                int(entry.quarantine_device)
+                if entry.quarantine_device is not None else None
+            ),
+            "quarantine_inode": (
+                int(entry.quarantine_inode)
+                if entry.quarantine_inode is not None else None
+            ),
+            "quarantine_mtime_ns": (
+                int(entry.quarantine_mtime_ns)
+                if entry.quarantine_mtime_ns is not None else None
+            ),
+        }
+
+    def run(self, job: WorkJob, context: JobContext, settings: Settings) -> None:
+        if not context.worker_id:
+            raise PermissionError("Quarantine restore requires active Worker authority")
+
+        state = json.loads(job.state_json or "{}")
+        entry_id = state.get("entry_id")
+        policy = state.get("conflict_policy")
+        custom_target = state.get("custom_target")
+        user_id = state.get("requested_by_user_id")
+        expected_identity = state.get("expected_identity")
+        if not isinstance(entry_id, int) or entry_id <= 0:
+            raise ValueError("Quarantine restore job is missing entry_id")
+        if policy not in {"skip", "rename", "manual"}:
+            raise ValueError("Quarantine restore job has invalid conflict_policy")
+        if not isinstance(expected_identity, dict):
+            raise ValueError("Quarantine restore job is missing frozen entry identity")
+
+        from app.tasks.recovery import assert_active_worker_lease
+
+        with context.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            assert_active_worker_lease(session, context.worker_id)
+            entry = session.get(QuarantineEntry, entry_id)
+            if entry is None:
+                raise KeyError(f"Quarantine entry #{entry_id} not found")
+            if self._identity(entry) != expected_identity:
+                raise StateConflictError(
+                    f"QUARANTINE_RESTORE_SNAPSHOT_CHANGED: entry #{entry_id} changed after enqueue"
+                )
+            session.commit()
+
+        context.checkpoint(
+            progress_current=0,
+            progress_total=1,
+            progress_message=f"Restoring quarantine entry #{entry_id}...",
+        )
+
+        from app.service import FileCenterService
+
+        service = FileCenterService(settings)
+        result = service.restore_quarantine_entry(
+            entry_id,
+            conflict_policy=policy,
+            custom_target=custom_target,
+            user_id=user_id,
+            worker_id=context.worker_id,
+        )
+
+        context.checkpoint(
+            progress_current=1,
+            progress_total=1,
+            progress_message=(
+                f"Quarantine entry #{entry_id} {result.get('state', result.get('status', 'processed'))}"
+            ),
+            checkpoint_data={"schema_version": 1, "result": result},
+        )
+        context.log(
+            "quarantine_restore_completed",
+            "Quarantine restore completed under Worker authority",
+            context=result,
+        )
+
+
+@register_handler
 class QuarantineRecordCleanupHandler(TaskHandler):
     job_type = "quarantine-record-cleanup"
     supports_pause = False
