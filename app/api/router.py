@@ -2017,7 +2017,7 @@ def update_quarantine_retention_policy(
         raise HTTPException(400, str(exc)) from exc
 
 
-@router.post("/quarantine/records/bulk-delete")
+@router.post("/quarantine/records/bulk-delete", status_code=202)
 def bulk_delete_quarantine_records(
     request: Request,
     payload: QuarantineRecordBulkDeleteRequest,
@@ -2157,7 +2157,7 @@ def cleanup_missing_quarantine_record(
         raise HTTPException(400, str(exc)) from exc
 
 
-@router.delete("/quarantine/{id}/record")
+@router.delete("/quarantine/{id}/record", status_code=202)
 def delete_quarantine_record(
     request: Request,
     id: int,
