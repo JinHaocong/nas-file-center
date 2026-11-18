@@ -5,6 +5,7 @@ They must never access original NAS media or require real filesystem mutation
 outside pytest's tmp_path. Destination NOREPLACE by itself does not pin source.
 """
 import errno
+import os
 from pathlib import Path
 
 import pytest
@@ -155,13 +156,13 @@ def test_pinned_hardlink_rejects_unsafe_destination_names(tmp_path):
     from app.batch.media_organizer_fd_link import link_pinned_inode_noreplace
     source = tmp_path / "original.bin"
     source.write_bytes(b"verified")
-    src_fd = __import__("os").open(source, __import__("os").O_RDONLY)
-    folder_fd = __import__("os").open(tmp_path, __import__("os").O_RDONLY | __import__("os").O_DIRECTORY)
+    src_fd = os.open(source, os.O_RDONLY)
+    folder_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        for name in ("../escape", ".", "", "file\\x00suffix"):
+        for name in ("../escape", ".", "", "file\x00suffix"):
             with pytest.raises(ValueError, match="unsafe"):
                 link_pinned_inode_noreplace(src_fd, folder_fd, name)
         assert sorted(p.name for p in tmp_path.iterdir()) == ["original.bin"]
     finally:
-        __import__("os").close(folder_fd)
-        __import__("os").close(src_fd)
+        os.close(folder_fd)
+        os.close(src_fd)
