@@ -19,6 +19,8 @@
 
 | SEC-09 | High | A partial publish could be resumed into a NEW empty P/V directory whose original owner marker was copied from the authentic output. The previous resume check accepted the marker text and would publish staged media into the replacement. Separately, retirement accepted a cloned marker plus hardlinked matching media without proving directory ownership. | Added immutable 0600 private per-group receipt, durably stored before atomic public promotion, bound to frozen manifest checksum, group name/ordinal and actual directory dev/inode. Resume, each public media hardlink and final stage retirement now require this receipt and matching directory identity; missing, forged or replaced evidence fails closed. Synthetic TDD demonstrated RED before the fix, then dedicated backend/frontend tests passed. | **Pending independent review:** secure private report storage, authority across power interruption and inode reuse, and external NAS proof. Do not equate copied witness text with original directory identity. |
 
+| SEC-10 | Critical | Cleanup of an original classification wrapper or the final empty stage uses source-name rename/rmdir after inode checks. An uncooperative concurrent writer can substitute a different source inode in the check/use gap, causing a foreign directory to be moved or deleted even if the post-syscall audit fails. | Added `MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK`, independent default-off fail-closed prerequisite to admin enqueue, preview execution controls and Worker entry. Synthetic integration tests verify missing/revoked acknowledgement blocks all mutation. This **does not fix the filesystem race**; it only blocks use without an external exclusivity decision. | **OPEN #399:** establish enforceable quiescence or redesign to defer all source-name cleanup. Independent review and real NAS disposable mount validation mandatory before execution is enabled. |
+
 ## Synthetic validation evidence
 
 - A separate forged-public-folder test copied a valid owner marker into a replaced empty P/V directory after interrupted promotion. Before the fix the new destination was adopted; with inode receipts it is rejected. A retirement test also proved that cloned markers plus hardlinked contents are insufficient to authorize stage-link deletion.
@@ -30,6 +32,8 @@
 - Additional frozen-stage-swap tests deliberately moved the owned stage directory after owner verification and put a foreign directory (with or without a copied marker) at its original path. The previous mover sent a file to the replacement; the new FD-pinned staging mover refuses that replacement before changing any source file.
 - Rejected untrusted stage, foreign target occupancy, changed file identities, interrupted hardlink publication, nested classification cleanup, 200/201 boundary and zero-change repeat scan remain in the focused suite.
 - All synthetic tests use temporary directories; media filenames are generic and do not include user private inventories.
+
+**Current special caution:** A namespace-quiescence acknowledgement is an operator assertion, not a mutual-exclusion primitive. Application Worker leases and directory inode validation cannot stop uncooperative SMB/NAS filesystem writers. The new flag is intentionally false by default and is not permission to bypass #399.
 
 ## Explicit launch restriction
 
