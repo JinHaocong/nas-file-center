@@ -44,6 +44,9 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
   const [executionConfirmation, setExecutionConfirmation] = useState('');
   const [executionJobId, setExecutionJobId] = useState<number | null>(null);
   const [recoveryConfirmation, setRecoveryConfirmation] = useState('');
+  const [mappingSelection, setMappingSelection] = useState<{ unit: string; mappingId: string } | null>(null);
+  const [mappingPage, setMappingPage] = useState(1);
+  const [mappingPageSize, setMappingPageSize] = useState(50);
   const enqueue = useMutation({ mutationFn: mediaOrganizerApi.startPreview });
   const startExecution = useMutation({
     mutationFn: ({ previewId, unit, confirmation }: {
@@ -61,6 +64,14 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     queryFn: () => mediaOrganizerApi.getPreview(jobId!, page, pageSize, statusFilter),
     enabled: jobId !== null,
     refetchInterval: query => isRunning(query.state.data?.status) ? 1500 : false,
+  });
+  const { data: mappingData, isError: mappingLoadFailed,
+    error: mappingLoadError, isFetching: mappingFetching } = useQuery({
+    queryKey: ['semanticMediaMapping', jobId, mappingSelection?.mappingId, mappingPage, mappingPageSize],
+    queryFn: () => mediaOrganizerApi.getMapping(
+      jobId!, mappingSelection!.mappingId, mappingPage, mappingPageSize,
+    ),
+    enabled: jobId !== null && mappingSelection !== null && data?.status === 'completed',
   });
   const { data: executionStatus, isError: executionLoadFailed,
     error: executionLoadError } = useQuery({
@@ -94,6 +105,8 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     setExecutionConfirmation('');
     setExecutionJobId(null);
     setRecoveryConfirmation('');
+    setMappingSelection(null);
+    setMappingPage(1);
     setPage(1);
     setStatusFilter('all');
   };
@@ -110,6 +123,8 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     setExecutionConfirmation('');
     setExecutionJobId(null);
     setRecoveryConfirmation('');
+    setMappingSelection(null);
+    setMappingPage(1);
     setPage(1);
     setStatusFilter('all');
     try {
@@ -278,6 +293,17 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                             </div>
                           ))}
                           {item.truncated && <small>只显示部分映射示例；统计包含该单元的全部媒体</small>}
+                          {item.mapping_id && (
+                            <div>
+                              <ConsoleButton size="sm" variant="secondary"
+                                onClick={() => {
+                                  setMappingSelection({ unit: item.unit, mappingId: item.mapping_id! });
+                                  setMappingPage(1);
+                                }}>
+                                查看完整映射（{item.total_proposals.toLocaleString()}）
+                              </ConsoleButton>
+                            </div>
+                          )}
                           {item.conflicts.map((reason, i) => (
                             <p key={i} role="alert" className="nfc-v2-batch-error">阻止原因：{reason}</p>
                           ))}
@@ -293,6 +319,50 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
             pageSizes={[10, 25, 50, 100]}
             onChange={(next, size) => { setPage(next); setPageSize(size); }} />
           <p className="nfc-form-note">预览不会移动文件。任何阻止项都必须先解决；不能跳过冲突强制执行。</p>
+        </DataPanel>
+      )}
+
+      {mappingSelection && (
+        <DataPanel title="完整源 → 目标映射" variant="dense"
+          className="nfc-v2-batch-media-panel"
+          action={<ConsoleButton size="sm" variant="ghost"
+            onClick={() => { setMappingSelection(null); setMappingPage(1); }}>关闭</ConsoleButton>}
+          description={<><CodePath value={mappingSelection.unit} /> · 完整映射分页展示，不含可变文件身份信息。</>}>
+          {mappingLoadFailed ? (
+            <p className="nfc-v2-batch-error" role="alert">
+              {getStructuredApiError(mappingLoadError).message || '无法读取完整映射'}
+            </p>
+          ) : mappingFetching && !mappingData ? (
+            <p className="nfc-form-note" role="status">正在读取完整映射…</p>
+          ) : mappingData ? (
+            <>
+              <p className="nfc-form-note">
+                共 {mappingData.total_moves.toLocaleString()} 条映射 · 第 {mappingData.page} 页
+              </p>
+              <div className="nfc-v2-batch-media-scroll">
+                <table className="nfc-v2-batch-media-table">
+                  <caption className="nfc-v2-batch-media-sr-only">完整源文件与目标路径映射</caption>
+                  <thead>
+                    <tr><th scope="col">类型</th><th scope="col">源路径</th>
+                      <th scope="col">目标路径</th><th scope="col">字节数</th></tr>
+                  </thead>
+                  <tbody>
+                    {mappingData.moves.map((move, index) => (
+                      <tr key={move.source + index}>
+                        <td>{move.kind}</td>
+                        <td><CodePath value={move.source} /></td>
+                        <td><CodePath value={move.target} /></td>
+                        <td>{move.bytes.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <ConsolePagination page={mappingPage} pageSize={mappingPageSize}
+                total={mappingData.total_moves} pageSizes={[25, 50, 100]}
+                onChange={(next, size) => { setMappingPage(next); setMappingPageSize(size); }} />
+            </>
+          ) : null}
         </DataPanel>
       )}
 
