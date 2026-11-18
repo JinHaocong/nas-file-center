@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import re
 import time
 
 from sqlalchemy import text
@@ -75,6 +76,159 @@ def write_report(settings: Settings, job_id: int, report: dict) -> None:
         candidate.unlink(missing_ok=True)
 
 
+def _create_worker_output_directory(
+    source: Path,
+    output: Path,
+    state: dict,
+    settings: Settings,
+    context: JobContext,
+) -> list[str]:
+    """Create the result directory exclusively under the frozen source-parent inode."""
+    from app.path_safety import require_allowed_path, require_unreserved_path
+    from app.tasks.recovery import renew_and_assert_worker_lease
+
+    if not context.worker_id:
+        raise PermissionError("Archive output creation requires active Worker authority")
+    if output.parent != source.parent or source.is_symlink():
+        raise RecoveryError("OUTPUT_PARENT_INVALID")
+    allowed = require_unreserved_path(
+        require_allowed_path(source, settings.allowed_roots), settings.quarantine_root
+    )
+    if allowed != source:
+        raise RecoveryError("SOURCE_INVALID")
+    prefix = source.name[:60] + "_恢复结果_"
+    suffix = output.name[len(prefix):] if output.name.startswith(prefix) else ""
+    if not re.fullmatch(r"[0-9a-f]{8}", suffix):
+        raise RecoveryError("OUTPUT_NAME_INVALID")
+
+    expected_parent = state.get("parent_identity")
+    expected_source = state.get("identity")
+    if (
+        not isinstance(expected_parent, list) or len(expected_parent) != 2
+        or not isinstance(expected_source, list) or len(expected_source) != 4
+    ):
+        raise RecoveryError("OUTPUT_AUTHORITY_SNAPSHOT_MISSING")
+
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    parent_fd = os.open(source.parent, directory_flags)
+    try:
+        parent_stat = os.fstat(parent_fd)
+        if (
+            not stat.S_ISDIR(parent_stat.st_mode)
+            or [str(parent_stat.st_dev), str(parent_stat.st_ino)] != expected_parent
+        ):
+            raise RecoveryError("OUTPUT_PARENT_CHANGED")
+
+        source_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        source_fd = os.open(source.name, source_flags, dir_fd=parent_fd)
+        try:
+            source_stat = os.fstat(source_fd)
+            observed_source = [
+                str(source_stat.st_dev), str(source_stat.st_ino),
+                str(source_stat.st_size), str(source_stat.st_mtime_ns),
+            ]
+            if not stat.S_ISREG(source_stat.st_mode) or observed_source != expected_source:
+                raise RecoveryError("SOURCE_CHANGED")
+        finally:
+            os.close(source_fd)
+
+        # Refresh the lease immediately before the filesystem mutation.
+        renew_and_assert_worker_lease(context.SessionLocal, context.worker_id)
+        try:
+            os.mkdir(output.name, mode=0o700, dir_fd=parent_fd)
+        except FileExistsError as exc:
+            raise RecoveryError("OUTPUT_CONFLICT") from exc
+
+        output_fd = os.open(output.name, directory_flags, dir_fd=parent_fd)
+        try:
+            output_stat = os.fstat(output_fd)
+            if (
+                not stat.S_ISDIR(output_stat.st_mode)
+                or output_stat.st_dev != parent_stat.st_dev
+                or output_stat.st_uid != os.geteuid()
+                or stat.S_IMODE(output_stat.st_mode) != 0o700
+            ):
+                raise RecoveryError("OUTPUT_DIRECTORY_UNSAFE")
+            return [str(output_stat.st_dev), str(output_stat.st_ino)]
+        finally:
+            os.close(output_fd)
+    finally:
+        os.close(parent_fd)
+
+
+def _persist_worker_output_identity(
+    context: JobContext,
+    job: WorkJob,
+    state: dict,
+    output_identity: list[str],
+) -> None:
+    """Persist the created directory's inode before any archive entry is published."""
+    from app.tasks.recovery import assert_active_worker_lease
+
+    if not context.worker_id or not callable(getattr(context, "SessionLocal", None)):
+        raise PermissionError("Archive output identity requires active Worker authority")
+    with context.SessionLocal() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        assert_active_worker_lease(session, context.worker_id)
+        current = session.get(WorkJob, int(job.id))
+        if current is None:
+            raise KeyError(f"Archive recovery job #{job.id} disappeared")
+        persisted = json.loads(current.state_json or "{}")
+        for key in ("source", "output", "identity", "parent_identity", "deep", "secret_token"):
+            if persisted.get(key) != state.get(key):
+                raise RecoveryError("ARCHIVE_JOB_AUTHORITY_CHANGED")
+        previous = persisted.get("output_identity")
+        if previous is not None and previous != output_identity:
+            raise RecoveryError("OUTPUT_IDENTITY_ALREADY_BOUND")
+        persisted["output_identity"] = output_identity
+        current.state_json = json.dumps(persisted, ensure_ascii=False, sort_keys=True)
+        session.commit()
+    state["output_identity"] = output_identity
+    job.state_json = json.dumps(state, ensure_ascii=False, sort_keys=True)
+
+
+def _validate_existing_worker_output(
+    source: Path,
+    output: Path,
+    state: dict,
+    settings: Settings,
+) -> None:
+    """Validate an already-created output directory for legacy queued jobs."""
+    from app.path_safety import require_allowed_path, require_unreserved_path
+
+    if output.parent != source.parent or output.is_symlink() or not output.is_dir():
+        raise RecoveryError("OUTPUT_INVALID")
+    allowed = require_unreserved_path(
+        require_allowed_path(source, settings.allowed_roots), settings.quarantine_root
+    )
+    if allowed != source:
+        raise RecoveryError("SOURCE_INVALID")
+    expected_parent = state.get("parent_identity")
+    if expected_parent is not None:
+        parent_stat = os.stat(source.parent, follow_symlinks=False)
+        if [str(parent_stat.st_dev), str(parent_stat.st_ino)] != expected_parent:
+            raise RecoveryError("OUTPUT_PARENT_CHANGED")
+    output_stat = os.stat(output, follow_symlinks=False)
+    if [str(output_stat.st_dev), str(output_stat.st_ino)] != state.get("output_identity"):
+        raise RecoveryError("OUTPUT_REPLACED")
+    if (
+        not stat.S_ISDIR(output_stat.st_mode)
+        or output_stat.st_uid != os.geteuid()
+        or stat.S_IMODE(output_stat.st_mode) != 0o700
+    ):
+        raise RecoveryError("OUTPUT_DIRECTORY_UNSAFE")
+
+
 @register_handler
 class ArchiveRecoveryHandler(TaskHandler):
     """Recover in place with fail-closed lease/cancel checkpoints."""
@@ -118,11 +272,16 @@ class ArchiveRecoveryHandler(TaskHandler):
                     != state['identity']):
                 raise RecoveryError('SOURCE_CHANGED')
             initial_source_stat = st
-            if output.parent != source.parent or output.is_symlink() or not output.is_dir():
-                raise RecoveryError('OUTPUT_INVALID')
-            out_stat = output.stat()
-            if [str(out_stat.st_dev), str(out_stat.st_ino)] != state.get('output_identity'):
-                raise RecoveryError('OUTPUT_REPLACED')
+            if state.get("output_identity") is None:
+                output_identity = _create_worker_output_directory(
+                    source, output, state, settings, context
+                )
+                # Record locally first so finally can clean only this exact inode
+                # even if the SQLite persistence step fails.
+                state["output_identity"] = output_identity
+                _persist_worker_output_identity(context, job, state, output_identity)
+            else:
+                _validate_existing_worker_output(source, output, state, settings)
             checkpoint()
             password = read_one_time_password(token)
             report = recover_archive(source, output, password=password, check=checkpoint,
