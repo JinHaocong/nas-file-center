@@ -44,13 +44,15 @@ class Gate6A2FileCenterService(FileCenterService):
                 session.rollback()
                 raise KeyError(f"Quarantine entry #{entry_id} not found")
 
-            validate_restore_destination_intent(
+            _source, destination = validate_restore_destination_intent(
                 entry,
                 allowed_roots=self.settings.allowed_roots,
                 quarantine_root=self.settings.quarantine_root,
                 custom_target=custom_target,
                 conflict_policy=policy,
             )
+            if policy == "manual" and (destination.exists() or destination.is_symlink()):
+                raise ValueError(f"Manual destination already exists: {destination}")
 
             expected_identity = {
                 "original_path": str(entry.original_path),
