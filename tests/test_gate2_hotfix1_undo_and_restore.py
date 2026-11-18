@@ -201,9 +201,12 @@ def test_direct_restore_journal_actor_and_no_fake_linkage(tmp_path: Path):
         admin_user = session.scalar(select(User).where(User.username == "admin"))
         admin_id = admin_user.id
 
-    # Call direct restore API
+    # Call direct restore API; the API queues the mutation for the Worker.
     res = client.post(f"/api/quarantine/{q_entry_id}/restore", json={})
-    assert res.status_code == 200
+    assert res.status_code == 202
+    restore_job_id = int(res.json()["work_job_id"])
+    _run_job(service, restore_job_id, settings, worker_id="test-worker-direct-restore")
+    assert target_file.read_text(encoding="utf-8") == "direct restore content"
 
     with service.SessionLocal() as session:
         # Check latest journal entry
