@@ -183,3 +183,57 @@ def test_direct_group_rejects_replaced_public_name_after_inode_bound(
     assert detached.is_dir()
     assert publishing._owned_public(detached, _authority(manifest))
     assert not (detached / "foreign.txt").exists()
+
+
+@pytest.mark.parametrize("unsafe_mode", [0o777, 0o770, 0o1777])
+def test_direct_group_refuses_group_or_world_writable_public_parent(
+    tmp_path, unsafe_mode,
+):
+    """Even synthetic direct mkdir must not publish into an openly writable unit."""
+    unit, manifest, frozen = _prepare(tmp_path)
+    name = manifest["groups"][0]["name"]
+    unit.chmod(unsafe_mode)
+    try:
+        with pytest.raises(publishing.PublishingConflict, match="public unit.*(owner|permission|writ)"):
+            publishing._create_public_group_direct(
+                unit, name, manifest, _authority(manifest), lambda: None,
+                frozen_manifest_path=frozen,
+            )
+        assert not (unit / name).exists()
+        assert not publishing._group_receipt_path(frozen, 1).exists()
+        assert (unit / "picture.jpg").read_bytes() == b"picture-original"
+        assert (unit / "movie.mp4").read_bytes() == b"movie-original"
+    finally:
+        unit.chmod(0o700)
+
+
+def test_direct_group_rechecks_parent_mode_after_lease_fence(
+    tmp_path,
+):
+    """A parent becoming writable immediately before mkdir must fail closed."""
+    unit, manifest, frozen = _prepare(tmp_path)
+    name = manifest["groups"][0]["name"]
+    calls = 0
+
+    def change_permissions_mid_operation():
+        nonlocal calls
+        calls += 1
+        # _check_unit calls fence at entry. The helper calls it again
+        # immediately before the exclusive mkdir.
+        if calls == 2:
+            unit.chmod(0o777)
+
+    try:
+        with pytest.raises(publishing.PublishingConflict, match="public unit.*(owner|permission|writ)"):
+            publishing._create_public_group_direct(
+                unit, name, manifest, _authority(manifest),
+                change_permissions_mid_operation,
+                frozen_manifest_path=frozen,
+            )
+        assert calls >= 2
+        assert not (unit / name).exists()
+        assert not publishing._group_receipt_path(frozen, 1).exists()
+        assert (unit / "picture.jpg").read_bytes() == b"picture-original"
+        assert (unit / "movie.mp4").read_bytes() == b"movie-original"
+    finally:
+        unit.chmod(0o700)
