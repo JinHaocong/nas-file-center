@@ -18,6 +18,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 chmod 0755 "$scratch"
+# The hosted runner's checkout is private to UID 1001; never chmod it.
+# Give the disposable UIDs only a read-only source copy in private CI scratch.
+cp -a "$repo/app" "$scratch/app"
+cd "$scratch"
 config="$scratch/config"
 media="$scratch/data"
 mkdir -p "$media/Collection/NO.001" "$config"
@@ -30,7 +34,7 @@ sudo chown 10002:10000 "$config/"{reports,backups,logs,home}
 sudo chmod 2770 "$config/"{reports,backups,logs,home}
 py="$(command -v python)"
 
-sudo -n env "NFC_SHARED_CONFIG_GID=10000" "PYTHONPATH=$repo" \
+sudo -n env "NFC_SHARED_CONFIG_GID=10000" "PYTHONPATH=$scratch" \
   "NFC_SYNTH_CONFIG=$config" "NFC_SYNTH_MEDIA=$media" \
   setpriv --reuid=10002 --regid=10000 --clear-groups "$py" - <<'PY'
 import json, os, pathlib, stat
@@ -61,7 +65,7 @@ assert a.stat().st_gid==b.stat().st_gid==10000
 print("WORKER_UID_10002_PREVIEW_AND_SQLITE_OK")
 PY
 
-sudo -n env "NFC_SHARED_CONFIG_GID=10000" "PYTHONPATH=$repo" \
+sudo -n env "NFC_SHARED_CONFIG_GID=10000" "PYTHONPATH=$scratch" \
   "NFC_SYNTH_CONFIG=$config" "NFC_SYNTH_MEDIA=$media" \
   setpriv --reuid=10001 --regid=10000 --clear-groups "$py" - <<'PY'
 import os,pathlib,stat
@@ -101,7 +105,7 @@ assert stat.S_IMODE((root/"app.db").stat().st_mode)==0o660
 print("API_UID_10001_READS_WORKER_PREVIEW_MAPPING_AND_DB_OK")
 PY
 
-sudo -n env "NFC_SHARED_CONFIG_GID=10000" "PYTHONPATH=$repo" \
+sudo -n env "NFC_SHARED_CONFIG_GID=10000" "PYTHONPATH=$scratch" \
   "NFC_SYNTH_CONFIG=$config" \
   setpriv --reuid=10002 --regid=10000 --clear-groups "$py" - <<'PY'
 import os,pathlib
@@ -135,7 +139,7 @@ PY
 sudo mkdir "$scratch/legacy-root-owned"
 sudo chmod 0755 "$scratch/legacy-root-owned"
 sudo chown 0:0 "$scratch/legacy-root-owned"
-sudo -n env "NFC_SHARED_CONFIG_GID=10000" "PYTHONPATH=$repo" \
+sudo -n env "NFC_SHARED_CONFIG_GID=10000" "PYTHONPATH=$scratch" \
   "NFC_SYNTH_LEGACY=$scratch/legacy-root-owned" \
   setpriv --reuid=10002 --regid=10000 --clear-groups "$py" - <<'PY'
 import os,pathlib
