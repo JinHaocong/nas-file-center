@@ -135,7 +135,7 @@ def test_without_worker_lease_no_file_is_touched(tmp_path):
     assert (work / "clip.mp4").read_bytes() == b"video-1"
 
 
-def test_confirmed_worker_executes_only_selected_unit_then_second_scan_is_noop(tmp_path):
+def test_confirmed_worker_publishes_only_one_unit_and_defers_manual_cleanup(tmp_path):
     client, settings, work = setup(tmp_path, enabled=True)
     sibling = work.parent / "NO.002"
     sibling.mkdir()
@@ -145,9 +145,13 @@ def test_confirmed_worker_executes_only_selected_unit_then_second_scan_is_noop(t
     assert queued.status_code == 200, queued.text
     job_id = queued.json()["job_id"]
     assert worker(settings, job_id)
-    result = client.get(f"/api/media-organizer/executions/{job_id}")
-    assert result.status_code == 200
-    assert result.json()["status"] == "completed"
+    status = client.get(f"/api/media-organizer/executions/{job_id}")
+    assert status.status_code == 200
+    state = status.json()
+    assert state["status"] == "completed"
+    assert state["manual_cleanup_required"] is True
+    assert state["finalized"] is False
+    assert state["progress"]["phase"] == "manual_cleanup_required"
     images = [p for folder in work.iterdir() if folder.is_dir()
               and folder.name.startswith("P [") for p in folder.glob("*.jpg")]
     videos = [p for folder in work.iterdir() if folder.is_dir()
@@ -155,16 +159,25 @@ def test_confirmed_worker_executes_only_selected_unit_then_second_scan_is_noop(t
     assert [f.read_bytes() for f in images] == [b"photo-1"]
     assert [f.read_bytes() for f in videos] == [b"video-1"]
     assert (sibling / "untouched.jpg").read_bytes() == b"untouched"
+    private = work / f".nfc-media-organizer-stage-{job_id}"
+    assert private.is_dir()
+    assert (private / ".nfc-stage-authority").is_file()
+    assert any(private.glob("*.jpg"))
+    record = (settings.reports_dir / "media_organizer-executions" /
+              str(job_id) / "manifest.json.manual-cleanup.json")
+    assert record.is_file()
     again = client.post("/api/media-organizer/previews", json={
         "selection": str(work.parent),
     })
     assert again.status_code == 200
-    new_pid = again.json()["job_id"]
-    assert process_work_job(settings, new_pid)
-    rows = client.get(f"/api/media-organizer/previews/{new_pid}").json()["units"]
+    pid2 = again.json()["job_id"]
+    assert process_work_job(settings, pid2)
+    rows = client.get(f"/api/media-organizer/previews/{pid2}").json()["units"]
     selected = next(x for x in rows if x["unit"] == str(work))
-    assert selected["status"] == "already_organized"
-    assert selected["needed_moves"] == 0
+    # Until a separate audited cleanup, the private stage is intentionally
+    # preserved. A new preview must not falsely report zero changes.
+    assert selected["status"] == "blocked"
+    assert "workspace" in (selected.get("reason") or "").lower()
 
 
 def test_stale_file_after_preview_fails_before_any_move(tmp_path):
@@ -211,46 +224,47 @@ def test_explicit_recovery_reuses_frozen_manifest_after_stage_interruption(tmp_p
                for folder in work.iterdir() if folder.is_dir())
 
 
-def test_recovery_after_partial_retirement_never_restarts_staging(tmp_path, monkeypatch):
-    """A published job must only continue its frozen retirement journal."""
-    from app.batch import media_organizer_retire as retirement
+def test_recovery_after_deferred_cleanup_record_interruption_keeps_staging(
+    tmp_path, monkeypatch,
+):
+    """Published-phase recovery only finishes its private manual-review record."""
+    from app.batch import media_organizer_execute_jobs as jobs
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
-    response = execute_request(client, pid, work)
-    assert response.status_code == 200
-    original_id = response.json()["job_id"]
-    original_unlink = retirement._retire_stage_link
-    calls = 0
+    submitted = execute_request(client, pid, work)
+    assert submitted.status_code == 200
+    original_id = submitted.json()["job_id"]
+    actual = jobs.record_deferred_cleanup_evidence
+    called = []
 
-    def stop_during_retirement(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise RuntimeError("synthetic crash after one staged link retired")
-        return original_unlink(*args, **kwargs)
+    def stop_before_record(*args, **kwargs):
+        called.append(True)
+        raise RuntimeError("synthetic report interruption")
 
-    monkeypatch.setattr(retirement, "_retire_stage_link", stop_during_retirement)
+    monkeypatch.setattr(jobs, "record_deferred_cleanup_evidence", stop_before_record)
     assert worker(settings, original_id, name="lease-owner") is False
-    monkeypatch.setattr(retirement, "_retire_stage_link", original_unlink)
-    current = client.get(f"/api/media-organizer/executions/{original_id}").json()
-    assert current["status"] == "failed"
-    assert current["progress"]["phase"] == "published"
-    confirmed = client.post(
+    assert called
+    monkeypatch.setattr(jobs, "record_deferred_cleanup_evidence", actual)
+    original = client.get(f"/api/media-organizer/executions/{original_id}").json()
+    assert original["status"] == "failed"
+    assert original["progress"]["phase"] == "published"
+    stage = work / f".nfc-media-organizer-stage-{original_id}"
+    assert stage.is_dir() and (stage / ".nfc-stage-authority").is_file()
+    recovery = client.post(
         f"/api/media-organizer/executions/{original_id}/recover",
         json={"confirmation": recovery_token(original_id)},
     )
-    assert confirmed.status_code == 200, confirmed.text
-    recovery_id = confirmed.json()["job_id"]
+    assert recovery.status_code == 200, recovery.text
+    recovery_id = recovery.json()["job_id"]
     assert worker(settings, recovery_id, name="lease-owner")
-    assert client.get(f"/api/media-organizer/executions/{recovery_id}").json()["status"] == "completed"
-    assert not any(p.name.startswith(".nfc-") for p in work.iterdir())
-    second = client.post("/api/media-organizer/previews", json={
-        "selection": str(work.parent),
-    })
-    assert second.status_code == 200
-    assert process_work_job(settings, second.json()["job_id"])
-    rows = client.get(f"/api/media-organizer/previews/{second.json()['job_id']}").json()["units"]
-    assert any(x["unit"] == str(work) and x["status"] == "already_organized" for x in rows)
+    current = client.get(f"/api/media-organizer/executions/{recovery_id}").json()
+    assert current["status"] == "completed"
+    assert current["manual_cleanup_required"] is True
+    assert stage.is_dir()
+    assert any(folder.name.startswith("P [") and list(folder.glob("*.jpg"))
+               for folder in work.iterdir() if folder.is_dir())
+    assert (settings.reports_dir / "media_organizer-executions" /
+            str(original_id) / "manifest.json.manual-cleanup.json").is_file()
 
 
 def test_preview_exposes_confirmation_only_to_enabled_admin_and_ready_unit(tmp_path):
@@ -342,45 +356,27 @@ def test_assisted_recovery_confirmation_is_idempotent_after_success(tmp_path, mo
     assert repeated.json()["status"] == "completed"
 
 
-def test_assisted_recovery_after_last_marker_gap_requires_durable_receipt(
-    tmp_path, monkeypatch,
-):
-    """Admin recovery may continue an EMPTY stage only with exact private proof."""
+def test_deferred_execution_never_reaches_last_marker_rmdir_gap(tmp_path, monkeypatch):
+    """The production path does not call rmdir or remove stage owner markers."""
     from app.batch import media_organizer_retire as retirement
+    from app.batch import media_organizer_execute_jobs as jobs
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
-    queued = execute_request(client, pid, work)
-    assert queued.status_code == 200
-    original_job_id = queued.json()["job_id"]
-    original_rmdir = retirement.os.rmdir
-    stage_name = f".nfc-media-organizer-stage-{original_job_id}"
-    interrupted = []
+    original_id = execute_request(client, pid, work).json()["job_id"]
 
-    def stop_before_final_rmdir(name, *args, **kwargs):
-        if name == stage_name and kwargs.get("dir_fd") is not None and not interrupted:
-            interrupted.append(name)
-            raise RuntimeError("synthetic power loss in marker gap")
-        return original_rmdir(name, *args, **kwargs)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("retirement must not be invoked in deferred mode")
 
-    monkeypatch.setattr(retirement.os, "rmdir", stop_before_final_rmdir)
-    assert worker(settings, original_job_id, name="receipt-owner") is False
-    monkeypatch.setattr(retirement.os, "rmdir", original_rmdir)
-    assert interrupted
-    stage = work / stage_name
+    monkeypatch.setattr(retirement, "_rmdir_bound_empty_stage", forbidden)
+    monkeypatch.setattr(jobs, "retire_published_stage", forbidden)
+    assert worker(settings, original_id, name="safe-retain-worker")
+    stage = work / f".nfc-media-organizer-stage-{original_id}"
     assert stage.is_dir()
-    assert list(stage.iterdir()) == []
-    receipt = (settings.reports_dir / "media_organizer-executions" /
-               str(original_job_id) / "manifest.json.retirement-receipt.json")
-    assert receipt.is_file()
-    approved = client.post(
-        f"/api/media-organizer/executions/{original_job_id}/recover",
-        json={"confirmation": recovery_token(original_job_id)},
-    )
-    assert approved.status_code == 200, approved.text
-    recovered_id = approved.json()["job_id"]
-    assert worker(settings, recovered_id, name="receipt-owner")
-    assert not stage.exists()
-    assert client.get(f"/api/media-organizer/executions/{recovered_id}").json()["status"] == "completed"
+    assert (stage / ".nfc-stage-complete").is_file()
+    assert (stage / ".nfc-stage-authority").is_file()
+    assert client.get(f"/api/media-organizer/executions/{original_id}").json()[
+        "manual_cleanup_required"
+    ] is True
 
 
 def test_namespace_quiescence_ack_is_required_even_when_other_permission_gates_open(
