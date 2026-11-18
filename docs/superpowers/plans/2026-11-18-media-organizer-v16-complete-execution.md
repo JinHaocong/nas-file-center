@@ -73,3 +73,23 @@ Files: `scripts/media_organizer_v16_real_nas_acceptance.py`, `docs/media-organiz
 - [ ] Run the full complete flow twice; second canonical scan reports `needed_moves=0` without unsafe stage hiding.
 - [ ] Run all eight exact-HEAD GitHub CI checks to success, plus same-mount acceptance.
 - [ ] Record residual risk and explicit owner approval; only then mark PR ready, merge and publish the stable Docker image.
+
+
+## Progress log — 2026-11-18: Worker identity / namespace custody
+
+### Evidence discovered
+- The production `Dockerfile` has no `USER` instruction.
+- `compose.yaml` and `compose.komodo.yaml` do not set a service `user:`.
+- Therefore the current API and Worker containers run as UID 0 by default. The API and Worker also both receive writable `/data` mounts in the Komodo deployment.
+- The direct grouped-publication primitive's POSIX owner/mode and ancestor checks are necessary but cannot establish a separate, least-privilege mutation principal while the Worker runs as root.
+
+### TDD slice
+- RED test added: `test_direct_group_refuses_root_worker_before_any_public_mutation`.
+- First run exposed an ordering issue: stage-owner validation failed before the intended root-Worker assertion. The guard was moved to the beginning of the direct group creation function.
+- GREEN: the focused backend + frontend V1.6 TDD workflow passed on commit `cbee88115408` (run `44265925311`). The new test now proves a root Worker is refused before public group creation and leaves original synthetic files byte-exact.
+
+### Decision / remaining work
+- This is a new necessary precondition, **not** a completed custody proof.
+- Do not change production bind-mount ownership/ACLs automatically.
+- Next: design and test a dedicated non-root Worker identity, separate API read-only access to `/data`, compatible shared database/report permissions, and explicit supported ACL/mount validation. If the actual NAS cannot prove that only this Worker principal can mutate the selected unit namespace during a job, keep grouped execution blocked.
+- Task 1 remains OPEN until those deployment and mount-level checks exist. #402 remains OPEN; #400 cleanup and true second-scan-zero remain separate blockers.
