@@ -574,7 +574,7 @@ def _mark_completed(directory: Path, part: list[dict], witness: bytes,
 def publish_frozen_stage(
     manifest: dict, *, frozen_manifest_path: Path, allowed_roots: list[Path],
     lease_fence: Callable[[], None], quarantine_root: Path | None = None,
-    resume: bool = False,
+    resume: bool = False, defer_directory_cleanup: bool = False,
 ) -> dict:
     """Publish a verified stage, retaining all staging/recovery witnesses.
 
@@ -598,6 +598,11 @@ def publish_frozen_stage(
                      Path(quarantine_root) if quarantine_root is not None else None)
         _check_unit(unit, manifest, lease_fence)
         rows, group_rows = _validate_shape(manifest, unit)
+        if defer_directory_cleanup:
+            # Do not call the unsafe source-name rename/rmdir path. This
+            # mode is the only path used by the dedicated V1.6 Worker.
+            from app.batch.media_organizer_deferred_cleanup import validate_deferred_publication
+            validate_deferred_publication(manifest)
         stage = unit / manifest["stage_directory"]
         if not os.path.lexists(stage):
             raise PublishingConflict("verified stage missing; cannot publish")
@@ -614,7 +619,9 @@ def publish_frozen_stage(
             unit, manifest, group_rows, rows, witness, resume,
             Path(frozen_manifest_path),
         )
-        retired = _retire_wrappers(unit, manifest, witness, lease_fence, resume)
+        retired = 0 if defer_directory_cleanup else _retire_wrappers(
+            unit, manifest, witness, lease_fence, resume,
+        )
         for name, part in group_rows.items():
             folder = unit / name
             if os.path.lexists(folder):
