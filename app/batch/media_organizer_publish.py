@@ -594,6 +594,10 @@ def publish_frozen_stage(
             Path(frozen_manifest_path), job_id=manifest["job_id"], unit=unit)
         if approved != manifest:
             raise PublishingConflict("frozen manifest content changed")
+        if manifest.get("cleanup_policy") == "deferred" and not defer_directory_cleanup:
+            raise PublishingConflict(
+                "deferred cleanup manifest prohibits automatic wrapper retirement"
+            )
         _check_scope(unit, [Path(p) for p in allowed_roots],
                      Path(quarantine_root) if quarantine_root is not None else None)
         _check_unit(unit, manifest, lease_fence)
