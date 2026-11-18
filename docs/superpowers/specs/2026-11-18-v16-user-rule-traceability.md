@@ -25,7 +25,7 @@ This matrix distinguishes **read-only planner conformance** from **end-to-end ex
 | Foreign occupied targets must block; never overwrite or adopt empty foreign buckets | Generic planner checks occupied destination files/folders; manifest freezes wrapper identities; publish preflight rejects foreign occupants. | Implemented in preview/preflight; grouped publication still gated |
 | Freeze, validate, stage, publish, cleanup only emptied classification wrappers, recover interruption | Generic mode has frozen manifest, FD-pinned staging/public links, WorkJob recovery and deferred-cleanup evidence. | Partial: no generic final cleanup/finalization yet |
 | Second canonical scan after completion must be zero changes | Current generic Worker deliberately retains originals, stage links and wrappers, records `manual_cleanup_required`, and does not finalize. | **Not implemented** |
-| UI must show status, media counts, bytes, moves, renames, wrapper cleanup and full paginated mappings | UI has paginated unit results, counts, group labels and sample source→target mappings. It currently caps per-unit mapping samples (not a complete mapping export), and generic grouped execution controls are filtered out. | Partial |
+| UI must show status, media counts, bytes, moves, renames, wrapper cleanup and full paginated mappings | Unit list is paginated; each ready unit now has a private full mapping JSONL sidecar, admin-only paginated API and a UI full-mapping table. Samples remain in the summary for quick review. Wrapper cleanup/finalization is still absent. | Mapping implemented; cleanup partial |
 
 ## Luolcy vs non-Luolcy boundary
 
@@ -51,7 +51,7 @@ This is an engineering estimate, not a CI score:
 - Generic old-wrapper cleanup/finalization: **~10%**
 - Full second-scan-zero and same-mount acceptance: **~0%**
 
-**Weighted overall completion estimate: ~58%.** The rule-driven read-only plan is substantially implemented; the complete, safe end-to-end mutation workflow is not.
+**Weighted overall completion estimate: ~59%.** The rule-driven read-only plan is substantially implemented; the complete, safe end-to-end mutation workflow is not.
 
 ## New V1.6 conformance tests
 
@@ -63,3 +63,15 @@ This is an engineering estimate, not a CI score:
 - identical media basenames across historical wrappers preserved as separate files.
 
 These tests only inspect disposable preview plans. They do not imply that grouped execution is enabled.
+
+
+## Subsequent mapping implementation (after the initial traceability review)
+
+At candidate `53ac80b`, the previously missing full mapping rule has been implemented:
+- `write_semantic_preview` writes each ready unit's complete `source/target/target_name/kind/bytes` mapping to a private 0600 JSONL sidecar under a 0700 per-job directory.
+- The unit summary stores a deterministic SHA-256 mapping ID while retaining only a bounded sample.
+- The admin-only `GET /api/media-organizer/previews/{job_id}/mappings/{mapping_id}` endpoint verifies the completed preview and pages the full mapping (maximum 100 rows/page).
+- The Batch UI now offers **查看完整映射** for each ready unit and displays all pages without loading the whole mapping into browser memory.
+- Backend and frontend focused V1.6 TDD jobs passed on this candidate. Full UI/Release/C5/Gate6-D checks were still running when this note was added.
+
+This closes the full mapping visibility gap in the confirmed rule. It does **not** close #402 grouped execution or #400 finalization.
