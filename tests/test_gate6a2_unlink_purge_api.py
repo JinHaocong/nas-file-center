@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.db import create_engine_and_session
 from app.main import create_app
-from app.models import IndexRoot, IndexedPath, QuarantineEntry, utcnow
+from app.models import IndexRoot, IndexedPath, QuarantineEntry, WorkJob, utcnow
 from app.service import FileCenterService
+from app.tasks.recovery import acquire_worker_ownership
+from app.worker import process_work_job
 
 
 def _setup_api(tmp_path: Path):
@@ -39,6 +43,30 @@ def _setup_api(tmp_path: Path):
     )
     assert login.status_code == 200
     return service, client, data, trash
+
+
+def _run_queued_purge(service: FileCenterService, work_job_id: int) -> dict:
+    """Run the queued unlink job under the real Worker lease contract."""
+    engine, factory = create_engine_and_session(service.settings.database_path)
+    worker_id = f"gate6a2-single-purge-test-{work_job_id}"
+    assert acquire_worker_ownership(engine, factory, worker_id=worker_id)
+    assert process_work_job(
+        service.settings,
+        work_job_id,
+        session_factory=factory,
+        engine=engine,
+        worker_id=worker_id,
+    )
+    with factory() as session:
+        job = session.get(WorkJob, work_job_id)
+        assert job is not None
+        assert job.status == "completed", job.error_text
+        assert job.checkpoint_json
+        checkpoint = json.loads(job.checkpoint_json)
+    assert checkpoint.get("schema_version") == 1
+    result = checkpoint.get("result")
+    assert isinstance(result, dict)
+    return result
 
 
 def _seed_transactional_entry_with_indexed_survivor(
@@ -179,8 +207,15 @@ def test_single_clear_prunes_only_empty_quarantine_parent_chain(tmp_path: Path) 
         headers={"Origin": "http://testserver"},
     )
 
-    assert response.status_code == 200, response.text
-    assert response.json()["state"] == "purged"
+    assert response.status_code == 202, response.text
+    queued = response.json()
+    assert queued["status"] == "queued"
+    assert queued["state"] == "active"
+    assert queued["purge_semantics"] == "unlink_v1"
+    result = _run_queued_purge(service, queued["work_job_id"])
+    assert result["entry_id"] == entry_id
+    assert result["purged"] is True
+    assert result["state"] == "purged"
     assert not nested_parent.exists()
     assert not (trash / "task-77").exists()
     assert not (trash / ".tx" / f"entry-{entry_id}").exists()
@@ -205,8 +240,12 @@ def test_single_clear_uses_unlink_v1_and_reports_indexed_hardlink_survivor(tmp_p
         headers={"Origin": "http://testserver"},
     )
 
-    assert response.status_code == 200, response.text
-    result = response.json()
+    assert response.status_code == 202, response.text
+    queued = response.json()
+    assert queued["status"] == "queued"
+    assert queued["state"] == "active"
+    assert queued["purge_semantics"] == "unlink_v1"
+    result = _run_queued_purge(service, queued["work_job_id"])
     assert result["entry_id"] == entry_id
     assert result["purged"] is True
     assert result["state"] == "purged"
