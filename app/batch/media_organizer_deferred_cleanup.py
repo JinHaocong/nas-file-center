@@ -15,6 +15,7 @@ from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.config_sharing import shared_config_gid, require_shared_directory
+from app.batch.media_organizer_custody import assert_exclusive_custody
 from app.batch.media_organizer_manifest import (
     FrozenPreviewError, _checksum, load_frozen_preview_manifest,
 )
@@ -32,8 +33,10 @@ class DeferredCleanupConflict(ValueError):
     """Safe publication cannot yet be handed off for manual cleanup."""
 
 
-def validate_deferred_publication(manifest: dict) -> None:
-    """Refuse a plan that would require deleting an old P/V bucket to publish."""
+def validate_deferred_publication(
+    manifest: dict, *, namespace_custody=None,
+) -> None:
+    """Refuse overlapping old groups and any grouped plan without real custody."""
     if not isinstance(manifest, dict) or manifest.get("cleanup_policy") != "deferred":
         raise DeferredCleanupConflict("deferred cleanup policy is mandatory")
     unit = Path(manifest.get("unit", ""))
@@ -55,19 +58,16 @@ def validate_deferred_publication(manifest: dict) -> None:
         raise DeferredCleanupConflict(
             "public group would require deleting an old classification wrapper"
         )
-    # SEC-12: a POSIX no-replace directory rename protects only the TARGET.
-    # The private pending group SOURCE can be replaced by a concurrent writer
-    # between its last dev/inode check and name-based rename. Post-checks
-    # detect a swap too late to prevent relocating that foreign directory.
-    # Until enforceable namespace custody or source-inode-bound directory
-    # publication is independently established, do not enter that path at all.
-    # This safeguard is unconditional: an operator ACK or Worker lease is NOT
-    # a substitute for a safe kernel primitive.
+    # Production's namespace-custody issuer has no grants until the actual
+    # NAS ACL, mount and concurrent-writer assumptions are independently
+    # validated. A boolean ACK/Worker lease cannot bypass this requirement.
+    # A synthetic test issuer can exercise the exact Worker path in tmp_path.
     if groups:
-        raise DeferredCleanupConflict(
-            "SEC-12: grouped directory publication is held pending "
-            "audited source namespace isolation"
-        )
+        parents = {unit}
+        parents.update(Path(row["source"]).parent for row in rows)
+        parents.update(Path(row["target"]).parent for row in rows)
+        parents.update(Path(row["final"]).parent for row in rows)
+        assert_exclusive_custody(namespace_custody, sorted(parents))
     # Do this before staging as well. A retained original source may
     # otherwise occupy a flat target that the prior rename-first engine freed.
     retained = {str(row["source"]).casefold() for row in rows}
@@ -294,6 +294,7 @@ def _write_report(path: Path, report: dict) -> None:
 def record_deferred_cleanup_evidence(
     manifest: dict, *, frozen_manifest_path: Path, allowed_roots: list[Path],
     lease_fence: Callable[[], None], quarantine_root: Path | None = None,
+    namespace_custody=None,
 ) -> dict:
     """Verify frozen staged/published files and persist a PRIVATE review record.
 
@@ -303,7 +304,7 @@ def record_deferred_cleanup_evidence(
     if not callable(lease_fence):
         raise DeferredCleanupConflict("Worker lease fence is required")
     try:
-        validate_deferred_publication(manifest)
+        validate_deferred_publication(manifest, namespace_custody=namespace_custody)
         unit = Path(manifest["unit"])
         frozen_path = Path(frozen_manifest_path)
         approved = load_frozen_preview_manifest(

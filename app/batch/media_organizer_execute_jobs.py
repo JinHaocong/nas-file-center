@@ -34,6 +34,7 @@ from app.batch.media_organizer_deferred_cleanup import (
 from app.config import Settings
 from app.config_sharing import shared_config_gid, ensure_shared_report_directory
 from app.batch.media_organizer_cleanup_audit import audit_deferred_cleanup_inventory
+from app.batch import media_organizer_custody as namespace_custody
 from app.batch.media_organizer_cleanup_plan import (
     cleanup_plan_path, read_cleanup_plan, save_cleanup_plan,
 )
@@ -188,12 +189,10 @@ def enqueue_media_organizer_execution(
             raise ValueError("unit must remain within the original preview selection")
         ready = _ready_unit_record(settings, preview_job_id, unit, summary)
         if ready.get("groups"):
-            # Reject at the admin API boundary BEFORE queueing any Worker.
-            # The Worker also rechecks frozen group safety before staging.
-            raise ValueError(
-                "SEC-12: grouped directory publication is blocked until "
-                "source namespace isolation is independently established"
-            )
+            # API only queues under a scoped, independently verifiable proof;
+            # the Worker reacquires/rechecks it before staging any media.
+            proof = namespace_custody.verified_namespace_custody(settings, Path(unit))
+            namespace_custody.assert_exclusive_custody(proof, (Path(unit),))
         matches = session.scalars(select(WorkJob).where(
             WorkJob.kind == EXECUTE_KIND,
             func.json_extract(WorkJob.state_json, "$.preview_job_id") == preview_job_id,
@@ -466,9 +465,28 @@ class MediaOrganizerExecuteHandler(TaskHandler):
         if not isinstance(preview_id, int) or preview_id < 1:
             raise ValueError("missing original preview job id")
 
+        custody = None
+        custody_parents: tuple[Path, ...] = ()
+
         def fence() -> None:
             from app.tasks.recovery import renew_and_assert_worker_lease
             renew_and_assert_worker_lease(context.SessionLocal, context.worker_id)
+            if custody is not None:
+                namespace_custody.assert_exclusive_custody(custody, custody_parents)
+
+        def bind_frozen_group_custody(manifest: dict) -> None:
+            nonlocal custody, custody_parents
+            if manifest.get("groups"):
+                parents = {unit}
+                parents.update(Path(row["source"]).parent for row in manifest["moves"])
+                parents.update(Path(row["target"]).parent for row in manifest["moves"])
+                parents.update(Path(row["final"]).parent for row in manifest["moves"])
+                custody_parents = tuple(sorted(parents))
+                custody = namespace_custody.verified_namespace_custody(settings, unit)
+                namespace_custody.assert_exclusive_custody(custody, custody_parents)
+            else:
+                custody = None
+                custody_parents = ()
 
         frozen_job_id = int(job.id) if original_id is None else original_id
         phase = "new"
@@ -513,9 +531,10 @@ class MediaOrganizerExecuteHandler(TaskHandler):
                 exclude_dir_names=_excluded_names(settings),
             )
             manifest["cleanup_policy"] = "deferred"
+            bind_frozen_group_custody(manifest)
             # A same-named old media bucket cannot be replaced without
             # deleting the original directory. Reject BEFORE touching files.
-            validate_deferred_publication(manifest)
+            validate_deferred_publication(manifest, namespace_custody=custody)
             shared_gid = shared_config_gid()
             if shared_gid is None:
                 folder.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -530,7 +549,8 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             manifest = load_frozen_preview_manifest(
                 manifest_path, job_id=frozen_job_id, unit=unit,
             )
-        validate_deferred_publication(manifest)
+            bind_frozen_group_custody(manifest)
+        validate_deferred_publication(manifest, namespace_custody=custody)
         checkpoint(1, "frozen", "冻结清单已经验证")
         if phase != "published":
             # An interruption in staging or publication retains all private
@@ -550,7 +570,7 @@ class MediaOrganizerExecuteHandler(TaskHandler):
                 allowed_roots=settings.allowed_roots,
                 quarantine_root=settings.quarantine_root, lease_fence=fence,
                 resume=original_id is not None,
-                defer_directory_cleanup=True,
+                defer_directory_cleanup=True, namespace_custody=custody,
             )
         # The safe execution path never removes original classification
         # wrappers, private staged hardlinks or recovery witnesses.
@@ -562,6 +582,7 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             manifest, frozen_manifest_path=manifest_path,
             allowed_roots=settings.allowed_roots,
             quarantine_root=settings.quarantine_root, lease_fence=fence,
+            namespace_custody=custody,
         )
         # Commit durable, immutable per-link review authority BEFORE the
         # publication is marked completed. This performs no media cleanup.

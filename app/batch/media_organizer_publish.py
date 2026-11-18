@@ -29,6 +29,7 @@ from app.batch.media_organizer_stage import (
 )
 from app.batch.media_organizer_planner import _check_scope
 from app.fs_ops import rename_noreplace_at
+from app.batch.media_organizer_custody import assert_exclusive_custody
 from app.batch.media_organizer_fd_link import link_pinned_inode_noreplace
 
 _PUBLIC_OWNER = ".nfc-publish-owner"
@@ -731,6 +732,7 @@ def publish_frozen_stage(
     manifest: dict, *, frozen_manifest_path: Path, allowed_roots: list[Path],
     lease_fence: Callable[[], None], quarantine_root: Path | None = None,
     resume: bool = False, defer_directory_cleanup: bool = False,
+    namespace_custody=None,
 ) -> dict:
     """Publish a verified stage, retaining all staging/recovery witnesses.
 
@@ -762,7 +764,9 @@ def publish_frozen_stage(
             # Do not call the unsafe source-name rename/rmdir path. This
             # mode is the only path used by the dedicated V1.6 Worker.
             from app.batch.media_organizer_deferred_cleanup import validate_deferred_publication
-            validate_deferred_publication(manifest)
+            validate_deferred_publication(
+                manifest, namespace_custody=namespace_custody,
+            )
         stage = unit / manifest["stage_directory"]
         if not os.path.lexists(stage):
             raise PublishingConflict("verified stage missing; cannot publish")
@@ -790,10 +794,9 @@ def publish_frozen_stage(
                 _inspect_existing_group(folder, part, witness, require_owner=True)
             else:
                 if defer_directory_cleanup:
-                    # Future grouped Worker path: never rename a private group
-                    # source pathname. The SEC-12 custody gate above still
-                    # refuses grouped production execution until the OS
-                    # namespace boundary is independently proven.
+                    # No SOURCE directory rename. This branch runs only when
+                    # the external custody provider is verified for unit.
+                    assert_exclusive_custody(namespace_custody, (unit,))
                     _create_public_group_direct(
                         unit, name, manifest, witness, lease_fence,
                         frozen_manifest_path=Path(frozen_manifest_path),
@@ -808,6 +811,10 @@ def publish_frozen_stage(
         group_bindings = _group_receipts(manifest, Path(frozen_manifest_path))
         published = reconciled = 0
         for row in rows:
+            if group_rows and defer_directory_cleanup:
+                assert_exclusive_custody(
+                    namespace_custody, (stage, Path(row["final"]).parent),
+                )
             if _link_one(row, stage=stage, unit=unit, witness=witness,
                          manifest=manifest, fence=lease_fence, resume=resume,
                          group_bindings=group_bindings):

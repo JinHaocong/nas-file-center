@@ -17,6 +17,7 @@ from app.fs_ops import rename_noreplace_at
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_scan import write_semantic_preview
 from app.config import Settings
+from app.batch import media_organizer_custody as namespace_custody
 from app.config_sharing import (
     shared_config_gid, require_shared_file, require_shared_directory,
     ensure_shared_report_directory,
@@ -211,10 +212,19 @@ def get_media_organizer_preview(session_factory, settings: Settings, job_id: int
         # Admin-only endpoint: provide the exact unit-bound confirmation
         # for visible ready rows, not for skipped/blocked/foreign units.
         from app.batch.media_organizer_execute_jobs import approval_token
-        confirmation_tokens = {
-            row['unit']: approval_token(job_id, row['unit'])
-            for row in units if row.get('status') == 'ready' and not row.get('groups')
-        }
+        for row in units:
+            if row.get('status') != 'ready':
+                continue
+            if row.get('groups'):
+                # Only a future approved external issuer can make grouped
+                # confirmations appear. A boolean ACK is not such an issuer.
+                try:
+                    unit = Path(row['unit'])
+                    proof = namespace_custody.verified_namespace_custody(settings, unit)
+                    namespace_custody.assert_exclusive_custody(proof, (unit,))
+                except (ValueError, OSError, PermissionError):
+                    continue
+            confirmation_tokens[row['unit']] = approval_token(job_id, row['unit'])
     return {'job_id': job_id, 'status': status, 'error': error,
             'selection': state.get('selection', ''), 'progress': progress,
             'summary': summary, 'units': units, 'page': page,
