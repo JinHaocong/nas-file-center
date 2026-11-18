@@ -459,6 +459,10 @@ def _create_public_group_direct(
     grouped Worker gate therefore remains closed until independently verified
     namespace isolation is available. No error branch deletes an entry.
     """
+    if os.geteuid() == 0:
+        raise PublishingConflict(
+            "grouped publication requires a dedicated non-root Worker UID"
+        )
     names = [row["name"] for row in manifest.get("groups", [])]
     if name not in names or Path(name).name != name or name in (".", ".."):
         raise PublishingConflict("group is not present in the frozen plan")
