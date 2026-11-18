@@ -106,6 +106,28 @@ def read_media_organizer_execution(request: Request, job_id: int,
         raise HTTPException(404, 'Execution not found') from exc
 
 
+@router.get('/executions/{job_id}/cleanup-review')
+def read_media_organizer_cleanup_review(
+    request: Request, job_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    _admin=Depends(require_admin_user),
+):
+    """Review retained original/stage/public evidence without authorizing unlink."""
+    from app.batch.media_organizer_execute_jobs import get_media_organizer_cleanup_review
+    try:
+        return get_media_organizer_cleanup_review(
+            request.app.state.service.SessionLocal, request.app.state.settings,
+            job_id, page=page, page_size=page_size,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, 'Execution not found') from exc
+    except (ValueError, PermissionError, OSError) as exc:
+        # Inaccessible private worker evidence is a hold, never an invitation
+        # to loosen NAS permissions or manufacture a positive cleanup receipt.
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.post('/executions/{job_id}/recover')
 def recover_media_organizer_execution(request: Request, job_id: int,
                                       payload: MediaOrganizerRecoveryRequest,

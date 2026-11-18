@@ -29,6 +29,7 @@ from app.batch.media_organizer_stage import stage_frozen_sources
 from app.batch.media_organizer_publish import publish_frozen_stage
 from app.batch.media_organizer_deferred_cleanup import (
     validate_deferred_publication, record_deferred_cleanup_evidence,
+    read_deferred_cleanup_review,
 )
 from app.config import Settings
 from app.models import WorkJob
@@ -243,6 +244,46 @@ def get_media_organizer_execution(session_factory, job_id: int) -> dict:
                 "phase": checkpoint.get("phase"),
             },
         }
+
+
+def get_media_organizer_cleanup_review(
+    session_factory, settings: Settings, job_id: int, *,
+    page: int = 1, page_size: int = 25,
+) -> dict:
+    """Admin-read evidence for a finished publication; never queue/retire."""
+    if not (isinstance(job_id, int) and job_id > 0):
+        raise ValueError("invalid execution job")
+    if not (isinstance(page, int) and page >= 1 and
+            isinstance(page_size, int) and 1 <= page_size <= 100):
+        raise ValueError("invalid review page")
+    with session_factory() as session:
+        job = session.get(WorkJob, job_id)
+        if job is None or job.kind != EXECUTE_KIND:
+            raise KeyError(job_id)
+        state = json.loads(job.state_json or "{}")
+        checkpoint = json.loads(job.checkpoint_json or "{}")
+        if (job.status != "completed" or
+                checkpoint.get("phase") != "manual_cleanup_required"):
+            raise ValueError("completed publication evidence is not ready for review")
+        unit = _literal_unit(state.get("unit"), settings)
+        prior = state.get("recovery_of_job_id")
+        frozen_id = int(job_id) if prior is None else prior
+        if not isinstance(frozen_id, int) or frozen_id < 1:
+            raise ValueError("invalid frozen execution identity")
+        if checkpoint.get("frozen_job_id") != frozen_id:
+            raise ValueError("cleanup review checkpoint is not bound to the frozen job")
+    manifest_file = _manifest_file(settings, frozen_id)
+    manifest = load_frozen_preview_manifest(
+        manifest_file, job_id=frozen_id, unit=unit,
+    )
+    if manifest.get("cleanup_policy") != "deferred":
+        raise ValueError("unsafe cleanup policy in frozen plan")
+    result = read_deferred_cleanup_review(
+        manifest, frozen_manifest_path=manifest_file,
+        page=page, page_size=page_size,
+    )
+    result["reviewed_execution_job_id"] = job_id
+    return result
 
 
 def enqueue_media_organizer_recovery(

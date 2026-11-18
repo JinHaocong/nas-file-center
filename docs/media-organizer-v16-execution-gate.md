@@ -218,3 +218,10 @@ not yet satisfy a zero-change second scan; #400 remains open.
 The workflow requires an online self-hosted runner with the labels above.
 A pending/queued job with no assigned runner means the real NAS test has NOT
 started. GitHub-hosted CI and Docker builds cannot substitute for this mount.
+
+
+## #400 Read-only deferred cleanup audit interface
+
+The authenticated admin can request `GET /api/media-organizer/executions/{job_id}/cleanup-review?page=1&page_size=25` only after publication has reached `manual_cleanup_required`. The endpoint reads a checksum-validated frozen manifest and bounded private 0600 manual-review journal, checks the original, staged and final hardlink identities on the requested page, and reports the original wrappers and expected counts/bytes. It cannot enqueue, delete or finalize anything: `cleanup_authorized=false`, `finalized=false`, `whole_unit_live_verified=false` are mandatory. An inaccessible journal, changed inode, stale stage or corrupt report fails closed with HTTP 409; pagination is bounded 1–100 and requires admin authentication. This is NOT a cleanup consent UI or end-to-end finalization.
+
+**Cross-UID caveat:** the private Worker file uses 0600 today, and the API is a distinct UID in #403; until an explicitly reviewed shared evidence visibility mechanism exists, live API may be unable to read the report and will refuse with 409. Do not loosen existing NAS permissions or enable V1.6 execution to work around it.

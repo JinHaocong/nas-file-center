@@ -76,6 +76,152 @@ def validate_deferred_publication(manifest: dict) -> None:
         )
 
 
+
+def read_deferred_cleanup_review(
+    manifest: dict, *, frozen_manifest_path: Path,
+    page: int = 1, page_size: int = 25,
+) -> dict:
+    """Bounded immutable cleanup-evidence read; no mutation or cleanup grant.
+
+    The journal is private 0600 Worker evidence today. A different API UID
+    must fail closed if it cannot read the report; any group-sharing change
+    needs separate explicit #403 permission review and regression tests.
+    """
+    if not isinstance(manifest, dict) or manifest.get("cleanup_policy") != "deferred":
+        raise DeferredCleanupConflict("deferred cleanup evidence required")
+    if not (isinstance(page, int) and page >= 1 and
+            isinstance(page_size, int) and 1 <= page_size <= 100):
+        raise DeferredCleanupConflict("invalid cleanup review page")
+    path = _report_path(frozen_manifest_path)
+    folder_fd = _open_directory_nofollow(path.parent)
+    try:
+        flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        report_fd = os.open(path.name, flags, dir_fd=folder_fd)
+        with os.fdopen(report_fd, "rb") as report_file:
+            info = os.fstat(report_file.fileno())
+            if (not stat.S_ISREG(info.st_mode)
+                    or not 1 <= info.st_size <= 1024 * 1024
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_uid != os.geteuid()):
+                raise DeferredCleanupConflict("private cleanup report permissions changed")
+            raw = report_file.read(1024 * 1024 + 1)
+    except (OSError, ValueError) as exc:
+        raise DeferredCleanupConflict("private cleanup evidence is unavailable or unsafe") from exc
+    finally:
+        os.close(folder_fd)
+    try:
+        saved = json.loads(raw)
+        rows = manifest["moves"]
+        wrapper_ids = manifest["wrapper_identities"]
+        stage = Path(manifest["unit"]) / manifest["stage_directory"]
+        expected = {
+            "schema_version": 1,
+            "cleanup_policy": "deferred",
+            "manual_cleanup_required": True,
+            "automatic_cleanup_authorized": False,
+            "job_id": manifest["job_id"],
+            "unit": manifest["unit"],
+            "manifest_checksum": _checksum(manifest),
+            "stage_directory": str(stage),
+            "staged_links_retained": len(rows),
+            "original_sources_retained": len(rows),
+            "files_published": len(rows),
+            "old_wrapper_identities": wrapper_ids,
+            "published_targets": [row["final"] for row in rows],
+            "disposition": "retain_all_until_independent_manual_review",
+        }
+        if not isinstance(saved, dict) or any(
+            saved.get(key) != val for key, val in expected.items()
+        ):
+            raise DeferredCleanupConflict("private cleanup journal differs from frozen authority")
+        # Group records (if any) must be the exact frozen group-inode receipts.
+        bindings = _group_receipts(manifest, frozen_manifest_path)
+        expected_groups = {
+            str(Path(manifest["unit"]) / name): list(identity)
+            for name, identity in bindings.items()
+        }
+        if saved.get("public_group_identities") != expected_groups:
+            raise DeferredCleanupConflict("cleanup group receipts changed")
+        stage_info = os.lstat(stage)
+        if (not stat.S_ISDIR(stage_info.st_mode)
+                or saved.get("stage_identity") != [
+                    int(stage_info.st_dev), int(stage_info.st_ino)
+                ]):
+            raise DeferredCleanupConflict("private stage identity changed")
+
+        # Verify reviewed page's three file locations by no-follow parent FDs.
+        # These metadata checks are NOT an authorization to unlink a basename.
+        def assert_frozen_file(literal: str, identity: list, role: str) -> None:
+            item = Path(literal)
+            if not item.is_relative_to(Path(manifest["unit"])):
+                raise DeferredCleanupConflict("frozen file escaped organizing unit")
+            parent_fd = _open_directory_nofollow(item.parent)
+            try:
+                stat_item = os.stat(item.name, dir_fd=parent_fd, follow_symlinks=False)
+                _check_identity(stat_item, identity, item)
+            except (StagingConflict, OSError) as exc:
+                raise DeferredCleanupConflict(
+                    f"{role} identity changed; no cleanup authorized"
+                ) from exc
+            finally:
+                os.close(parent_fd)
+
+        start = (page - 1) * page_size
+        selected = rows[start:start + page_size]
+        items = []
+        total_bytes = 0
+        for original in rows:
+            identity = original["identity"]
+            if not isinstance(identity, list) or len(identity) != 4:
+                raise DeferredCleanupConflict("frozen source identity incomplete")
+            total_bytes += int(identity[2])
+        for row in selected:
+            identity = row["identity"]
+            assert_frozen_file(row["source"], identity, "original source")
+            assert_frozen_file(row["target"], identity, "private staged file")
+            assert_frozen_file(row["final"], identity, "public final file")
+            items.append({
+                "source": row["source"],
+                "stage": row["target"],
+                "target": row["final"],
+                "bytes": int(identity[2]),
+                "source_present": True,
+                "stage_present": True,
+                "target_present": True,
+                "identity_matches": True,
+            })
+        for literal, identity in wrapper_ids.items():
+            wrapper_fd = _open_directory_nofollow(Path(literal))
+            try:
+                current = os.fstat(wrapper_fd)
+                if [int(current.st_dev), int(current.st_ino)] != identity:
+                    raise DeferredCleanupConflict("old wrapper identity changed")
+            finally:
+                os.close(wrapper_fd)
+        return {
+            "job_id": int(manifest["job_id"]),
+            "unit": str(manifest["unit"]),
+            "files_total": len(rows),
+            "total_bytes": total_bytes,
+            "page": page,
+            "page_size": page_size,
+            "items": items,
+            "groups": manifest["groups"],
+            "old_wrapper_count": len(wrapper_ids),
+            "old_wrappers": sorted(wrapper_ids),
+            "original_sources_retained": len(rows),
+            "staged_links_retained": len(rows),
+            "manual_cleanup_required": True,
+            "finalized": False,
+            "cleanup_authorized": False,
+            "review_scope": "immutable_journal_and_page_identity_only",
+            "whole_unit_live_verified": False,
+        }
+    except (OSError, ValueError, KeyError, TypeError, OverflowError) as exc:
+        if isinstance(exc, DeferredCleanupConflict):
+            raise
+        raise DeferredCleanupConflict("cleanup evidence cannot be reviewed safely") from exc
+
 def _report_path(frozen_manifest_path: Path) -> Path:
     path = Path(frozen_manifest_path)
     return path.with_name(path.name + ".manual-cleanup.json")

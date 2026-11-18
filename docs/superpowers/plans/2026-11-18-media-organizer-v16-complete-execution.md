@@ -123,3 +123,11 @@ https://github.com/JinHaocong/nas-file-center/issues/403
 - No production data, NAS paths, ownership or ACLs were modified by this inventory.
 
 **Task 1 status:** initial route/service inventory recorded. RED→GREEN migration tests, Worker handlers, deployment split and actual NAS ACL/mount evidence remain open. #403 remains OPEN and is a prerequisite for a defensible #402 custody boundary.
+
+
+## #400 Read-only cleanup review groundwork
+
+- RED commit `5746359` added five synthetic API tests for admin-only paginated source→stage→final audit, tampered private report refusal, foreign replacement refusal, unfinished-job refusal and 422 page bounds. Initial CI confirmed all five fail on missing endpoint.
+- Candidate GREEN: `GET /api/media-organizer/executions/{job_id}/cleanup-review` reads only an already completed, deferred, frozen publication. It validates the checksum manifest and 0600 private journal, verifies the requested page's three no-follow file identities and the old wrapper inode bindings, returns immutable counts/mapping with `cleanup_authorized=false` and `finalized=false`. It performs no filesystem mutations, WorkJob enqueue, deletion or cleanup.
+- This is a **page-limited review**, not a whole-unit full-content/hash verification and not finalization. Grouped publication remains SEC-12 blocked; no cleanup Worker, source unlink, rmdir, or second-zero-scan claim is created.
+- With #403 distinct container UIDs, a 0600 Worker-owned private journal remains unavailable to the API until a separately verified group-readable evidence contract is implemented. The endpoint must return a safe 409, never chmod/chown the host evidence.
