@@ -56,6 +56,7 @@ jobs:
           pytest -q tests/test_media_organizer_*.py \
             tests/test_api_route_media_mutation_boundary.py \
             tests/test_archive_recovery_password_channel_preflight.py \
+            tests/test_archive_recovery_shared_password_channel.py \
             tests/test_quarantine_api.py \
             tests/test_quarantine_terminal_record_cleanup.py \
             tests/test_archive_recovery_7z_regression.py -k 'not real_7zip_default_header'
