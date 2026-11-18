@@ -394,12 +394,12 @@ def _mutate_one(op: dict, *, previously_begun: bool,
         os.close(parent_fd)
 
 
-def _verify_finished_scan(manifest: dict, allowed_roots: list[Path],
+def _verify_finished_scan(manifest: dict, frozen: Path,
+                          allowed_roots: list[Path],
                           quarantine_root: Path | None) -> dict:
+    """Check using the ORIGINAL frozen bytes, never a decorated manifest."""
     unit = Path(manifest["unit"])
-    _check_public(manifest, _group_receipts(
-        manifest, Path(manifest["_frozen_path_for_check"]),
-    ))
+    _check_public(manifest, _group_receipts(manifest, frozen))
     result = preview_semantic_unit(
         unit, allowed_roots=allowed_roots, quarantine_root=quarantine_root,
         exclude_dir_names=manifest.get("excluded_dir_names", []),
@@ -505,10 +505,8 @@ def finish_deferred_cleanup(
             pending = None
         # No staging/old wrappers remain. The second scan must now find the
         # complete frozen output unchanged before the final durable event.
-        scan_manifest = dict(manifest)
-        scan_manifest["_frozen_path_for_check"] = str(frozen)
         scanned = _verify_finished_scan(
-            scan_manifest, [Path(p) for p in allowed_roots], quarantine_root,
+            manifest, frozen, [Path(p) for p in allowed_roots], quarantine_root,
         )
         if not finished:
             _append(path, chain, {"kind": "finalized", "count": len(ops)})
