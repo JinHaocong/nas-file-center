@@ -4185,3 +4185,61 @@ class QuarantineRecordCleanupHandler(TaskHandler):
             "Restored quarantine cleanup completed",
             context=result,
         )
+
+
+
+@register_handler
+class QuarantineSinglePurgeHandler(TaskHandler):
+    """Execute a frozen Gate6-A2 single-purge request under the Worker lease."""
+
+    job_type = "quarantine-single-purge"
+    supports_pause = False
+    supports_cancel = False
+    supports_retry = True
+    supports_resume = True
+
+    def run(self, job: WorkJob, context: JobContext, settings: Settings) -> None:
+        if not context.worker_id:
+            raise PermissionError("Single quarantine purge requires active Worker authority")
+
+        state = json.loads(job.state_json or "{}")
+        entry_id = state.get("entry_id")
+        confirmation = state.get("confirmation")
+        frozen_manifest = state.get("frozen_manifest")
+        user_id = state.get("requested_by_user_id")
+        if not isinstance(entry_id, int) or entry_id <= 0:
+            raise ValueError("Single quarantine purge job is missing entry_id")
+        if confirmation != "DELETE" or not isinstance(frozen_manifest, dict):
+            raise ValueError("Single quarantine purge job has invalid frozen authority")
+
+        context.checkpoint(
+            progress_current=0,
+            progress_total=len(frozen_manifest.get("owned_paths") or []),
+            progress_message=f"Purging quarantine entry #{entry_id}...",
+        )
+
+        from app.quarantine.single_unlink_purge import purge_single_transactional_entry
+        from app.service import FileCenterService
+
+        service = FileCenterService(settings)
+        result = purge_single_transactional_entry(
+            service,
+            entry_id,
+            confirmation=confirmation,
+            is_admin=True,
+            worker_id=context.worker_id,
+            frozen_manifest=frozen_manifest,
+            user_id=user_id,
+        )
+
+        context.checkpoint(
+            progress_current=int(result.get("removed_count") or 0),
+            progress_total=len(frozen_manifest.get("owned_paths") or []),
+            progress_message=f"Quarantine entry #{entry_id} purged",
+            checkpoint_data={"schema_version": 1, "result": result},
+        )
+        context.log(
+            "quarantine_single_purge_completed",
+            "Single quarantine purge completed under Worker authority",
+            context=result,
+        )
