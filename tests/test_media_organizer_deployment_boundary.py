@@ -110,3 +110,55 @@ def test_dockerfile_final_stage_has_unprivileged_default_user() -> None:
         if line.startswith("USER ")
     ]
     assert user_directives == [f"{API_UID}:{SHARED_GID}"]
+
+
+def _assert_shared_ram_secret_volume(model: dict, api_name: str, worker_name: str) -> None:
+    """Both distinct principals must mount ONE shared tmpfs-backed Docker volume."""
+    services = model["services"]
+    selected = []
+    for service_name in (api_name, worker_name):
+        service = services[service_name]
+        mounts = [
+            v for v in service["volumes"]
+            if v["target"] == "/run/nfc-recovery-secrets"
+        ]
+        assert len(mounts) == 1
+        assert mounts[0]["type"] == "volume"
+        assert not mounts[0].get("read_only", False)
+        selected.append(mounts[0]["source"])
+        assert service["environment"]["NFC_SECRET_OWNER_UID"] == API_UID
+        assert service["environment"]["NFC_SECRET_GROUP_GID"] == SHARED_GID
+    assert selected[0] == selected[1]
+    definition = model["volumes"]["nfc-recovery-secrets"]
+    assert definition["driver"] == "local"
+    opts = definition["driver_opts"]
+    assert opts["type"] == "tmpfs" and opts["device"] == "tmpfs"
+    options = set(opts["o"].split(","))
+    assert {
+        "size=1m", f"uid={API_UID}", f"gid={SHARED_GID}",
+        "mode=2770", "noexec", "nosuid", "nodev",
+    }.issubset(options)
+
+
+def test_local_archive_password_channel_uses_shared_memory_volume(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    local_compose = tmp_path / "compose.yaml"
+    local_compose.write_text(
+        (ROOT / "compose.yaml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    model = _compose_model(
+        local_compose, cwd=tmp_path,
+        extra_env={"HOST_DATA_DIR": str(tmp_path), "HOST_CONFIG_DIR": str(tmp_path),
+                   "NFC_API_UID": API_UID, "NFC_WORKER_UID": WORKER_UID,
+                   "NFC_SHARED_GID": SHARED_GID},
+    )
+    _assert_shared_ram_secret_volume(model, "api", "worker")
+
+
+def test_komodo_archive_password_channel_uses_shared_memory_volume() -> None:
+    model = _compose_model(
+        ROOT / "compose.komodo.yaml", cwd=ROOT,
+        extra_env={"NFC_API_UID": API_UID, "NFC_WORKER_UID": WORKER_UID,
+                   "NFC_SHARED_GID": SHARED_GID},
+    )
+    _assert_shared_ram_secret_volume(model, "nas-file-center-api", "nas-file-center-worker")
