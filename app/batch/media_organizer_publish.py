@@ -408,26 +408,43 @@ def _verify_group_parent_posix_permissions(unit_fd: int, manifest: dict) -> None
             "public unit owner or writable permissions are unsafe"
         )
 
-    # The unit's own 0700 permissions are not enough if another actor can
-    # rename its basename from a writable immediate parent. Check the parent
-    # by FD, not by following the current unit symlink/entry.
+    # Verify the entire ancestor chain by pinned directory FDs. A writable
+    # grandparent could rename/rebind the unit's immediate parent even when
+    # that immediate parent itself is private.
     unit = Path(manifest["unit"])
-    parent_fd = _open_directory_nofollow(unit.parent)
-    try:
-        parent = os.fstat(parent_fd)
-        named = _entry(parent_fd, unit.name)
-        if (not stat.S_ISDIR(parent.st_mode)
-                or named is None or not stat.S_ISDIR(named.st_mode)
-                or (int(named.st_dev), int(named.st_ino)) != (
-                    int(info.st_dev), int(info.st_ino))):
-            raise PublishingConflict("public unit parent binding changed")
-        if (int(parent.st_uid) != os.geteuid()
-                or stat.S_IMODE(parent.st_mode) & 0o022):
-            raise PublishingConflict(
-                "public unit parent writable permissions are unsafe"
-            )
-    finally:
-        os.close(parent_fd)
+    child_path = unit
+    child_info = info
+    trusted_owners = {0, os.geteuid()}
+    while True:
+        parent_path = child_path.parent
+        if parent_path == child_path:
+            break
+        parent_fd = _open_directory_nofollow(parent_path)
+        try:
+            parent = os.fstat(parent_fd)
+            named = _entry(parent_fd, child_path.name)
+            if (not stat.S_ISDIR(parent.st_mode)
+                    or named is None or not stat.S_ISDIR(named.st_mode)
+                    or (int(named.st_dev), int(named.st_ino)) != (
+                        int(child_info.st_dev), int(child_info.st_ino))):
+                raise PublishingConflict("public unit ancestor binding changed")
+            mode = stat.S_IMODE(parent.st_mode)
+            if int(parent.st_uid) not in trusted_owners:
+                raise PublishingConflict(
+                    "public unit ancestor owner is not trusted"
+                )
+            if mode & 0o022:
+                # A sticky shared parent (for example /tmp) protects a child
+                # owned by this Worker or root from other users' rename/unlink.
+                if not (mode & stat.S_ISVTX
+                        and int(named.st_uid) in trusted_owners):
+                    raise PublishingConflict(
+                        "public unit ancestor writable permissions are unsafe"
+                    )
+            child_info = parent
+        finally:
+            os.close(parent_fd)
+        child_path = parent_path
 
 
 def _create_public_group_direct(
