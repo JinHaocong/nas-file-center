@@ -228,3 +228,90 @@ def test_legacy_restore_api_only_enqueues_worker_and_preserves_payload_until_wor
         checkpoint = json.loads(job.checkpoint_json)
         assert checkpoint["schema_version"] == 1
         assert checkpoint["result"]["state"] == "restored"
+
+def test_terminal_record_delete_api_only_queues_worker_before_transaction_artifact_cleanup(
+    tmp_path: Path,
+):
+    """Record deletion must not rmdir private transaction paths in the API process."""
+    data = tmp_path / "data"
+    data.mkdir()
+    trash = data / ".nas-file-center-trash"
+    trash.mkdir()
+    config = tmp_path / "config"
+    config.mkdir()
+    settings = Settings(
+        config_dir=config,
+        data_mount=data,
+        allowed_roots_raw=str(data),
+        quarantine_root=trash,
+        initial_admin_username="admin",
+        initial_admin_password="AdminPassword123!",
+        allow_mutation=True,
+        allow_delete=True,
+    )
+    service = FileCenterService(settings)
+    client = TestClient(create_app(settings))
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "AdminPassword123!"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert login.status_code == 200
+
+    with service.SessionLocal() as session:
+        entry = QuarantineEntry(
+            original_path=str(data / "already-restored.bin"),
+            quarantine_path=str(trash / "already-purged.bin"),
+            state="purged",
+            tx_phase="purged",
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        session.add(entry)
+        session.flush()
+        entry_id = int(entry.id)
+        session.commit()
+
+    tx_entry_root = trash / ".tx" / f"entry-{entry_id}"
+    (tx_entry_root / "attempt-1").mkdir(parents=True)
+
+    response = client.delete(
+        f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD",
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 202, response.text
+    queued = response.json()
+    assert queued["status"] == "queued"
+    assert queued["work_job_id"]
+    assert tx_entry_root.is_dir()
+    assert (tx_entry_root / "attempt-1").is_dir()
+    with service.SessionLocal() as session:
+        persisted = session.get(QuarantineEntry, entry_id)
+        job = session.get(WorkJob, queued["work_job_id"])
+        assert persisted is not None
+        assert persisted.state == "purged"
+        assert job is not None
+        assert job.kind == "quarantine-record-cleanup"
+        assert job.status == "queued"
+
+    worker_id = f"worker-record-cleanup-{entry_id}"
+    assert acquire_worker_ownership(service.engine, service.SessionLocal, worker_id)
+    assert process_work_job(
+        settings,
+        queued["work_job_id"],
+        session_factory=service.SessionLocal,
+        engine=service.engine,
+        worker_id=worker_id,
+    )
+
+    assert not tx_entry_root.exists()
+    with service.SessionLocal() as session:
+        assert session.get(QuarantineEntry, entry_id) is None
+        job = session.get(WorkJob, queued["work_job_id"])
+        assert job is not None
+        assert job.status == "completed"
+        assert job.checkpoint_json
+        checkpoint = json.loads(job.checkpoint_json)
+        assert checkpoint["schema_version"] == 1
+        assert checkpoint["result"]["deleted_count"] == 1
