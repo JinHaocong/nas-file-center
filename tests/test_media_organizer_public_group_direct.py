@@ -346,3 +346,26 @@ def test_direct_group_rechecks_higher_ancestor_after_final_fence(tmp_path):
         assert not publishing._group_receipt_path(frozen, 1).exists()
     finally:
         ancestor.chmod(original_mode)
+
+
+def test_direct_group_refuses_root_worker_before_any_public_mutation(
+    tmp_path, monkeypatch,
+):
+    """Root has ambient authority and is not an enforceable dedicated Worker UID."""
+    unit, manifest, frozen = _prepare(tmp_path)
+    monkeypatch.setattr(publishing.os, "geteuid", lambda: 0)
+
+    with pytest.raises(
+        publishing.PublishingConflict,
+        match="dedicated non-root Worker",
+    ):
+        publishing._create_public_group_direct(
+            unit, manifest["groups"][0]["name"], manifest,
+            _authority(manifest), lambda: None,
+            frozen_manifest_path=frozen,
+        )
+
+    assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
+    assert not publishing._group_receipt_path(frozen, 1).exists()
+    assert (unit / "picture.jpg").read_bytes() == b"picture-original"
+    assert (unit / "movie.mp4").read_bytes() == b"movie-original"
