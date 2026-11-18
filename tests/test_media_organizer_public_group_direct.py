@@ -248,7 +248,7 @@ def test_direct_group_refuses_writable_parent_of_organizing_unit(tmp_path):
     original_mode = stat.S_IMODE(parent.stat().st_mode)
     parent.chmod(0o777)
     try:
-        with pytest.raises(publishing.PublishingConflict, match="public unit parent.*permission"):
+        with pytest.raises(publishing.PublishingConflict, match="public unit (?:parent|ancestor).*permission"):
             publishing._create_public_group_direct(
                 unit, manifest["groups"][0]["name"], manifest,
                 _authority(manifest), lambda: None,
@@ -276,7 +276,7 @@ def test_direct_group_rechecks_unit_parent_after_fence(tmp_path):
             parent.chmod(0o777)
 
     try:
-        with pytest.raises(publishing.PublishingConflict, match="public unit parent.*permission"):
+        with pytest.raises(publishing.PublishingConflict, match="public unit (?:parent|ancestor).*permission"):
             publishing._create_public_group_direct(
                 unit, manifest["groups"][0]["name"], manifest,
                 _authority(manifest), loosen_parent,
