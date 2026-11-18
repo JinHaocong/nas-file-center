@@ -84,3 +84,42 @@ def test_direct_group_alone_does_not_bypass_sec12_execution_gate(tmp_path):
             lease_fence=lambda: None, defer_directory_cleanup=True,
         )
     assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
+
+
+def test_deferred_grouped_publication_uses_direct_group_creation_in_synthetic_custody(
+    tmp_path, monkeypatch,
+):
+    """Synthetic custody injection checks the grouped publication branch only.
+
+    This is NOT evidence that a real NAS mount has exclusive custody. Runtime
+    validation must remain fail-closed until an enforceable custody proof exists.
+    """
+    from app.batch import media_organizer_deferred_cleanup as guard
+
+    unit, manifest, frozen = _prepare(tmp_path)
+    monkeypatch.setattr(guard, "validate_deferred_publication", lambda _manifest: None)
+
+    def forbid_source_directory_rename(*_args, **_kwargs):
+        raise AssertionError("deferred Worker called name-based directory promotion")
+
+    monkeypatch.setattr(publishing, "rename_noreplace_at", forbid_source_directory_rename)
+    outcome = publishing.publish_frozen_stage(
+        manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
+        lease_fence=lambda: None, defer_directory_cleanup=True,
+    )
+    assert outcome["file_count"] == len(manifest["moves"])
+    assert outcome["published_files"] == len(manifest["moves"])
+    for row in manifest["moves"]:
+        original = Path(row["source"])
+        staged = Path(row["target"])
+        final = Path(row["final"])
+        assert final.is_file()
+        assert final.read_bytes() == staged.read_bytes() == original.read_bytes()
+        assert (final.stat().st_dev, final.stat().st_ino) == (
+            original.stat().st_dev, original.stat().st_ino
+        )
+    for group in manifest["groups"]:
+        directory = Path(group["destination"])
+        assert publishing._owned_public(directory, _authority(manifest))
+        assert directory.is_dir()
+    assert not list((unit / manifest["stage_directory"]).glob(".nfc-publish-pending-*"))
