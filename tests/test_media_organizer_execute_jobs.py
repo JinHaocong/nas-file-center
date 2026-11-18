@@ -414,3 +414,57 @@ def test_worker_rechecks_quiescence_ack_after_job_was_queued(tmp_path):
     assert (work / "photo.jpg").read_bytes() == b"photo-1"
     assert (work / "clip.mp4").read_bytes() == b"video-1"
     assert not any(x.name.startswith(".nfc-") for x in work.iterdir())
+
+
+def test_worker_requires_manual_cleanup_without_deleting_old_wrapper_or_stage(
+    tmp_path, monkeypatch,
+):
+    """The production WorkJob must never call the legacy unsafe retirement."""
+    from app.batch import media_organizer_publish as publishing
+    from app.batch import media_organizer_execute_jobs as jobs
+    client, settings, work = setup(tmp_path, enabled=True)
+    (work / "P1").mkdir()
+    (work / "P1" / "second.jpg").write_bytes(b"second-image")
+    pid = preview(client, settings, work)
+    planned = execute_request(client, pid, work)
+    assert planned.status_code == 200, planned.text
+    job_id = planned.json()["job_id"]
+
+    def never_delete(*args, **kwargs):
+        raise AssertionError("automatic directory retirement was invoked")
+
+    monkeypatch.setattr(publishing, "_retire_wrappers", never_delete)
+    monkeypatch.setattr(jobs, "retire_published_stage", never_delete)
+    assert worker(settings, job_id, name="manual-only-worker")
+    result = client.get(f"/api/media-organizer/executions/{job_id}").json()
+    assert result["status"] == "completed"
+    assert result["manual_cleanup_required"] is True
+    assert result["progress"]["phase"] == "manual_cleanup_required"
+    assert result["finalized"] is False
+    assert (work / "P1").is_dir()
+    assert list((work / "P1").iterdir()) == []
+    stage = work / f".nfc-media-organizer-stage-{job_id}"
+    assert stage.is_dir()
+    assert (stage / ".nfc-stage-authority").is_file()
+    assert list(stage.glob("*.jpg"))
+    report = settings.reports_dir / "media_organizer-executions" / str(job_id)
+    assert (report / "manifest.json.manual-cleanup.json").is_file()
+    assert any(group.name.startswith("P [") and list(group.glob("*.jpg"))
+               for group in work.iterdir() if group.is_dir())
+    assert (work / "photo.jpg").exists() is False
+
+
+def test_worker_refuses_unsafe_same_named_old_bucket_before_staging_anything(tmp_path):
+    client, settings, work = setup(tmp_path, enabled=True)
+    original = work / "photo.jpg"
+    old = work / "P [1 7B]"
+    old.mkdir()
+    (old / "001.jpg").write_bytes(b"picture")
+    original.unlink()
+    pid = preview(client, settings, work)
+    queued = execute_request(client, pid, work)
+    assert queued.status_code == 200
+    assert worker(settings, queued.json()["job_id"]) is False
+    assert (old / "001.jpg").read_bytes() == b"picture"
+    assert (work / "clip.mp4").read_bytes() == b"video-1"
+    assert not any(p.name.startswith(".nfc-") for p in work.iterdir())
