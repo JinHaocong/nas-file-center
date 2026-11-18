@@ -1,0 +1,29 @@
+# OPTIONAL V1.6 security overlay, NOT applied by the default Compose command.
+# Usage: docker compose -f compose.yaml -f compose.v16-isolation.yaml config
+# Before deployment, verify host UID/GID, SQLite/WAL/config access, NAS ACLs,
+# all allowed source/public parents and Worker-only namespace custody.
+# No automatic chmod/chown; execution gates intentionally remain OFF.
+services:
+  api:
+    user: "${NFC_API_UID:?Set a dedicated non-root API UID}:${NFC_SHARED_GID:?Set the config/database group GID}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - "${HOST_DATA_DIR:?Set HOST_DATA_DIR}:/data:ro"
+    environment:
+      MEDIA_ORGANIZER_EXECUTION_ENABLED: "false"
+      MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"
+
+  worker:
+    user: "${NFC_WORKER_UID:?Set a distinct non-root Worker UID}:${NFC_SHARED_GID:?Set the config/database group GID}"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - "${HOST_DATA_DIR:?Set HOST_DATA_DIR}:/data:rw"
+    environment:
+      MEDIA_ORGANIZER_EXECUTION_ENABLED: "false"
+      MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"
