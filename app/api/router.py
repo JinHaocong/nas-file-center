@@ -2061,7 +2061,7 @@ def quarantine_recovery_diagnostic(
         raise HTTPException(404, str(exc)) from exc
 
 
-@router.post("/quarantine/{id}/restore")
+@router.post("/quarantine/{id}/restore", status_code=202)
 def restore_quarantine_entry(
     request: Request,
     id: int,
@@ -2069,7 +2069,7 @@ def restore_quarantine_entry(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        return request.app.state.service.restore_quarantine_entry(
+        return request.app.state.service.enqueue_quarantine_restore(
             id,
             conflict_policy=payload.conflict_policy,
             custom_target=payload.custom_target,
