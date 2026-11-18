@@ -15,7 +15,9 @@ from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.config_sharing import shared_config_gid, require_shared_directory
-from app.batch.media_organizer_custody import assert_exclusive_custody
+from app.batch.media_organizer_custody import (
+    assert_exclusive_custody, NamespaceCustodyUnavailable,
+)
 from app.batch.media_organizer_manifest import (
     FrozenPreviewError, _checksum, load_frozen_preview_manifest,
 )
@@ -67,7 +69,10 @@ def validate_deferred_publication(
         parents.update(Path(row["source"]).parent for row in rows)
         parents.update(Path(row["target"]).parent for row in rows)
         parents.update(Path(row["final"]).parent for row in rows)
-        assert_exclusive_custody(namespace_custody, sorted(parents))
+        try:
+            assert_exclusive_custody(namespace_custody, sorted(parents))
+        except NamespaceCustodyUnavailable as exc:
+            raise DeferredCleanupConflict(str(exc)) from exc
     # Do this before staging as well. A retained original source may
     # otherwise occupy a flat target that the prior rename-first engine freed.
     retained = {str(row["source"]).casefold() for row in rows}

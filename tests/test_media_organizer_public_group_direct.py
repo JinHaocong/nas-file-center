@@ -86,6 +86,13 @@ def test_direct_group_alone_does_not_bypass_sec12_execution_gate(tmp_path):
     assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
 
 
+def _fixture_custody(root):
+    class ScopedFixtureCustody:
+        def assert_exclusive(self, folder):
+            assert Path(folder).is_relative_to(root)
+    return ScopedFixtureCustody()
+
+
 def test_deferred_grouped_publication_uses_direct_group_creation_in_synthetic_custody(
     tmp_path, monkeypatch,
 ):
@@ -97,7 +104,6 @@ def test_deferred_grouped_publication_uses_direct_group_creation_in_synthetic_cu
     from app.batch import media_organizer_deferred_cleanup as guard
 
     unit, manifest, frozen = _prepare(tmp_path)
-    monkeypatch.setattr(guard, "validate_deferred_publication", lambda _manifest: None)
 
     def forbid_source_directory_rename(*_args, **_kwargs):
         raise AssertionError("deferred Worker called name-based directory promotion")
@@ -106,6 +112,7 @@ def test_deferred_grouped_publication_uses_direct_group_creation_in_synthetic_cu
     outcome = publishing.publish_frozen_stage(
         manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
         lease_fence=lambda: None, defer_directory_cleanup=True,
+        namespace_custody=_fixture_custody(tmp_path),
     )
     assert outcome["file_count"] == len(manifest["moves"])
     assert outcome["published_files"] == len(manifest["moves"])
@@ -135,8 +142,7 @@ def test_direct_group_recovery_with_existing_valid_inode_receipt(tmp_path, monke
         unit, first_group, manifest, _authority(manifest), lambda: None,
         frozen_manifest_path=frozen,
     )
-    monkeypatch.setattr(guard, "validate_deferred_publication", lambda _m: None)
-
+    # Recovery uses the same explicitly scoped synthetic custody.
     def never_rename(*_args, **_kwargs):
         raise AssertionError("unexpected source-directory rename during recovery")
 
@@ -144,6 +150,7 @@ def test_direct_group_recovery_with_existing_valid_inode_receipt(tmp_path, monke
     result = publishing.publish_frozen_stage(
         manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
         lease_fence=lambda: None, defer_directory_cleanup=True, resume=True,
+        namespace_custody=_fixture_custody(tmp_path),
     )
     assert result["file_count"] == len(manifest["moves"])
     assert all(Path(row["final"]).is_file() for row in manifest["moves"])

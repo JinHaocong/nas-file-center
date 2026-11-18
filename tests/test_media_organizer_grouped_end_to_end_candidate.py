@@ -1,8 +1,7 @@
 """#402 synthetic grouped-output acceptance against the actual publication engine.
 
-These tests deliberately bypass the SEC-12 *library* hold only inside
-pytest's disposable tmp_path, not the API/Worker. They do not certify
-exclusive custody of NAS source directory names or authorize deploy.
+These tests pass an explicit tmp_path-scoped custody fixture to the real
+publishing library; this does not certify actual NAS namespace exclusion.
 """
 from __future__ import annotations
 
@@ -73,9 +72,12 @@ def test_grouped_direct_publication_preserves_every_original_and_file_identity(
         manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
         lease_fence=lambda: None,
     )
-    # Only this synthetic function bypasses the hold; the real admin API and
-    # Worker path must continue to refuse ALL grouped execution (#402).
-    monkeypatch.setattr(deferred, "validate_deferred_publication", lambda _m: None)
+    # Explicit tmp_path-scoped custody: not a production issuer.
+    class ScopedFixtureCustody:
+        def assert_exclusive(self, folder):
+            assert Path(folder).is_relative_to(tmp_path)
+
+    proof = ScopedFixtureCustody()
 
     def forbid_directory_source_rename(*args, **kwargs):
         raise AssertionError("deferred grouped engine reached source-name rename")
@@ -84,6 +86,7 @@ def test_grouped_direct_publication_preserves_every_original_and_file_identity(
     result = publish_frozen_stage(
         manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
         lease_fence=lambda: None, defer_directory_cleanup=True,
+        namespace_custody=proof,
     )
     assert result["file_count"] == picture_count + video_count
     assert result["published_files"] + result["reconciled_files"] == (

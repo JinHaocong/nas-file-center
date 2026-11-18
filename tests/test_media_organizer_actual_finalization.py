@@ -99,9 +99,7 @@ def test_mixed_PV_group_direct_publication_can_finish_canonical_rescan(
     from app.batch.media_organizer_publish import publish_frozen_stage
 
     unit, manifest, frozen = _grouped(tmp_path)
-    # This only bypasses the group hold inside disposable CI tests.
-    monkeypatch.setattr(deferred, "validate_deferred_publication",
-                        lambda _manifest: None)
+    proof = ExclusiveSyntheticCustody(tmp_path)
     stage_frozen_sources(
         manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
         lease_fence=lambda: None,
@@ -109,10 +107,11 @@ def test_mixed_PV_group_direct_publication_can_finish_canonical_rescan(
     publish_frozen_stage(
         manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
         lease_fence=lambda: None, defer_directory_cleanup=True,
+        namespace_custody=proof,
     )
     record_deferred_cleanup_evidence(
         manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
-        lease_fence=lambda: None,
+        lease_fence=lambda: None, namespace_custody=proof,
     )
     plan = save_cleanup_plan(cleanup_plan_path(frozen), manifest)
     expected = _bytes(plan)
