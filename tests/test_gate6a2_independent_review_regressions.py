@@ -15,6 +15,7 @@ from app.quarantine.purge_advisory import discover_unlink_purge_advisory
 from app.quarantine.service_adapter import Gate6A2FileCenterService
 from app.quarantine.single_unlink_purge import purge_single_transactional_entry
 from app.quarantine.unlink_purge import OPERATION_ID, build_unlink_manifest
+from app.tasks.recovery import acquire_worker_ownership
 from app.service import FileCenterService
 
 
@@ -140,6 +141,13 @@ def test_single_clear_retry_repairs_post_terminal_audit_gap_exactly_once(
         trash=trash,
         label="terminal-audit-gap",
     )
+    worker_id = "worker-gate6a2-single-clear-test"
+    assert acquire_worker_ownership(service.engine, service.SessionLocal, worker_id)
+    with service.SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        frozen_manifest = build_unlink_manifest(entry, trash)
+        assert frozen_manifest["blockers"] == []
 
     real_advisory = single_unlink_purge._fresh_survivor_advisory
 
@@ -157,6 +165,8 @@ def test_single_clear_retry_repairs_post_terminal_audit_gap_exactly_once(
             entry_id,
             confirmation="DELETE",
             is_admin=True,
+            worker_id=worker_id,
+            frozen_manifest=frozen_manifest,
         )
 
     assert not anchor.exists()
@@ -184,6 +194,8 @@ def test_single_clear_retry_repairs_post_terminal_audit_gap_exactly_once(
         entry_id,
         confirmation="DELETE",
         is_admin=True,
+        worker_id=worker_id,
+        frozen_manifest=frozen_manifest,
     )
     assert recovered["state"] == "purged"
     assert recovered["purge_semantics"] == "unlink_v1"
@@ -193,6 +205,8 @@ def test_single_clear_retry_repairs_post_terminal_audit_gap_exactly_once(
         entry_id,
         confirmation="DELETE",
         is_admin=True,
+        worker_id=worker_id,
+        frozen_manifest=frozen_manifest,
     )
     assert repeated["state"] == "purged"
 
