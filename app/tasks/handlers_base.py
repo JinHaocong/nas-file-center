@@ -4255,6 +4255,9 @@ class QuarantineRecordCleanupHandler(TaskHandler):
             raise ValueError("Quarantine cleanup job is missing entry_ids")
         entry_ids = [int(value) for value in raw_ids]
         user_id = state.get("requested_by_user_id")
+        expected_entries = state.get("expected_entries")
+        if expected_entries is not None and not isinstance(expected_entries, dict):
+            raise ValueError("Quarantine cleanup job has invalid frozen entry identities")
 
         context.checkpoint(
             progress_current=0,
@@ -4270,6 +4273,7 @@ class QuarantineRecordCleanupHandler(TaskHandler):
             worker_id=context.worker_id,
             job_id=int(job.id),
             user_id=user_id,
+            expected_entries=expected_entries,
         )
 
         context.checkpoint(
