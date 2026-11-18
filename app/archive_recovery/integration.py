@@ -308,14 +308,32 @@ class ArchiveRecoveryHandler(TaskHandler):
             raise RecoveryError(error) from None
         finally:
             # All intermediate file descriptors close in core. Remove only
-            # worker-owned temporary names; final published files survive.
+            # worker-owned temporary names under the same frozen parent/output inodes.
             if token and tmpfs_available():
                 (SECRET_DIR / token).unlink(missing_ok=True)
-            clean_interrupted_parts(output, state.get('output_identity', []))
+            output_bound = False
             try:
-                (output / '_incomplete').rmdir()
+                parent_stat = os.stat(source.parent, follow_symlinks=False)
+                expected_parent = state.get("parent_identity")
+                parent_matches = (
+                    expected_parent is None
+                    or [str(parent_stat.st_dev), str(parent_stat.st_ino)] == expected_parent
+                )
+                output_stat = os.stat(output, follow_symlinks=False)
+                output_bound = (
+                    parent_matches
+                    and stat.S_ISDIR(output_stat.st_mode)
+                    and [str(output_stat.st_dev), str(output_stat.st_ino)]
+                    == state.get("output_identity")
+                )
             except OSError:
-                pass
+                output_bound = False
+            if output_bound:
+                clean_interrupted_parts(output, state.get('output_identity', []))
+                try:
+                    (output / '_incomplete').rmdir()
+                except OSError:
+                    pass
             if status != 'completed' and status != 'partial':
                 # A task stopped by RESOURCE_LIMIT / TIME_LIMIT may already
                 # have recovered files. If the source is still the original
@@ -355,9 +373,7 @@ class ArchiveRecoveryHandler(TaskHandler):
                 })
                 # Never retain empty failed-job output directories.
                 try:
-                    if output.is_dir() and not output.is_symlink() and (
-                        [str(output.stat().st_dev), str(output.stat().st_ino)] == state.get('output_identity')
-                    ):
+                    if output_bound and output.is_dir() and not output.is_symlink():
                         output.rmdir()
                 except OSError:
                     pass
@@ -383,6 +399,17 @@ def cleanup_recovery_after_worker_restart(settings: Settings, session_factory, w
             from app.path_safety import require_allowed_path
             if output.parent != source.parent or (
                 require_allowed_path(source, settings.allowed_roots) != source
+            ):
+                continue
+            expected_parent = state.get("parent_identity")
+            if expected_parent is not None:
+                parent_stat = os.stat(source.parent, follow_symlinks=False)
+                if [str(parent_stat.st_dev), str(parent_stat.st_ino)] != expected_parent:
+                    continue
+            output_stat = os.stat(output, follow_symlinks=False)
+            if (
+                not stat.S_ISDIR(output_stat.st_mode)
+                or [str(output_stat.st_dev), str(output_stat.st_ino)] != state.get("output_identity")
             ):
                 continue
             clean_interrupted_parts(output, state.get('output_identity', []))
