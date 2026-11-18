@@ -34,6 +34,9 @@ from app.batch.media_organizer_deferred_cleanup import (
 from app.config import Settings
 from app.config_sharing import shared_config_gid, ensure_shared_report_directory
 from app.batch.media_organizer_cleanup_audit import audit_deferred_cleanup_inventory
+from app.batch.media_organizer_cleanup_plan import (
+    cleanup_plan_path, read_cleanup_plan, save_cleanup_plan,
+)
 from app.models import WorkJob
 from app.tasks.context import JobContext
 from app.tasks.handlers_base import TaskHandler, register_handler
@@ -312,6 +315,45 @@ def get_media_organizer_cleanup_audit(
     return result
 
 
+def get_media_organizer_cleanup_plan(
+    session_factory, settings: Settings, job_id: int, *,
+    page: int = 1, page_size: int = 25,
+) -> dict:
+    """Verified paginated planned cleanup *review*; no mutation authority."""
+    if (not isinstance(page, int) or page < 1
+            or not isinstance(page_size, int) or not 1 <= page_size <= 100):
+        raise ValueError("invalid cleanup plan pagination")
+    audit = get_media_organizer_cleanup_audit(session_factory, settings, job_id)
+    frozen_id = int(audit["job_id"])
+    path = _manifest_file(settings, frozen_id)
+    manifest = load_frozen_preview_manifest(
+        path, job_id=frozen_id, unit=Path(audit["unit"]),
+    )
+    plan = read_cleanup_plan(cleanup_plan_path(path), manifest)
+    offset = (page - 1) * page_size
+    return {
+        "job_id": frozen_id,
+        "reviewed_execution_job_id": job_id,
+        "unit": plan["unit"],
+        "plan_sha256": plan["plan_sha256"],
+        "manifest_checksum": plan["manifest_checksum"],
+        "plan_kind": "review_only",
+        "page": page,
+        "page_size": page_size,
+        "total_original_links": len(plan["original_links"]),
+        "total_staged_links": len(plan["staged_links"]),
+        "original_links": plan["original_links"][offset:offset + page_size],
+        "staged_links": plan["staged_links"][offset:offset + page_size],
+        "wrapper_directories": plan["wrapper_directories"],
+        "stage": plan["stage"],
+        "cleanup_authorized": False,
+        "finalized": False,
+        "zero_change_rescan_verified": False,
+        "namespace_exclusive_custody_proven": False,
+        "read_only": True,
+    }
+
+
 def enqueue_media_organizer_recovery(
     session_factory, settings: Settings, *, failed_job_id: int,
     confirmation: str,
@@ -521,6 +563,15 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             allowed_roots=settings.allowed_roots,
             quarantine_root=settings.quarantine_root, lease_fence=fence,
         )
+        # Commit durable, immutable per-link review authority BEFORE the
+        # publication is marked completed. This performs no media cleanup.
+        fence()
+        audit_deferred_cleanup_inventory(
+            manifest, frozen_manifest_path=manifest_path,
+            allowed_roots=settings.allowed_roots,
+            quarantine_root=settings.quarantine_root,
+        )
+        save_cleanup_plan(cleanup_plan_path(manifest_path), manifest)
         checkpoint(
             4, "manual_cleanup_required",
             "媒体文件已发布；旧分类目录和暂存文件已保留，等待人工核查清理",

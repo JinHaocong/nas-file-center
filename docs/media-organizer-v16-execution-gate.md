@@ -235,3 +235,10 @@ When `NFC_SHARED_CONFIG_GID` is configured, the Worker creates **new** `reports/
 ### #400 Full read-only inventory audit
 
 After an already completed deferred WorkJob, the admin-only `GET /api/media-organizer/executions/{job_id}/cleanup-audit` checks all frozen file links, rather than one page. It validates the immutable journal, stage witness, public receipts, entire original/staged/final inode list and exact contents of old classification wrappers (basenames, not bytes). All mismatches cause HTTP 409 without changing files. Even a fully green response is **not** cleanup consent, proves no adversarial NAS namespace exclusion and does not demonstrate a zero-change rescan. It always reports `cleanup_authorized=false`, `finalized=false` and `zero_change_rescan_verified=false`. Existing #402/#399/#398/#403 release holds remain mandatory.
+
+
+### #400 immutable cleanup-plan review (not a cleanup executor)
+
+After a deferred Worker has published all frozen files, verified the existing full inventory and written the manual-cleanup evidence, it now writes a bounded O_EXCL/fsynced `manifest.json.cleanup-plan.json` in its private execution report directory before stamping `manual_cleanup_required`. The record binds every retained original/staged path to the final path and frozen inode, old classification wrappers sorted deepest first, frozen manifest SHA-256 and a canonical plan SHA-256. Existing plan reuse requires a byte-for-byte matching verified record; foreign files/symlinks or wrong modes/GIDs are never fixed or overwritten. Admins can page its planned review via `GET /api/media-organizer/executions/{job_id}/cleanup-plan`; this endpoint also runs the full read-only frozen-inventory audit.
+
+This is *not* a cleanup command or confirmation. `cleanup_authorized=false`, `finalized=false` and `zero_change_rescan_verified=false` are mandatory. No source name is unlinked, no wrapper rmdir is attempted, and no NAS namespace exclusivity is claimed. #402 / #399 / #398 / #403 release holds remain open.

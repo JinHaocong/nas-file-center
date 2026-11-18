@@ -145,6 +145,26 @@ def read_media_organizer_cleanup_audit(
         raise HTTPException(409, str(exc)) from exc
 
 
+@router.get('/executions/{job_id}/cleanup-plan')
+def read_media_organizer_cleanup_plan(
+    request: Request, job_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    _admin=Depends(require_admin_user),
+):
+    """Read immutable cleanup proposal. This endpoint cannot delete media."""
+    from app.batch.media_organizer_execute_jobs import get_media_organizer_cleanup_plan
+    try:
+        return get_media_organizer_cleanup_plan(
+            request.app.state.service.SessionLocal, request.app.state.settings,
+            job_id, page=page, page_size=page_size,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, 'Execution not found') from exc
+    except (ValueError, PermissionError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.post('/executions/{job_id}/recover')
 def recover_media_organizer_execution(request: Request, job_id: int,
                                       payload: MediaOrganizerRecoveryRequest,
