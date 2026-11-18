@@ -10,7 +10,11 @@ from sqlalchemy import func, select, text
 
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.batch.media_organizer_planner import _check_scope, _normalized_excluded_dir_names
-from app.batch.media_organizer_reports import read_preview_page
+from app.batch.media_organizer_reports import (
+    mapping_identifier, read_preview_mapping, read_preview_page,
+)
+from app.fs_ops import rename_noreplace_at
+from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_scan import write_semantic_preview
 from app.config import Settings
 from app.models import WorkJob
@@ -66,6 +70,49 @@ def _new_private(path: Path):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
                  getattr(os, 'O_NOFOLLOW', 0), 0o600)
     return os.fdopen(fd, 'w', encoding='utf-8')
+
+
+def mapping_report_root(settings: Settings, job_id: int) -> Path:
+    data, _ = report_files(settings, job_id)
+    return data.parent / f"{job_id}.semantic-maps"
+
+
+def get_media_organizer_mapping(
+    session_factory, settings: Settings, job_id: int, mapping_id: str, *,
+    page: int = 1, page_size: int = 50,
+) -> dict:
+    """Return a bounded page of the exact full map for one completed preview unit."""
+    if not isinstance(mapping_id, str) or len(mapping_id) != 64:
+        raise ValueError("invalid mapping identity")
+    with session_factory() as session:
+        job = session.get(WorkJob, job_id)
+        if job is None or job.kind != PREVIEW_KIND:
+            raise KeyError(job_id)
+        if job.status != "completed":
+            raise ValueError("full mapping is available only after preview completion")
+    data, summary = report_files(settings, job_id)
+    if not data.is_file() or not summary.is_file():
+        raise ValueError("completed preview report is incomplete")
+    found = False
+    with data.open("r", encoding="utf-8") as stream:
+        for line in stream:
+            row = json.loads(line)
+            if row.get("mapping_id") == mapping_id and row.get("status") == "ready":
+                if mapping_identifier(row.get("unit", "")) != mapping_id:
+                    raise ValueError("mapping identity does not match preview unit")
+                found = True
+                break
+    if not found:
+        raise KeyError(mapping_id)
+    moves, total = read_preview_mapping(
+        mapping_report_root(settings, job_id), mapping_id,
+        page=page, page_size=page_size,
+    )
+    return {
+        "job_id": job_id, "mapping_id": mapping_id,
+        "page": page, "page_size": page_size, "total_moves": total,
+        "moves": moves, "read_only": True,
+    }
 
 
 def enqueue_media_organizer_preview(session_factory, settings: Settings, *, selection: str) -> dict:
@@ -157,9 +204,13 @@ class MediaOrganizerPreviewHandler(TaskHandler):
         data, summary_path = report_files(settings, int(job.id))
         stage_data = data.with_name(data.name + '.staging')
         stage_summary = summary_path.with_name(summary_path.name + '.staging')
-        for path in (data, summary_path, stage_data, stage_summary):
+        final_mappings = mapping_report_root(settings, int(job.id))
+        stage_mappings = final_mappings.with_name(final_mappings.name + '.staging')
+        for path in (data, summary_path, stage_data, stage_summary,
+                     final_mappings, stage_mappings):
             if os.path.lexists(path):
                 raise ValueError('preview report already exists; preserve evidence for review')
+        stage_mappings.mkdir(mode=0o700)
         last_tick = 0.0
 
         def check_cancelled():
@@ -180,7 +231,8 @@ class MediaOrganizerPreviewHandler(TaskHandler):
                 quarantine_root=settings.quarantine_root,
                 exclude_roots=_excluded(settings),
                 exclude_dir_names=_excluded_names(settings), out=out,
-                max_items=10, check_cancelled=check_cancelled, on_progress=progress,
+                mapping_root=stage_mappings, max_items=10,
+                check_cancelled=check_cancelled, on_progress=progress,
             )
             out.flush()
             os.fsync(out.fileno())
@@ -188,6 +240,16 @@ class MediaOrganizerPreviewHandler(TaskHandler):
             json.dump(final_stats, out, ensure_ascii=False)
             out.flush()
             os.fsync(out.fileno())
+        # Publish the complete mapping directory without replacing any
+        # existing evidence. The summary remains the final report marker.
+        report_fd = _open_directory_nofollow(data.parent)
+        try:
+            rename_noreplace_at(
+                report_fd, stage_mappings.name, report_fd, final_mappings.name,
+            )
+            os.fsync(report_fd)
+        finally:
+            os.close(report_fd)
         # Summary is the final durable publication marker. No overwrite even
         # if a competing process creates a destination after preflight.
         for staged, final in ((stage_data, data), (stage_summary, summary_path)):
