@@ -19,6 +19,9 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from app.archive_recovery import core, integration
 from app.archive_recovery.aes_lzma2 import DeepRecoveryUnavailable, inspect_7z, recover_aes_lzma2
+from app.config import Settings
+from app.db import create_engine_and_session
+from app.models import TaskLock, WorkJob, utcnow
 
 
 @pytest.mark.parametrize("encrypted", [False, True])
@@ -204,23 +207,65 @@ def test_plain_7z_has_metadata_without_password(tmp_path):
     assert metadata.aes_props is None
 
 
+
+def _worker_fixture(tmp_path: Path, source: Path, output: Path):
+    config = tmp_path / "config"
+    config.mkdir(exist_ok=True)
+    trash = tmp_path / ".trash"
+    trash.mkdir(exist_ok=True)
+    settings = Settings(
+        config_dir=config,
+        data_mount=tmp_path,
+        allowed_roots_raw=str(tmp_path),
+        quarantine_root=trash,
+        allow_mutation=True,
+    )
+    engine, session_factory = create_engine_and_session(config / "worker.db")
+    WorkJob.__table__.create(engine)
+    TaskLock.__table__.create(engine)
+    worker_id = "archive-recovery-test-worker"
+    source_stat = source.stat()
+    parent_stat = source.parent.stat()
+    state = {
+        "source": str(source),
+        "output": str(output),
+        "deep": True,
+        "identity": [
+            str(source_stat.st_dev), str(source_stat.st_ino),
+            str(source_stat.st_size), str(source_stat.st_mtime_ns),
+        ],
+        "parent_identity": [str(parent_stat.st_dev), str(parent_stat.st_ino)],
+        "secret_token": None,
+    }
+    with session_factory() as session:
+        session.add(TaskLock(
+            id=1, locked=True, owner=worker_id, acquired_at=utcnow()
+        ))
+        job = WorkJob(
+            kind="archive-recovery",
+            status="running",
+            state_json=json.dumps(state),
+            created_at=utcnow(),
+        )
+        session.add(job)
+        session.commit()
+        job_id = int(job.id)
+    with session_factory() as session:
+        job = session.get(WorkJob, job_id)
+    context = SimpleNamespace(
+        worker_id=worker_id,
+        SessionLocal=session_factory,
+        checkpoint=lambda **kwargs: None,
+        log=lambda *args, **kwargs: None,
+    )
+    return settings, engine, session_factory, job, context
+
+
 def test_no_files_report_retains_deep_unsupported_reason(tmp_path, monkeypatch):
     source = tmp_path / "broken.7z"
-    source.write_bytes(b"7z\xbc\xaf\x27\x1c" + b"x" * 40)
-    output = tmp_path / "broken.7z_恢复结果_test"
-    output.mkdir()
-    observed = source.stat()
-    outstat = output.stat()
-    settings = SimpleNamespace(
-        allow_mutation=True, allowed_roots=[str(tmp_path)],
-        quarantine_root=tmp_path / ".trash", config_dir=tmp_path / "config"
-    )
-    job = SimpleNamespace(id=9001, state_json=json.dumps({
-        "source": str(source), "output": str(output), "deep": True,
-        "identity": list(map(str, [observed.st_dev, observed.st_ino, observed.st_size, observed.st_mtime_ns])),
-        "output_identity": list(map(str, [outstat.st_dev, outstat.st_ino])),
-    }))
-    context = SimpleNamespace(checkpoint=lambda **kwargs: None)
+    source.write_bytes(b"7z\\xbc\\xaf\\x27\\x1c" + b"x" * 40)
+    output = tmp_path / "broken.7z_恢复结果_deadbeef"
+    settings, engine, session_factory, job, context = _worker_fixture(tmp_path, source, output)
     def no_files(*args, **kwargs):
         kwargs["items"].append({"name": "<archive>", "status": "unrecovered", "reason": "PASSWORD_OR_DATA_ERROR"})
         return {
@@ -300,25 +345,11 @@ def test_limit_aborted_recovery_still_lists_unvisited_header_files(tmp_path, mon
     """An error after one file cannot erase the other known archive names."""
     source = tmp_path / "large.7z"
     _plain_7z(source, os.urandom(8000), os.urandom(9000))
-    output = tmp_path / "out"
-    output.mkdir()
-    (output / "broken.bin").write_bytes(b"some extracted bytes")
-    initial = source.stat()
-    dest_stat = output.stat()
-    settings = SimpleNamespace(
-        allow_mutation=True, allowed_roots=[str(tmp_path)],
-        quarantine_root=tmp_path / ".trash", config_dir=tmp_path / "config"
-    )
-    job = SimpleNamespace(id=9003, state_json=json.dumps({
-        "source": str(source), "output": str(output), "deep": True,
-        "identity": list(map(str, [
-            initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns
-        ])),
-        "output_identity": list(map(str, [dest_stat.st_dev, dest_stat.st_ino])),
-    }))
-    context = SimpleNamespace(checkpoint=lambda **_kwargs: None)
+    output = tmp_path / "large.7z_恢复结果_cafebabe"
+    settings, engine, session_factory, job, context = _worker_fixture(tmp_path, source, output)
 
     def limited(_source, _output, **kwargs):
+        (_output / "broken.bin").write_bytes(b"some extracted bytes")
         kwargs["items"].append({
             "name": "broken.bin", "path": "broken.bin",
             "bytes": len(b"some extracted bytes"), "status": "unverified",
