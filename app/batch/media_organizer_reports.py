@@ -8,6 +8,8 @@ import re
 import stat
 from pathlib import Path
 
+from app.config_sharing import shared_config_gid, require_shared_directory
+
 ALLOWED_STATUS_FILTERS = frozenset({"all", "ready", "blocked", "skipped", "already_organized"})
 _MAPPING_ID = re.compile(r"^[0-9a-f]{64}$")
 MAX_MAPPING_BYTES = 512 * 1024 * 1024
@@ -74,10 +76,16 @@ def read_preview_mapping(mapping_root: Path, mapping_id: str, *, page: int,
         raise ValueError("invalid mapping pagination")
     root = Path(mapping_root)
     root_stat = os.lstat(root)
-    if (not stat.S_ISDIR(root_stat.st_mode) or stat.S_ISLNK(root_stat.st_mode)
-            or int(root_stat.st_uid) != os.geteuid()
-            or stat.S_IMODE(root_stat.st_mode) & 0o077):
-        raise ValueError("unsafe mapping report directory")
+    gid = shared_config_gid()
+    if gid is None:
+        if (not stat.S_ISDIR(root_stat.st_mode) or stat.S_ISLNK(root_stat.st_mode)
+                or int(root_stat.st_uid) != os.geteuid()
+                or stat.S_IMODE(root_stat.st_mode) & 0o077):
+            raise ValueError("unsafe mapping report directory")
+    else:
+        # Different worker/API UIDs may share only pre-provisioned trusted GID.
+        # A legacy 0700 mapping root must never be silently permission-repaired.
+        require_shared_directory(root, gid)
     path = root / f"{mapping_id}.jsonl"
     root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
@@ -86,10 +94,13 @@ def read_preview_mapping(mapping_root: Path, mapping_id: str, *, page: int,
         os.close(root_fd)
     try:
         info = os.fstat(fd)
-        if (not stat.S_ISREG(info.st_mode) or int(info.st_uid) != os.geteuid()
-                or stat.S_IMODE(info.st_mode) & 0o077
-                or info.st_size > MAX_MAPPING_BYTES):
+        if (not stat.S_ISREG(info.st_mode) or info.st_size > MAX_MAPPING_BYTES):
             raise ValueError("unsafe full mapping report")
+        if gid is None:
+            if int(info.st_uid) != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
+                raise ValueError("unsafe full mapping report")
+        elif info.st_gid != gid or stat.S_IMODE(info.st_mode) != 0o640:
+            raise ValueError("unsafe group-shared full mapping report")
         offset = (page - 1) * page_size
         count = 0
         rows = []

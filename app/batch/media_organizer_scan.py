@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Callable, TextIO
 
+from app.config_sharing import shared_config_gid, require_shared_directory
 from app.batch.media_organizer_units import discover_semantic_units
 from app.batch.media_organizer_reports import compact_preview_record, mapping_identifier
 
@@ -32,6 +33,9 @@ def write_semantic_preview(selection: Path, *, allowed_roots: list[Path], out: T
         info = os.lstat(mapping_root)
         if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
             raise ValueError("full mapping root must be an existing real directory")
+        gid = shared_config_gid()
+        if gid is not None:
+            require_shared_directory(mapping_root, gid)
         mapping_fd = os.open(mapping_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         for preview in discover_semantic_units(selection, allowed_roots=allowed_roots,
@@ -44,11 +48,20 @@ def write_semantic_preview(selection: Path, *, allowed_roots: list[Path], out: T
             if mapping_fd is not None and proposed:
                 mapping_id = mapping_identifier(preview["unit"])
                 filename = f"{mapping_id}.jsonl"
+                mode = 0o640 if gid is not None else 0o600
                 fd = os.open(
                     filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                    0o600, dir_fd=mapping_fd,
+                    mode, dir_fd=mapping_fd,
                 )
                 with os.fdopen(fd, "w", encoding="utf-8") as mapping:
+                    if gid is not None:
+                        created = os.fstat(mapping.fileno())
+                        if (not stat.S_ISREG(created.st_mode)
+                                or created.st_gid != gid
+                                or created.st_uid != os.geteuid()):
+                            raise PermissionError("SHARED_CONFIG: mapping evidence group mismatch")
+                        # Only the newly created mapping file can be adjusted.
+                        os.fchmod(mapping.fileno(), mode)
                     for item in proposed:
                         row = {key: item[key] for key in (
                             "source", "target", "target_name", "kind", "bytes",

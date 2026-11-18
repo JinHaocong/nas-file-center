@@ -78,7 +78,7 @@ def test_preview_reports_and_full_mapping_are_group_readable_not_world(
     assert result["total_moves"] == 13
     assert len(result["moves"]) == 5
     assert all(item["target_name"].endswith(".JpG") for item in result["moves"])
-    assert all(item["identity"] if "identity" in item else True for item in result["moves"])
+    assert all("identity" not in item for item in result["moves"])
     assert all(f.read_bytes().startswith(b"synthetic") for f in work.iterdir())
 
 

@@ -17,6 +17,10 @@ from app.fs_ops import rename_noreplace_at
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_scan import write_semantic_preview
 from app.config import Settings
+from app.config_sharing import (
+    shared_config_gid, require_shared_file, require_shared_directory,
+    ensure_shared_report_directory,
+)
 from app.models import WorkJob
 from app.tasks.context import JobContext
 from app.tasks.handlers_base import TaskHandler, register_handler
@@ -62,14 +66,36 @@ def report_files(settings: Settings, job_id: int) -> tuple[Path, Path]:
     root = settings.reports_dir / "media_package-previews"
     if root.is_symlink():
         raise ValueError("unsafe preview report directory")
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    shared_gid = shared_config_gid()
+    if shared_gid is None:
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    else:
+        # A shared API may only read from a preprovisioned trusted group root.
+        # Existing private host directories cannot be chmod/chowned in place.
+        require_shared_directory(settings.reports_dir, shared_gid)
+        ensure_shared_report_directory(root, shared_gid)
     return root / f"{job_id}.semantic.jsonl", root / f"{job_id}.semantic.summary.json"
 
 
 def _new_private(path: Path):
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
-                 getattr(os, 'O_NOFOLLOW', 0), 0o600)
-    return os.fdopen(fd, 'w', encoding='utf-8')
+    gid = shared_config_gid()
+    if gid is not None:
+        require_shared_directory(path.parent, gid)
+    mode = 0o640 if gid is not None else 0o600
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)
+    fd = os.open(path, flags, mode)
+    try:
+        if gid is not None:
+            created = os.fstat(fd)
+            if (not os.path.isfile(path) or created.st_uid != os.geteuid()
+                    or created.st_gid != gid):
+                raise PermissionError("SHARED_CONFIG: preview evidence group mismatch")
+            # Only a newly created file descriptor may be fchmod'd.
+            os.fchmod(fd, mode)
+        return os.fdopen(fd, 'w', encoding='utf-8')
+    except BaseException:
+        os.close(fd)
+        raise
 
 
 def mapping_report_root(settings: Settings, job_id: int) -> Path:
@@ -94,6 +120,10 @@ def get_media_organizer_mapping(
     if (data.is_symlink() or summary.is_symlink()
             or not data.is_file() or not summary.is_file()):
         raise ValueError("completed preview report is incomplete")
+    shared_gid = shared_config_gid()
+    if shared_gid is not None:
+        require_shared_file(data, shared_gid, 0o640)
+        require_shared_file(summary, shared_gid, 0o640)
     found = False
     with data.open("r", encoding="utf-8") as stream:
         for line in stream:
@@ -158,8 +188,13 @@ def get_media_organizer_preview(session_factory, settings: Settings, job_id: int
     total = 0
     if status == 'completed':
         data, final = report_files(settings, job_id)
-        if not data.is_file() or not final.is_file():
+        if (data.is_symlink() or final.is_symlink()
+                or not data.is_file() or not final.is_file()):
             raise ValueError('completed preview report is incomplete')
+        shared_gid = shared_config_gid()
+        if shared_gid is not None:
+            require_shared_file(data, shared_gid, 0o640)
+            require_shared_file(final, shared_gid, 0o640)
         with final.open('r', encoding='utf-8') as stream:
             summary = json.load(stream)
         units, total = read_preview_page(data, page=page, page_size=page_size,
@@ -211,7 +246,11 @@ class MediaOrganizerPreviewHandler(TaskHandler):
                      final_mappings, stage_mappings):
             if os.path.lexists(path):
                 raise ValueError('preview report already exists; preserve evidence for review')
-        stage_mappings.mkdir(mode=0o700)
+        shared_gid = shared_config_gid()
+        if shared_gid is None:
+            stage_mappings.mkdir(mode=0o700)
+        else:
+            ensure_shared_report_directory(stage_mappings, shared_gid)
         last_tick = 0.0
 
         def check_cancelled():
