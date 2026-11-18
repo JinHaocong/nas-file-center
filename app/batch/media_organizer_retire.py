@@ -335,6 +335,10 @@ def retire_published_stage(
         )
         if approved != manifest:
             raise RetirementConflict("frozen manifest changed")
+        if manifest.get("cleanup_policy") == "deferred":
+            raise RetirementConflict(
+                "deferred cleanup manifest prohibits automatic stage retirement"
+            )
         _check_scope(unit, [Path(p) for p in allowed_roots],
                      Path(quarantine_root) if quarantine_root is not None else None)
         _check_unit(unit, manifest, lease_fence)
