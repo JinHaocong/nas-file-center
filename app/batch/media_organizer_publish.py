@@ -5,7 +5,9 @@ stage inode. Public group folders require a checksum-bound owner witness.
 The stage and publication witnesses are deliberately retained; final
 retirement/cleanup is a separate, independently reviewed operation.
 
-No API/Worker execution route registers this module yet.
+The gated Worker uses only defer_directory_cleanup=True for new frozen jobs.
+Legacy auto-wrapper retirement is historical library behavior for isolated
+synthetic tests and is refused for every cleanup_policy=deferred manifest.
 """
 from __future__ import annotations
 
