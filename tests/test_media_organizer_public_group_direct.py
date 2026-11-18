@@ -287,3 +287,62 @@ def test_direct_group_rechecks_unit_parent_after_fence(tmp_path):
         assert not publishing._group_receipt_path(frozen, 1).exists()
     finally:
         parent.chmod(original_mode)
+
+
+def _prepare_nested(tmp_path):
+    parent = tmp_path / "ancestor" / "parent"
+    parent.mkdir(parents=True)
+    unit, manifest, frozen = _grouped(parent)
+    stage_frozen_sources(
+        manifest, frozen_manifest_path=frozen, allowed_roots=[parent],
+        lease_fence=lambda: None,
+    )
+    return unit, manifest, frozen
+
+
+def test_direct_group_refuses_writable_higher_ancestor_of_unit(tmp_path):
+    import stat
+
+    unit, manifest, frozen = _prepare_nested(tmp_path)
+    ancestor = unit.parent.parent
+    original_mode = stat.S_IMODE(ancestor.stat().st_mode)
+    ancestor.chmod(0o777)
+    try:
+        with pytest.raises(publishing.PublishingConflict, match="ancestor.*(owner|permission|writ)"):
+            publishing._create_public_group_direct(
+                unit, manifest["groups"][0]["name"], manifest,
+                _authority(manifest), lambda: None,
+                frozen_manifest_path=frozen,
+            )
+        assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
+        assert not publishing._group_receipt_path(frozen, 1).exists()
+    finally:
+        ancestor.chmod(original_mode)
+
+
+def test_direct_group_rechecks_higher_ancestor_after_final_fence(tmp_path):
+    import stat
+
+    unit, manifest, frozen = _prepare_nested(tmp_path)
+    ancestor = unit.parent.parent
+    original_mode = stat.S_IMODE(ancestor.stat().st_mode)
+    calls = 0
+
+    def loosen_ancestor():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            ancestor.chmod(0o777)
+
+    try:
+        with pytest.raises(publishing.PublishingConflict, match="ancestor.*(owner|permission|writ)"):
+            publishing._create_public_group_direct(
+                unit, manifest["groups"][0]["name"], manifest,
+                _authority(manifest), loosen_ancestor,
+                frozen_manifest_path=frozen,
+            )
+        assert calls >= 2
+        assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
+        assert not publishing._group_receipt_path(frozen, 1).exists()
+    finally:
+        ancestor.chmod(original_mode)
