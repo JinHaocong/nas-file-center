@@ -32,6 +32,7 @@ from app.batch.media_organizer_deferred_cleanup import (
     read_deferred_cleanup_review,
 )
 from app.config import Settings
+from app.config_sharing import shared_config_gid, ensure_shared_report_directory
 from app.models import WorkJob
 from app.tasks.context import JobContext
 from app.tasks.handlers_base import TaskHandler, register_handler
@@ -448,7 +449,14 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             # A same-named old media bucket cannot be replaced without
             # deleting the original directory. Reject BEFORE touching files.
             validate_deferred_publication(manifest)
-            folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+            shared_gid = shared_config_gid()
+            if shared_gid is None:
+                folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+            else:
+                # Newly created job evidence is readable by the trusted API
+                # group; incompatible legacy private dirs must fail closed.
+                ensure_shared_report_directory(folder.parent, shared_gid)
+                ensure_shared_report_directory(folder, shared_gid)
             fence()
             save_frozen_preview_manifest(manifest_path, manifest)
         else:

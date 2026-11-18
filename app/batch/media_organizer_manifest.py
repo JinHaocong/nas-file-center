@@ -13,6 +13,7 @@ import stat
 from pathlib import Path
 
 from app.batch.file_rename import _open_directory_nofollow
+from app.config_sharing import shared_config_gid, require_shared_directory
 from app.batch.media_organizer_planner import preview_semantic_unit, _normalized_excluded_dir_names
 
 MANIFEST_VERSION = 1
@@ -141,11 +142,15 @@ def _checksum(manifest: dict) -> str:
 
 
 def save_frozen_preview_manifest(path: Path, manifest: dict) -> None:
-    """Publish a checksum-protected 0600 plan without ever replacing one."""
+    """Publish a checksum-frozen plan with no replace or host permission repair."""
     path = Path(path)
     if not path.is_absolute():
         raise FrozenPreviewError("manifest path must be absolute")
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    shared_gid = shared_config_gid()
+    if shared_gid is None:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    else:
+        require_shared_directory(path.parent, shared_gid)
     fd = _open_directory_nofollow(path.parent)
     tmpname = path.name + ".staging"
     body = json.dumps({"manifest": manifest, "checksum": _checksum(manifest)},
@@ -157,9 +162,17 @@ def save_frozen_preview_manifest(path: Path, manifest: dict) -> None:
         if os.path.lexists(path) or os.path.lexists(path.with_name(tmpname)):
             raise FrozenPreviewError("frozen manifest already exists")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-        file_fd = os.open(tmpname, flags, 0o600, dir_fd=fd)
+        mode = 0o640 if shared_gid is not None else 0o600
+        file_fd = os.open(tmpname, flags, mode, dir_fd=fd)
         try:
             with os.fdopen(file_fd, "wb") as stream:
+                if shared_gid is not None:
+                    stat_new = os.fstat(stream.fileno())
+                    if (stat_new.st_uid != os.geteuid() or
+                            stat_new.st_gid != shared_gid or
+                            not stat.S_ISREG(stat_new.st_mode)):
+                        raise FrozenPreviewError("new manifest group identity is unsafe")
+                os.fchmod(stream.fileno(), mode)
                 stream.write(body)
                 stream.flush()
                 os.fsync(stream.fileno())
@@ -184,8 +197,13 @@ def load_frozen_preview_manifest(path: Path, *, job_id: int, unit: Path) -> dict
             file_fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
             try:
                 st = os.fstat(file_fd)
-                if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_MANIFEST_BYTES:
-                    raise FrozenPreviewError("manifest is not a bounded regular file")
+                shared_gid = shared_config_gid()
+                expected_mode = 0o640 if shared_gid is not None else 0o600
+                if (not stat.S_ISREG(st.st_mode) or st.st_size > MAX_MANIFEST_BYTES
+                        or stat.S_IMODE(st.st_mode) != expected_mode
+                        or (shared_gid is not None and st.st_gid != shared_gid)
+                        or (shared_gid is None and st.st_uid != os.geteuid())):
+                    raise FrozenPreviewError("manifest is not a bounded trusted file")
                 with os.fdopen(file_fd, "r", encoding="utf-8") as stream:
                     file_fd = -1
                     body = json.load(stream)

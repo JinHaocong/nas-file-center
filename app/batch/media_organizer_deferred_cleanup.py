@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
+from app.config_sharing import shared_config_gid, require_shared_directory
 from app.batch.media_organizer_manifest import (
     FrozenPreviewError, _checksum, load_frozen_preview_manifest,
 )
@@ -99,10 +100,13 @@ def read_deferred_cleanup_review(
         report_fd = os.open(path.name, flags, dir_fd=folder_fd)
         with os.fdopen(report_fd, "rb") as report_file:
             info = os.fstat(report_file.fileno())
+            shared_gid = shared_config_gid()
+            mode = 0o640 if shared_gid is not None else 0o600
             if (not stat.S_ISREG(info.st_mode)
                     or not 1 <= info.st_size <= 1024 * 1024
-                    or stat.S_IMODE(info.st_mode) != 0o600
-                    or info.st_uid != os.geteuid()):
+                    or stat.S_IMODE(info.st_mode) != mode
+                    or (shared_gid is None and info.st_uid != os.geteuid())
+                    or (shared_gid is not None and info.st_gid != shared_gid)):
                 raise DeferredCleanupConflict("private cleanup report permissions changed")
             raw = report_file.read(1024 * 1024 + 1)
     except (OSError, ValueError) as exc:
@@ -233,8 +237,12 @@ def _read_verified_report(path: Path, expected: dict) -> None:
         item_fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
         with os.fdopen(item_fd, "rb") as source:
             info = os.fstat(source.fileno())
-            if (not stat.S_ISREG(info.st_mode) or info.st_size < 1
-                    or info.st_size > 1024 * 1024 or info.st_mode & 0o077):
+            shared_gid = shared_config_gid()
+            mode = 0o640 if shared_gid is not None else 0o600
+            if (not stat.S_ISREG(info.st_mode) or not 1 <= info.st_size <= 1024 * 1024
+                    or stat.S_IMODE(info.st_mode) != mode
+                    or (shared_gid is None and info.st_uid != os.geteuid())
+                    or (shared_gid is not None and info.st_gid != shared_gid)):
                 raise DeferredCleanupConflict("manual cleanup journal has unsafe attributes")
             raw = source.read(1024 * 1024 + 1)
     finally:
@@ -253,17 +261,28 @@ def _write_report(path: Path, report: dict) -> None:
     ).encode("utf-8")
     if len(serialized) > 1024 * 1024:
         raise DeferredCleanupConflict("manual cleanup evidence exceeds bound")
+    shared_gid = shared_config_gid()
+    if shared_gid is not None:
+        require_shared_directory(path.parent, shared_gid)
     fd = _open_directory_nofollow(path.parent)
     try:
         try:
+            mode = 0o640 if shared_gid is not None else 0o600
             file_fd = os.open(
                 path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600, dir_fd=fd,
+                mode, dir_fd=fd,
             )
         except FileExistsError:
             _read_verified_report(path, report)
             return
         with os.fdopen(file_fd, "wb") as output:
+            if shared_gid is not None:
+                stat_new = os.fstat(output.fileno())
+                if (not stat.S_ISREG(stat_new.st_mode)
+                        or stat_new.st_uid != os.geteuid()
+                        or stat_new.st_gid != shared_gid):
+                    raise DeferredCleanupConflict("new cleanup journal group identity unsafe")
+            os.fchmod(output.fileno(), mode)
             output.write(serialized)
             output.flush()
             os.fsync(output.fileno())
