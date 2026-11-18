@@ -78,3 +78,23 @@ The following API surfaces currently persist or enqueue work rather than directl
 - Do not switch the production API mount to read-only until every confirmed direct mutation path above has been migrated and regression-tested.
 - This inventory does not close #402: a dedicated Worker identity and real mount-level custody proof are prerequisites, not a substitute for independent review.
 - PR #397 remains Draft; no merge, deployment or Docker release until #398–#403 dependencies, complete cleanup/finalization, full CI and owner-approved same-mount acceptance are satisfied.
+
+## Progress — 2026-11-18: first API mutation moved behind Worker
+
+### Completed slice: single quarantine restore
+
+- `POST /api/quarantine/{id}/restore` now validates and enqueues a `quarantine-restore` WorkJob; it returns `202 Accepted` and does not move the quarantined file in the API process.
+- The WorkJob freezes the quarantine-entry identity and requested conflict policy / custom destination. The Worker rechecks the frozen DB identity under the active Worker lease before invoking the existing restore implementation.
+- The Worker uses the existing SHA-256 integrity check, no-overwrite destination behavior, conflict policy, restore journal and audit event. The existing mid-operation restore implementation is deliberately not advertised as blind retry/resume safe.
+- The Restore modal now reports the queued task and invalidates the task-center query rather than claiming the file has already been restored.
+- RED evidence: `test_legacy_restore_api_only_enqueues_worker_and_preserves_payload_until_worker_runs` failed on the old route because the API returned 200 and moved the file before the Worker ran.
+- GREEN evidence: `Semantic Media Organizer V1.6 TDD` passed both backend-focused tests and frontend typecheck on commit `2b95fb1f28d1f5574d6fe57dfcedf1f3ace3c720`.
+
+### Remaining direct API mutation paths
+
+- [ ] Single and bulk quarantine-record deletion still invoke `_cleanup_empty_terminal_tx_artifacts` before any Worker handoff. Move the complete cleanup + metadata retirement sequence behind a Worker job.
+- [ ] Archive recovery still creates its sibling output directory and removes it on API-side enqueue failure. Move output-directory creation/binding to the Worker.
+- [ ] Add API read-only mount regression coverage for every registered route and startup hook.
+- [ ] Implement dedicated non-root Worker identity, API read-only media mount, shared SQLite/report/secret permissions and supported NAS ACL validation. Do not change deployment mounts or host permissions before the inventory is complete.
+
+Full Release Validation and UI Validation are still required after the complete migration; focused V1.6 TDD success is not release approval.
