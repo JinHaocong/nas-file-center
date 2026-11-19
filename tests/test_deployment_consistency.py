@@ -57,7 +57,7 @@ def test_real_nas_acceptance_pulls_the_verified_candidate_without_building_on_na
     )
     assert service["read_only"] is True
     assert service["network_mode"] == "none"
-    assert service["user"] is None  # image's verified 10001:10000 default
+    assert service.get("user") is None  # image's verified 10001:10000 default
     mounts = {item["target"]: item for item in service["volumes"]}
     assert mounts["/nas/v16-acceptance"]["read_only"] is False
     assert mounts["/tmp/media_organizer_v16_real_nas_acceptance.py"]["read_only"] is True
