@@ -283,6 +283,39 @@ backing-store aliases and future isolation remain unproven. This test does
 not exercise FD-pinned publication, the complete P/V organizer lifecycle,
 cleanup/recovery or second-scan convergence, and it does not satisfy #398.
 
+### Owner-reported Worker permission acceptance — 2026-11-19
+
+The owner ran the exact helper at
+`3500e51b8472340e3a61032434c3ab68c0bdfee5`, whose SHA-256 was
+`26bfd1d816d7094c51ef4b1a22496e3028d525ed6b6a2c870478e89a498adf05`.
+The terminal reported `PASS_LOCAL_PERMISSION_BOUNDARY` and
+`NFC_ACCEPTANCE_EXIT=0`. This was an owner-executed real NAS run, not a CI
+or repository-agent execution. Private paths and inode values are omitted.
+
+| Probe | Observed result |
+| --- | --- |
+| Worker 10002:10000 on read/write test bind | PASS: synthetic write/read-back, file/directory fsync and owned scratch lifecycle completed |
+| API 10001:10000 on read/write test bind | All six attempted mutations returned EACCES (13); frozen inventory unchanged |
+| API 10001:10000 on read-only test bind | Write returned EACCES (13); create/mkdir/rename/rmdir/unlink returned EROFS (30); frozen inventory unchanged |
+| Foreign 65534:10000 on read/write test bind | All six attempted mutations returned EACCES (13); frozen inventory unchanged |
+| Foreign 65534:65534 on read/write test bind | Existing-entry traversal/stat, read and create returned EACCES (13); frozen inventory unchanged |
+
+Every probe attested the expected numeric identity, direct UID/GID maps,
+zero permitted/effective/bounding capabilities, NoNewPrivs=1, intended
+read-only/read-write flag and the same synthetic unit device/inode. The
+retained unit was Worker-owned mode 0750; synthetic files were mode 0640.
+The live API/Worker canonical data binds remained read-only. The helper
+used the installed Worker's local immutable image ID.
+
+This completes the local-identity permission matrix for that fixture. It
+does not establish exclusive namespace/content custody or accept full
+organizer execution, cleanup/recovery or release. The report retained both
+`namespace_exclusive_custody_proven=false` and `release_ready=false`.
+
+The remaining operating-boundary decision is recorded separately in the
+[maintenance-window proposal](superpowers/specs/2026-11-19-v16-maintenance-window-proposal.md).
+That proposal is not approved and does not replace the strict contract.
+
 ## Configuration backup, candidate validation and rollback (#403)
 
 This is a sequence for a **separately approved maintenance window**, not a
