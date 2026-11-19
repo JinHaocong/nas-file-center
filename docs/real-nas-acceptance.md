@@ -180,6 +180,109 @@ These results still do not prove remote SMB/NFS service exclusion, absence
 of same-UID writers, or privileged/root exclusion. The production custody
 issuer and every release gate remain unchanged.
 
+### Subsequent owner-reported container identity evidence — 2026-11-19
+
+The owner subsequently supplied selected `docker inspect`, default
+`docker exec`, PID 1 and host-process map evidence for the running services.
+This is a point-in-time observation, not a repository-agent NAS execution.
+
+| Observed property | Worker | API |
+| --- | --- | --- |
+| Configured and actual UID:GID | 10002:10000 | 10001:10000 |
+| Effective group set | 10000 only | 10000 only |
+| UID/GID maps in observed host/container processes | Direct identity mapping | Direct identity mapping |
+| Permitted/effective/bounding capabilities | Zero | Zero |
+| NoNewPrivs | 1 | 1 |
+| Privileged / added capabilities | False / none | False / none |
+| Dropped capabilities | ALL | ALL |
+| Canonical `/data` bind | Read-only | Read-only |
+| Runtime `/data` read-only flag | True | True |
+
+Both opened container roots matched the previously observed host data root
+by device and inode. The earlier identity-mapping question is therefore
+resolved for these observed processes. This does not attest other host
+processes, alternate bind paths or SMB/NFS/backing-store writers.
+
+The next step is the separately scoped disposable Worker permission test
+specified in
+[`2026-11-19-v16-worker-permission-acceptance-design.md`](superpowers/specs/2026-11-19-v16-worker-permission-acceptance-design.md).
+Its temporary test containers mount only a new synthetic unit. Existing
+containers retain their read-only canonical data binds. The old API-owned
+primitive acceptance directories remain unchanged.
+
+## Step 0c: Disposable Worker permission enforcement test
+
+`scripts/v16_nas_worker_permission_acceptance.py` implements the next scoped
+step. Unlike the metadata collectors, this command **writes synthetic test
+files**. Its required `--create-disposable-fixture` flag makes that scope
+explicit. Run it on the NAS host as an authorized administrator after
+reviewing the pinned script:
+
+```bash
+sudo python3 -I -S -B scripts/v16_nas_worker_permission_acceptance.py \
+  --data-root "/absolute/host/path/to/SATA-media-root" \
+  --worker-container nas-file-center-worker \
+  --api-container nas-file-center-api \
+  --create-disposable-fixture
+```
+
+The controller uses the local Docker Unix socket and the existing Worker's
+exact installed image ID, without pulling or building an image. It first
+revalidates the host/controller and service UID/GID maps, actual runtime
+identities, capabilities and canonical read-only data binds. It requires
+root-owned trusted data ancestors and understood ACL metadata. Unsupported
+or unexpected metadata is a stop condition, not a request to repair the NAS.
+
+After those checks it exclusively creates one new sibling named
+`nfc-v16-worker-permission-<random>` directly inside the supplied data root.
+The parent is root:10000 mode 0750; its `unit` child is 10002:10000 mode 0750.
+Ownership and mode operations apply only to these newly created inodes.
+Existing primitive fixtures and existing media are not traversed or changed.
+
+Five temporary Python containers run sequentially. Their image root is
+read-only, network is disabled, all capabilities are dropped, and
+no-new-privileges is required. Only the new `unit` is bind-mounted. The
+controller inspects each created container before starting it, and each
+probe checks its actual identity, maps, capabilities and bound directory
+before operating. Image health checks and declared data volumes cannot
+introduce application jobs or extra data mounts.
+
+| Role | Unit bind | Expected observation |
+| --- | --- | --- |
+| Worker 10002:10000 | Read/write | Synthetic create/write/read-back/fsync and owned scratch cleanup succeed |
+| API 10001:10000 | Read/write | Canary reads succeed; write, unlink, rename, rmdir, mkdir and create are denied |
+| API 10001:10000 | Read-only | Same reads and mutation denials; runtime bind is confirmed read-only |
+| Foreign 65534:10000 | Read/write | Shared-group reads succeed; all six mutations are denied |
+| Foreign 65534:65534 | Read/write | Unit search, canary read and entry creation are denied |
+
+Only permission-denial errors count. An unexpected success, wrong identity,
+unavailable primitive, missing canary or changed evidence stops the matrix.
+On each negative probe, including an errored probe, the controller verifies
+the frozen synthetic inventory, inode metadata and content. It first stops
+and removes its own temporary container; an uncertain cleanup is reported
+as a failure rather than treating a possibly live writer's evidence as
+frozen. Existing service containers are not reconfigured or restarted.
+
+The JSON report is printed to the terminal. Once its evidence file has been
+created, the controller also writes it to the new fixture parent's
+`acceptance-report.json` with root-only permissions. The new fixture is
+retained on success and failure; the script never recursively removes it.
+If a prerequisite fails before creation, `fixture` is null and the terminal
+report identifies the failure. Retain the report for review rather than
+changing permissions or rerunning against an existing fixture.
+
+Success requires **both exit code 0 and terminal
+`status=PASS_LOCAL_PERMISSION_BOUNDARY`**. If the final report write/fsync
+fails, an on-disk file can already contain the earlier provisional status;
+`EVIDENCE_WRITE_FAILED` in the terminal or an unsuccessful exit invalidates
+that saved file as acceptance evidence. Successful acceptance means the
+tested local identities behaved as expected through these mounts during
+this run. `namespace_exclusive_custody_proven` and `release_ready` remain
+false even on success. Root/admin, same-UID processes, remote services,
+backing-store aliases and future isolation remain unproven. This test does
+not exercise FD-pinned publication, the complete P/V organizer lifecycle,
+cleanup/recovery or second-scan convergence, and it does not satisfy #398.
+
 ## Configuration backup, candidate validation and rollback (#403)
 
 This is a sequence for a **separately approved maintenance window**, not a
