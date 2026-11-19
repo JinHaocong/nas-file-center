@@ -1,12 +1,14 @@
 # V1.6 in-place organizer: maintenance-window proposal
 
-Status: **PROPOSED — OWNER DECISION REQUIRED — NOT IMPLEMENTED**
+Status: **OWNER APPROVED — IMPLEMENTATION IN PROGRESS — NOT RELEASE ACCEPTANCE**
 Date: 2026-11-19
 Baseline: `3500e51b8472340e3a61032434c3ab68c0bdfee5`, Draft PR #397
 
-This document does not supersede the accepted execution safety contract,
-authorize media writes, enable a feature flag, or grant namespace custody.
-It records a concrete alternative requiring an explicit product decision.
+The owner explicitly accepted this maintenance-window operating contract
+on 2026-11-19 ("同意"). It applies only to the separately named maintenance
+mode. The strict custody contract remains unchanged. This decision authorizes
+implementation, not arbitrary media writes, a feature flag change, a release,
+or a claim of exclusive namespace custody.
 
 ## Goal and evidence
 
@@ -57,11 +59,11 @@ unsupported pending an actual storage/OS enforcement mechanism.
 | Explicit maintenance-window execution | The operator stops other writes to the selected unit; the application validates its own access and serializes cooperating mutations | Recommended for owner consideration; materially weaker concurrency guarantee and requires acceptance |
 | New private filesystem or copy/import workspace | Independently controlled destination and additional storage/workflow | Does not satisfy in-place cleanup of the original share; not adopted as a substitute |
 
-The recommendation is a proposal, not a decision already made by the owner.
-The instruction to continue implementation is not acceptance of a weaker
-concurrency guarantee.
+The owner has accepted the named maintenance-window alternative and its
+changed concurrency guarantee. That explicit acceptance follows the risk
+description below; it is not inferred from a generic request to continue.
 
-## Proposed operating contract
+## Accepted operating contract
 
 The mode would organize the same explicitly selected unit in place. It
 would require a maintenance window lasting through execution, separate
@@ -145,10 +147,11 @@ syscall. A cooperative operation-lifetime lock must cover every relevant
 application mutator, including takeover and recovery. It still must not be
 described as excluding external clients or a hostile same-UID process.
 
-## Completion criteria if this proposal is accepted
+## Completion criteria
 
 1. Record explicit acceptance of the changed operating condition and
-   concurrency guarantee. Write the implementation plan from that decision.
+   concurrency guarantee. Accepted on 2026-11-19; implementation plan:
+   [maintenance-window plan](../plans/2026-11-19-v16-maintenance-window.md).
 2. Implement the named mode, API/Worker lifetime separation, cooperating
    mutation serialization, evidence/result labeling and failure handling.
    No permissive test issuer may appear in the production execution path.
@@ -162,13 +165,13 @@ described as excluding external clients or a hostile same-UID process.
 
 ## Owner decision
 
-Does the owner accept in-place maintenance-window mode: other writes to the
-selected unit are paused during execution, cleanup and recovery; existing
-integrity/recovery controls are retained; absolute protection against writers
-violating that window is not promised?
-
-Until that decision, the strict safety contract and production refusal
-remain in force. No executable authorization code is added by this document.
+Accepted on 2026-11-19: other writes to the selected unit and underlying data
+are paused during execution, cleanup and recovery. Existing integrity and
+recovery controls are retained. Absolute protection against writers violating
+that window, including restoration after a substituted entry is deleted, is
+not promised. Strict mode remains separately gated and unavailable without
+demonstrated external custody. Execution defaults remain off. Actual SATA
+full-lifecycle acceptance and release review are still required.
 
 ## Primary references
 

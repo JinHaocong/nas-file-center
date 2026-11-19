@@ -15,8 +15,9 @@ from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.config_sharing import shared_config_gid, require_shared_directory
-from app.batch.media_organizer_custody import (
-    assert_exclusive_custody, NamespaceCustodyUnavailable,
+from app.batch.media_organizer_custody import NamespaceCustodyUnavailable
+from app.batch.media_organizer_authority import (
+    assert_operation_authorized, is_maintenance_session, publication_fence, publication_parents,
 )
 from app.batch.media_organizer_manifest import (
     FrozenPreviewError, _checksum, load_frozen_preview_manifest,
@@ -58,7 +59,7 @@ def _publication_evidence(manifest: dict) -> dict:
 def validate_deferred_publication(
     manifest: dict, *, namespace_custody=None,
 ) -> None:
-    """Require frozen path roles for overlaps and real custody for all groups."""
+    """Require frozen path roles for overlaps and scoped operation authority for groups."""
     if not isinstance(manifest, dict) or manifest.get("cleanup_policy") != "deferred":
         raise DeferredCleanupConflict("deferred cleanup policy is mandatory")
     unit = Path(manifest.get("unit", ""))
@@ -83,17 +84,12 @@ def validate_deferred_publication(
         raise DeferredCleanupConflict(
             "public group would require deleting an old classification wrapper"
         )
-    # Production's namespace-custody issuer has no grants until the actual
-    # NAS ACL, mount and concurrent-writer assumptions are independently
-    # validated. A boolean ACK/Worker lease cannot bypass this requirement.
-    # A synthetic test issuer can exercise the exact Worker path in tmp_path.
-    if groups:
-        parents = {unit}
-        parents.update(Path(row["source"]).parent for row in rows)
-        parents.update(Path(row["target"]).parent for row in rows)
-        parents.update(Path(row["final"]).parent for row in rows)
+    # The dispatcher admits the explicit maintenance session or a strict
+    # custody proof. Configuration flags cannot pass this boundary.
+    if (groups or manifest.get("execution_mode") == "maintenance_window"
+            or is_maintenance_session(namespace_custody)):
         try:
-            assert_exclusive_custody(namespace_custody, sorted(parents))
+            assert_operation_authorized(namespace_custody, publication_parents(manifest), manifest=manifest)
         except NamespaceCustodyUnavailable as exc:
             raise DeferredCleanupConflict(str(exc)) from exc
     # Do this before staging as well. A retained original source may
@@ -352,6 +348,7 @@ def record_deferred_cleanup_evidence(
         if approved != manifest:
             raise DeferredCleanupConflict("frozen manual cleanup authority changed")
         _check_scope(unit, [Path(p) for p in allowed_roots], quarantine_root)
+        lease_fence = publication_fence(manifest, namespace_custody, lease_fence)
         _check_unit(unit, manifest, lease_fence)
         rows, groups = _validate_shape(manifest, unit)
         stage = unit / manifest["stage_directory"]

@@ -1,15 +1,9 @@
-"""Crash-resumable V1.6 cleanup engine with a fail-closed production issuer.
+"""Crash-resumable cleanup under separate, unit-bound confirmation.
 
-Unlike the read-only audit and cleanup plan this module actually unlinks
-frozen original/stage hardlinks and rmdirs emptied classification wrappers.
-It therefore REQUIRES an externally enforced exclusive namespace-custody
-provider. None is issued by the production application: an admin checkbox,
-a WorkJob lease or an ordinary inode recheck is NOT such a provider.
-
-The injected provider is used only in disposable synthetic acceptance until
-the NAS filesystem/ACL and concurrent writer threat model has independently
-proven enforceable custody. The separately confirmed cleanup Worker calls
-this engine; the HTTP API only queues that work and never performs cleanup.
+The Worker checks operation authority at every mutation boundary. Strict
+custody requires external enforcement. In maintenance mode the operator
+must keep other writers stopped through cleanup and recovery. A violating
+writer can substitute a different file between the last check and unlink.
 """
 from __future__ import annotations
 
@@ -19,14 +13,16 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 import stat
-from typing import Callable, Protocol
+from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_cleanup_audit import audit_deferred_cleanup_inventory
 from app.batch.media_organizer_cleanup_plan import (
     _read_existing, cleanup_plan_path,
 )
-from app.batch.media_organizer_custody import assert_exclusive_custody
+from app.batch.media_organizer_authority import (
+    OperationAuthority, assert_operation_authorized, is_maintenance_session,
+)
 from app.batch.media_organizer_manifest import (
     _checksum, load_frozen_preview_manifest,
 )
@@ -45,12 +41,7 @@ _GROUP_COMPLETE = ".nfc-publish-complete"
 
 
 class CleanupExecutionBlocked(ValueError):
-    """No cleanup action may be performed without frozen, exclusive custody."""
-
-
-class ExclusiveNamespaceCustody(Protocol):
-    def assert_exclusive(self, parent: Path) -> None:
-        """Provide externally verified EXCLUSIVE write custody of this namespace."""
+    """Cleanup cannot continue with the current evidence or operation authority."""
 
 
 def cleanup_confirmation(job_id: int, unit: str, plan_sha256: str) -> str:
@@ -186,6 +177,35 @@ def _legacy_operations(manifest: dict, plan: dict) -> list[dict]:
     ops.append({"kind": "stage-directory", "path": str(stage),
                 "identity": plan["stage"]["identity"]})
     return ops
+
+
+def _journal_header(manifest: dict, plan: dict, ops: list[dict]) -> dict:
+    return {
+        "kind": "header",
+        "job_id": manifest["job_id"],
+        "unit": manifest["unit"],
+        "manifest_checksum": _checksum(manifest),
+        "plan_sha256": plan["plan_sha256"],
+        "operations_sha256": hashlib.sha256(_canonical(ops)).hexdigest(),
+        "operations_count": len(ops),
+    }
+
+
+def journal_directory_retirements(manifest: dict, frozen: Path) -> tuple[set[Path], Path | None]:
+    """Read only exact rmdir operations covered by a verified private journal."""
+    plan = _read_existing(cleanup_plan_path(frozen))
+    ops = _operations(manifest, plan)
+    cursor, completed, pending, _ = _load_journal(
+        _journal_path(frozen), _journal_header(manifest, plan, ops), len(ops),
+    )
+    try:
+        kinds = ("wrapper", "stage-directory")
+        retired = {Path(op["path"]) for op in ops[:completed] if op["kind"] in kinds}
+        begun = (Path(ops[pending]["path"]) if pending is not None
+                 and ops[pending]["kind"] in kinds else None)
+        return retired, begun
+    finally:
+        cursor.binding.close()
 
 
 def _line(previous: str, event: dict) -> tuple[bytes, str]:
@@ -709,13 +729,13 @@ def _check_layout_replay_inventory(
 
 
 def _mutate_one(op: dict, *, previously_begun: bool,
-                custody: ExclusiveNamespaceCustody, witness: bytes,
+                custody: OperationAuthority, witness: bytes,
                 manifest: dict, receipts: dict[str, tuple[int, int]]) -> None:
     path = Path(op["path"])
     kind = op["kind"]
     if not path.is_relative_to(Path(manifest["unit"])):
         raise CleanupExecutionBlocked("cleanup mutation escaped frozen unit")
-    assert_exclusive_custody(custody, (path.parent,))
+    assert_operation_authorized(custody, (path.parent,))
     role_mode = uses_path_roles(manifest)
     if role_mode:
         _assert_layout_parent_bindings(path.parent, op, manifest, receipts)
@@ -758,7 +778,7 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                 # the original basename, including pending crash recovery.
                 os.fsync(staged_file_fd)
                 os.fsync(stage_fd)
-                assert_exclusive_custody(custody, (stage.parent, path.parent))
+                assert_operation_authorized(custody, (stage.parent, path.parent))
                 _assert_layout_parent_bindings(path.parent, op, manifest, receipts, parent_fd)
                 _assert_layout_stage(stage_fd, op, manifest, witness)
                 if (not _file_matches(_entry(stage_fd, stage.name), op["identity"])
@@ -768,7 +788,7 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                 # Revalidate the external exclusion grant AFTER the final
                 # identity check so a revoked custody boundary cannot delete
                 # a replacement that appeared in the check/use interval.
-                assert_exclusive_custody(custody, (stage.parent, path.parent))
+                assert_operation_authorized(custody, (stage.parent, path.parent))
                 os.unlink(path.name, dir_fd=parent_fd)
             finally:
                 if staged_file_fd is not None:
@@ -786,7 +806,7 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                 # Both the removed name and the copy that makes removal safe
                 # must stay under custody until this unlink. A source-only
                 # fence could leave the last staged copy unprotected.
-                assert_exclusive_custody(custody, (path.parent, final.parent))
+                assert_operation_authorized(custody, (path.parent, final.parent))
                 if role_mode:
                     _assert_layout_parent_bindings(path.parent, op, manifest, receipts, parent_fd)
                 _assert_surviving_final_parent(final.parent, final_fd, manifest, receipts)
@@ -795,10 +815,9 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                 if not _file_matches(_entry(parent_fd, path.name), op["identity"]):
                     raise CleanupExecutionBlocked("source identity changed at mutation boundary")
                 # unlinkat cannot bind a child name to the earlier checked FD.
-                # Keep the custody grant live through the last name check and
-                # the mutation boundary; the production issuer must provide
-                # actual exclusion, not a snapshot-only assertion.
-                assert_exclusive_custody(custody, (path.parent, final.parent))
+                # Strict custody excludes competing writers here. Maintenance
+                # relies on the operator's continuing pause across this gap.
+                assert_operation_authorized(custody, (path.parent, final.parent))
                 os.unlink(path.name, dir_fd=parent_fd)
             finally:
                 os.close(final_fd)
@@ -819,7 +838,7 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                         raise CleanupExecutionBlocked("cleanup directory not empty")
             finally:
                 os.close(directory_fd)
-            assert_exclusive_custody(custody, (path.parent,))
+            assert_operation_authorized(custody, (path.parent,))
             if role_mode:
                 _assert_layout_parent_bindings(path.parent, op, manifest, receipts, parent_fd)
             bound = _entry(parent_fd, path.name)
@@ -827,9 +846,9 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                 raise CleanupExecutionBlocked("cleanup directory rebound")
             # rmdirat is also basename-based. Revalidate custody after the
             # final inode/emptiness check, then check the binding once more
-            # immediately before the syscall. A real provider must exclude
-            # competing writers throughout this interval.
-            assert_exclusive_custody(custody, (path.parent,))
+            # immediately before the syscall. Maintenance depends on the
+            # operator keeping all other writers stopped in this interval.
+            assert_operation_authorized(custody, (path.parent,))
             bound = _entry(parent_fd, path.name)
             if bound is None or [int(bound.st_dev), int(bound.st_ino)] != op["identity"]:
                 raise CleanupExecutionBlocked("cleanup directory rebound at mutation boundary")
@@ -849,13 +868,13 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                 if (int(opened_fd.st_dev), int(opened_fd.st_ino)) != binding:
                     raise CleanupExecutionBlocked("public group binding changed")
             _verify_marker(parent_fd, path.name, witness)
-            assert_exclusive_custody(custody, (path.parent,))
+            assert_operation_authorized(custody, (path.parent,))
             if role_mode:
                 _assert_layout_parent_bindings(path.parent, op, manifest, receipts, parent_fd)
             _verify_marker(parent_fd, path.name, witness)
             # Marker removal is name-based too; the final custody check must
             # remain adjacent to the unlinkat mutation boundary.
-            assert_exclusive_custody(custody, (path.parent,))
+            assert_operation_authorized(custody, (path.parent,))
             _verify_marker(parent_fd, path.name, witness)
             os.unlink(path.name, dir_fd=parent_fd)
         else:
@@ -927,12 +946,12 @@ def _assert_layout_parent_bindings(
 
 
 def _check_unbegun_layout_operation(
-    op: dict, *, custody: ExclusiveNamespaceCustody, manifest: dict,
+    op: dict, *, custody: OperationAuthority, manifest: dict,
     receipts: dict[str, tuple[int, int]], witness: bytes,
 ) -> None:
     """Never issue a new BEGIN for a name that has already changed externally."""
     path = Path(op["path"])
-    assert_exclusive_custody(custody, (Path(manifest["unit"]), path.parent))
+    assert_operation_authorized(custody, (Path(manifest["unit"]), path.parent))
     _assert_layout_parent_bindings(path.parent, op, manifest, receipts)
     fd = _open_directory_nofollow(path.parent)
     try:
@@ -998,7 +1017,7 @@ def _assert_layout_stage(fd: int, op: dict, manifest: dict, witness: bytes) -> N
 
 
 def _publish_layout_final(op: dict, *, previously_begun: bool,
-                          custody: ExclusiveNamespaceCustody, witness: bytes,
+                          custody: OperationAuthority, witness: bytes,
                           manifest: dict, receipts: dict[str, tuple[int, int]]) -> None:
     from app.batch.media_organizer_publish import _link_one
     unit = Path(manifest["unit"])
@@ -1013,7 +1032,7 @@ def _publish_layout_final(op: dict, *, previously_begun: bool,
         _assert_layout_stage(fd, op, manifest, witness)
 
         def fence() -> None:
-            assert_exclusive_custody(custody, (unit, stage, dest.parent))
+            assert_operation_authorized(custody, (unit, stage, dest.parent))
             _assert_layout_parent_bindings(dest.parent, op, manifest, receipts)
             _assert_layout_stage(fd, op, manifest, witness)
 
@@ -1055,17 +1074,15 @@ def _verify_finished_scan(manifest: dict, frozen: Path,
 
 def finish_deferred_cleanup(
     manifest: dict, *, frozen_manifest_path: Path, allowed_roots: list[Path],
-    confirmation: str, custody: ExclusiveNamespaceCustody | None = None,
+    confirmation: str, custody: OperationAuthority | None = None,
     quarantine_root: Path | None = None,
     after_mutation: Callable[[int], None] | None = None,
 ) -> dict:
-    """Execute real cleanup ONLY with separate approval and external custody.
-
-    The cleanup Worker calls this only after acquiring a custody grant, whose
-    production issuer still refuses. Tests inject control of a private tmp_path.
-    """
-    if custody is None or not callable(getattr(custody, "assert_exclusive", None)):
-        raise CleanupExecutionBlocked("verified exclusive namespace custody required")
+    """Finalize separately approved cleanup while checking the live operation authority."""
+    try:
+        assert_operation_authorized(custody, (), manifest=manifest)
+    except (ValueError, OSError) as exc:
+        raise CleanupExecutionBlocked(str(exc)) from exc
     if not callable(after_mutation) and after_mutation is not None:
         raise CleanupExecutionBlocked("invalid test interruption callback")
     if os.geteuid() == 0:
@@ -1096,25 +1113,17 @@ def finish_deferred_cleanup(
         custody_scope = tuple(sorted(custody_parents))
 
         def fence_all() -> None:
-            assert_exclusive_custody(custody, custody_scope)
+            assert_operation_authorized(custody, custody_scope)
 
         if confirmation != cleanup_confirmation(
                 manifest["job_id"], str(unit), plan["plan_sha256"]):
             raise CleanupExecutionBlocked("exact separate cleanup confirmation required")
         for op in ops:
-            assert_exclusive_custody(custody, (Path(op["path"]).parent,))
-        assert_exclusive_custody(custody, (unit,))
+            assert_operation_authorized(custody, (Path(op["path"]).parent,))
+        assert_operation_authorized(custody, (unit,))
         receipts = _group_receipts(manifest, frozen)
         path = _journal_path(frozen)
-        header = {
-            "kind": "header",
-            "job_id": manifest["job_id"],
-            "unit": str(unit),
-            "manifest_checksum": _checksum(manifest),
-            "plan_sha256": plan["plan_sha256"],
-            "operations_sha256": hashlib.sha256(_canonical(ops)).hexdigest(),
-            "operations_count": len(ops),
-        }
+        header = _journal_header(manifest, plan, ops)
         journal_exists = os.path.lexists(path)
         if not journal_exists:
             # Initial acceptance must establish every original and stage
@@ -1199,7 +1208,9 @@ def finish_deferred_cleanup(
             "groups_verified": len(manifest["groups"]),
             "stage_removed": True,
             "namespace_exclusive_custody_proven": False,
-            "scope": "injected_custody_only_not_production_authorized",
+            **({"scope": "maintenance_window", "assurance_level": "maintenance_window"}
+               if is_maintenance_session(custody) else
+               {"scope": "injected_custody_only_not_production_authorized"}),
         }
     except (OSError, ValueError, TypeError, KeyError) as exc:
         if isinstance(exc, CleanupExecutionBlocked):

@@ -10,6 +10,7 @@ enabled alongside ALLOW_MUTATION and ALLOW_DELETE.
 """
 from __future__ import annotations
 
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -17,9 +18,10 @@ from pathlib import Path
 
 from sqlalchemy import func, select, text
 
+from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.batch.media_organizer_jobs import (
-    PREVIEW_KIND, _validate_selection, _excluded_names, report_files,
+    PREVIEW_KIND, _validate_selection, _excluded_names, report_files, mode_fields, require_mode,
 )
 from app.batch.media_organizer_manifest import (
     _checksum, build_frozen_preview_manifest, load_frozen_preview_manifest,
@@ -35,7 +37,9 @@ from app.config import Settings
 from app.config_sharing import shared_config_gid, ensure_shared_report_directory
 from app.batch.media_organizer_cleanup_audit import audit_deferred_cleanup_inventory
 from app.batch.media_organizer_path_roles import POLICY, classify_path_roles, uses_path_roles
-from app.batch import media_organizer_custody as namespace_custody
+from app.batch.media_organizer_authority import (
+    execution_mode, check_api_eligibility, acquire_operation_authority, assert_operation_authorized,
+)
 from app.batch.media_organizer_cleanup_plan import (
     cleanup_plan_path, read_cleanup_plan, save_cleanup_plan,
 )
@@ -76,11 +80,55 @@ def _require_enabled(settings: Settings) -> None:
     # cannot exclude an uncooperative concurrent writer. An independently
     # reviewed/exclusively quiescent namespace is an additional REQUIREMENT.
     # This acknowledgement is deliberately false in every default deploy.
-    if not getattr(settings, "media_organizer_namespace_quiescence_ack", False):
+    if (execution_mode(settings) == "strict"
+            and not getattr(settings, "media_organizer_namespace_quiescence_ack", False)):
         raise ValueError(
             "Execution blocked: MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK "
             "requires verified exclusive namespace custody"
         )
+
+
+def _approval_fields(settings: Settings, confirmed: bool) -> dict:
+    mode = execution_mode(settings)
+    if type(confirmed) is not bool or (mode == "maintenance_window") != confirmed:
+        raise ValueError("maintenance_window_confirmed must match the configured execution mode")
+    return {"execution_mode": mode, "maintenance_window_confirmed": confirmed}
+
+
+def _validate_job_approval(settings: Settings, job: WorkJob, state: dict) -> None:
+    from app.tasks.recovery import organizer_recovery_predecessor
+
+    mode = require_mode(settings, state)
+    parent = organizer_recovery_predecessor(job.id, getattr(job, "retry_of", None), state)
+    _approval_fields(settings, state.get("maintenance_window_confirmed", False))
+    if mode == "maintenance_window" and (
+            type(state.get("approved_job_id")) is not int or state["approved_job_id"] != job.id):
+        raise ValueError("maintenance approval belongs to another WorkJob")
+    if mode == "maintenance_window" and job.kind == EXECUTE_KIND:
+        expected = (approval_token(state.get("preview_job_id"), state.get("unit"))
+                    if parent is None else recovery_token(parent))
+        if state.get("confirmation") != expected:
+            raise ValueError("maintenance confirmation differs from the approved unit or job")
+
+
+def _snapshot_review(settings: Settings) -> bool:
+    return shared_config_gid() is not None or execution_mode(settings) == "maintenance_window"
+
+
+def _require_mutation_slot(session, *, family_id: int | None = None) -> None:
+    """Keep queued foreign work from blocking the sole reserved family's follow-up."""
+    from app.tasks.recovery import reserved_maintenance_family_ids, work_job_allowed_by_maintenance_reservation
+
+    reserved = reserved_maintenance_family_ids(session)
+    if reserved and reserved != {family_id}:
+        raise ValueError("another frozen maintenance window is active")
+    active = session.scalars(select(WorkJob).where(
+        WorkJob.kind.in_(MUTATION_KINDS), WorkJob.status.in_(ACTIVE),
+    ))
+    for job in active:
+        if reserved and job.status == "queued" and not work_job_allowed_by_maintenance_reservation(session, job):
+            continue
+        raise ValueError("another V1.6 mutation WorkJob is active")
 
 
 def _require_nonroot_mutation_worker() -> None:
@@ -138,7 +186,9 @@ def _completed_preview(session, settings: Settings, preview_job_id: int) -> tupl
             or summary.get("blocked_count") != 0
             or summary.get("read_only") is not True):
         raise ValueError("preview is empty, over limit, or has unresolved blockers")
-    return json.loads(preview.state_json or "{}"), summary
+    state = json.loads(preview.state_json or "{}")
+    require_mode(settings, state, summary)
+    return state, summary
 
 
 def _ready_unit_record(settings: Settings, preview_job_id: int, unit: str,
@@ -177,10 +227,11 @@ def _ready_unit_record(settings: Settings, preview_job_id: int, unit: str,
 
 def enqueue_media_organizer_execution(
     session_factory, settings: Settings, *, preview_job_id: int,
-    unit: str, confirmation: str,
+    unit: str, confirmation: str, maintenance_window_confirmed: bool = False,
 ) -> dict:
     """Queue exactly one reviewed unit, never mutate files in the API request."""
     _require_enabled(settings)
+    approval = _approval_fields(settings, maintenance_window_confirmed)
     _literal_unit(unit, settings)
     if confirmation != approval_token(preview_job_id, unit):
         raise ValueError("exact unit-bound preview confirmation required")
@@ -191,11 +242,8 @@ def enqueue_media_organizer_execution(
         if not Path(unit).is_relative_to(selection):
             raise ValueError("unit must remain within the original preview selection")
         ready = _ready_unit_record(settings, preview_job_id, unit, summary)
-        if ready.get("groups"):
-            # API only queues under a scoped, independently verifiable proof;
-            # the Worker reacquires/rechecks it before staging any media.
-            proof = namespace_custody.verified_namespace_custody(settings, Path(unit))
-            namespace_custody.assert_exclusive_custody(proof, (Path(unit),))
+        if maintenance_window_confirmed or ready.get("groups"):
+            check_api_eligibility(settings, Path(unit), (Path(unit),))
         matches = session.scalars(select(WorkJob).where(
             WorkJob.kind == EXECUTE_KIND,
             func.json_extract(WorkJob.state_json, "$.preview_job_id") == preview_job_id,
@@ -206,27 +254,26 @@ def enqueue_media_organizer_execution(
         if originals:
             old = originals[0]
             if old.status in (*ACTIVE, "completed"):
-                return {"job_id": int(old.id), "status": old.status}
+                _validate_job_approval(settings, old, json.loads(old.state_json))
+                return {"job_id": int(old.id), "status": old.status, **mode_fields(approval["execution_mode"])}
             raise ValueError("prior execution failed; explicit recovery is required")
-        active = session.scalar(select(WorkJob.id).where(
-            WorkJob.kind.in_(MUTATION_KINDS),
-            WorkJob.status.in_(ACTIVE),
-        ).limit(1))
-        if active is not None:
-            raise ValueError("another semantic execution is active")
+        _require_mutation_slot(session)
+        approved_id = next_media_package_job_id(session, settings)
         job = WorkJob(
-            id=next_media_package_job_id(session, settings),
+            id=approved_id,
             kind=EXECUTE_KIND, status="queued", progress_current=0,
             progress_total=4,
             progress_message="等待专用 Worker 冻结并校验选定作品",
             state_json=json.dumps({
+                **approval, "approved_job_id": approved_id, "confirmation": confirmation,
+                "input_fingerprint": ready["input_fingerprint"],
                 "preview_job_id": preview_job_id,
                 "selection": str(selection), "unit": unit,
             }, ensure_ascii=False),
         )
         session.add(job)
         session.commit()
-        return {"job_id": int(job.id), "status": job.status}
+        return {"job_id": int(job.id), "status": job.status, **mode_fields(approval["execution_mode"])}
 
 
 def get_media_organizer_execution(
@@ -249,6 +296,8 @@ def get_media_organizer_execution(
             raise KeyError(job_id)
         state = json.loads(job.state_json or "{}")
         checkpoint = json.loads(job.checkpoint_json or "{}")
+        mode = state.get("execution_mode", "strict")
+        execution_enabled = execution_enabled and mode == execution_mode(settings)
         cleanup = session.scalar(select(WorkJob).where(
             WorkJob.kind == CLEANUP_KIND,
             func.json_extract(WorkJob.state_json, "$.execution_job_id") == job_id,
@@ -266,13 +315,14 @@ def get_media_organizer_execution(
                     cleanup_state["unit"], cleanup_state.get("plan_sha256"),
                 )
             cleanup_status = {
+                **mode_fields(cleanup_state.get("execution_mode", "strict")),
                 "job_id": int(cleanup.id), "status": cleanup.status,
                 "error": cleanup.error_text,
                 "recovery_confirmation": recovery_confirmation,
             }
         return {
             "job_id": int(job.id), "status": job.status,
-            "execution_enabled": execution_enabled,
+            **mode_fields(mode), "execution_enabled": execution_enabled,
             "error": job.error_text,
             "preview_job_id": state.get("preview_job_id"),
             "unit": state.get("unit"),
@@ -298,6 +348,28 @@ def get_media_organizer_execution(
         }
 
 
+def _validate_publication_family(session, settings, job, state, checkpoint) -> None:
+    """Recheck the failed root of a recovered publication before separate cleanup."""
+    _validate_job_approval(settings, job, state)
+    mode = require_mode(settings, checkpoint)
+    if mode != "maintenance_window":
+        return
+    root_id = state.get("recovery_of_job_id", job.id)
+    if (checkpoint.get("frozen_job_id") != root_id or checkpoint.get("unit") != state["unit"]
+            or checkpoint.get("preview_job_id") != state["preview_job_id"]):
+        raise ValueError("publication differs from the approved frozen unit")
+    if root_id == job.id:
+        return
+    original = session.get(WorkJob, root_id)
+    if original is None:
+        raise ValueError("missing original frozen execution")
+    original_state, original_checkpoint, _, _ = _original_recovery_authority(original, settings)
+    digest = checkpoint.get("manifest_checksum")
+    if not digest or digest != original_checkpoint.get("manifest_checksum"):
+        raise ValueError("recovered publication differs from the original frozen manifest")
+    _recovery_job_binding(job, original, original_state, original_checkpoint, digest)
+
+
 def _cleanup_review_authority(session_factory, settings: Settings, job_id: int):
     """Bind review artifacts to a completed execution, without private reads."""
     if type(job_id) is not int or job_id <= 0:
@@ -318,12 +390,14 @@ def _cleanup_review_authority(session_factory, settings: Settings, job_id: int):
         frozen_id = int(job_id) if prior is None else prior
         if not isinstance(frozen_id, int) or frozen_id < 1:
             raise ValueError("invalid frozen execution identity")
+        _validate_publication_family(session, settings, job, state, checkpoint)
         if checkpoint.get("frozen_job_id") != frozen_id:
             raise ValueError("cleanup review checkpoint is not bound to the frozen job")
     manifest_file = _manifest_file(settings, frozen_id)
     manifest = load_frozen_preview_manifest(
         manifest_file, job_id=frozen_id, unit=unit,
     )
+    require_mode(settings, manifest)
     if manifest.get("cleanup_policy") != "deferred":
         raise ValueError("unsafe cleanup policy in frozen plan")
     return manifest, manifest_file, checkpoint
@@ -337,7 +411,7 @@ def get_media_organizer_cleanup_review(
     if not (type(page) is int and page >= 1 and
             type(page_size) is int and 1 <= page_size <= 100):
         raise ValueError("invalid review page")
-    shared = shared_config_gid() is not None
+    shared = _snapshot_review(settings)
     manifest, manifest_file, checkpoint = _cleanup_review_authority(
         session_factory, settings, job_id,
     )
@@ -353,7 +427,7 @@ def get_media_organizer_cleanup_review(
         )
         result.update(verification_scope="live_frozen_inventory",
                       live_inventory_verified=True, read_only=True)
-    result["reviewed_execution_job_id"] = job_id
+    result.update(mode_fields(execution_mode(settings)), reviewed_execution_job_id=job_id)
     return result
 
 
@@ -361,14 +435,14 @@ def get_media_organizer_cleanup_audit(
     session_factory, settings: Settings, job_id: int,
 ) -> dict:
     """Admin-read entire frozen inventory; not a cleanup/finalize operation."""
-    if shared_config_gid() is not None:
+    if _snapshot_review(settings):
         from app.batch.media_organizer_shared_handoff import (
             read_shared_cleanup_handoff, shared_audit_summary,
         )
         manifest, path, checkpoint = _cleanup_review_authority(session_factory, settings, job_id)
         read_shared_cleanup_handoff(manifest, path, checkpoint)
         result = shared_audit_summary(manifest)
-        result["reviewed_execution_job_id"] = job_id
+        result.update(mode_fields(execution_mode(settings)), reviewed_execution_job_id=job_id)
         return result
     # This existing reader already checks completed WorkJob, phase, checksum,
     # read-only journal, the first frozen row and source→unit binding.
@@ -387,7 +461,7 @@ def get_media_organizer_cleanup_audit(
         quarantine_root=settings.quarantine_root,
     )
     result["reviewed_execution_job_id"] = job_id
-    result.update(verification_scope="live_frozen_inventory", live_inventory_verified=True)
+    result.update(mode_fields(execution_mode(settings)), verification_scope="live_frozen_inventory", live_inventory_verified=True)
     return result
 
 
@@ -400,7 +474,7 @@ def get_media_organizer_cleanup_plan(
             or not isinstance(page_size, int) or not 1 <= page_size <= 100):
         raise ValueError("invalid cleanup plan pagination")
     from app.batch.media_organizer_finalize import cleanup_confirmation
-    shared = shared_config_gid() is not None
+    shared = _snapshot_review(settings)
     if shared:
         from app.batch.media_organizer_shared_handoff import read_shared_cleanup_handoff
         manifest, path, checkpoint = _cleanup_review_authority(session_factory, settings, job_id)
@@ -414,7 +488,7 @@ def get_media_organizer_cleanup_plan(
         plan = read_cleanup_plan(cleanup_plan_path(path), manifest)
     offset = (page - 1) * page_size
     return {
-        "job_id": frozen_id,
+        **mode_fields(execution_mode(settings)), "job_id": frozen_id,
         "reviewed_execution_job_id": job_id,
         "unit": plan["unit"],
         "plan_sha256": plan["plan_sha256"],
@@ -454,6 +528,8 @@ def _original_recovery_authority(original: WorkJob, settings: Settings):
     checkpoint = json.loads(original.checkpoint_json or "{}")
     if not isinstance(state, dict) or not isinstance(checkpoint, dict):
         raise ValueError("invalid original recovery authority")
+    _validate_job_approval(settings, original, state)
+    require_mode(settings, checkpoint)
     if state.get("recovery_of_job_id") is not None:
         raise ValueError("nested recovery is forbidden; manual review required")
     phase = checkpoint.get("phase")
@@ -464,7 +540,7 @@ def _original_recovery_authority(original: WorkJob, settings: Settings):
         raise ValueError("recovery preview identity missing")
     # Earlier legacy phases retain their private-read authorization path.
     # The newly supported terminal gap always requires frozen digest binding.
-    bound = shared_config_gid() is not None or phase == "manual_cleanup_required"
+    bound = _snapshot_review(settings) or phase == "manual_cleanup_required"
     if bound:
         selection = _literal_unit(state.get("selection"), settings)
         if original.retry_of is not None or not unit.is_relative_to(selection):
@@ -484,6 +560,7 @@ def _recovery_manifest_authority(manifest: dict, checkpoint: dict, *,
             or type(checkpoint.get("preview_job_id")) is not int
             or checkpoint["preview_job_id"] != preview_id
             or checkpoint.get("unit") != str(unit)
+            or checkpoint.get("execution_mode", "strict") != manifest.get("execution_mode", "strict")
             or manifest.get("cleanup_policy") != "deferred"
             or type(manifest.get("job_id")) is not int
             or manifest["job_id"] != frozen_id
@@ -508,6 +585,7 @@ def _recovery_job_binding(recovery: WorkJob, original: WorkJob,
             or state["preview_job_id"] != original_state["preview_job_id"]
             or state.get("unit") != original_state["unit"]
             or state.get("selection") != original_state.get("selection")
+            or state.get("execution_mode", "strict") != original_state.get("execution_mode", "strict")
             or state.get("recovery_manifest_checksum") != digest
             or state.get("recovery_phase") != checkpoint["phase"]):
         raise ValueError("recovery WorkJob differs from its original frozen approval")
@@ -518,7 +596,6 @@ def _validate_private_recovery_stage(manifest: dict, manifest_path: Path, phase:
     stage = Path(manifest["unit"]) / manifest["stage_directory"]
     if not stage.is_dir() or stage.is_symlink():
         raise ValueError("trusted staged custody is absent; manual review required")
-    from app.batch.file_rename import _open_directory_nofollow
     from app.batch.media_organizer_stage import (
         _read_marker, _authority, _assert_private_stage_fd,
     )
@@ -544,8 +621,37 @@ def _validate_private_recovery_stage(manifest: dict, manifest_path: Path, phase:
         os.close(fd)
 
 
+def _resume_frozen_stage(manifest: dict, manifest_path: Path, phase: str) -> bool:
+    """Distinguish interruption before the first mkdir from a witnessed partial stage."""
+    if manifest.get("execution_mode") == "maintenance_window" and phase == "frozen":
+        unit_fd = _open_directory_nofollow(Path(manifest["unit"]))
+        try:
+            os.stat(manifest["stage_directory"], dir_fd=unit_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            stage_absent = True
+        else:
+            stage_absent = False
+        finally:
+            os.close(unit_fd)
+        if stage_absent:
+            # Before the first media write the job has only its frozen manifest.
+            # Fresh staging rechecks the complete inventory and uses exclusive mkdir.
+            report_fd = _open_directory_nofollow(manifest_path.parent)
+            try:
+                with os.scandir(report_fd) as entries:
+                    if {entry.name for entry in entries} != {manifest_path.name}:
+                        raise ValueError("unexpected job evidence before initial staging")
+            finally:
+                os.close(report_fd)
+            return False
+    _validate_private_recovery_stage(manifest, manifest_path, phase)
+    return True
+
+
 def _frozen_custody_scope(manifest: dict) -> tuple[Path, ...]:
     parents = {Path(manifest["unit"])}
+    if manifest.get("execution_mode") == "maintenance_window":
+        parents.update(Path(literal) for literal in manifest["wrapper_identities"])
     for row in manifest["moves"]:
         parents.update(Path(row[key]).parent for key in ("source", "target", "final"))
     return tuple(sorted(parents))
@@ -553,10 +659,11 @@ def _frozen_custody_scope(manifest: dict) -> tuple[Path, ...]:
 
 def enqueue_media_organizer_recovery(
     session_factory, settings: Settings, *, failed_job_id: int,
-    confirmation: str,
+    confirmation: str, maintenance_window_confirmed: bool = False,
 ) -> dict:
     """Create a distinct explicit recovery job tied to original frozen custody."""
     _require_enabled(settings)
+    approval = _approval_fields(settings, maintenance_window_confirmed)
     if confirmation != recovery_token(failed_job_id):
         raise ValueError("exact original execution recovery confirmation required")
     with session_factory() as session:
@@ -568,7 +675,7 @@ def enqueue_media_organizer_recovery(
         phase = checkpoint["phase"]
         unit = str(selected)
         original_preview_id = state["preview_job_id"]
-        shared = shared_config_gid() is not None
+        shared = _snapshot_review(settings)
         manifest_path = _manifest_file(settings, failed_job_id)
         manifest = None
         digest = None
@@ -594,6 +701,7 @@ def enqueue_media_organizer_recovery(
         ).order_by(WorkJob.id.desc()).limit(1))
         if existing is not None:
             if existing.status in (*ACTIVE, "completed"):
+                _validate_job_approval(settings, existing, json.loads(existing.state_json))
                 if bound:
                     _recovery_job_binding(existing, original, state, checkpoint, digest)
                     if existing.status == "completed":
@@ -606,33 +714,31 @@ def enqueue_media_organizer_recovery(
                             phases=("manual_cleanup_required", "completed"),
                         )
                 return {"job_id": int(existing.id), "status": existing.status,
-                        "recovery_of_job_id": failed_job_id}
+                        "recovery_of_job_id": failed_job_id, **mode_fields(approval["execution_mode"])}
             raise ValueError("prior recovery failed; manual review required")
         if manifest is None:
             manifest = load_frozen_preview_manifest(
                 manifest_path, job_id=failed_job_id, unit=selected,
             )
+        require_mode(settings, manifest)
         if manifest.get("job_id") != failed_job_id:
             raise ValueError("frozen job identity changed")
         if not shared:
             _validate_private_recovery_stage(manifest, manifest_path, phase)
-        if manifest.get("groups") or uses_path_roles(manifest):
+        if maintenance_window_confirmed or manifest.get("groups") or uses_path_roles(manifest):
             # A known missing/revoked scope must not consume the one assisted
             # recovery attempt. This assertion reads no private stage evidence;
             # the Worker independently reacquires custody before any mutation.
-            proof = namespace_custody.verified_namespace_custody(settings, selected)
-            namespace_custody.assert_exclusive_custody(proof, _frozen_custody_scope(manifest))
-        active = session.scalar(select(WorkJob.id).where(
-            WorkJob.kind.in_(MUTATION_KINDS), WorkJob.status.in_(ACTIVE),
-        ).limit(1))
-        if active is not None:
-            raise ValueError("another semantic execution is active")
+            check_api_eligibility(settings, selected, _frozen_custody_scope(manifest))
+        _require_mutation_slot(session, family_id=failed_job_id if maintenance_window_confirmed else None)
+        approved_id = next_media_package_job_id(session, settings)
         job = WorkJob(
-            id=next_media_package_job_id(session, settings),
+            id=approved_id,
             kind=EXECUTE_KIND, status="queued", progress_current=0,
             progress_total=4,
             progress_message="等待 Worker 使用原冻结清单安全恢复",
             state_json=json.dumps({
+                **approval, "approved_job_id": approved_id, "confirmation": confirmation,
                 "preview_job_id": original_preview_id, "unit": unit,
                 "selection": state.get("selection"),
                 "recovery_of_job_id": failed_job_id,
@@ -644,7 +750,7 @@ def enqueue_media_organizer_recovery(
         session.add(job)
         session.commit()
         return {"job_id": int(job.id), "status": job.status,
-                "recovery_of_job_id": failed_job_id}
+                "recovery_of_job_id": failed_job_id, **mode_fields(approval["execution_mode"])}
 
 
 @register_handler
@@ -656,6 +762,10 @@ class MediaOrganizerExecuteHandler(TaskHandler):
     supports_resume = False  # Only explicit new recovery WorkJob is supported.
 
     def run(self, job: WorkJob, context: JobContext, settings: Settings) -> None:
+        with ExitStack() as resources:
+            self._run(job, context, settings, resources)
+
+    def _run(self, job: WorkJob, context: JobContext, settings: Settings, resources: ExitStack) -> None:
         _require_enabled(settings)
         if not context.worker_id:
             raise PermissionError("exclusive Worker lease required for media mutation")
@@ -663,6 +773,8 @@ class MediaOrganizerExecuteHandler(TaskHandler):
         state = json.loads(job.state_json or "{}")
         if not isinstance(state, dict):
             raise ValueError("invalid execution WorkJob approval")
+        _validate_job_approval(settings, job, state)
+        mode = execution_mode(settings)
         original_id = state.get("recovery_of_job_id")
         preview_id = state.get("preview_job_id")
         unit = _literal_unit(state.get("unit"), settings)
@@ -676,20 +788,24 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             from app.tasks.recovery import renew_and_assert_worker_lease
             renew_and_assert_worker_lease(context.SessionLocal, context.worker_id)
             if custody is not None:
-                namespace_custody.assert_exclusive_custody(custody, custody_parents)
+                assert_operation_authorized(custody, custody_parents)
 
-        def bind_frozen_group_custody(manifest: dict) -> None:
+        def bind_authority(manifest: dict) -> None:
             nonlocal custody, custody_parents
-            if manifest.get("groups") or uses_path_roles(manifest):
+            require_mode(settings, manifest)
+            if mode == "maintenance_window" or manifest.get("groups") or uses_path_roles(manifest):
                 custody_parents = _frozen_custody_scope(manifest)
-                custody = namespace_custody.verified_namespace_custody(settings, unit)
-                namespace_custody.assert_exclusive_custody(custody, custody_parents)
+                custody = resources.enter_context(acquire_operation_authority(
+                    settings, unit, custody_parents, manifest=manifest,
+                ))
+                assert_operation_authorized(custody, custody_parents)
             else:
                 custody = None
                 custody_parents = ()
 
         frozen_job_id = int(job.id) if original_id is None else original_id
         phase = "new"
+        resume_stage = False
         if original_id is not None:
             if type(original_id) is not int or original_id <= 0:
                 raise ValueError("invalid original failed execution identity")
@@ -708,15 +824,15 @@ class MediaOrganizerExecuteHandler(TaskHandler):
         manifest_path = _manifest_file(settings, frozen_job_id)
         handoff_checkpoint = {}
 
-        def checkpoint(n: int, mode: str, message: str) -> None:
+        def checkpoint(n: int, phase_name: str, message: str) -> None:
             pending_count = (len(classify_path_roles(manifest)["deferred_rows"])
                              if uses_path_roles(manifest) else 0)
             context.checkpoint(
                 progress_current=n, progress_total=4, progress_message=message,
                 checkpoint_data={
-                    "schema_version": 1, "phase": mode, "preview_job_id": preview_id,
+                    "schema_version": 1, "phase": phase_name, "preview_job_id": preview_id,
                     "frozen_job_id": frozen_job_id, "unit": str(unit),
-                    "deferred_publication_count": pending_count,
+                    "deferred_publication_count": pending_count, **mode_fields(mode),
                     **handoff_checkpoint,
                 },
             )
@@ -729,6 +845,10 @@ class MediaOrganizerExecuteHandler(TaskHandler):
                 if not unit.is_relative_to(selection):
                     raise ValueError("unit moved outside approved preview scope")
             record = _ready_unit_record(settings, preview_id, str(unit), summary)
+            if mode == "maintenance_window" and (
+                    state.get("selection") != str(selection)
+                    or state.get("input_fingerprint") != record["input_fingerprint"]):
+                raise ValueError("approved unit differs from the reviewed preview evidence")
             if manifest_path.exists() or manifest_path.is_symlink():
                 raise ValueError("untrusted frozen manifest file already exists")
             manifest = build_frozen_preview_manifest(
@@ -736,11 +856,12 @@ class MediaOrganizerExecuteHandler(TaskHandler):
                 quarantine_root=settings.quarantine_root, job_id=frozen_job_id,
                 exclude_dir_names=_excluded_names(settings),
             )
+            manifest["execution_mode"] = mode
             manifest["cleanup_policy"] = "deferred"
             roles = classify_path_roles(manifest)
             if roles["retained_sources"] or roles["retained_groups"] or roles["deferred_rows"]:
                 manifest["path_role_policy"] = POLICY
-            bind_frozen_group_custody(manifest)
+            bind_authority(manifest)
             # Only newly frozen, explicitly versioned plans can retain final
             # roles or defer occupied final names to separately approved cleanup.
             validate_deferred_publication(manifest, namespace_custody=custody)
@@ -764,15 +885,15 @@ class MediaOrganizerExecuteHandler(TaskHandler):
                     preview_id=preview_id, unit=unit,
                 )
                 _recovery_job_binding(job, original, original_state, original_checkpoint, digest)
-                if (shared_config_gid() is not None
+                if (_snapshot_review(settings)
                         and phase == "manual_cleanup_required"):
                     from app.batch.media_organizer_shared_handoff import read_shared_cleanup_handoff
                     read_shared_cleanup_handoff(manifest, manifest_path, original_checkpoint)
-            bind_frozen_group_custody(manifest)
+            bind_authority(manifest)
             # Shared API authorization was a frozen-artifact snapshot only.
             # Every recovery still proves private custody in the Worker,
             # followed by the complete phase-specific live inventory checks.
-            _validate_private_recovery_stage(manifest, manifest_path, phase)
+            resume_stage = _resume_frozen_stage(manifest, manifest_path, phase)
         validate_deferred_publication(manifest, namespace_custody=custody)
         # The Worker records this immutable authority before staging. All new
         # phases retain it, including interruption before the completed commit.
@@ -788,7 +909,7 @@ class MediaOrganizerExecuteHandler(TaskHandler):
                 manifest, frozen_manifest_path=manifest_path,
                 allowed_roots=settings.allowed_roots,
                 quarantine_root=settings.quarantine_root, lease_fence=fence,
-                resume=original_id is not None,
+                resume=resume_stage,
             )
             checkpoint(2, "staged", "全部已暂存，开始核验与无覆盖发布")
             fence()
@@ -796,7 +917,7 @@ class MediaOrganizerExecuteHandler(TaskHandler):
                 manifest, frozen_manifest_path=manifest_path,
                 allowed_roots=settings.allowed_roots,
                 quarantine_root=settings.quarantine_root, lease_fence=fence,
-                resume=original_id is not None,
+                resume=resume_stage,
                 defer_directory_cleanup=True, namespace_custody=custody,
             )
         # The safe execution path never removes original classification
@@ -825,7 +946,7 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             quarantine_root=settings.quarantine_root,
         )
         save_cleanup_plan(cleanup_plan_path(manifest_path), manifest)
-        if shared_config_gid() is not None:
+        if _snapshot_review(settings):
             from app.batch.media_organizer_shared_handoff import shared_handoff_checkpoint
             handoff_checkpoint = shared_handoff_checkpoint(manifest, manifest_path)
         checkpoint(

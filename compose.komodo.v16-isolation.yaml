@@ -13,6 +13,7 @@ services:
       - "${NFC_KOMODO_DATA_DIR:?Set validated NAS data bind mount}:/data:ro"
     environment:
       MEDIA_ORGANIZER_EXECUTION_ENABLED: "false"
+      MEDIA_ORGANIZER_EXECUTION_MODE: "strict"
       MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"
 
   nas-file-center-worker:
@@ -25,4 +26,5 @@ services:
       - "${NFC_KOMODO_DATA_DIR:?Set validated NAS data bind mount}:/data:rw"
     environment:
       MEDIA_ORGANIZER_EXECUTION_ENABLED: "false"
+      MEDIA_ORGANIZER_EXECUTION_MODE: "strict"
       MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"

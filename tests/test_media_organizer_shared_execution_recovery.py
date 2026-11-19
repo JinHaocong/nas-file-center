@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 import pytest
 
+from app.batch import media_organizer_custody
 from app.batch import media_organizer_execute_jobs as execution
 from app.batch.media_organizer_manifest import _checksum
 from app.config import Settings
@@ -29,8 +30,9 @@ def _failed_shared(tmp_path, monkeypatch, *, phase="frozen", kind="grouped", sha
         monkeypatch.delenv("NFC_SHARED_CONFIG_GID", raising=False)
     data, config = tmp_path / "data", tmp_path / "config"
     data.mkdir()
-    config.mkdir(mode=0o2770)
-    config.chmod(0o2770)
+    config.mkdir(mode=0o700)
+    if shared:
+        config.chmod(0o2770)
     settings = Settings(
         _env_file=None, CONFIG_DIR=str(config), DATA_MOUNT=str(data),
         ALLOWED_ROOTS=str(data), QUARANTINE_ROOT=str(data / ".trash"),
@@ -331,7 +333,7 @@ def test_recovery_queue_requires_current_custody_without_consuming_attempt(
         raise ValueError("synthetic namespace custody issuer unavailable")
 
     with monkeypatch.context() as unavailable:
-        unavailable.setattr(execution.namespace_custody, "verified_namespace_custody",
+        unavailable.setattr(media_organizer_custody, "verified_namespace_custody",
                             missing_issuer if failure == "missing-issuer"
                             else lambda *_args: ScopedRevocation())
         if shared:
@@ -346,7 +348,7 @@ def test_recovery_queue_requires_current_custody_without_consuming_attempt(
     assert restored.json()["job_id"] != original_id
     # Returning the already authorized job consumes no new attempt or custody.
     with monkeypatch.context() as unavailable:
-        unavailable.setattr(execution.namespace_custody, "verified_namespace_custody", missing_issuer)
+        unavailable.setattr(media_organizer_custody, "verified_namespace_custody", missing_issuer)
         repeated = _request_recovery(client, original_id)
         assert repeated.status_code == 200, repeated.text
         assert repeated.json()["job_id"] == restored.json()["job_id"]

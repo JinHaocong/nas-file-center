@@ -5,6 +5,13 @@ export type SemanticPreviewStatus = 'queued' | 'running' | 'completed' | 'failed
   'cancelled' | 'cancel_requested' | 'paused';
 export type SemanticUnitStatus = 'ready' | 'blocked' | 'skipped' | 'already_organized';
 
+export interface SemanticExecutionAssurance {
+  execution_mode?: 'strict' | 'maintenance_window';
+  assurance_level?: 'strict' | 'maintenance_window';
+  requires_maintenance_window?: boolean;
+  namespace_exclusive_custody_proven?: boolean;
+}
+
 export interface SemanticMediaGroup {
   name: string;
   kind: 'P' | 'V' | 'Other';
@@ -53,7 +60,7 @@ export interface SemanticPreviewSummary {
   read_only: true;
 }
 
-export interface SemanticPreviewPage {
+export interface SemanticPreviewPage extends SemanticExecutionAssurance {
   job_id: number;
   status: SemanticPreviewStatus;
   error: string | null;
@@ -79,7 +86,7 @@ export interface SemanticMappingPage {
   read_only: true;
 }
 
-export interface SemanticExecutionStatus {
+export interface SemanticExecutionStatus extends SemanticExecutionAssurance {
   job_id: number;
   status: SemanticPreviewStatus;
   error: string | null;
@@ -124,7 +131,7 @@ export interface SemanticReleasedOriginalLink extends SemanticCleanupLink {
   stage_path: string;
 }
 
-export interface SemanticCleanupPlan {
+export interface SemanticCleanupPlan extends SemanticExecutionAssurance {
   verification_scope?: 'worker_handoff_snapshot' | 'live_frozen_inventory';
   live_inventory_verified?: boolean;
   job_id: number;
@@ -162,6 +169,20 @@ const taskIsActive = (status: SemanticPreviewStatus | undefined) =>
 
 const positiveJobId = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+
+export function requiresSemanticMaintenanceWindow(response: SemanticExecutionAssurance | undefined): boolean {
+  return response?.execution_mode === 'maintenance_window' ||
+    response?.assurance_level === 'maintenance_window' || response?.requires_maintenance_window === true;
+}
+
+export function hasMaintenanceConfirmation(
+  response: SemanticExecutionAssurance | undefined, confirmed: boolean,
+): boolean {
+  return !requiresSemanticMaintenanceWindow(response) || confirmed === true;
+}
+
+const maintenanceConfirmationBody = (confirmed: boolean) =>
+  confirmed === true ? { maintenance_window_confirmed: true } : {};
 
 export function semanticExecutionIdFromSearch(search: URLSearchParams): number | null {
   const values = search.getAll('execution');
@@ -210,8 +231,11 @@ export function canConfirmSemanticCleanup(
   execution: SemanticExecutionStatus | undefined,
   plan: SemanticCleanupPlan | undefined,
   confirmation: string,
+  maintenanceWindowConfirmed = false,
 ): boolean {
   return Boolean(execution?.execution_enabled && execution.status === 'completed' && execution.manual_cleanup_required &&
+    hasMaintenanceConfirmation(execution, maintenanceWindowConfirmed) &&
+    hasMaintenanceConfirmation(plan, maintenanceWindowConfirmed) &&
     !execution.finalized && !execution.cleanup && plan?.read_only &&
     plan.plan_kind === 'review_only' && !plan.cleanup_authorized &&
     plan.reviewed_execution_job_id === execution.job_id && plan.unit === execution.unit &&
@@ -221,17 +245,19 @@ export function canConfirmSemanticCleanup(
 export function canRecoverSemanticCleanup(
   execution: SemanticExecutionStatus | undefined,
   confirmation: string,
+  maintenanceWindowConfirmed = false,
 ): boolean {
   const cleanup = execution?.cleanup;
   return Boolean(execution?.execution_enabled && cleanup?.status === 'failed' && cleanup.recovery_confirmation &&
+    hasMaintenanceConfirmation(execution, maintenanceWindowConfirmed) &&
     confirmation === cleanup.recovery_confirmation);
 }
 
 export const mediaOrganizerApi = {
-  startExecution: (previewJobId: number, unit: string, confirmation: string) =>
+  startExecution: (previewJobId: number, unit: string, confirmation: string, maintenanceWindowConfirmed = false) =>
     api.post<{ job_id: number; status: SemanticPreviewStatus }>(
       `/api/media-organizer/previews/${previewJobId}/execute`,
-      { unit, confirmation },
+      { unit, confirmation, ...maintenanceConfirmationBody(maintenanceWindowConfirmed) },
     ),
   getExecution: (jobId: number) =>
     api.get<SemanticExecutionStatus>(`/api/media-organizer/executions/${jobId}`),
@@ -241,18 +267,20 @@ export const mediaOrganizerApi = {
       `/api/media-organizer/executions/${jobId}/cleanup-plan?${query}`,
     );
   },
-  startCleanup: (jobId: number, confirmation: string) =>
+  startCleanup: (jobId: number, confirmation: string, maintenanceWindowConfirmed = false) =>
     api.post<{ job_id: number; status: SemanticPreviewStatus; execution_job_id: number }>(
-      `/api/media-organizer/executions/${jobId}/cleanup`, { confirmation },
+      `/api/media-organizer/executions/${jobId}/cleanup`,
+      { confirmation, ...maintenanceConfirmationBody(maintenanceWindowConfirmed) },
     ),
-  recoverCleanup: (cleanupJobId: number, confirmation: string) =>
+  recoverCleanup: (cleanupJobId: number, confirmation: string, maintenanceWindowConfirmed = false) =>
     api.post<{ job_id: number; status: SemanticPreviewStatus; execution_job_id: number }>(
-      `/api/media-organizer/cleanups/${cleanupJobId}/recover`, { confirmation },
+      `/api/media-organizer/cleanups/${cleanupJobId}/recover`,
+      { confirmation, ...maintenanceConfirmationBody(maintenanceWindowConfirmed) },
     ),
-  recoverExecution: (jobId: number, confirmation: string) =>
+  recoverExecution: (jobId: number, confirmation: string, maintenanceWindowConfirmed = false) =>
     api.post<{ job_id: number; status: SemanticPreviewStatus; recovery_of_job_id: number }>(
       `/api/media-organizer/executions/${jobId}/recover`,
-      { confirmation },
+      { confirmation, ...maintenanceConfirmationBody(maintenanceWindowConfirmed) },
     ),
   startPreview: (selection: string) =>
     api.post<{ job_id: number; status: SemanticPreviewStatus }>(

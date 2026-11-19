@@ -8,6 +8,10 @@ on:
       - 'compose*.yaml'
       - 'app/batch/media_organizer_*.py'
       - 'app/media_organizer/**'
+      - 'app/config.py'
+      - 'app/worker.py'
+      - 'app/tasks/media_mutation_lock.py'
+      - 'app/tasks/recovery.py'
       - 'app/archive_recovery/**'
       - 'app/quarantine/service_adapter.py'
       - 'app/api/router.py'
@@ -34,9 +38,14 @@ on:
       - 'frontend/tests/media_organizer_preview.test.ts'
       - 'frontend/tests/media_organizer_cleanup.test.ts'
       - 'frontend/tests/media_organizer_resume.test.tsx'
+      - 'frontend/tests/media_organizer_maintenance.test.tsx'
       - 'frontend/scripts/run-tests.mjs'
       - 'frontend/tests/quarantine_worker_mutation.test.ts'
       - 'tests/test_media_organizer_*.py'
+      - 'tests/test_media_mutation_lock.py'
+      - 'tests/test_maintenance_api_probe_boundary.py'
+      - 'scripts/v16_nas_maintenance_acceptance.py'
+      - 'tests/test_v16_nas_maintenance_acceptance.py'
       - 'tests/test_deployment_consistency.py'
       - '.github/workflows/media-organizer-v16-tdd.yml'
   workflow_dispatch:
@@ -69,6 +78,9 @@ jobs:
           PYTHONPATH: .
         run: |
           pytest -q tests/test_media_organizer_*.py \
+            tests/test_media_mutation_lock.py \
+            tests/test_maintenance_api_probe_boundary.py \
+            tests/test_v16_nas_maintenance_acceptance.py \
             tests/test_api_route_media_mutation_boundary.py \
             tests/test_archive_recovery_password_channel_preflight.py \
             tests/test_archive_recovery_shared_password_channel.py \

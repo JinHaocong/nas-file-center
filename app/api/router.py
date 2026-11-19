@@ -43,6 +43,8 @@ from app.storage_optimization.capability import (
     probe_storage_optimization_capabilities,
 )
 from app.service import StateConflictError
+from app.tasks.media_mutation_lock import media_mutation_lock, MediaMutationLockUnavailable
+from app.tasks.recovery import assert_no_maintenance_reservation, MaintenanceReservationActive
 from app.planning.dedupe_preview import (
     DedupeEmptyPlanError,
     DedupeError,
@@ -873,18 +875,24 @@ def storage_optimization_capabilities(
             status_code=409,
             detail="Storage capability probe requires ALLOW_MUTATION=true",
         )
-    if payload.directory is not None:
-        return probe_storage_optimization_capabilities(
-            payload.directory,
-            settings.allowed_roots,
-        )
-    assert payload.source_directory is not None
-    assert payload.destination_directory is not None
-    return probe_storage_optimization_between(
-        payload.source_directory,
-        payload.destination_directory,
-        settings.allowed_roots,
-    )
+    # These probes create and remove scratch entries in media directories.
+    # They participate in the same cooperative boundary as Worker jobs.
+    try:
+        with media_mutation_lock(settings, blocking=False):
+            with request.app.state.service.SessionLocal() as session:
+                assert_no_maintenance_reservation(session)
+            if payload.directory is not None:
+                return probe_storage_optimization_capabilities(
+                    payload.directory, settings.allowed_roots,
+                )
+            assert payload.source_directory is not None
+            assert payload.destination_directory is not None
+            return probe_storage_optimization_between(
+                payload.source_directory, payload.destination_directory,
+                settings.allowed_roots,
+            )
+    except (MediaMutationLockUnavailable, MaintenanceReservationActive) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/scans/{scan_job_id}")

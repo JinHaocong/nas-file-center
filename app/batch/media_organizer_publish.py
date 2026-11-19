@@ -31,7 +31,7 @@ from app.batch.media_organizer_stage import (
 from app.batch.media_organizer_path_roles import classify_path_roles, uses_path_roles
 from app.batch.media_organizer_planner import _check_scope
 from app.fs_ops import rename_noreplace_at
-from app.batch.media_organizer_custody import assert_exclusive_custody
+from app.batch.media_organizer_authority import assert_operation_authorized, publication_fence
 from app.batch.media_organizer_fd_link import link_pinned_inode_noreplace
 
 _PUBLIC_OWNER = ".nfc-publish-owner"
@@ -398,7 +398,7 @@ def _verify_group_parent_posix_permissions(unit_fd: int, manifest: dict) -> None
 
     The opened unit must be owned by this Worker EUID and must not be writable
     by its group or others. Same-UID/root, ACL and NAS-mapped writers remain
-    outside the guarantees of this check; SEC-12's production hold stays ON.
+    outside the guarantees of this check in either execution mode.
     """
     info = os.fstat(unit_fd)
     if (not stat.S_ISDIR(info.st_mode)
@@ -458,9 +458,9 @@ def _create_public_group_direct(
 
     This primitive removes SEC-12's private pending-name rename path, but it
     does NOT by itself prove custody against same-UID/root writers able to
-    replace the public basename between mkdirat and openat. The live V1.6
-    grouped Worker gate therefore remains closed until independently verified
-    namespace isolation is available. No error branch deletes an entry.
+    replace the public basename between mkdirat and openat. In maintenance
+    mode the operator must exclude these writers. No error branch deletes
+    an entry.
     """
     if os.geteuid() == 0:
         raise PublishingConflict(
@@ -495,12 +495,9 @@ def _create_public_group_direct(
             raise PublishingConflict("public group raced with exclusive creation") from exc
         os.fsync(unit_fd)
 
-        # Revalidate the external namespace grant AFTER mkdir and BEFORE
-        # resolving the new public basename with openat. If the custody
-        # provider reports revocation or a changed name binding, leave both
-        # directories untouched for manual reconciliation. The provider must
-        # still enforce exclusion between this check and openat; a post-check
-        # alone cannot make an uncooperative namespace safe.
+        # Revalidate operation authority after mkdir and before openat.
+        # Leave a changed binding untouched for manual reconciliation.
+        # In maintenance mode another writer could still race the open.
         fence()
 
         # A created-but-not-yet-witnessed directory is intentionally left for
@@ -1014,9 +1011,9 @@ def _publish_with_path_roles(
         # Public directory creation is the SEC-12 grouped namespace boundary.
         # A pure flat plan creates no group directory and only publishes
         # inode-pinned files with linkat no-replace while retaining originals.
-        # Grouped plans still require the external, non-boolean custody proof.
+        # Grouped plans additionally require a scoped operation authority.
         if group_rows:
-            assert_exclusive_custody(namespace_custody, sorted(parents))
+            assert_operation_authorized(namespace_custody, sorted(parents))
 
     guard()
     # Validate every prospective group before creating any receipt or marker.
@@ -1143,8 +1140,9 @@ def publish_frozen_stage(
             )
         _check_scope(unit, [Path(p) for p in allowed_roots],
                      Path(quarantine_root) if quarantine_root is not None else None)
-        _check_unit(unit, manifest, lease_fence)
         rows, group_rows = _validate_shape(manifest, unit)
+        lease_fence = publication_fence(manifest, namespace_custody, lease_fence)
+        _check_unit(unit, manifest, lease_fence)
         if defer_directory_cleanup:
             # Do not call the unsafe source-name rename/rmdir path. This
             # mode is the only path used by the dedicated V1.6 Worker.
@@ -1185,8 +1183,8 @@ def publish_frozen_stage(
             else:
                 if defer_directory_cleanup:
                     # No SOURCE directory rename. This branch runs only when
-                    # the external custody provider is verified for unit.
-                    assert_exclusive_custody(namespace_custody, (unit,))
+                    # operation authority is checked for this unit.
+                    assert_operation_authorized(namespace_custody, (unit,))
                     _create_public_group_direct(
                         unit, name, manifest, witness, lease_fence,
                         frozen_manifest_path=Path(frozen_manifest_path),
@@ -1202,7 +1200,7 @@ def publish_frozen_stage(
         published = reconciled = 0
         for row in rows:
             if group_rows and defer_directory_cleanup:
-                assert_exclusive_custody(
+                assert_operation_authorized(
                     namespace_custody, (stage, Path(row["final"]).parent),
                 )
             if _link_one(row, stage=stage, unit=unit, witness=witness,

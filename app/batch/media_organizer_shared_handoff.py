@@ -1,6 +1,7 @@
-"""Shared-GID review of a completed Worker's immutable cleanup snapshot.
+"""Read a completed Worker's immutable cleanup snapshot from config reports.
 
-Only shared 0640 artifacts are read here. Private group receipts, progress
+Shared installations use 0640 evidence. Single-UID maintenance installations
+use owner-only 0600 evidence. Private group receipts, progress
 journals, stage directories and live media remain exclusively Worker checks.
 The snapshot grants no filesystem authority and is never a custody proof.
 """
@@ -32,16 +33,23 @@ class SharedHandoffConflict(ValueError):
     """Shared artifacts do not match the completed Worker's frozen checkpoint."""
 
 
-def _read_shared_report(path: Path, gid: int) -> tuple[dict, str]:
-    require_shared_directory(path.parent, gid)
+def _read_shared_report(path: Path, gid: int | None) -> tuple[dict, str]:
+    if gid is not None:
+        require_shared_directory(path.parent, gid)
     parent_fd = _open_directory_nofollow(path.parent)
     try:
+        if gid is None:
+            directory = os.fstat(parent_fd)
+            if directory.st_uid != os.geteuid() or stat.S_IMODE(directory.st_mode) != 0o700:
+                raise SharedHandoffConflict("maintenance snapshot requires a private config report directory")
         fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK |
                      getattr(os, "O_CLOEXEC", 0), dir_fd=parent_fd)
         with os.fdopen(fd, "rb") as stream:
             before = os.fstat(stream.fileno())
             if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
-                    or stat.S_IMODE(before.st_mode) != 0o640 or before.st_gid != gid
+                    or stat.S_IMODE(before.st_mode) != (0o640 if gid is not None else 0o600)
+                    or (gid is not None and before.st_gid != gid)
+                    or (gid is None and before.st_uid != os.geteuid())
                     or not 1 <= before.st_size <= _MAX_REPORT_BYTES):
                 raise SharedHandoffConflict("shared cleanup report permissions or size changed")
             raw = stream.read(_MAX_REPORT_BYTES + 1)
@@ -69,10 +77,11 @@ def _directory_identity(identity, device: int) -> None:
 
 def _artifacts(manifest: dict, frozen_manifest_path: Path) -> dict:
     gid = shared_config_gid()
-    if gid is None:
-        raise SharedHandoffConflict("explicit shared config GID required for snapshot review")
+    if gid is None and manifest.get("execution_mode", "strict") != "maintenance_window":
+        raise SharedHandoffConflict("explicit shared config GID required for strict snapshot review")
     frozen = Path(frozen_manifest_path)
-    require_shared_directory(frozen.parent, gid)
+    if gid is not None:
+        require_shared_directory(frozen.parent, gid)
     unit = Path(manifest["unit"])
     if (manifest.get("cleanup_policy") != "deferred"
             or load_frozen_preview_manifest(frozen, job_id=manifest["job_id"], unit=unit) != manifest):
@@ -131,11 +140,12 @@ def shared_handoff_checkpoint(manifest: dict, frozen_manifest_path: Path) -> dic
 
 
 def read_shared_cleanup_handoff(manifest: dict, frozen_manifest_path: Path,
-                                checkpoint: dict) -> dict:
+                                checkpoint: dict, *, allow_finalized: bool = False) -> dict:
     """Read only shared artifacts already bound to a completed execution row."""
     try:
+        phases = ("manual_cleanup_required", "completed") if allow_finalized else ("manual_cleanup_required",)
         if (not isinstance(checkpoint, dict)
-                or checkpoint.get("phase") != "manual_cleanup_required"
+                or checkpoint.get("phase") not in phases
                 or checkpoint.get("frozen_job_id") != manifest["job_id"]
                 or checkpoint.get("unit") != manifest["unit"]):
             raise SharedHandoffConflict("shared snapshot checkpoint belongs to another frozen unit")

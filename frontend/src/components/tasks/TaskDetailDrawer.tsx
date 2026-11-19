@@ -163,6 +163,9 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
             {organizerHref && (
               <div className="nfc-overlay-stack">
                 <p className="nfc-form-note">在智能媒体整理中查看已发布文件、独立清理及恢复状态。</p>
+                {task.payload?.execution_mode === 'maintenance_window' && (
+                  <p className="nfc-form-note">本任务使用维护窗口模式。清理或恢复完成前，请继续暂停对这些文件的其他写入。</p>
+                )}
                 <ConsoleButton variant="secondary" onClick={() => {
                   onClose();
                   navigate(organizerHref);

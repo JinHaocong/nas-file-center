@@ -1,0 +1,352 @@
+"""Local behavioral tests for the stand-alone physical acceptance driver."""
+from contextlib import ExitStack
+import json
+import os
+from pathlib import Path
+import secrets
+import socket
+import subprocess
+import sys
+import time
+
+import pytest
+
+from scripts import v16_nas_maintenance_acceptance as nas
+
+
+DIGEST = "sha256:" + "b" * 64
+REV = "1" * 40
+
+
+@pytest.mark.parametrize("image", ["repo:latest", "-q", "repo@sha256:1", "x y@" + DIGEST])
+def test_mutable_or_unsafe_reference_rejected(image):
+    with pytest.raises(nas.Failure):
+        nas.validate_inputs("/mnt/media", image, REV)
+
+
+def test_revision_and_image_identity_bound():
+    ref = "localhost:5000/private/nfc@" + DIGEST
+    nas.validate_inputs("/mnt/media", ref, REV)
+    record = {"id": DIGEST, "revision": REV, "volumes": None, "digests": [ref]}
+    assert nas.validate_image(record, ref, REV) == DIGEST
+    for bad in [dict(record, revision="2" * 40), dict(record, volumes={"/extra": {}}),
+                dict(record, digests=[]), dict(record, id="latest")]:
+        with pytest.raises(nas.Failure):
+            nas.validate_image(bad, ref, REV)
+
+
+@pytest.mark.parametrize("root", ["/", "../bad", "/a/../b", "/a//b", "/bad,name"])
+def test_root_name_refusal(root):
+    with pytest.raises(nas.Failure):
+        nas.validate_inputs(root, DIGEST, REV)
+
+
+def test_walk_refuses_symlink_and_replaced_binding(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "alias").symlink_to(tmp_path, target_is_directory=True)
+    with pytest.raises(OSError):
+        with ExitStack() as stack:
+            nas.open_tree(stack, tmp_path / "alias/real")
+    with ExitStack() as stack:
+        parent = nas.open_tree(stack, tmp_path)
+        child = nas.open_tree(stack, real)
+        real.rename(tmp_path / "moved")
+        real.mkdir()
+        with pytest.raises(nas.Failure, match="binding"):
+            nas.check_binding(parent, "real", child)
+
+
+def test_collection_inventory_rejects_foreign_entry(tmp_path):
+    unit = nas.seed_case(tmp_path, "mixed")
+    before = nas.inventory(unit)
+    assert before["count"] == 3 and sum(before["hashes"].values()) == 3
+    (unit / "foreign").symlink_to(tmp_path)
+    with pytest.raises(nas.Failure):
+        nas.inventory(unit)
+
+
+@pytest.fixture(scope="module")
+def local_server(tmp_path_factory):
+    if os.geteuid() == 0:
+        pytest.skip("The production maintenance authority requires an unprivileged Worker")
+    base = tmp_path_factory.mktemp("maintenance-http")
+    data, config = base / "data", base / "config"
+    data.mkdir()
+    config.mkdir()
+    config.chmod(0o2770)
+    password = secrets.token_urlsafe(32)
+    env = {**os.environ, **nas.CONFIG, "CONFIG_DIR": str(config), "DATA_MOUNT": str(data),
+           "ALLOWED_ROOTS": str(data), "QUARANTINE_ROOT": str(data / ".trash"),
+           "NFC_SHARED_CONFIG_GID": str(os.getegid()), "INITIAL_ADMIN_PASSWORD": password}
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        with subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "app.main:app", "--fd", str(sock.fileno())],
+            pass_fds=(sock.fileno(),), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ) as process:
+            try:
+                for _ in range(180):
+                    try:
+                        if nas.http(port, "GET", "/health")["status"] == 200:
+                            break
+                    except OSError:
+                        pass
+                    assert process.poll() is None
+                    time.sleep(.2)
+                else:
+                    pytest.fail("API failed to start")
+                login = nas.http(port, "POST", "/api/auth/login",
+                                 {"username": nas.CONFIG["INITIAL_ADMIN_USERNAME"], "password": password})
+                assert login["status"] == 200 and login["cookie"]
+                yield data, env, port, login["cookie"]
+            finally:
+                process.terminate()
+                process.wait(timeout=15)
+
+
+@pytest.mark.parametrize("case", ["mixed", "historical", "boundary"])
+def test_ordinary_http_and_real_dispatch_recovery(local_server, case, monkeypatch):
+    from app.config import Settings
+    data, env, port, cookie = local_server
+    for key in [*nas.CONFIG, "INITIAL_ADMIN_PASSWORD"]:
+        monkeypatch.setenv(key, env[key])
+    settings = Settings(_env_file=None)
+    unit = nas.seed_case(data, case)
+    evidence = {}
+    def request(method, path, body=None):
+        return nas.http(port, method, path, body, cookie)
+    def run_job(jid, fault=None):
+        return nas.dispatch(settings, jid, fault)
+    nas.run_case(case, unit, request, run_job, lambda: nas.inventory(unit), evidence)
+    assert evidence["complete"] and evidence["before"]["hashes"] == evidence["after"]["hashes"]
+    assert evidence["second_scan"] == {"needed_moves": 0, "renamed_count": 0}
+    if case == "historical":
+        assert set(evidence["simulated_interruptions"]) == {"publication", "cleanup"}
+
+
+def test_mount_evidence_from_real_open_fd(tmp_path):
+    with ExitStack() as stack:
+        fd = nas.open_tree(stack, tmp_path)
+        observed = nas.mount_evidence(fd)
+        assert observed["identity"] == nas.identity(tmp_path.stat())
+        assert observed["read_only"] is False
+        assert observed["mount_id"] > 0 and observed["filesystem"]
+        assert observed["major_minor"] == f"{os.major(tmp_path.stat().st_dev)}:{os.minor(tmp_path.stat().st_dev)}"
+
+
+@pytest.mark.parametrize("role", ["api", "worker"])
+def test_inspected_mount_and_runtime_contract(role, tmp_path):
+    from copy import deepcopy
+    uid = nas.API if role == "api" else nas.WORKER
+    cid = "c" * 64
+    info = {"id": cid, "image": DIGEST, "label": tmp_path.name, "name": f"/{tmp_path.name}-{role}",
+            "user": f"{uid}:{nas.GROUP}", "host": {"ReadonlyRootfs": True, "NetworkMode": "none",
+            "Privileged": False, "CapDrop": ["ALL"], "CapAdd": [], "PortBindings": {}, "GroupAdd": [],
+            "SecurityOpt": ["no-new-privileges"], "Tmpfs": {"/tmp": "nosuid,nodev,noexec"}},
+            "mounts": [{"Type": "bind", "Destination": "/config", "Source": str(tmp_path / "config"), "RW": True},
+                       {"Type": "bind", "Destination": "/data", "Source": str(tmp_path / "data"), "RW": role == "worker"}]}
+    assert nas.verify_container(info, cid, DIGEST, tmp_path, role)["id"] == cid
+    for patch in ({"NetworkMode": "host"}, {"ReadonlyRootfs": False}, {"CapAdd": ["DAC_OVERRIDE"]},
+                  {"GroupAdd": ["0"]}, {"SecurityOpt": []}, {"PortBindings": {"80/tcp": []}}):
+        with pytest.raises(nas.Failure):
+            nas.verify_container(dict(info, host={**info["host"], **patch}), cid, DIGEST, tmp_path, role)
+    for mutation in ("socket", "wrong-data", "wrong-rw", "wrong-user", "other-container"):
+        bad = deepcopy(info)
+        if mutation == "socket":
+            bad["mounts"].append({"Type": "bind", "Source": "/var/run/docker.sock",
+                                  "Destination": "/var/run/docker.sock", "RW": True})
+        elif mutation == "wrong-data":
+            bad["mounts"][-1]["Source"] = str(tmp_path)
+        elif mutation == "wrong-rw":
+            bad["mounts"][-1]["RW"] = role == "api"
+        elif mutation == "wrong-user":
+            bad["user"] = "0:0"
+        else:
+            bad["id"] = "d" * 64
+        with pytest.raises(nas.Failure):
+            nas.verify_container(bad, cid, DIGEST, tmp_path, role)
+
+
+def test_root_only_cli_and_bad_revision_cannot_touch_existing_data(tmp_path, capsys):
+    existing = tmp_path / "existing.jpg"
+    existing.write_bytes(b"existing")
+    for revision in ["abc"] + ([REV] if os.geteuid() != 0 else []):
+        assert nas.main(["--data-root", str(tmp_path), "--image", DIGEST, "--candidate-sha", revision]) == 2
+        report = json.loads(capsys.readouterr().out)
+        assert report["status"] == "FAIL_MAINTENANCE_LIFECYCLE"
+        assert report["namespace_exclusive_custody_proven"] is report["release_ready"] is False
+        assert list(tmp_path.iterdir()) == [existing] and existing.read_bytes() == b"existing"
+
+
+def test_production_flock_contention_through_real_subprocess(local_server, monkeypatch):
+    from app.config import Settings
+    _, env, _, _ = local_server
+    monkeypatch.setenv("NFC_SHARED_CONFIG_GID", env["NFC_SHARED_CONFIG_GID"])
+    settings = Settings(_env_file=None, CONFIG_DIR=env["CONFIG_DIR"])
+    evidence = nas.lock_check([sys.executable, "-c", nas.LOCK_HOLDER], lambda: nas.probe_lock(settings), env=env)
+    assert evidence["worker_refused_while_api_holds"] and evidence["worker_acquired_after_release"]
+    assert evidence["lock_identity"] == nas.identity((Path(env["CONFIG_DIR"]) / ".media-mutation.lock").stat())
+
+
+def test_lock_holder_ready_on_high_descriptor():
+    import fcntl
+    import resource
+    if resource.getrlimit(resource.RLIMIT_NOFILE)[0] <= 1024:
+        pytest.skip("descriptor limit prevents allocating FD 1024")
+    with ExitStack() as stack:
+        reader, writer = os.pipe()
+        stack.callback(os.close, reader)
+        stack.callback(os.close, writer)
+        high = fcntl.fcntl(reader, fcntl.F_DUPFD_CLOEXEC, 1024)
+        stack.callback(os.close, high)
+        with pytest.raises(nas.Failure, match="did not acquire"):
+            nas.wait_for_lock_holder(high, 0)
+        os.write(writer, b"ready")
+        nas.wait_for_lock_holder(high, .5)
+
+
+@pytest.mark.parametrize("kind", ["file", "directory", "permanent-directory"])
+def test_evidence_sync_failure_cannot_leave_a_public_pass(tmp_path, monkeypatch, kind):
+    import stat
+    real_sync = os.fsync
+    report = {"status": nas.PASS, "zero_exit_required": True}
+    with ExitStack() as stack:
+        fd = nas.open_tree(stack, tmp_path)
+        nas.publish_report(fd, {"status": "INCOMPLETE"})
+        fired = []
+        def fail_sync(target):
+            directory = stat.S_ISDIR(os.fstat(target).st_mode)
+            if directory == (kind != "file") and (not fired or kind == "permanent-directory"):
+                fired.append(True)
+                raise OSError("injected sync error")
+            real_sync(target)
+        monkeypatch.setattr(nas.os, "fsync", fail_sync)
+        nas.finish_report(fd, report)
+    assert fired and report["status"] == nas.FAIL and report["report_write_failure"]
+    retained = json.loads((tmp_path / "acceptance-report.json").read_text())
+    assert retained["status"] == nas.FAIL and retained["zero_exit_required"] is True
+    if kind == "permanent-directory":
+        assert report["retained_evidence_unverified"]
+
+
+def test_new_fixture_recorded_before_metadata_validation(tmp_path, monkeypatch):
+    fixture = tmp_path / (nas.PREFIX + "case")
+    report = {}
+    def reject(*args):
+        raise nas.Failure("injected new directory metadata failure")
+    with ExitStack() as stack:
+        fd = nas.open_tree(stack, tmp_path)
+        monkeypatch.setattr(nas, "provision_new_directory", reject)
+        with pytest.raises(nas.Failure, match="metadata"):
+            nas.create_fixture(stack, fd, fixture, report)
+        assert list(fixture.iterdir()) == [] and report["fixture"] == str(fixture)
+        assert report["fixture_created"] is True and report["report_destination_verified"] is False
+        untouched = {}
+        with pytest.raises(nas.Failure, match="collision"):
+            nas.create_fixture(stack, fd, fixture, untouched)
+        assert untouched["fixture_created"] is False and "fixture" not in untouched
+
+
+def test_parent_default_acl_refuses_creation(tmp_path, monkeypatch):
+    fixture = tmp_path / (nas.PREFIX + "acl")
+    report = {}
+    with ExitStack() as stack:
+        fd = nas.open_tree(stack, tmp_path)
+        monkeypatch.setattr(os, "listxattr", lambda parent: ["system.posix_acl_default"])
+        with pytest.raises(nas.Failure, match="default ACL"):
+            nas.create_fixture(stack, fd, fixture, report)
+    assert not fixture.exists() and not report.get("fixture_created")
+
+
+@pytest.mark.parametrize("daemon", ["owns", "mismatch", "unreachable", "absent"])
+def test_lost_create_response_and_missing_cidfile(tmp_path, monkeypatch, daemon):
+    cid = "d" * 64
+    role = "worker"
+    name = f"{tmp_path.name}-{role}"
+    calls = []
+    def transport(args, operation, *rest, **options):
+        calls.append(args)
+        if args[0] == "ps":
+            assert "--all" in args and "--no-trunc" in args and f"name=^/{name}$" in args
+            if daemon == "unreachable":
+                raise nas.Failure("daemon unavailable")
+            return "" if daemon == "absent" else cid
+        if args[0] == "inspect":
+            assert args[-1] == cid
+            return json.dumps({"id": cid, "name": "/" + name, "image": DIGEST,
+                               "label": "someone-else" if daemon == "mismatch" else tmp_path.name})
+        assert args == ["rm", "--force", cid]
+        return cid
+    monkeypatch.setattr(nas, "docker", transport)
+    report = {"removed_containers": [], "container_cleanup": {}}
+    with ExitStack() as stack:
+        fd = nas.open_tree(stack, tmp_path)
+        if daemon in ("owns", "absent"):
+            nas.remove_container(fd, tmp_path, role, None, DIGEST, report)
+        else:
+            with pytest.raises(nas.Failure):
+                nas.remove_container(fd, tmp_path, role, None, DIGEST, report)
+    assert bool([call for call in calls if call[0] == "rm"]) == (daemon == "owns")
+    state = report["container_cleanup"][role]["state"]
+    assert state == {"owns": "removed", "mismatch": "identity_mismatch", "unreachable": "unverified",
+                     "absent": "absent_at_lookup"}[daemon]
+
+
+def test_unrecoverable_sync_error_invalidates_visible_pass(tmp_path, monkeypatch):
+    import stat
+    real_sync = os.fsync
+    report = {"status": nas.PASS, "zero_exit_required": True}
+    with ExitStack() as stack:
+        fd = nas.open_tree(stack, tmp_path)
+        nas.publish_report(fd, {"status": "INCOMPLETE"})
+        after_replace = []
+        def bad_storage(target):
+            if after_replace:
+                raise OSError("further sync unavailable")
+            if stat.S_ISDIR(os.fstat(target).st_mode):
+                assert json.loads((tmp_path / nas.REPORT_NAME).read_text())["status"] == nas.PASS
+                after_replace.append(True)
+                raise OSError("directory sync failed after publish")
+            real_sync(target)
+        monkeypatch.setattr(os, "fsync", bad_storage)
+        nas.finish_report(fd, report)
+    assert after_replace and report["status"] == nas.FAIL and report["retained_evidence_unverified"]
+    assert not (tmp_path / nas.REPORT_NAME).exists()
+
+
+def test_failed_create_unwinds_and_removes_daemon_committed_container(tmp_path, monkeypatch):
+    fixture = tmp_path / (nas.PREFIX + "12ab")
+    fixture.mkdir()
+    for child in ("config", "data"):
+        (fixture / child).mkdir()
+    cid = "c" * 64
+    daemon = {}
+    def transport(args, operation, *other, **kwargs):
+        if args[0] == "create":
+            name = args[args.index("--name") + 1]
+            daemon[cid] = {"id": cid, "image": DIGEST, "name": "/" + name, "label": fixture.name}
+            raise nas.Failure("lost create response")
+        if args[0] == "ps":
+            assert f"name=^/{fixture.name}-worker$" in args
+            return next(iter(daemon))
+        if args[0] == "inspect":
+            return json.dumps(daemon[args[-1]])
+        assert args == ["rm", "--force", cid]
+        del daemon[cid]
+        return cid
+    monkeypatch.setattr(nas, "docker", transport)
+    # Exercise the real pinned path and cleanup callback with this harness user's
+    # temp root. Production requires root-owned ancestors on the Docker host.
+    walk = nas.open_tree
+    monkeypatch.setattr(nas, "open_tree", lambda stack, path, trusted=False: walk(stack, path))
+    report = {"roles": {}, "removed_containers": [], "container_cleanup": {}}
+    with ExitStack() as stack:
+        rootfd = walk(stack, tmp_path)
+        fixturefd = walk(stack, fixture)
+        children = {name: walk(stack, fixture / name) for name in ("config", "data")}
+        with pytest.raises(nas.Failure, match="lost create response"):
+            nas.run_containers(rootfd, fixturefd, fixture, children, DIGEST, report)
+    assert not daemon and not (fixture / "worker.cid").exists()
+    assert report["removed_containers"] == [cid] and report["container_cleanup"]["worker"]["state"] == "removed"

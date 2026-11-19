@@ -154,6 +154,7 @@ def test_sigterm_request_does_not_stop_heartbeat_before_active_job_finishes(
     claimed = {"once": False}
 
     settings = SimpleNamespace(
+        config_dir=tmp_path,
         database_path=tmp_path / "dummy.db",
         backups_dir=tmp_path / "backups",
         initial_admin_username=None,

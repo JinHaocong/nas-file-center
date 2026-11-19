@@ -21,6 +21,7 @@ from app.tasks.handlers_base import TaskHandler, register_handler
 from app.tasks.state_machine import JobCancelRequested, JobLeaseLost
 
 SECRET_DIR = Path('/run/nfc-recovery-secrets')
+_CANCELLED_OUTPUT_PENDING = "cancelled_output_cleanup_pending"
 
 # A real tmpfs-backed *shared* Docker volume is required. Separate per-service
 # Docker tmpfs mounts do NOT share data across two container UIDs.
@@ -523,21 +524,39 @@ class ArchiveRecoveryHandler(TaskHandler):
                     pass
 
 
-def cleanup_recovery_after_worker_restart(settings: Settings, session_factory, worker_id: str) -> None:
-    """Retire only job-owned temp names after the existing Worker lease takeover."""
-    from sqlalchemy import select
-    from app.tasks.recovery import assert_active_worker_lease
+def cleanup_recovery_after_worker_restart(
+    settings: Settings, session_factory, worker_id: str, *, cancelled_only: bool = False,
+) -> None:
+    """Retire inode-bound output and temporary names with Worker authority."""
+    from sqlalchemy import and_, or_, select
+    from app.tasks.media_mutation_lock import assert_media_mutation_lock
+    from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
+
+    assert_media_mutation_lock(settings)
+    cancelled = and_(
+        WorkJob.status == "cancelled",
+        WorkJob.state_json.contains(f'"{_CANCELLED_OUTPUT_PENDING}"', autoescape=True),
+    )
+    interrupted = and_(
+        WorkJob.status == "failed", WorkJob.error_code == "WORKER_INTERRUPTED",
+    )
 
     with session_factory() as session:
         assert_active_worker_lease(session, worker_id)
         jobs = list(session.scalars(
-            select(WorkJob).where(WorkJob.kind == 'archive-recovery',
-                                  WorkJob.status == 'failed',
-                                  WorkJob.error_code == 'WORKER_INTERRUPTED')
+            select(WorkJob).where(
+                WorkJob.kind == "archive-recovery",
+                cancelled if cancelled_only else or_(cancelled, interrupted),
+            )
         ))
     for job in jobs:
         try:
-            state = json.loads(job.state_json or '{}')
+            if job.status == "cancelled":
+                state = _consume_cancelled_output_cleanup(session_factory, worker_id, job)
+                if state is None:
+                    continue
+            else:
+                state = json.loads(job.state_json or "{}")
             output = Path(state['output'])
             source = Path(state['source'])
             from app.path_safety import require_allowed_path
@@ -556,7 +575,12 @@ def cleanup_recovery_after_worker_restart(settings: Settings, session_factory, w
                 or [str(output_stat.st_dev), str(output_stat.st_ino)] != state.get("output_identity")
             ):
                 continue
-            clean_interrupted_parts(output, state.get('output_identity', []))
+            assert_media_mutation_lock(settings)
+            renew_and_assert_worker_lease(session_factory, worker_id)
+            if job.status == "cancelled":
+                _remove_empty_cancelled_output(output, output_stat)
+            else:
+                clean_interrupted_parts(output, state.get('output_identity', []))
             token = state.get('secret_token')
             discard_one_time_password(token)
         except (KeyError, OSError, ValueError):
@@ -564,20 +588,59 @@ def cleanup_recovery_after_worker_restart(settings: Settings, session_factory, w
             continue
 
 
-def cleanup_cancelled_queued_recovery(state_json: str) -> None:
-    """Remove one-time RAM secret and only a task-owned EMPTY output dir."""
+def record_cancelled_output_cleanup(job: WorkJob) -> None:
+    """Register a single attempt while the queued cancellation is committed."""
     try:
-        state = json.loads(state_json or '{}')
-        token = state.get('secret_token')
-        discard_one_time_password(token)
-        output = Path(state['output'])
-        source = Path(state['source'])
-        if output.parent != source.parent or output.is_symlink() or not output.is_dir():
-            return
-        st = output.stat()
-        if [str(st.st_dev), str(st.st_ino)] != state.get('output_identity'):
-            return
-        output.rmdir()
-    except (KeyError, ValueError, OSError):
-        # Existing user files, foreign directories and ambiguous identities survive.
+        state = json.loads(job.state_json or "{}")
+    except (TypeError, ValueError):
+        return
+    if not isinstance(state, dict):
+        return
+    identity = state.get("output_identity")
+    if isinstance(identity, list) and len(identity) == 2 and all(type(part) is str for part in identity):
+        state[_CANCELLED_OUTPUT_PENDING] = True
+        job.state_json = json.dumps(state, ensure_ascii=False)
+
+
+def _consume_cancelled_output_cleanup(session_factory, worker_id: str, job: WorkJob) -> dict | None:
+    from app.tasks.recovery import assert_active_worker_lease
+
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        assert_active_worker_lease(session, worker_id)
+        current = session.get(WorkJob, job.id)
+        if (
+            current is None or current.kind != "archive-recovery" or current.status != "cancelled"
+            or current.state_json != job.state_json
+        ):
+            return None
+        state = json.loads(current.state_json or "{}")
+        if not isinstance(state, dict) or state.pop(_CANCELLED_OUTPUT_PENDING, None) is not True:
+            return None
+        # Disarm before even observing the pathname. A crash, missing path or
+        # stale inode must never authorize a second attempt against a later name.
+        current.state_json = json.dumps(state, ensure_ascii=False)
+        session.commit()
+        return state
+
+
+def _remove_empty_cancelled_output(output: Path, observed: os.stat_result) -> None:
+    parent_fd = os.open(
+        output.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+    )
+    try:
+        current = os.stat(output.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) == (observed.st_dev, observed.st_ino):
+            os.rmdir(output.name, dir_fd=parent_fd)
+    finally:
+        os.close(parent_fd)
+
+
+def discard_cancelled_recovery_password(state_json: str) -> None:
+    """Retire the one-time RAM secret without accessing the media namespace."""
+    try:
+        state = json.loads(state_json or "{}")
+        if isinstance(state, dict):
+            discard_one_time_password(state.get("secret_token"))
+    except (TypeError, ValueError):
         pass

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from app.auth.dependencies import require_admin_user
 
@@ -18,16 +18,19 @@ class MediaOrganizerExecuteRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     unit: str = Field(min_length=1, max_length=4096)
     confirmation: str = Field(min_length=1, max_length=256)
+    maintenance_window_confirmed: StrictBool = False
 
 
 class MediaOrganizerRecoveryRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     confirmation: str = Field(min_length=1, max_length=256)
+    maintenance_window_confirmed: StrictBool = False
 
 
 class MediaOrganizerCleanupRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     confirmation: str = Field(min_length=1, max_length=256)
+    maintenance_window_confirmed: StrictBool = False
 
 
 @router.post('/previews')
@@ -92,6 +95,7 @@ def start_media_organizer_execution(request: Request, job_id: int,
             request.app.state.service.SessionLocal, request.app.state.settings,
             preview_job_id=job_id, unit=payload.unit,
             confirmation=payload.confirmation,
+            maintenance_window_confirmed=payload.maintenance_window_confirmed,
         )
     except KeyError as exc:
         raise HTTPException(404, 'Preview not found') from exc
@@ -184,6 +188,7 @@ def start_media_organizer_cleanup(
         return enqueue_media_organizer_cleanup(
             request.app.state.service.SessionLocal, request.app.state.settings,
             execution_job_id=job_id, confirmation=payload.confirmation,
+            maintenance_window_confirmed=payload.maintenance_window_confirmed,
         )
     except KeyError as exc:
         raise HTTPException(404, 'Original execution not found') from exc
@@ -200,6 +205,7 @@ def recover_media_organizer_execution(request: Request, job_id: int,
         return enqueue_media_organizer_recovery(
             request.app.state.service.SessionLocal, request.app.state.settings,
             failed_job_id=job_id, confirmation=payload.confirmation,
+            maintenance_window_confirmed=payload.maintenance_window_confirmed,
         )
     except KeyError as exc:
         raise HTTPException(404, 'Original failed execution not found') from exc
@@ -218,6 +224,7 @@ def recover_media_organizer_cleanup(
         return enqueue_media_organizer_cleanup_recovery(
             request.app.state.service.SessionLocal, request.app.state.settings,
             failed_job_id=job_id, confirmation=payload.confirmation,
+            maintenance_window_confirmed=payload.maintenance_window_confirmed,
         )
     except KeyError as exc:
         raise HTTPException(404, 'Failed cleanup not found') from exc

@@ -14,6 +14,7 @@ services:
       - "${HOST_DATA_DIR:?Set HOST_DATA_DIR}:/data:ro"
     environment:
       MEDIA_ORGANIZER_EXECUTION_ENABLED: "false"
+      MEDIA_ORGANIZER_EXECUTION_MODE: "strict"
       MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"
 
   worker:
@@ -26,4 +27,5 @@ services:
       - "${HOST_DATA_DIR:?Set HOST_DATA_DIR}:/data:rw"
     environment:
       MEDIA_ORGANIZER_EXECUTION_ENABLED: "false"
+      MEDIA_ORGANIZER_EXECUTION_MODE: "strict"
       MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"

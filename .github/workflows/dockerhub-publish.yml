@@ -11,6 +11,8 @@ on:
       - 'app/**'
       - 'frontend/**'
       - 'scripts/verify_v16_candidate_ci.py'
+      - 'scripts/v16_nas_maintenance_acceptance.py'
+      - 'tests/test_v16_nas_maintenance_acceptance.py'
       - 'tests/test_v16_candidate_delivery.py'
 
 permissions:
@@ -152,6 +154,20 @@ jobs:
           print('FRESH_NONROOT_CANDIDATE_API_BOOTSTRAP_OK')
           PY
 
+      - name: Real maintenance lifecycle on a disposable Docker fixture
+        shell: bash
+        env:
+          CANDIDATE_IMAGE: ${{ steps.identity.outputs.tag }}
+        run: |
+          set -euo pipefail
+          NFC_MAINTENANCE_ROOT="$(sudo mktemp -d /tmp/nfc-v16-maintenance-ci.XXXXXXXX)"
+          NFC_MAINTENANCE_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$CANDIDATE_IMAGE")"
+          sudo chmod 0755 "$NFC_MAINTENANCE_ROOT"
+          sudo python3 scripts/v16_nas_maintenance_acceptance.py \
+            --data-root "$NFC_MAINTENANCE_ROOT" \
+            --image "$NFC_MAINTENANCE_IMAGE_ID" \
+            --candidate-sha "$GITHUB_SHA" | tee candidate-maintenance-report.json
+
       - name: Require current candidate CI before publishing
         id: ci
         env:
@@ -202,6 +218,7 @@ jobs:
             candidate-image.json
             candidate-image-digest.txt
             candidate-registry-manifest.txt
+            candidate-maintenance-report.json
 
   publish:
     name: Build linux/amd64 and push to Docker Hub

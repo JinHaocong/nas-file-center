@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from app.batch import media_organizer_custody
 from app.batch import media_organizer_cleanup_jobs as cleanup_jobs
 from app.batch.media_organizer_planner import preview_semantic_unit
 from app.db import create_engine_and_session
@@ -346,7 +347,7 @@ def test_execution_status_provides_current_gate_without_a_new_preview(tmp_path, 
 
 def test_custody_revocation_before_original_commit_holds_finalized_status(tmp_path, monkeypatch):
     client, settings, unit, jid, token, state = _published(tmp_path, monkeypatch)
-    issue = cleanup_jobs.namespace_custody.verified_namespace_custody
+    issue = media_organizer_custody.verified_namespace_custody
 
     def live_proof(settings, unit):
         proof = issue(settings, unit)
@@ -358,7 +359,7 @@ def test_custody_revocation_before_original_commit_holds_finalized_status(tmp_pa
                 proof.assert_exclusive(folder)
         return RevocableProof()
 
-    monkeypatch.setattr(cleanup_jobs.namespace_custody, "verified_namespace_custody", live_proof)
+    monkeypatch.setattr(media_organizer_custody, "verified_namespace_custody", live_proof)
     cid = _queue(client, jid, token)
     checkpoint = JobContext.checkpoint
 

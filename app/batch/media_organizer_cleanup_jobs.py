@@ -1,9 +1,7 @@
 """A separate, confirmed WorkJob for FINAL V1.6 cleanup (#400).
 
-Important: this is wired but permanently fail-closed in production until
-the externally reviewed NAS namespace-custody issuer exists. No API request
-unlinks data; only the dedicated non-root Worker invokes the resumable
-finalizer after frozen evidence, a second confirmation and a lease fence.
+Only the non-root Worker invokes the resumable finalizer under the approved
+execution mode, after frozen evidence, a fresh confirmation and a lease fence.
 """
 from __future__ import annotations
 
@@ -12,13 +10,19 @@ from pathlib import Path
 
 from sqlalchemy import func, select, text
 
-from app.batch import media_organizer_custody as namespace_custody
+from app.batch.media_organizer_authority import (
+    check_api_eligibility, acquire_operation_authority, assert_operation_authorized,
+    fence_operation_authority,
+)
+from app.batch.media_organizer_jobs import mode_fields, require_mode
 from app.batch.media_organizer_cleanup_plan import (
     cleanup_plan_path, _read_existing,
 )
 from app.batch.media_organizer_execute_jobs import (
-    EXECUTE_KIND, MUTATION_KINDS, ACTIVE, _require_enabled, _require_nonroot_mutation_worker,
+    EXECUTE_KIND, ACTIVE, _require_enabled, _require_nonroot_mutation_worker,
     _literal_unit, _manifest_file, get_media_organizer_cleanup_plan,
+    _approval_fields, _validate_job_approval, _snapshot_review, _require_mutation_slot,
+    _validate_publication_family,
 )
 from app.batch.media_organizer_finalize import (
     cleanup_confirmation, finish_deferred_cleanup, _operations,
@@ -26,7 +30,6 @@ from app.batch.media_organizer_finalize import (
 from app.batch.media_organizer_manifest import _checksum, load_frozen_preview_manifest
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.config import Settings
-from app.config_sharing import shared_config_gid
 from app.models import WorkJob
 from app.tasks.context import JobContext
 from app.tasks.handlers_base import TaskHandler, register_handler
@@ -43,10 +46,22 @@ def cleanup_recovery_confirmation(cleanup_job_id: int, frozen_job_id: int,
             + cleanup_confirmation(frozen_job_id, unit, plan_sha256))
 
 
+def _cleanup_checkpoint_binding(state: dict, cleanup_job_id: int) -> dict:
+    fields = ("execution_job_id", "frozen_job_id", "unit", "plan_sha256", "manifest_checksum")
+    return {"cleanup_job_id": cleanup_job_id, **{field: state.get(field) for field in fields}}
+
+
 def _validated_state(job: WorkJob, settings: Settings) -> dict:
     state = json.loads(job.state_json or "{}")
     if not isinstance(state, dict) or job.kind != CLEANUP_KIND:
         raise ValueError("invalid cleanup WorkJob authority")
+    _validate_job_approval(settings, job, state)
+    checkpoint = json.loads(job.checkpoint_json or "{}")
+    if checkpoint:
+        mode = require_mode(settings, checkpoint)
+        if mode == "maintenance_window" and any(
+                checkpoint.get(key) != value for key, value in _cleanup_checkpoint_binding(state, job.id).items()):
+            raise ValueError("cleanup checkpoint differs from the approved frozen evidence")
     for field in ("execution_job_id", "frozen_job_id"):
         if type(state.get(field)) is not int or state[field] <= 0:
             raise ValueError("invalid frozen cleanup WorkJob identity")
@@ -91,12 +106,18 @@ def _cleanup_ancestry(session, job: WorkJob, state: dict,
     raise ValueError("cleanup recovery ancestry exceeds review limit")
 
 
-def _original_for_cleanup(session, state: dict, finalizers: set[int]) -> WorkJob:
+def _original_for_cleanup(session, state: dict, finalizers: set[int], settings: Settings) -> WorkJob:
     original = session.get(WorkJob, state["execution_job_id"])
     if original is None or original.kind != EXECUTE_KIND:
         raise ValueError("original approved publication is missing")
     original_state = json.loads(original.state_json or "{}")
     checkpoint = json.loads(original.checkpoint_json or "{}")
+    _validate_publication_family(session, settings, original, original_state, checkpoint)
+    if state.get("execution_mode") == "maintenance_window" and (
+            checkpoint.get("cleanup_plan_sha256") != state["plan_sha256"]
+            or checkpoint.get("unit") != state["unit"]
+            or checkpoint.get("manifest_checksum") != state.get("manifest_checksum")):
+        raise ValueError("cleanup approval differs from the completed Worker handoff")
     if (original.status != "completed"
             or checkpoint.get("frozen_job_id") != state["frozen_job_id"]
             or original_state.get("unit") != state["unit"]):
@@ -111,22 +132,32 @@ def _original_for_cleanup(session, state: dict, finalizers: set[int]) -> WorkJob
     return original
 
 
-def _frozen_cleanup_plan(settings: Settings, state: dict):
+def _frozen_cleanup_plan(settings: Settings, state: dict, original: WorkJob):
     frozen = _manifest_file(settings, state["frozen_job_id"])
     manifest = load_frozen_preview_manifest(
         frozen, job_id=state["frozen_job_id"], unit=Path(state["unit"]),
     )
-    plan = _read_existing(cleanup_plan_path(frozen))
+    require_mode(settings, manifest)
+    if state.get("execution_mode") == "maintenance_window":
+        from app.batch.media_organizer_shared_handoff import read_shared_cleanup_handoff
+        # The caller already checked the publication's phase and finalizer ancestry.
+        handoff = read_shared_cleanup_handoff(
+            manifest, frozen, json.loads(original.checkpoint_json), allow_finalized=True,
+        )
+        plan = handoff["plan"]
+    else:
+        plan = _read_existing(cleanup_plan_path(frozen))
+        _operations(manifest, plan)
     if state["plan_sha256"] != plan.get("plan_sha256"):
         raise ValueError("cleanup WorkJob differs from immutable plan")
     # Pure frozen-plan validation: stage may already have been removed by
     # the failed Worker. Only that Worker's private journal authorizes replay.
-    _operations(manifest, plan)
     return frozen, manifest
 
 
 def _receipt(job: WorkJob, state: dict) -> dict:
-    result = {"job_id": int(job.id), "status": job.status,
+    result = {**mode_fields(state.get("execution_mode", "strict")),
+              "job_id": int(job.id), "status": job.status,
               "execution_job_id": state["execution_job_id"]}
     if state.get("recovery_of_job_id") is not None:
         result["recovery_of_job_id"] = state["recovery_of_job_id"]
@@ -144,7 +175,7 @@ def _approved_existing(session, job: WorkJob, confirmation: str, settings: Setti
     state = _validated_state(job, settings)
     if confirmation != state["confirmation"]:
         raise ValueError("exact separate cleanup confirmation required")
-    _original_for_cleanup(session, state, _cleanup_ancestry(session, job, state, settings))
+    _original_for_cleanup(session, state, _cleanup_ancestry(session, job, state, settings), settings)
     if job.status not in (*ACTIVE, "completed"):
         raise ValueError("failed cleanup requires explicit journal recovery review")
     return _receipt(job, state)
@@ -166,10 +197,11 @@ def _cleanup_scope(manifest: dict) -> tuple[Path, ...]:
 
 def enqueue_media_organizer_cleanup(
     session_factory, settings: Settings, *,
-    execution_job_id: int, confirmation: str,
+    execution_job_id: int, confirmation: str, maintenance_window_confirmed: bool = False,
 ) -> dict:
     """Queue exactly one separately approved cleanup job, without media writes."""
     _require_enabled(settings)
+    approval = _approval_fields(settings, maintenance_window_confirmed)
     if not isinstance(confirmation, str) or not confirmation:
         raise ValueError("exact separate cleanup approval required")
 
@@ -182,7 +214,7 @@ def enqueue_media_organizer_cleanup(
 
     # Explicit shared mode reads the completed Worker's bound snapshot;
     # legacy mode retains the live audit. The Worker always audits again.
-    shared = shared_config_gid() is not None
+    shared = _snapshot_review(settings)
     review = get_media_organizer_cleanup_plan(
         session_factory, settings, execution_job_id, page=1, page_size=1,
     )
@@ -199,10 +231,8 @@ def enqueue_media_organizer_cleanup(
     )
     if _checksum(manifest) != review["manifest_checksum"]:
         raise ValueError("frozen manifest changed after cleanup review")
-    proof = namespace_custody.verified_namespace_custody(settings, unit)
-    namespace_custody.assert_exclusive_custody(
-        proof, _cleanup_scope(manifest),
-    )
+    require_mode(settings, manifest)
+    check_api_eligibility(settings, unit, _cleanup_scope(manifest))
 
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
@@ -210,6 +240,7 @@ def enqueue_media_organizer_cleanup(
         if prior is None or prior.kind != EXECUTE_KIND:
             raise KeyError(execution_job_id)
         checkpoint = json.loads(prior.checkpoint_json or "{}")
+        _validate_publication_family(session, settings, prior, json.loads(prior.state_json), checkpoint)
         phase = checkpoint.get("phase")
         if prior.status != "completed" or phase != "manual_cleanup_required":
             raise ValueError("cleanup is not ready for separate confirmation")
@@ -222,18 +253,17 @@ def enqueue_media_organizer_cleanup(
         existing = _existing_cleanup(session, execution_job_id)
         if existing is not None:
             return _approved_existing(session, existing, confirmation, settings)
-        if session.scalar(select(WorkJob.id).where(
-            WorkJob.kind.in_(MUTATION_KINDS),
-            WorkJob.status.in_(ACTIVE),
-        ).limit(1)) is not None:
-            raise ValueError("another V1.6 mutation WorkJob is active")
+        _require_mutation_slot(session, family_id=frozen_id if maintenance_window_confirmed else None)
 
+        approved_id = next_media_package_job_id(session, settings)
         job = WorkJob(
-            id=next_media_package_job_id(session, settings),
+            id=approved_id,
             kind=CLEANUP_KIND, status="queued", progress_current=0,
             progress_total=2,
-            progress_message="等待专用 Worker 验证清理授权和独占目录权限",
+            progress_message=("等待专用 Worker 核验维护窗口清理授权和操作范围"
+                              if maintenance_window_confirmed else "等待专用 Worker 验证清理授权和独占目录权限"),
             state_json=json.dumps({
+                **approval, "approved_job_id": approved_id, "manifest_checksum": _checksum(manifest),
                 "execution_job_id": execution_job_id,
                 "frozen_job_id": frozen_id,
                 "unit": str(unit),
@@ -243,15 +273,16 @@ def enqueue_media_organizer_cleanup(
         )
         session.add(job)
         session.commit()
-        return {"job_id": int(job.id), "status": job.status,
-                "execution_job_id": execution_job_id}
+        return _receipt(job, json.loads(job.state_json))
 
 
 def enqueue_media_organizer_cleanup_recovery(
     session_factory, settings: Settings, *, failed_job_id: int, confirmation: str,
+    maintenance_window_confirmed: bool = False,
 ) -> dict:
     """Queue explicit recovery; private journal reconciliation stays in Worker."""
     _require_enabled(settings)
+    approval = _approval_fields(settings, maintenance_window_confirmed)
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
         failed = session.get(WorkJob, failed_job_id)
@@ -275,23 +306,21 @@ def enqueue_media_organizer_cleanup_recovery(
                 raise ValueError("recover the latest failed cleanup attempt explicitly")
             existing_state = _validated_state(existing, settings)
             ancestry = _cleanup_ancestry(session, existing, existing_state, settings)
-            _original_for_cleanup(session, existing_state, ancestry)
+            _original_for_cleanup(session, existing_state, ancestry, settings)
             return _receipt(existing, existing_state)
-        _original_for_cleanup(session, state, ancestors)
-        _, manifest = _frozen_cleanup_plan(settings, state)
-        proof = namespace_custody.verified_namespace_custody(settings, Path(state["unit"]))
-        namespace_custody.assert_exclusive_custody(proof, _cleanup_scope(manifest))
-        if session.scalar(select(WorkJob.id).where(
-            WorkJob.kind.in_(MUTATION_KINDS), WorkJob.status.in_(ACTIVE),
-        ).limit(1)) is not None:
-            raise ValueError("another V1.6 mutation WorkJob is active")
+        original = _original_for_cleanup(session, state, ancestors, settings)
+        _, manifest = _frozen_cleanup_plan(settings, state, original)
+        check_api_eligibility(settings, Path(state["unit"]), _cleanup_scope(manifest))
+        _require_mutation_slot(session, family_id=state["frozen_job_id"] if maintenance_window_confirmed else None)
         recovery_state = {key: state[key] for key in (
             "execution_job_id", "frozen_job_id", "unit", "plan_sha256", "confirmation",
         )}
+        approved_id = next_media_package_job_id(session, settings)
+        recovery_state.update(approval, approved_job_id=approved_id, manifest_checksum=_checksum(manifest))
         recovery_state.update({"recovery_of_job_id": failed_job_id,
                                "recovery_confirmation": confirmation})
         job = WorkJob(
-            id=next_media_package_job_id(session, settings), kind=CLEANUP_KIND,
+            id=approved_id, kind=CLEANUP_KIND,
             status="queued", progress_current=0, progress_total=2,
             progress_message="等待专用 Worker 核验原清理日志并恢复",
             state_json=json.dumps(recovery_state, ensure_ascii=False),
@@ -316,38 +345,35 @@ class MediaOrganizerCleanupHandler(TaskHandler):
             raise PermissionError("exclusive Worker lease required for cleanup")
         _require_nonroot_mutation_worker()
         state = _validated_state(job, settings)
-        execution_id = state["execution_job_id"]
-        frozen_id = state["frozen_job_id"]
         unit = Path(state["unit"])
         with context.SessionLocal() as session:
             original = _original_for_cleanup(
-                session, state, _cleanup_ancestry(session, job, state, settings),
+                session, state, _cleanup_ancestry(session, job, state, settings), settings,
             )
-        frozen, manifest = _frozen_cleanup_plan(settings, state)
-        proof = namespace_custody.verified_namespace_custody(settings, unit)
-        namespace_custody.assert_exclusive_custody(
-            proof, _cleanup_scope(manifest),
-        )
+            frozen, manifest = _frozen_cleanup_plan(settings, state, original)
+        with acquire_operation_authority(settings, unit, _cleanup_scope(manifest), manifest=manifest) as proof:
+            self._finalize(job, context, settings, state, frozen, manifest, proof)
 
-        # Revalidate the Worker lease and scoped custody at EACH cleanup step,
-        # not merely when the API queues the WorkJob.
-        class FencedCustody:
-            def assert_exclusive(self, folder: Path) -> None:
-                from app.tasks.recovery import renew_and_assert_worker_lease
-                renew_and_assert_worker_lease(context.SessionLocal, context.worker_id)
-                namespace_custody.assert_exclusive_custody(proof, (folder,))
+    def _finalize(self, job, context, settings, state, frozen, manifest, proof) -> None:
+        binding = {**mode_fields(state.get("execution_mode", "strict")), **_cleanup_checkpoint_binding(state, job.id)}
 
+        def renew_lease():
+            from app.tasks.recovery import renew_and_assert_worker_lease
+            renew_and_assert_worker_lease(context.SessionLocal, context.worker_id)
+
+        fenced = fence_operation_authority(proof, renew_lease)
+        assert_operation_authorized(fenced, _cleanup_scope(manifest))
         context.checkpoint(
             progress_current=0, progress_total=2,
-            progress_message="冻结清单与独占目录凭证已复核，开始可恢复清理",
-            checkpoint_data={"schema_version": 1, "phase": "cleanup-verified",
-                             "execution_job_id": execution_id, "frozen_job_id": frozen_id},
+            progress_message=("冻结清单与维护窗口授权已复核，开始可恢复清理"
+                              if binding["requires_maintenance_window"] else "冻结清单与独占目录凭证已复核，开始可恢复清理"),
+            checkpoint_data={**binding, "schema_version": 1, "phase": "cleanup-verified"},
         )
         result = finish_deferred_cleanup(
             manifest, frozen_manifest_path=frozen,
             allowed_roots=settings.allowed_roots,
             quarantine_root=settings.quarantine_root,
-            confirmation=state["confirmation"], custody=FencedCustody(),
+            confirmation=state["confirmation"], custody=fenced,
         )
         if (not result["finalized"] or result["needed_moves"] != 0
                 or result["renamed_count"] != 0):
@@ -355,8 +381,7 @@ class MediaOrganizerCleanupHandler(TaskHandler):
         context.checkpoint(
             progress_current=1, progress_total=2,
             progress_message="原路径与暂存清理完成；二次扫描已确认零变更",
-            checkpoint_data={"schema_version": 1, "phase": "cleanup-scanned-zero",
-                             "execution_job_id": execution_id, "frozen_job_id": frozen_id},
+            checkpoint_data={**binding, "schema_version": 1, "phase": "cleanup-scanned-zero"},
         )
         # Durability ordering: update the original job's finalized status ONLY
         # after the resumable file-system journal has a committed final marker.
@@ -364,14 +389,14 @@ class MediaOrganizerCleanupHandler(TaskHandler):
             session.execute(text("BEGIN IMMEDIATE"))
             from app.tasks.recovery import assert_active_worker_lease
             assert_active_worker_lease(session, context.worker_id)
-            namespace_custody.assert_exclusive_custody(proof, _cleanup_scope(manifest))
+            assert_operation_authorized(proof, _cleanup_scope(manifest))
             current_job = session.get(WorkJob, int(job.id))
             if (current_job is None or current_job.status != "running"
                     or _validated_state(current_job, settings) != state):
                 raise ValueError("cleanup WorkJob authority changed before finalization")
             original = _original_for_cleanup(session, state, _cleanup_ancestry(
                 session, current_job, state, settings,
-            ))
+            ), settings)
             current = json.loads(original.checkpoint_json or "{}")
             current.update({
                 "phase": "completed",
@@ -387,6 +412,5 @@ class MediaOrganizerCleanupHandler(TaskHandler):
         context.checkpoint(
             progress_current=2, progress_total=2,
             progress_message="已完成清理及零变更复扫",
-            checkpoint_data={"schema_version": 1, "phase": "completed",
-                             "execution_job_id": execution_id, "frozen_job_id": frozen_id},
+            checkpoint_data={**binding, "schema_version": 1, "phase": "completed"},
         )

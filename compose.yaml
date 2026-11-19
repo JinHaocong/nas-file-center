@@ -22,6 +22,7 @@ x-common: &common
     MTIME_REFRESH_DELAY_SECONDS: ${MTIME_REFRESH_DELAY_SECONDS:-2}
     # V1.6 execution remains independently disabled until NAS acceptance.
     MEDIA_ORGANIZER_EXECUTION_ENABLED: "false"
+    MEDIA_ORGANIZER_EXECUTION_MODE: "strict"
     MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"
     # Distinct UIDs need group-shared SQLite and reports under a provisioned /config.
     NFC_SHARED_CONFIG_GID: ${NFC_SHARED_GID:-10000}

@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 import ipaddress
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,6 +31,9 @@ class Settings(BaseSettings):
     # Existing mutation permissions alone never enable this feature.
     media_organizer_execution_enabled: bool = Field(
         default=False, validation_alias="MEDIA_ORGANIZER_EXECUTION_ENABLED",
+    )
+    media_organizer_execution_mode: Literal["strict", "maintenance_window"] = Field(
+        default="strict", validation_alias="MEDIA_ORGANIZER_EXECUTION_MODE",
     )
     # SECURITY HOLD: inode checks cannot make rename/rmdir source-name
     # operations atomic against uncooperative concurrent writers. Keep this

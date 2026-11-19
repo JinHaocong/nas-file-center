@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import logging
 import sqlite3
 from typing import Any
-from sqlalchemy import Integer, func, select, update, text
+from sqlalchemy import Integer, func, or_, select, update, text
 from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
 from sqlalchemy.orm import sessionmaker
 
@@ -45,6 +46,248 @@ RESOURCE_CONTROLLED_JOB_KINDS: tuple[str, ...] = (
     "workflow-scheduled",
     "download-verify-webdav",
 )
+
+_EXECUTION_KIND = "media-organizer-execute"
+_CLEANUP_KIND = "media-organizer-cleanup"
+_READ_ONLY_PREVIEWS = ("media-organizer-preview", "media_package-package-preview", "media-sort-preview")
+_MAINTENANCE_MODE = "maintenance_window"
+
+
+class MaintenanceReservationActive(PermissionError):
+    """A frozen maintenance family still owns the application mutation window."""
+
+
+def _json_object(raw: str | None) -> dict[str, Any]:
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _positive_id(value: Any) -> bool:
+    return type(value) is int and value > 0
+
+
+def organizer_recovery_predecessor(
+    job_id: int, retry_of: int | None, state: dict[str, Any],
+) -> int | None:
+    """Classify only the canonical persisted organizer recovery predecessor."""
+    if "recover_from_job_id" in state:
+        raise ValueError("noncanonical organizer recovery predecessor")
+    if "recovery_of_job_id" not in state and retry_of is None:
+        return None
+    parent = state.get("recovery_of_job_id")
+    if not _positive_id(parent) or parent >= job_id or type(retry_of) is not int or retry_of != parent:
+        raise ValueError("organizer recovery predecessor differs from the durable retry link")
+    return parent
+
+
+@dataclass(frozen=True)
+class _OrganizerJob:
+    id: int
+    status: str
+    state: dict[str, Any]
+    checkpoint: dict[str, Any]
+    retry_of: int | None
+
+
+def _matches_fields(actual: dict[str, Any], expected: dict[str, Any]) -> bool:
+    return all(key in actual and type(actual[key]) is type(value) and actual[key] == value
+               for key, value in expected.items())
+
+
+def _sha256(value: Any) -> bool:
+    return type(value) is str and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def _approved_predecessors(jobs: dict[int, _OrganizerJob]) -> dict[int, int | None]:
+    predecessors = {}
+    for job in jobs.values():
+        if not _matches_fields(job.state, {
+            "execution_mode": _MAINTENANCE_MODE, "maintenance_window_confirmed": True,
+            "approved_job_id": job.id,
+        }):
+            continue
+        try:
+            predecessors[job.id] = organizer_recovery_predecessor(job.id, job.retry_of, job.state)
+        except ValueError:
+            continue
+    return predecessors
+
+
+def _publication_binding(job: _OrganizerJob, family_id: int) -> bool:
+    unit = job.state.get("unit")
+    preview_id = job.state.get("preview_job_id")
+    return (
+        type(unit) is str and bool(unit) and _positive_id(preview_id)
+        and _sha256(job.checkpoint.get("manifest_checksum"))
+        and _matches_fields(job.checkpoint, {
+            "schema_version": 1, "execution_mode": _MAINTENANCE_MODE,
+            "frozen_job_id": family_id, "unit": unit, "preview_job_id": preview_id,
+        })
+    )
+
+
+def _execution_families(executions: dict[int, _OrganizerJob]) -> dict[int, int]:
+    from app.batch.media_organizer_execute_jobs import RECOVERABLE_PHASES
+
+    predecessors = _approved_predecessors(executions)
+    families = {}
+    for job_id, predecessor in predecessors.items():
+        if predecessor is None:
+            families[job_id] = job_id
+            continue
+        job = executions[job_id]
+        original = executions.get(predecessor)
+        if (
+            original is not None and original.status == JobState.FAILED.value
+            and predecessor in predecessors and predecessors[predecessor] is None
+            and _publication_binding(original, predecessor)
+            and type(original.state.get("selection")) is str and original.state["selection"]
+            and original.checkpoint.get("phase") in RECOVERABLE_PHASES
+            and _matches_fields(job.state, {
+                "unit": original.state["unit"], "preview_job_id": original.state["preview_job_id"],
+                "selection": original.state.get("selection"),
+                "recovery_manifest_checksum": original.checkpoint["manifest_checksum"],
+                "recovery_phase": original.checkpoint["phase"],
+            })
+        ):
+            families[job_id] = predecessor
+    return families
+
+
+def _eligible_cleanups(
+    cleanups: dict[int, _OrganizerJob],
+    publications: dict[int, _OrganizerJob],
+    families: dict[int, int],
+) -> dict[int, dict[str, Any]]:
+    predecessors = _approved_predecessors(cleanups)
+    eligible = {}
+    # Parents precede recoveries. Match each predecessor to the same reviewed
+    # publication so an old cancellation or another cleanup cannot confer scope.
+    for cleanup_id in sorted(predecessors):
+        cleanup = cleanups[cleanup_id]
+        publication_id = cleanup.state.get("execution_job_id")
+        if not _positive_id(publication_id) or publication_id not in publications:
+            continue
+        publication = publications[publication_id]
+        binding = {
+            "execution_job_id": publication_id,
+            "frozen_job_id": families[publication_id],
+            "unit": publication.state["unit"],
+            "manifest_checksum": publication.checkpoint["manifest_checksum"],
+            "plan_sha256": publication.checkpoint["cleanup_plan_sha256"],
+        }
+        predecessor = predecessors[cleanup_id]
+        if not _matches_fields(cleanup.state, binding):
+            continue
+        if predecessor is not None and (
+            eligible.get(predecessor) != binding or cleanups[predecessor].status != JobState.FAILED.value
+        ):
+            continue
+        eligible[cleanup_id] = binding
+    return eligible
+
+
+def _maintenance_mutation_gate(session: Any) -> tuple[set[int], set[int]]:
+    rows = session.execute(
+        select(
+            WorkJob.id, WorkJob.kind, WorkJob.status, WorkJob.state_json, WorkJob.checkpoint_json, WorkJob.retry_of,
+        ).where(WorkJob.kind.in_((_EXECUTION_KIND, _CLEANUP_KIND)))
+    )
+    executions = {}
+    cleanups = {}
+    reserved = set()
+    for job_id, kind, status, raw_state, raw_checkpoint, retry_of in rows:
+        state = _json_object(raw_state)
+        checkpoint = _json_object(raw_checkpoint)
+        job = _OrganizerJob(job_id, status, state, checkpoint, retry_of)
+        if kind == _EXECUTION_KIND:
+            if _MAINTENANCE_MODE in (state.get("execution_mode"), checkpoint.get("execution_mode")):
+                executions[job_id] = job
+                frozen_id = checkpoint.get("frozen_job_id")
+                checksum = checkpoint.get("manifest_checksum")
+                if _positive_id(frozen_id) and type(checksum) is str and checksum:
+                    reserved.add(frozen_id)
+        elif state.get("execution_mode") == _MAINTENANCE_MODE:
+            cleanups[job_id] = job
+    if not reserved:
+        return reserved, set()
+
+    families = _execution_families(executions)
+    publications = {
+        job_id: job for job_id, job in executions.items()
+        if job_id in families and job.status == JobState.COMPLETED.value
+        and _publication_binding(job, families[job_id])
+        and _sha256(job.checkpoint.get("cleanup_plan_sha256"))
+        and job.checkpoint.get("phase") in ("manual_cleanup_required", "completed")
+        and (families[job_id] == job_id
+             or job.checkpoint["manifest_checksum"] == job.state["recovery_manifest_checksum"])
+    }
+    eligible_cleanups = _eligible_cleanups(cleanups, publications, families)
+
+    for job_id, publication in publications.items():
+        checkpoint = publication.checkpoint
+        if not _matches_fields(checkpoint, {
+            "phase": "completed", "second_scan_needed_moves": 0, "second_scan_renamed_count": 0,
+        }):
+            continue
+        finalizer_id = checkpoint.get("finalized_by_cleanup_job_id")
+        if not _positive_id(finalizer_id) or finalizer_id not in eligible_cleanups:
+            continue
+        binding = eligible_cleanups[finalizer_id]
+        finalizer = cleanups[finalizer_id]
+        phase = finalizer.checkpoint.get("phase")
+        # The Worker persists the scanned-zero checkpoint before updating the
+        # publication. Its separate terminal DB commit may still be pending.
+        if (
+            binding["execution_job_id"] == job_id
+            and finalizer.status in {JobState.RUNNING.value, JobState.COMPLETED.value, JobState.FAILED.value}
+            and phase in ("cleanup-scanned-zero", "completed")
+            and (finalizer.status != JobState.COMPLETED.value or phase == "completed")
+            and _matches_fields(finalizer.checkpoint, {
+                **binding, "schema_version": 1, "execution_mode": _MAINTENANCE_MODE,
+                "cleanup_job_id": finalizer_id,
+            })
+        ):
+            reserved.discard(families[job_id])
+
+    allowed = set()
+    if len(reserved) == 1:
+        family_id = next(iter(reserved))
+        allowed.update(job_id for job_id, root_id in families.items()
+                       if root_id == family_id and job_id != root_id)
+        allowed.update(cleanup_id for cleanup_id, binding in eligible_cleanups.items()
+                       if binding["frozen_job_id"] == family_id)
+    return reserved, allowed
+
+
+def reserved_maintenance_family_ids(session: Any) -> set[int]:
+    """Return the frozen execution IDs that still own a mutation window."""
+    reserved, _ = _maintenance_mutation_gate(session)
+    return reserved
+
+
+def assert_no_maintenance_reservation(session: Any) -> None:
+    """Require a free mutation window for a caller outside WorkJob dispatch."""
+    if reserved_maintenance_family_ids(session):
+        raise MaintenanceReservationActive("A frozen media organizer maintenance window is active")
+
+
+def work_job_allowed_by_maintenance_reservation(session: Any, job: WorkJob) -> bool:
+    if job.kind in _READ_ONLY_PREVIEWS:
+        return True
+    reserved, allowed = _maintenance_mutation_gate(session)
+    return not reserved or job.id in allowed
+
+
+def _queued_jobs_allowed_by_reservation(session: Any):
+    query = select(WorkJob.id).where(WorkJob.status == JobState.QUEUED.value)
+    reserved, allowed = _maintenance_mutation_gate(session)
+    if reserved:
+        query = query.where(or_(WorkJob.kind.in_(_READ_ONLY_PREVIEWS), WorkJob.id.in_(allowed)))
+    return query.order_by(WorkJob.id).limit(1)
 
 
 def assert_active_worker_lease(
@@ -325,44 +568,13 @@ def claim_next_job(
                 resource_jobs_admitted = eff.resource_jobs_admitted
                 job_priority = snapshot.job_priority
 
-            candidate_id = None
-            if not resource_jobs_admitted:
-                candidate_id = session.scalar(
-                    select(WorkJob.id)
-                    .where(
-                        WorkJob.status == JobState.QUEUED.value,
-                        WorkJob.kind.not_in(RESOURCE_CONTROLLED_JOB_KINDS),
-                    )
-                    .order_by(WorkJob.id)
-                    .limit(1)
-                )
-            elif job_priority == "background":
-                candidate_id = session.scalar(
-                    select(WorkJob.id)
-                    .where(
-                        WorkJob.status == JobState.QUEUED.value,
-                        WorkJob.kind.not_in(RESOURCE_CONTROLLED_JOB_KINDS),
-                    )
-                    .order_by(WorkJob.id)
-                    .limit(1)
-                )
-                if candidate_id is None:
-                    candidate_id = session.scalar(
-                        select(WorkJob.id)
-                        .where(
-                            WorkJob.status == JobState.QUEUED.value,
-                            WorkJob.kind.in_(RESOURCE_CONTROLLED_JOB_KINDS),
-                        )
-                        .order_by(WorkJob.id)
-                        .limit(1)
-                    )
+            queue = _queued_jobs_allowed_by_reservation(session)
+            if not resource_jobs_admitted or job_priority == "background":
+                candidate_id = session.scalar(queue.where(WorkJob.kind.not_in(RESOURCE_CONTROLLED_JOB_KINDS)))
+                if candidate_id is None and resource_jobs_admitted:
+                    candidate_id = session.scalar(queue.where(WorkJob.kind.in_(RESOURCE_CONTROLLED_JOB_KINDS)))
             else:
-                candidate_id = session.scalar(
-                    select(WorkJob.id)
-                    .where(WorkJob.status == JobState.QUEUED.value)
-                    .order_by(WorkJob.id)
-                    .limit(1)
-                )
+                candidate_id = session.scalar(queue)
 
             if candidate_id is None:
                 session.rollback()
@@ -396,13 +608,8 @@ def claim_next_job(
         fallback_now = utcnow()
         assert_active_worker_lease(session, worker_id, now=fallback_now, timeout_seconds=timeout_seconds)
         candidate_id = session.scalar(
-            select(WorkJob.id)
-            .where(
-                WorkJob.status == JobState.QUEUED.value,
-                WorkJob.kind.not_in(RESOURCE_CONTROLLED_JOB_KINDS),
-            )
-            .order_by(WorkJob.id)
-            .limit(1)
+            _queued_jobs_allowed_by_reservation(session)
+            .where(WorkJob.kind.not_in(RESOURCE_CONTROLLED_JOB_KINDS))
         )
         if candidate_id is None:
             session.rollback()

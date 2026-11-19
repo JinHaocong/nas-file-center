@@ -279,6 +279,9 @@ class TaskService:
                 validate_transition(job.status, JobState.CANCELLED.value)
                 job.status = JobState.CANCELLED.value
                 job.finished_at = now
+                if job.kind == "archive-recovery":
+                    from app.archive_recovery.integration import record_cancelled_output_cleanup
+                    record_cancelled_output_cleanup(job)
                 sync_scan_job_status(
                     session,
                     job,
@@ -325,8 +328,8 @@ class TaskService:
             with self.SessionLocal() as session:
                 current = session.get(WorkJob, task_id)
                 if current is not None:
-                    from app.archive_recovery.integration import cleanup_cancelled_queued_recovery
-                    cleanup_cancelled_queued_recovery(current.state_json)
+                    from app.archive_recovery.integration import discard_cancelled_recovery_password
+                    discard_cancelled_recovery_password(current.state_json)
         return response
 
     def retry_task(self, task_id: int, user_id: int | None = None) -> dict:

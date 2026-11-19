@@ -1643,6 +1643,21 @@ class FileCenterService:
         return {"id": plan.id, "status": plan.status, "items": len(generated.items), "delete_counts": generated.delete_counts}
 
     def validate_plan(self, plan_id: int, *, progress_callback: Callable[[int, int], None] | None = None) -> dict:
+        # Storage optimization validation can run live write probes. Acquire
+        # before DB locks so an API validation cannot overlap a Worker or an
+        # unfinished organizer maintenance window.
+        from app.tasks.media_mutation_lock import media_mutation_lock, MediaMutationLockUnavailable
+        from app.tasks.recovery import assert_no_maintenance_reservation, MaintenanceReservationActive
+
+        try:
+            with media_mutation_lock(self.settings, blocking=False):
+                with self.SessionLocal() as session:
+                    assert_no_maintenance_reservation(session)
+                return self._validate_plan_under_media_lock(plan_id, progress_callback=progress_callback)
+        except (MediaMutationLockUnavailable, MaintenanceReservationActive) as exc:
+            raise StateConflictError(str(exc)) from exc
+
+    def _validate_plan_under_media_lock(self, plan_id: int, *, progress_callback: Callable[[int, int], None] | None = None) -> dict:
         with self.SessionLocal() as session:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:

@@ -16,6 +16,7 @@ import { getStructuredApiError } from '../../api/errors';
 import {
   mediaOrganizerApi, executableSemanticUnits, semanticExecutionNeedsPolling,
   canConfirmSemanticCleanup, canRecoverSemanticCleanup,
+  hasMaintenanceConfirmation, requiresSemanticMaintenanceWindow,
   semanticExecutionIdFromSearch, withSemanticExecutionId,
   type SemanticUnitPreview, type SemanticCleanupLink, type SemanticCleanupPlan,
 } from '../../api/media_organizer';
@@ -23,6 +24,22 @@ import {
 const isRunning = (status: string | undefined) =>
   status === 'queued' || status === 'running' ||
   status === 'cancel_requested' || status === 'paused';
+
+export const SemanticMaintenanceConfirmation: React.FC<{
+  id: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void;
+}> = ({ id, checked, disabled, onChange }) => (
+  <div className="nfc-v2-batch-field">
+    <p id={`${id}-description`} className="nfc-form-note">
+      维护窗口模式：请暂停对当前作品及同一批文件的其他写入，包括共享访问、同步任务和其他应用，
+      直到清理或恢复全部完成。若其他程序仍在修改，替换的文件可能被误删，无法保证恢复。
+    </p>
+    <label htmlFor={id}>
+      <input id={id} type="checkbox" checked={checked} disabled={disabled}
+        aria-describedby={`${id}-description`} onChange={event => onChange(event.target.checked)} />
+      我已暂停其他写入，并确认本次操作的维护窗口仍然有效
+    </label>
+  </div>
+);
 
 const unitStatus = (item: SemanticUnitPreview): [string, string] => {
   if (item.status === 'blocked') return ['failed', '需要人工检查'];
@@ -142,28 +159,36 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
   const [cleanupPageSize, setCleanupPageSize] = useState(25);
   const [cleanupConfirmation, setCleanupConfirmation] = useState('');
   const [cleanupRecoveryConfirmation, setCleanupRecoveryConfirmation] = useState('');
+  // Store the exact operation binding so changing a unit, job or reviewed
+  // plan cannot reuse a checked acknowledgement, even before effects run.
+  const [executionMaintenance, setExecutionMaintenance] = useState<string | null>(null);
+  const [recoveryMaintenance, setRecoveryMaintenance] = useState<string | null>(null);
+  const [cleanupMaintenance, setCleanupMaintenance] = useState<string | null>(null);
+  const [cleanupRecoveryMaintenance, setCleanupRecoveryMaintenance] = useState<string | null>(null);
   const [expectedCleanupJobId, setExpectedCleanupJobId] = useState<number | null>(null);
   const [mappingSelection, setMappingSelection] = useState<{ unit: string; mappingId: string } | null>(null);
   const [mappingPage, setMappingPage] = useState(1);
   const [mappingPageSize, setMappingPageSize] = useState(50);
   const enqueue = useMutation({ mutationFn: mediaOrganizerApi.startPreview });
   const startExecution = useMutation({
-    mutationFn: ({ previewId, unit, confirmation }: {
-      previewId: number; unit: string; confirmation: string;
-    }) => mediaOrganizerApi.startExecution(previewId, unit, confirmation),
+    mutationFn: ({ previewId, unit, confirmation, maintenanceConfirmed }: {
+      previewId: number; unit: string; confirmation: string; maintenanceConfirmed: boolean;
+    }) => mediaOrganizerApi.startExecution(previewId, unit, confirmation, maintenanceConfirmed),
   });
   const recoverExecution = useMutation({
-    mutationFn: ({ executionId, confirmation }: {
-      executionId: number; confirmation: string;
-    }) => mediaOrganizerApi.recoverExecution(executionId, confirmation),
+    mutationFn: ({ executionId, confirmation, maintenanceConfirmed }: {
+      executionId: number; confirmation: string; maintenanceConfirmed: boolean;
+    }) => mediaOrganizerApi.recoverExecution(executionId, confirmation, maintenanceConfirmed),
   });
   const startCleanup = useMutation({
-    mutationFn: ({ executionId, confirmation }: { executionId: number; confirmation: string }) =>
-      mediaOrganizerApi.startCleanup(executionId, confirmation),
+    mutationFn: ({ executionId, confirmation, maintenanceConfirmed }: {
+      executionId: number; confirmation: string; maintenanceConfirmed: boolean;
+    }) => mediaOrganizerApi.startCleanup(executionId, confirmation, maintenanceConfirmed),
   });
   const recoverCleanup = useMutation({
-    mutationFn: ({ cleanupId, confirmation }: { cleanupId: number; confirmation: string }) =>
-      mediaOrganizerApi.recoverCleanup(cleanupId, confirmation),
+    mutationFn: ({ cleanupId, confirmation, maintenanceConfirmed }: {
+      cleanupId: number; confirmation: string; maintenanceConfirmed: boolean;
+    }) => mediaOrganizerApi.recoverCleanup(cleanupId, confirmation, maintenanceConfirmed),
   });
   const cancel = useMutation({ mutationFn: tasksApi.cancelTask });
   const { data, isError, error, isFetching } = useQuery({
@@ -225,20 +250,37 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
   const executableUnits = executableSemanticUnits(data);
   const readyUnit = executableUnits.find(row => row.unit === selectedUnit);
   const expectedConfirmation = data?.confirmation_tokens?.[selectedUnit] || '';
+  const executionAgreementKey = JSON.stringify([jobId, selectedUnit, data?.execution_mode, expectedConfirmation]);
+  const recoveryAgreementKey = JSON.stringify([executionJobId, executionStatus?.unit, executionStatus?.execution_mode]);
+  const cleanupAgreementKey = JSON.stringify([executionJobId, cleanupPlan?.unit,
+    cleanupPlan?.execution_mode, cleanupPlan?.plan_sha256, cleanupPlan?.confirmation]);
+  const cleanupRecoveryAgreementKey = JSON.stringify([executionJobId, executionStatus?.unit,
+    executionStatus?.execution_mode, executionStatus?.cleanup?.job_id,
+    executionStatus?.cleanup?.recovery_confirmation]);
+  useEffect(() => setExecutionMaintenance(null), [executionAgreementKey]);
+  useEffect(() => setRecoveryMaintenance(null), [recoveryAgreementKey]);
+  useEffect(() => setCleanupMaintenance(null), [cleanupAgreementKey]);
+  useEffect(() => setCleanupRecoveryMaintenance(null), [cleanupRecoveryAgreementKey]);
+  const executionMaintenanceConfirmed = executionMaintenance === executionAgreementKey;
+  const recoveryMaintenanceConfirmed = recoveryMaintenance === recoveryAgreementKey;
+  const cleanupMaintenanceConfirmed = cleanupMaintenance === cleanupAgreementKey;
+  const cleanupRecoveryMaintenanceConfirmed = cleanupRecoveryMaintenance === cleanupRecoveryAgreementKey;
   const canExecute = Boolean(data?.execution_enabled && data?.status === 'completed' &&
+    hasMaintenanceConfirmation(data, executionMaintenanceConfirmed) &&
     summary && summary.blocked_count === 0 && readyUnit && expectedConfirmation &&
     executionConfirmation === expectedConfirmation && !busy &&
     !startExecution.isPending && executionJobId === null);
   const recoveryToken = executionJobId === null ? '' :
     `RECOVER_MEDIA_ORGANIZER_EXECUTION_${executionJobId}`;
   const canRecover = Boolean(executionStatus?.execution_enabled && executionJobId !== null &&
+    hasMaintenanceConfirmation(executionStatus, recoveryMaintenanceConfirmed) &&
     executionStatus?.status === 'failed' &&
     executionStatus.recovery_of_job_id == null &&
     recoveryConfirmation === recoveryToken && !busy && !recoverExecution.isPending);
   const canCleanup = Boolean(!busy && !cleanupPlanFetching &&
-    canConfirmSemanticCleanup(executionStatus, cleanupPlan, cleanupConfirmation));
+    canConfirmSemanticCleanup(executionStatus, cleanupPlan, cleanupConfirmation, cleanupMaintenanceConfirmed));
   const canRecoverCleanup = Boolean(!busy &&
-    canRecoverSemanticCleanup(executionStatus, cleanupRecoveryConfirmation));
+    canRecoverSemanticCleanup(executionStatus, cleanupRecoveryConfirmation, cleanupRecoveryMaintenanceConfirmed));
 
   const resetCleanup = () => {
     setCleanupReviewOpen(false);
@@ -301,10 +343,12 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
 
   const executeCurrentUnit = async () => {
     if (!canExecute || jobId === null) return;
+    setExecutionMaintenance(null);
     try {
       const response = await startExecution.mutateAsync({
         previewId: jobId, unit: selectedUnit,
         confirmation: executionConfirmation,
+        maintenanceConfirmed: executionMaintenanceConfirmed,
       });
       setExecutionJobId(response.job_id);
       setExecutionConfirmation('');
@@ -316,9 +360,11 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
 
   const recoverOriginal = async () => {
     if (!canRecover || executionJobId === null) return;
+    setRecoveryMaintenance(null);
     try {
       const response = await recoverExecution.mutateAsync({
         executionId: executionJobId, confirmation: recoveryConfirmation,
+        maintenanceConfirmed: recoveryMaintenanceConfirmed,
       });
       setExecutionJobId(response.job_id);
       setRecoveryConfirmation('');
@@ -331,9 +377,11 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
 
   const cleanupCurrentUnit = async () => {
     if (!canCleanup || executionJobId === null) return;
+    setCleanupMaintenance(null);
     try {
       const response = await startCleanup.mutateAsync({
         executionId: executionJobId, confirmation: cleanupConfirmation,
+        maintenanceConfirmed: cleanupMaintenanceConfirmed,
       });
       setExpectedCleanupJobId(response.job_id);
       setCleanupConfirmation('');
@@ -347,9 +395,11 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
 
   const recoverCurrentCleanup = async () => {
     if (!canRecoverCleanup || !executionStatus?.cleanup) return;
+    setCleanupRecoveryMaintenance(null);
     try {
       const response = await recoverCleanup.mutateAsync({
         cleanupId: executionStatus.cleanup.job_id, confirmation: cleanupRecoveryConfirmation,
+        maintenanceConfirmed: cleanupRecoveryMaintenanceConfirmed,
       });
       setExpectedCleanupJobId(response.job_id);
       setCleanupRecoveryConfirmation('');
@@ -594,6 +644,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                   onChange={e => {
                     setSelectedUnit(e.target.value);
                     setExecutionConfirmation('');
+                    setExecutionMaintenance(null);
                   }}>
                   <option value="">请选择一个作品目录</option>
                   {executableUnits.map(item => (
@@ -611,6 +662,11 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                     placeholder="输入完整确认码"
                     onChange={e => setExecutionConfirmation(e.target.value)} />
                 </div>
+              )}
+              {requiresSemanticMaintenanceWindow(data) && (
+                <SemanticMaintenanceConfirmation id="semantic-execution-maintenance"
+                  checked={executionMaintenanceConfirmed} disabled={busy}
+                  onChange={checked => setExecutionMaintenance(checked ? executionAgreementKey : null)} />
               )}
               <ConsoleButton variant="danger" loading={startExecution.isPending}
                 disabled={!canExecute} onClick={() => { void executeCurrentUnit(); }}>
@@ -640,6 +696,11 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
               <p className="nfc-form-note">
                 目标：<CodePath value={executionStatus.unit} />
               </p>
+              {requiresSemanticMaintenanceWindow(executionStatus) && (
+                <p className="nfc-form-note" role="status">
+                  本任务使用维护窗口模式。清理或恢复完成前请继续暂停其他写入；应用内其他写入任务会等待。
+                </p>
+              )}
               {executionStatus.status === 'failed' && (
                 <p className="nfc-v2-batch-error" role="alert">
                   执行中断：{executionStatus.error || '请检查任务记录'}。不得手动修改暂存目录。
@@ -688,6 +749,11 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                       onChange={e => setRecoveryConfirmation(e.target.value)}
                       placeholder="输入完整恢复确认码" />
                   </div>
+                  {requiresSemanticMaintenanceWindow(executionStatus) && (
+                    <SemanticMaintenanceConfirmation id="semantic-recovery-maintenance"
+                      checked={recoveryMaintenanceConfirmed} disabled={busy}
+                      onChange={checked => setRecoveryMaintenance(checked ? recoveryAgreementKey : null)} />
+                  )}
                   <ConsoleButton variant="danger" disabled={!canRecover}
                     loading={recoverExecution.isPending}
                     onClick={() => { void recoverOriginal(); }}>
@@ -755,6 +821,11 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                           disabled={busy} placeholder="输入服务器提供的完整恢复确认码"
                           onChange={event => setCleanupRecoveryConfirmation(event.target.value)} />
                       </div>
+                      {requiresSemanticMaintenanceWindow(executionStatus) && (
+                        <SemanticMaintenanceConfirmation id="semantic-cleanup-recovery-maintenance"
+                          checked={cleanupRecoveryMaintenanceConfirmed} disabled={busy}
+                          onChange={checked => setCleanupRecoveryMaintenance(checked ? cleanupRecoveryAgreementKey : null)} />
+                      )}
                       <ConsoleButton variant="danger" disabled={!canRecoverCleanup}
                         loading={recoverCleanup.isPending}
                         onClick={() => { void recoverCurrentCleanup(); }}>
@@ -817,6 +888,11 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                       确认后将按清单释放占用路径、从已核验暂存文件完成目标发布，再清理多余原始路径和暂存数据。
                       清单中标为保留的文件与目标目录会保留。Worker 会再次核验权限、文件身份和执行记录。
                     </p>
+                    {(requiresSemanticMaintenanceWindow(executionStatus) || requiresSemanticMaintenanceWindow(cleanupPlan)) && (
+                      <SemanticMaintenanceConfirmation id="semantic-cleanup-maintenance"
+                        checked={cleanupMaintenanceConfirmed} disabled={busy || cleanupPlanFetching}
+                        onChange={checked => setCleanupMaintenance(checked ? cleanupAgreementKey : null)} />
+                    )}
                     <ConsoleButton variant="danger" disabled={!canCleanup}
                       loading={startCleanup.isPending}
                       onClick={() => { void cleanupCurrentUnit(); }}>

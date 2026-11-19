@@ -17,7 +17,7 @@ from app.fs_ops import rename_noreplace_at
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_scan import write_semantic_preview
 from app.config import Settings
-from app.batch import media_organizer_custody as namespace_custody
+from app.batch.media_organizer_authority import execution_mode, check_api_eligibility
 from app.config_sharing import (
     shared_config_gid, require_shared_file, require_shared_directory,
     ensure_shared_report_directory,
@@ -29,6 +29,21 @@ from app.tasks.handlers_base import TaskHandler, register_handler
 PREVIEW_KIND = "media-organizer-preview"
 ACTIVE_STATUSES = ("queued", "running", "paused", "cancel_requested")
 MAX_ACTIVE_PREVIEWS = 3
+
+
+def mode_fields(mode: str) -> dict:
+    if mode not in ("strict", "maintenance_window"):
+        raise ValueError("invalid execution mode in job evidence")
+    return {"execution_mode": mode, "assurance_level": mode,
+            "requires_maintenance_window": mode == "maintenance_window",
+            "namespace_exclusive_custody_proven": False}
+
+
+def require_mode(settings, *records: dict) -> str:
+    mode = execution_mode(settings)
+    if any(record.get("execution_mode", "strict") != mode for record in records):
+        raise ValueError("execution mode differs from the original approval or frozen evidence")
+    return mode
 
 
 def _excluded(settings: Settings) -> list[Path]:
@@ -125,6 +140,8 @@ def get_media_organizer_mapping(
     if shared_gid is not None:
         require_shared_file(data, shared_gid, 0o640)
         require_shared_file(summary, shared_gid, 0o640)
+    with summary.open("r", encoding="utf-8") as stream:
+        mode = json.load(stream).get("execution_mode", "strict")
     found = False
     with data.open("r", encoding="utf-8") as stream:
         for line in stream:
@@ -141,7 +158,7 @@ def get_media_organizer_mapping(
         page=page, page_size=page_size,
     )
     return {
-        "job_id": job_id, "mapping_id": mapping_id,
+        **mode_fields(mode), "job_id": job_id, "mapping_id": mapping_id,
         "page": page, "page_size": page_size, "total_moves": total,
         "moves": moves, "read_only": True,
     }
@@ -159,12 +176,13 @@ def enqueue_media_organizer_preview(session_factory, settings: Settings, *, sele
             id=next_media_package_job_id(session, settings),
             kind=PREVIEW_KIND, status='queued', progress_current=0,
             progress_total=0, progress_message='等待 Worker 只读分析目录',
-            state_json=json.dumps({'selection': str(chosen)}, ensure_ascii=False),
+            state_json=json.dumps({'selection': str(chosen), 'execution_mode': execution_mode(settings),
+                                   'maintenance_window_confirmed': False}, ensure_ascii=False),
         )
         session.add(job)
         session.commit()
         session.refresh(job)
-        return {'job_id': int(job.id), 'status': job.status}
+        return {'job_id': int(job.id), 'status': job.status, **mode_fields(execution_mode(settings))}
 
 
 def get_media_organizer_preview(session_factory, settings: Settings, job_id: int, *,
@@ -200,9 +218,12 @@ def get_media_organizer_preview(session_factory, settings: Settings, job_id: int
             summary = json.load(stream)
         units, total = read_preview_page(data, page=page, page_size=page_size,
                                          status_filter=status_filter)
+    mode = state.get("execution_mode", "strict")
     execution_enabled = bool(
-        getattr(settings, 'media_organizer_execution_enabled', False)
-        and getattr(settings, 'media_organizer_namespace_quiescence_ack', False)
+        mode == execution_mode(settings)
+        and (summary is None or summary.get("execution_mode", "strict") == mode)
+        and getattr(settings, 'media_organizer_execution_enabled', False)
+        and (mode == 'maintenance_window' or getattr(settings, 'media_organizer_namespace_quiescence_ack', False))
         and settings.allow_mutation and settings.allow_delete
     )
     confirmation_tokens = {}
@@ -215,13 +236,10 @@ def get_media_organizer_preview(session_factory, settings: Settings, job_id: int
         for row in units:
             if row.get('status') != 'ready':
                 continue
-            if row.get('groups'):
-                # Only a future approved external issuer can make grouped
-                # confirmations appear. A boolean ACK is not such an issuer.
+            if mode == "maintenance_window" or row.get("groups"):
                 try:
-                    unit = Path(row['unit'])
-                    proof = namespace_custody.verified_namespace_custody(settings, unit)
-                    namespace_custody.assert_exclusive_custody(proof, (unit,))
+                    unit = Path(row["unit"])
+                    check_api_eligibility(settings, unit, (unit,))
                 except (ValueError, OSError, PermissionError):
                     continue
             confirmation_tokens[row['unit']] = approval_token(job_id, row['unit'])
@@ -229,7 +247,7 @@ def get_media_organizer_preview(session_factory, settings: Settings, job_id: int
             'selection': state.get('selection', ''), 'progress': progress,
             'summary': summary, 'units': units, 'page': page,
             'page_size': page_size, 'filtered_total': total, 'read_only': True,
-            'execution_enabled': execution_enabled,
+            'execution_enabled': execution_enabled, **mode_fields(mode),
             'confirmation_tokens': confirmation_tokens}
 
 
@@ -243,6 +261,7 @@ class MediaOrganizerPreviewHandler(TaskHandler):
 
     def run(self, job: WorkJob, context: JobContext, settings: Settings) -> None:
         state = json.loads(job.state_json or '{}')
+        mode = require_mode(settings, state)
         selection = state.get('selection')
         if not isinstance(selection, str):
             raise ValueError('preview requires literal selection')
@@ -273,7 +292,7 @@ class MediaOrganizerPreviewHandler(TaskHandler):
         def progress(n: int, _stats: dict):
             context.checkpoint(progress_current=n,
                                progress_message=f'已只读预览 {n:,} 个目录单元',
-                               checkpoint_data={'schema_version': 1, 'units_scanned': n})
+                               checkpoint_data={'schema_version': 1, 'execution_mode': mode, 'units_scanned': n})
 
         with _new_private(stage_data) as out:
             final_stats = write_semantic_preview(
@@ -286,6 +305,7 @@ class MediaOrganizerPreviewHandler(TaskHandler):
             )
             out.flush()
             os.fsync(out.fileno())
+        final_stats["execution_mode"] = mode
         with _new_private(stage_summary) as out:
             json.dump(final_stats, out, ensure_ascii=False)
             out.flush()
@@ -307,5 +327,5 @@ class MediaOrganizerPreviewHandler(TaskHandler):
             os.unlink(staged)
         context.checkpoint(progress_current=final_stats['unit_count'],
                            progress_message='只读整理预览完成',
-                           checkpoint_data={'schema_version': 1, 'finished': True,
+                           checkpoint_data={'schema_version': 1, 'execution_mode': mode, 'finished': True,
                                             'units_scanned': final_stats['unit_count']})
