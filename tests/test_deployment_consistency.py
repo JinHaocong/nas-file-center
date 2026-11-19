@@ -42,6 +42,31 @@ def test_komodo_compose_and_readme_deployment_consistency():
 
 
 
+def test_real_nas_acceptance_compose_rejects_duplicate_yaml_keys():
+    class UniqueKeyLoader(yaml.SafeLoader):
+        pass
+
+    def construct_unique_mapping(loader, node, deep=False):
+        mapping = {}
+        for key_node, value_node in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            if key in mapping:
+                raise yaml.constructor.ConstructorError(
+                    "while constructing a mapping", node.start_mark,
+                    f"duplicate key {key!r}", key_node.start_mark,
+                )
+            mapping[key] = loader.construct_object(value_node, deep=deep)
+        return mapping
+
+    UniqueKeyLoader.add_constructor(
+        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+        construct_unique_mapping,
+    )
+    root = Path(__file__).resolve().parent.parent
+    with (root / "compose.v16-real-nas-acceptance.yaml").open(encoding="utf-8") as stream:
+        yaml.load(stream, Loader=UniqueKeyLoader)
+
+
 def test_real_nas_acceptance_pulls_the_verified_candidate_without_building_on_nas():
     root = Path(__file__).resolve().parent.parent
     compose = yaml.safe_load(

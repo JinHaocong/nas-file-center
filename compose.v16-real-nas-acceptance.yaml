@@ -39,8 +39,6 @@ services:
         read_only: false
         bind:
           create_host_path: false
-        bind:
-          create_host_path: false
     command:
       - python
       - /tmp/media_organizer_v16_real_nas_acceptance.py
