@@ -39,3 +39,30 @@ def test_komodo_compose_and_readme_deployment_consistency():
     assert "Zoraxy" in readme_text
     assert "nginx_network" in readme_text
     assert parsed_komodo["networks"]["nginx_network"]["external"] is True
+
+
+
+def test_real_nas_acceptance_pulls_the_verified_candidate_without_building_on_nas():
+    root = Path(__file__).resolve().parent.parent
+    compose = yaml.safe_load(
+        (root / "compose.v16-real-nas-acceptance.yaml").read_text(encoding="utf-8")
+    )
+    runner = (root / "scripts/run_v16_real_nas_acceptance.sh").read_text(encoding="utf-8")
+    service = compose["services"]["v16-real-nas-acceptance"]
+
+    assert "build" not in service
+    assert service["image"] == (
+        "kerwinjhc/nas-file-center@sha256:"
+        "c5ceaf32813ddc1b3955b661c91c9ca923040ec34d58961003d47e17642d0d32"
+    )
+    assert service["read_only"] is True
+    assert service["network_mode"] == "none"
+    assert service["user"] is None  # image's verified 10001:10000 default
+    mounts = {item["target"]: item for item in service["volumes"]}
+    assert mounts["/nas/v16-acceptance"]["read_only"] is False
+    assert mounts["/tmp/media_organizer_v16_real_nas_acceptance.py"]["read_only"] is True
+    assert mounts["/evidence"]["read_only"] is False
+    assert mounts["/evidence"]["bind"]["create_host_path"] is False
+    assert "--build" not in runner
+    assert "compose pull v16-real-nas-acceptance" in runner
+    assert "compose run --rm v16-real-nas-acceptance" in runner

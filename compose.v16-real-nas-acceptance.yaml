@@ -2,11 +2,8 @@ name: nas-file-center-v16-real-nas-acceptance
 
 services:
   v16-real-nas-acceptance:
-    build:
-      context: .
-      args:
-        FCLONES_VERSION: ${FCLONES_VERSION:-0.35.0}
-    image: nas-file-center:${V16_IMAGE_TAG:-v16-real-nas-acceptance}
+    # Reuse the exact GitHub-built candidate image; NAS does not build source.
+    image: kerwinjhc/nas-file-center@sha256:c5ceaf32813ddc1b3955b661c91c9ca923040ec34d58961003d47e17642d0d32
     working_dir: /app
     read_only: true
     network_mode: none
@@ -37,9 +34,11 @@ services:
         bind:
           create_host_path: false
       - type: bind
-        source: ${V16_EVIDENCE_HOST_DIR:-./v16-nas-evidence}
+        source: ${V16_EVIDENCE_HOST_DIR:?Set V16_EVIDENCE_HOST_DIR to an existing writable evidence directory}
         target: /evidence
         read_only: false
+        bind:
+          create_host_path: false
         bind:
           create_host_path: false
     command:

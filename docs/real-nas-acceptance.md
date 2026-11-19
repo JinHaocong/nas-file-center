@@ -352,3 +352,29 @@ actual host identity/ACL/custody evidence, approved config migration/rollback,
 and a separately approved disposable end-to-end run covering grouped/retained
 layouts, explicit cleanup, interrupted recovery and a zero-change final scan.
 `PASS_FLAT_AND_GROUP_HOLD` alone satisfies none of those additional gates.
+
+
+## Owner-authorized first SATA primitive acceptance (published image)
+
+For candidate `a812a48ead1c513bd1a4692280d28cebd51bf90a`, the NAS acceptance
+Compose task reuses the exact GitHub-built and Docker-Hub-published image digest
+`kerwinjhc/nas-file-center@sha256:c5ceaf32813ddc1b3955b661c91c9ca923040ec34d58961003d47e17642d0d32`.
+The NAS wrapper runs `docker compose pull` followed by `docker compose run --rm`;
+it has no build stanza and never invokes `--build`. The container runs as the
+image's non-root default UID 10001:GID 10000, with a read-only root filesystem
+and no network. Only the explicitly supplied disposable SATA acceptance root
+and a separately provisioned evidence directory are writable binds. The test
+creates a uniquely named evidence run under the organizer child and retains it
+for manual review. The filesystem capability probe uses private random scratch
+under the authorized acceptance root and removes only entries whose exact
+inode identities it created; any unknown residue blocks and is retained.
+
+The required SATA directory tree must be created by the owner in advance, with
+the root and organizer child writable by UID 10001:GID 10000. The scheduler
+child must remain empty. The evidence directory may be a separate temporary
+NVMe or tmpfs directory, also writable by UID 10001:GID 10000. The wrapper
+refuses missing paths and does not create/chown/chmod them. The first-round
+harness only tests actual-mount primitives, flat synthetic publication and
+SEC-12 mixed-group refusal. It deliberately retains its run evidence and does
+not exercise Worker cleanup, finalization, grouped publication or a true
+zero-change second scan.
