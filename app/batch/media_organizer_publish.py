@@ -495,11 +495,20 @@ def _create_public_group_direct(
             raise PublishingConflict("public group raced with exclusive creation") from exc
         os.fsync(unit_fd)
 
+        # Revalidate the external namespace grant AFTER mkdir and BEFORE
+        # resolving the new public basename with openat. If the custody
+        # provider reports revocation or a changed name binding, leave both
+        # directories untouched for manual reconciliation. The provider must
+        # still enforce exclusion between this check and openat; a post-check
+        # alone cannot make an uncooperative namespace safe.
+        fence()
+
         # A created-but-not-yet-witnessed directory is intentionally left for
         # manual reconciliation after a crash. Do not adopt unknown folders.
         group_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY |
                            os.O_NOFOLLOW, dir_fd=unit_fd)
         created = os.fstat(group_fd)
+        fence()
         bound = _entry(unit_fd, name)
         if (bound is None or not stat.S_ISDIR(bound.st_mode)
                 or (int(bound.st_dev), int(bound.st_ino)) != (
@@ -511,6 +520,13 @@ def _create_public_group_direct(
         with os.scandir(group_fd) as entries:
             if next(entries, None) is not None:
                 raise PublishingConflict("new public group is not empty")
+        # Do not create an owner witness or receipt unless the pinned FD is
+        # still the directory named by the public parent under live custody.
+        fence()
+        _assert_named_directory(
+            unit / name, group_fd,
+            (int(created.st_dev), int(created.st_ino)),
+        )
         shared_gid = shared_config_gid()
         if shared_gid is not None:
             # Only this newly created, still-pinned inode receives API read
