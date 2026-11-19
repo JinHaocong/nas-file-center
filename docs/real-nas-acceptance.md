@@ -42,7 +42,13 @@ python3 scripts/v16_nas_readonly_preflight.py \
 Requirements: Python 3.10+ on the NAS host; no external packages and no root
 privileges required for normal readable metadata. It only reads inode/mode/GID
 metadata for known configuration files/directories and mount information from
-`/proc/self/mountinfo`. It never lists or opens files below the SATA media
+`/proc/self/mountinfo`. Each root is opened with a metadata-only `O_PATH`
+directory descriptor; its `/proc/self/fdinfo` mount ID selects the actual
+mount record. Record order and longest pathname prefixes cannot identify the
+visible filesystem reliably when mounts are stacked or hidden. Unavailable
+or ambiguous descriptor-bound metadata blocks the check. This remains a
+point-in-time observation, not proof of a backing disk or exclusive custody.
+It never lists or opens files below the SATA media
 root. Up to 1,000 archive **report directory** entries may be checked for
 file metadata; names, file contents and host paths are not included in JSON.
 

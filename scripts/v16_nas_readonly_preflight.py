@@ -145,51 +145,62 @@ def _report_children(directory: Path, gid: int) -> dict[str, str]:
     return _entry("config.archive_report_files", "FAIL" if invalid else "PASS", f"checked={checked}, incompatible={invalid}; names omitted")
 
 
-def _unescape_mount(path: str) -> str:
-    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), path)
+_UNKNOWN_MOUNT = {"mount_id": None, "fs_type": None, "host_view_read_only": None}
 
 
-def _mount_record_from_lines(target: Path, lines) -> dict[str, object]:
-    """Select the visible mount: longest target, then last stacked mount.
-
-    mountinfo can contain multiple records for the same mountpoint when a
-    filesystem is mounted over an existing mount. The later matching record
-    is the visible top layer; keeping the first record misreported the
-    underlying tmpfs instead of the ZFS FUSE mount on the NAS.
-    """
-    best: dict[str, object] | None = None
-    best_key = (-1, -1)
-    location = str(target)
-    for index, line in enumerate(lines):
+def _mount_record_from_lines(mount_id: str, lines) -> dict[str, object]:
+    """Match the pinned directory's kernel mount ID, never path/row order."""
+    if not re.fullmatch(r"[1-9][0-9]*", mount_id):
+        return _UNKNOWN_MOUNT.copy()
+    found: dict[str, object] | None = None
+    for line in lines:
         halves = line.rstrip("\n").split(" - ", 1)
-        if len(halves) != 2:
-            continue
         before = halves[0].split()
+        if not before or before[0] != mount_id:
+            continue
+        if found is not None or len(halves) != 2 or len(before) < 6:
+            return _UNKNOWN_MOUNT.copy()
         after = halves[1].split()
-        if len(before) < 6 or not after:
-            continue
-        mount_point = _unescape_mount(before[4])
-        root = mount_point.rstrip("/") or "/"
-        if location != root and not location.startswith(root.rstrip("/") + "/"):
-            continue
-        candidate_key = (len(root), index)
-        if candidate_key > best_key:
-            best = {
-                "mount_id": before[0],
-                "fs_type": after[0],
-                "host_view_read_only": "ro" in before[5].split(","),
-            }
-            best_key = candidate_key
-    return best or {"mount_id": None, "fs_type": None, "host_view_read_only": None}
+        if (len(after) != 3 or not re.fullmatch(r"[1-9][0-9]*", before[1])
+                or not re.fullmatch(r"[0-9]+:[0-9]+", before[2])
+                or not before[3].startswith("/") or not before[4].startswith("/")):
+            return _UNKNOWN_MOUNT.copy()
+        mount_access = {"ro", "rw"}.intersection(before[5].split(","))
+        super_access = {"ro", "rw"}.intersection(after[2].split(","))
+        if len(mount_access) != 1 or len(super_access) != 1:
+            return _UNKNOWN_MOUNT.copy()
+        found = {
+            "mount_id": mount_id,
+            "fs_type": after[0],
+            "host_view_read_only": "ro" in mount_access or "ro" in super_access,
+        }
+    return found or _UNKNOWN_MOUNT.copy()
 
 
 def _mount_record(target: Path) -> dict[str, object]:
-    """Read mountinfo and omit host source from the report."""
+    """Observe the mount bound to a metadata-only directory descriptor.
+
+    A mountpoint may have stacked or hidden descendant records. The kernel's
+    fdinfo mnt_id identifies the opened directory's actual mount without
+    guessing from path prefixes or mountinfo order. This is only a snapshot;
+    it neither establishes namespace custody nor proves a backing disk.
+    """
+    fd = None
     try:
+        if _ancestor_symlink(target):
+            return _UNKNOWN_MOUNT.copy()
+        fd = os.open(target, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        with open(f"/proc/self/fdinfo/{fd}", "r", encoding="utf-8") as src:
+            ids = [line.partition(":")[2].strip() for line in src if line.startswith("mnt_id:")]
+        if len(ids) != 1:
+            return _UNKNOWN_MOUNT.copy()
         with open("/proc/self/mountinfo", "r", encoding="utf-8") as src:
-            return _mount_record_from_lines(target, src)
-    except OSError:
-        return {"mount_id": None, "fs_type": None, "host_view_read_only": None}
+            return _mount_record_from_lines(ids[0], src)
+    except (OSError, AttributeError, UnicodeError, MetadataUnavailable):
+        return _UNKNOWN_MOUNT.copy()
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def run(argv: list[str] | None = None) -> tuple[int, dict[str, object]]:
@@ -222,7 +233,7 @@ def run(argv: list[str] | None = None) -> tuple[int, dict[str, object]]:
     data_mount = _mount_record(data)
     for label, record in (("config", cfg_mount), ("media", data_mount)):
         if record["mount_id"] is None:
-            checks.append(_entry("mount." + label, "FAIL", "Linux mountinfo unavailable"))
+            checks.append(_entry("mount." + label, "FAIL", "directory-bound Linux mount identity unavailable or ambiguous"))
         elif record["host_view_read_only"] and label == "media":
             checks.append(_entry("mount.media", "FAIL", "host mount is read-only, Worker cannot write"))
         else:
