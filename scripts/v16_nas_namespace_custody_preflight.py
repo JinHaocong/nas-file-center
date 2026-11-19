@@ -197,7 +197,7 @@ def _worker_can_write(info, access_acl: dict, worker_uid: int) -> bool:
         return any(
             entry["tag"] == "USER"
             and entry.get("id") == worker_uid
-            and (entry.get("effective_perm", 0) & 0o300) == 0o300
+            and (entry.get("effective_perm", 0) & 0x3) == 0x3
             for entry in access_acl["entries"]
         )
     return False
