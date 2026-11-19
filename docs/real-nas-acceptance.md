@@ -79,6 +79,42 @@ does not establish exclusion of other same-UID, shared-group or privileged
 content/namespace writers. `app/batch/media_organizer_custody.py` remains
 default-deny even when execution flags are set.
 
+
+
+## Step 0b: Scoped namespace and ACL metadata preflight (#402/#399/#401)
+
+After Step 0 has identified the existing SATA mount and before considering any
+custody design, inspect **one existing organizing unit** using the new
+read-only metadata collector. This is not a write probe and must not be pointed
+at a production unit unless the owner explicitly wants its directory metadata
+reviewed. The command opens directory components with `O_NOFOLLOW`, reads
+POSIX access/default ACL xattrs and mount IDs, and never enumerates or opens
+media files:
+
+```bash
+python3 scripts/v16_nas_namespace_custody_preflight.py \
+  --data-root "/absolute/host/path/to/SATA-media-root" \
+  --unit "/absolute/host/path/to/SATA-media-root/existing-disposable-unit" \
+  --worker-uid 10002 \
+  --api-uid 10001 \
+  --shared-gid 10000
+```
+
+The JSON records directory UID/GID/mode, mount ID/filesystem/read-only state,
+visible POSIX access/default ACL entries, path-ancestor ownership and
+whether the Worker UID appears able to create entries. It deliberately emits
+`smb_nfs_write_exclusion=NOT_PROVEN`,
+`same_uid_process_exclusion=NOT_PROVEN`,
+`root_admin_exclusion=NOT_PROVEN`,
+`namespace_exclusive_custody_proven=false` and
+`release_ready=false` for every result. `POSIX_SCOPE_RESTRICTED` means only
+that the observed directory metadata has no detected non-Worker POSIX writer
+within this narrow snapshot; it is **not** an execution credential or proof
+against root, same-UID processes, remote SMB/NFS clients, server-side ACLs,
+or changes after the observation. `REVIEW` or `BLOCKED` must not be bypassed.
+The tool performs no chmod/chown/setfacl, mkdir, unlink, rename or file-content
+read. Never use it to inspect a media file or recursively walk a library.
+
 ## Configuration backup, candidate validation and rollback (#403)
 
 This is a sequence for a **separately approved maintenance window**, not a
