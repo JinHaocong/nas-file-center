@@ -184,3 +184,119 @@ def test_interrupted_cleanup_can_reconcile_durable_pending_step(tmp_path):
     assert outcome["needed_moves"] == 0
     assert expected == _bytes(plan)
     assert preview_semantic_unit(unit, allowed_roots=[tmp_path])["status"] == "already_organized"
+
+def test_cleanup_rechecks_custody_after_last_source_check_before_unlink(
+    tmp_path, monkeypatch,
+):
+    """A source-name swap after the inode check must not reach unlink."""
+    import os
+    from app.batch import media_organizer_finalize as finalizer
+
+    unit, manifest, frozen, plan = _flat(tmp_path)
+    op = next(item for item in finalizer._operations(manifest, plan)
+              if item["kind"] == "original")
+    source = Path(op["path"])
+    detached = source.with_name("owned-source-detached-for-audit" + source.suffix)
+    original_bytes = source.read_bytes()
+    final = Path(op["published"])
+    staged = Path(op["stage_path"]) if "stage_path" in op else None
+
+    class RevocableCustody:
+        allowed = True
+
+        def assert_exclusive(self, parent):
+            if not self.allowed:
+                raise CleanupExecutionBlocked("custody revoked at mutation boundary")
+
+    proof = RevocableCustody()
+    original_entry = finalizer._entry
+    parent_stat = source.parent.stat()
+    source_checks = 0
+
+    def swap_after_final_source_check(parent_fd, name):
+        nonlocal source_checks
+        info = original_entry(parent_fd, name)
+        opened_parent = os.fstat(parent_fd)
+        if ((opened_parent.st_dev, opened_parent.st_ino) ==
+                (parent_stat.st_dev, parent_stat.st_ino) and name == source.name):
+            source_checks += 1
+            if source_checks == 2:
+                source.rename(detached)
+                source.write_bytes(b"foreign-source-must-survive")
+                proof.allowed = False
+        return info
+
+    monkeypatch.setattr(finalizer, "_entry", swap_after_final_source_check)
+    with pytest.raises(CleanupExecutionBlocked, match="custody revoked"):
+        finalizer._mutate_one(
+            op, previously_begun=False, custody=proof, witness=b"unused",
+            manifest=manifest, receipts={},
+        )
+
+    assert source_checks == 2
+    assert detached.read_bytes() == original_bytes
+    assert source.read_bytes() == b"foreign-source-must-survive"
+    assert final.is_file() and final.read_bytes() == original_bytes
+    assert staged is None or staged.is_file()
+
+
+def test_cleanup_rechecks_custody_after_last_wrapper_check_before_rmdir(
+    tmp_path, monkeypatch,
+):
+    """An empty foreign replacement must not be removed after a stale check."""
+    import os
+    from app.batch import media_organizer_finalize as finalizer
+
+    unit, manifest, frozen, plan = _flat(tmp_path, wrapper=True)
+    op = next(item for item in finalizer._operations(manifest, plan)
+              if item["kind"] == "wrapper")
+    wrapper = Path(op["path"])
+    source = next(Path(row["source"]) for row in manifest["moves"]
+                  if Path(row["source"]).parent == wrapper)
+    original_bytes = source.read_bytes()
+    final = next(Path(row["final"]) for row in manifest["moves"]
+                 if Path(row["source"]) == source)
+    staged = next(Path(row["target"]) for row in manifest["moves"]
+                  if Path(row["source"]) == source)
+    # Simulate the already-completed child-file operation. The original inode
+    # remains safely available through its final and staged hardlinks.
+    source.unlink()
+    detached = wrapper.with_name("owned-wrapper-detached-for-audit")
+
+    class RevocableCustody:
+        allowed = True
+
+        def assert_exclusive(self, parent):
+            if not self.allowed:
+                raise CleanupExecutionBlocked("custody revoked at mutation boundary")
+
+    proof = RevocableCustody()
+    original_entry = finalizer._entry
+    parent_stat = wrapper.parent.stat()
+    wrapper_checks = 0
+
+    def swap_after_final_wrapper_check(parent_fd, name):
+        nonlocal wrapper_checks
+        info = original_entry(parent_fd, name)
+        opened_parent = os.fstat(parent_fd)
+        if ((opened_parent.st_dev, opened_parent.st_ino) ==
+                (parent_stat.st_dev, parent_stat.st_ino) and name == wrapper.name):
+            wrapper_checks += 1
+            if wrapper_checks == 2:
+                wrapper.rename(detached)
+                wrapper.mkdir()
+                proof.allowed = False
+        return info
+
+    monkeypatch.setattr(finalizer, "_entry", swap_after_final_wrapper_check)
+    with pytest.raises(CleanupExecutionBlocked, match="custody revoked"):
+        finalizer._mutate_one(
+            op, previously_begun=False, custody=proof, witness=b"unused",
+            manifest=manifest, receipts={},
+        )
+
+    assert wrapper_checks == 2
+    assert detached.is_dir()
+    assert wrapper.is_dir()
+    assert list(wrapper.iterdir()) == []
+    assert final.read_bytes() == staged.read_bytes() == original_bytes
