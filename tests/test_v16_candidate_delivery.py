@@ -37,7 +37,8 @@ def test_fresh_install_pulls_the_published_image_without_host_ports():
 
 def test_candidate_publish_rebuilds_for_media_organizer_runtime_and_acceptance_changes():
     workflow = _workflow()
-    paths = workflow["on"]["push"]["paths"]
+    triggers = workflow.get("on", workflow.get(True))
+    paths = triggers["push"]["paths"]
     assert "app/batch/media_organizer_*.py" in paths
     assert "tests/test_media_organizer_*.py" in paths
     assert "tests/test_deployment_consistency.py" in paths
