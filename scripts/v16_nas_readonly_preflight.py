@@ -161,7 +161,7 @@ def _mount_record_from_lines(target: Path, lines) -> dict[str, object]:
     best_key = (-1, -1)
     location = str(target)
     for index, line in enumerate(lines):
-        halves = line.rstrip("\\n").split(" - ", 1)
+        halves = line.rstrip("\n").split(" - ", 1)
         if len(halves) != 2:
             continue
         before = halves[0].split()
