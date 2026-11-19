@@ -149,35 +149,47 @@ def _unescape_mount(path: str) -> str:
     return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), path)
 
 
-def _mount_record(target: Path) -> dict[str, object]:
-    """Find the longest matching mount namespace record; omit host source."""
+def _mount_record_from_lines(target: Path, lines) -> dict[str, object]:
+    """Select the visible mount: longest target, then last stacked mount.
+
+    mountinfo can contain multiple records for the same mountpoint when a
+    filesystem is mounted over an existing mount. The later matching record
+    is the visible top layer; keeping the first record misreported the
+    underlying tmpfs instead of the ZFS FUSE mount on the NAS.
+    """
     best: dict[str, object] | None = None
-    longest = -1
+    best_key = (-1, -1)
+    location = str(target)
+    for index, line in enumerate(lines):
+        halves = line.rstrip("\\n").split(" - ", 1)
+        if len(halves) != 2:
+            continue
+        before = halves[0].split()
+        after = halves[1].split()
+        if len(before) < 6 or not after:
+            continue
+        mount_point = _unescape_mount(before[4])
+        root = mount_point.rstrip("/") or "/"
+        if location != root and not location.startswith(root.rstrip("/") + "/"):
+            continue
+        candidate_key = (len(root), index)
+        if candidate_key > best_key:
+            best = {
+                "mount_id": before[0],
+                "fs_type": after[0],
+                "host_view_read_only": "ro" in before[5].split(","),
+            }
+            best_key = candidate_key
+    return best or {"mount_id": None, "fs_type": None, "host_view_read_only": None}
+
+
+def _mount_record(target: Path) -> dict[str, object]:
+    """Read mountinfo and omit host source from the report."""
     try:
         with open("/proc/self/mountinfo", "r", encoding="utf-8") as src:
-            for line in src:
-                halves = line.rstrip("\n").split(" - ", 1)
-                if len(halves) != 2:
-                    continue
-                before = halves[0].split()
-                after = halves[1].split()
-                if len(before) < 6 or not after:
-                    continue
-                mount_point = _unescape_mount(before[4])
-                root = mount_point.rstrip("/") or "/"
-                location = str(target)
-                if location != root and not location.startswith(root.rstrip("/") + "/"):
-                    continue
-                if len(root) > longest:
-                    best = {
-                        "mount_id": before[0],
-                        "fs_type": after[0],
-                        "host_view_read_only": "ro" in before[5].split(","),
-                    }
-                    longest = len(root)
+            return _mount_record_from_lines(target, src)
     except OSError:
-        pass
-    return best or {"mount_id": None, "fs_type": None, "host_view_read_only": None}
+        return {"mount_id": None, "fs_type": None, "host_view_read_only": None}
 
 
 def run(argv: list[str] | None = None) -> tuple[int, dict[str, object]]:

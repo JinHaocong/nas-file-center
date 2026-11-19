@@ -1,6 +1,7 @@
 """#403 read-only NAS host metadata audit. All fixtures are disposable."""
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,11 @@ import tempfile
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "v16_nas_readonly_preflight.py"
+
+_SPEC = importlib.util.spec_from_file_location("v16_nas_readonly_preflight_test_target", SCRIPT)
+assert _SPEC is not None and _SPEC.loader is not None
+_PREFLIGHT = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_PREFLIGHT)
 
 
 class TestNasReadOnlyPreflight(unittest.TestCase):
@@ -50,6 +56,25 @@ class TestNasReadOnlyPreflight(unittest.TestCase):
         report = self.config / "archive-recovery-reports" / "2.json"
         report.write_text("{}", encoding="utf-8")
         report.chmod(0o640)
+
+    def test_stacked_mountpoint_selects_topmost_filesystem_not_underlay(self):
+        mountinfo = [
+            "509 33 0:42 / /tmp/zfsv3 rw,relatime - tmpfs tmpfs rw,size=4k,inode64",
+            "620 509 0:43 / /tmp/zfsv3 rw,nosuid,nodev,relatime - "
+            "zfuse.zfsv3 zfsv3 rw,user_id=0,group_id=0,default_permissions,allow_other",
+        ]
+        config_mount = _PREFLIGHT._mount_record_from_lines(
+            Path("/tmp/zfsv3/nvme13/config"), mountinfo
+        )
+        data_mount = _PREFLIGHT._mount_record_from_lines(
+            Path("/tmp/zfsv3/sata11/data"), mountinfo
+        )
+
+        self.assertEqual(config_mount["mount_id"], "620")
+        self.assertEqual(config_mount["fs_type"], "zfuse.zfsv3")
+        self.assertFalse(config_mount["host_view_read_only"])
+        self.assertEqual(data_mount["mount_id"], "620")
+        self.assertEqual(data_mount["fs_type"], "zfuse.zfsv3")
 
     def test_provisioned_metadata_reports_check_only_not_release_approval(self):
         self._provision()
