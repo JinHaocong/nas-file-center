@@ -9,6 +9,7 @@ writers remain unproven, so this tool NEVER grants execution custody.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import errno
 import json
 import os
@@ -27,7 +28,32 @@ _ACL_TAGS = {
 }
 _ACL_ACCESS = "system.posix_acl_access"
 _ACL_DEFAULT = "system.posix_acl_default"
+_ACL_ABSENCE_ERRNOS = {getattr(errno, name) for name in ("ENODATA", "ENOATTR") if hasattr(errno, name)}
 _TRUSTED_UIDS = {0}
+_WRITE_AND_SEARCH = 0x3
+
+
+class _DirectoryCollectionError(OSError):
+    def __init__(self, exc, operation: str, path_role: str, depth: int):
+        error_number = getattr(exc, "errno", None)
+        super().__init__(error_number, "directory collection failed")
+        self.details = {
+            "type": type(exc).__name__,
+            "errno": error_number,
+            "errno_name": errno.errorcode.get(error_number, "UNKNOWN") if error_number is not None else None,
+            "operation": operation,
+            "path_role": path_role,
+            "directory_depth": depth,
+            "invoking_uid": os.getuid(),
+        }
+
+
+@contextmanager
+def _directory_operation(operation: str, path_role: str, depth: int):
+    try:
+        yield
+    except (OSError, ValueError) as exc:
+        raise _DirectoryCollectionError(exc, operation, path_role, depth) from exc
 
 
 def _args(argv=None):
@@ -61,18 +87,26 @@ def _args(argv=None):
     return args
 
 
-def _open_directory_chain(path: Path) -> list[int]:
+def _close_directory_chain(fds: list[int]) -> None:
+    for fd in reversed(fds):
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+
+
+def _open_directory_chain(path: Path, path_role: str = "unit") -> list[int]:
     """Open each component with O_NOFOLLOW and retain FDs for metadata only."""
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
-    fds = [os.open("/", flags)]
+    fds = []
     try:
-        for part in path.parts[1:]:
-            next_fd = os.open(part, flags, dir_fd=fds[-1])
-            fds.append(next_fd)
+        for depth, part in enumerate(("/", *path.parts[1:])):
+            with _directory_operation("open_directory", path_role, depth):
+                next_fd = os.open(part, flags, dir_fd=fds[-1] if fds else None)
+                fds.append(next_fd)
         return fds
     except BaseException:
-        for fd in reversed(fds):
-            os.close(fd)
+        _close_directory_chain(fds)
         raise
 
 
@@ -125,7 +159,7 @@ def _read_acl(fd: int, name: str) -> dict:
     try:
         return _decode_acl(os.getxattr(fd, name))
     except OSError as exc:
-        if exc.errno in (getattr(errno, "ENODATA", 61), getattr(errno, "ENOATTR", 93)):
+        if exc.errno in _ACL_ABSENCE_ERRNOS:
             return {"status": "ABSENT", "entries": []}
         if exc.errno in (errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", errno.ENOTSUP)):
             return {"status": "UNSUPPORTED", "entries": []}
@@ -189,21 +223,42 @@ def _acl_writers(acl: dict, worker_uid: int) -> list[str]:
     return writers
 
 
-def _worker_can_write(info, access_acl: dict, worker_uid: int) -> bool:
-    mode = stat.S_IMODE(info.st_mode)
-    if info.st_uid == worker_uid and (mode & 0o300) == 0o300:
-        return True
-    if access_acl.get("status") == "PRESENT":
-        return any(
-            entry["tag"] == "USER"
-            and entry.get("id") == worker_uid
-            and (entry.get("effective_perm", 0) & 0x3) == 0x3
-            for entry in access_acl["entries"]
-        )
-    return False
+def _worker_can_write(info, access_acl: dict, worker_uid: int, shared_gid: int = 10000) -> bool | None:
+    """Infer directory write plus search from available POSIX metadata."""
+    status = access_acl.get("status")
+    if status == "ABSENT":
+        mode = stat.S_IMODE(info.st_mode)
+        if info.st_uid == worker_uid:
+            mode >>= 6
+        elif info.st_gid == shared_gid:
+            mode >>= 3
+        return (mode & _WRITE_AND_SEARCH) == _WRITE_AND_SEARCH
+    if status != "PRESENT":
+        return None
+
+    entries = access_acl["entries"]
+    if info.st_uid == worker_uid:
+        owner = next(entry for entry in entries if entry["tag"] == "USER_OBJ")
+        return (owner["effective_perm"] & _WRITE_AND_SEARCH) == _WRITE_AND_SEARCH
+
+    named_user = next((entry for entry in entries
+                       if entry["tag"] == "USER" and entry["id"] == worker_uid), None)
+    if named_user is not None:
+        return (named_user["effective_perm"] & _WRITE_AND_SEARCH) == _WRITE_AND_SEARCH
+
+    matching_groups = [entry for entry in entries
+                       if (entry["tag"] == "GROUP_OBJ" and info.st_gid == shared_gid)
+                       or (entry["tag"] == "GROUP" and entry["id"] == shared_gid)]
+    if matching_groups:
+        # Each matching entry is evaluated with the ACL mask already applied.
+        return any((entry["effective_perm"] & _WRITE_AND_SEARCH) == _WRITE_AND_SEARCH
+                   for entry in matching_groups)
+
+    other = next(entry for entry in entries if entry["tag"] == "OTHER")
+    return (other["effective_perm"] & _WRITE_AND_SEARCH) == _WRITE_AND_SEARCH
 
 
-def _directory_record(fd: int, index: int, worker_uid: int) -> dict:
+def _directory_record(fd: int, index: int, worker_uid: int, shared_gid: int) -> dict:
     info = os.fstat(fd)
     access = _read_acl(fd, _ACL_ACCESS)
     default = _read_acl(fd, _ACL_DEFAULT)
@@ -219,7 +274,7 @@ def _directory_record(fd: int, index: int, worker_uid: int) -> dict:
         "mount": _mount_record(fd),
         "access_acl": access,
         "default_acl": default,
-        "worker_can_create_entries": _worker_can_write(info, access, worker_uid),
+        "worker_can_create_entries": _worker_can_write(info, access, worker_uid, shared_gid),
         "untrusted_access_writers": _acl_writers(access, worker_uid),
         "untrusted_default_writers": _acl_writers(default, worker_uid),
     }
@@ -243,28 +298,36 @@ def run(argv=None) -> tuple[int, dict]:
     args = _args(argv)
     data_fds = unit_fds = []
     try:
-        data_fds = _open_directory_chain(args.data_root)
-        unit_fds = _open_directory_chain(args.unit)
-        data_info = os.fstat(data_fds[-1])
-        unit_info = os.fstat(unit_fds[-1])
-        if not stat.S_ISDIR(data_info.st_mode) or not stat.S_ISDIR(unit_info.st_mode):
-            raise ValueError("data-root and unit must be directories")
+        data_fds = _open_directory_chain(args.data_root, "data_root")
+        unit_fds = _open_directory_chain(args.unit, "unit")
+        data_depth = len(data_fds) - 1
+        unit_depth = len(unit_fds) - 1
+        with _directory_operation("stat_directory", "data_root", data_depth):
+            data_info = os.fstat(data_fds[-1])
+            if not stat.S_ISDIR(data_info.st_mode):
+                raise ValueError("data-root must be a directory")
+        with _directory_operation("stat_directory", "unit", unit_depth):
+            unit_info = os.fstat(unit_fds[-1])
+            if not stat.S_ISDIR(unit_info.st_mode):
+                raise ValueError("unit must be a directory")
 
         # The unit path must resolve to the same opened data-root inode at the
         # corresponding component depth; lexical containment alone is not enough.
-        data_depth = len(args.data_root.parts) - 1
-        unit_data_binding = os.fstat(unit_fds[data_depth])
-        if (data_info.st_dev, data_info.st_ino) != (
-                unit_data_binding.st_dev, unit_data_binding.st_ino):
-            raise ValueError("unit path does not resolve beneath the opened data-root inode")
+        with _directory_operation("validate_data_root_binding", "unit", data_depth):
+            unit_data_binding = os.fstat(unit_fds[data_depth])
+            if (data_info.st_dev, data_info.st_ino) != (
+                    unit_data_binding.st_dev, unit_data_binding.st_ino):
+                raise ValueError("unit path does not resolve beneath the opened data-root inode")
 
-        records = [_directory_record(fd, i, args.worker_uid)
-                   for i, fd in enumerate(unit_fds)]
+        records = []
+        for i, fd in enumerate(unit_fds):
+            with _directory_operation("read_directory_metadata", "unit", i):
+                records.append(_directory_record(fd, i, args.worker_uid, args.shared_gid))
         issues = []
         review = []
         for index, record in enumerate(records):
-            if (record["access_acl"]["status"] in ("UNSUPPORTED", "ERROR", "MALFORMED")
-                    or record["default_acl"]["status"] in ("UNSUPPORTED", "ERROR", "MALFORMED")):
+            if (record["access_acl"]["status"] not in ("PRESENT", "ABSENT")
+                    or record["default_acl"]["status"] not in ("PRESENT", "ABSENT")):
                 review.append(f"acl-metadata-unavailable-depth-{index}")
             if record["mount"]["mount_id"] is None:
                 review.append(f"mount-identity-unavailable-depth-{index}")
@@ -297,7 +360,7 @@ def run(argv=None) -> tuple[int, dict]:
             issues.append("unit-mode-allows-group-or-world-write")
         if target["uid"] not in (0, args.worker_uid):
             issues.append("untrusted-unit-owner")
-        if not target["worker_can_create_entries"]:
+        if target["worker_can_create_entries"] is False:
             issues.append("worker-cannot-create-in-unit")
         if target["mount"]["read_only"] is True:
             issues.append("unit-mount-read-only")
@@ -329,6 +392,17 @@ def run(argv=None) -> tuple[int, dict]:
                 "invoking_process_uid_map": _read_id_map("/proc/self/uid_map"),
                 "invoking_process_gid_map": _read_id_map("/proc/self/gid_map"),
             },
+            "worker_permission_model": {
+                "worker_uid": args.worker_uid,
+                "primary_gid": args.shared_gid,
+                "supplementary_gids_assumed": [],
+                "basis": "POSIX_DIRECTORY_METADATA",
+                "limitations": (
+                    "Per-directory write and search permissions only. Access ACL metadata "
+                    "may be unavailable. Runtime access, ancestor traversal, UID/GID "
+                    "mappings, capabilities, and FUSE enforcement are unverified."
+                ),
+            },
             "directories": records,
             "posix_namespace_permissions": status,
             "blocking_conditions": sorted(set(issues)),
@@ -347,31 +421,26 @@ def run(argv=None) -> tuple[int, dict]:
         }
         return (2 if status != "POSIX_SCOPE_RESTRICTED" else 0), result
     finally:
-        for fd in reversed(unit_fds):
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-        for fd in reversed(data_fds):
-            try:
-                os.close(fd)
-            except OSError:
-                pass
+        _close_directory_chain(unit_fds)
+        _close_directory_chain(data_fds)
 
 
 def main(argv=None) -> int:
     try:
         status, report = run(argv)
     except (OSError, ValueError) as exc:
+        details = exc.details if isinstance(exc, _DirectoryCollectionError) else None
         report = {
             "tool": "v16-nas-namespace-custody-preflight",
             "mode": "READ_ONLY_METADATA_ONLY",
             "posix_namespace_permissions": "BLOCKED",
-            "blocking_conditions": [type(exc).__name__],
+            "blocking_conditions": [details["type"] if details else type(exc).__name__],
             "namespace_exclusive_custody_proven": False,
             "release_ready": False,
             "note": "No files changed; path or metadata validation failed.",
         }
+        if details:
+            report["collection_error"] = details
         status = 2
     print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     return status

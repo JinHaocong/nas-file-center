@@ -102,7 +102,15 @@ python3 scripts/v16_nas_namespace_custody_preflight.py \
 
 The JSON records directory UID/GID/mode, mount ID/filesystem/read-only state,
 visible POSIX access/default ACL entries, path-ancestor ownership and
-whether the Worker UID appears able to create entries. It deliberately emits
+whether the Worker appears able to create entries under a POSIX metadata
+model. That model assumes the supplied Worker UID and `--shared-gid` as its
+primary group, with no supplementary groups. It checks owner/named-user/group/
+other precedence and ACL masks; it does not perform a real access or write
+probe. Unknown access ACL metadata produces an unknown assessment, not a
+definitive denial. Container identity mapping, ancestor traversal, mount
+read-only state and NAS/FUSE enforcement remain separate observations. A
+group-derived grant does not satisfy the exclusive-writer requirement.
+It deliberately emits
 `smb_nfs_write_exclusion=NOT_PROVEN`,
 `same_uid_process_exclusion=NOT_PROVEN`,
 `root_admin_exclusion=NOT_PROVEN`,
@@ -114,6 +122,63 @@ against root, same-UID processes, remote SMB/NFS clients, server-side ACLs,
 or changes after the observation. `REVIEW` or `BLOCKED` must not be bypassed.
 The tool performs no chmod/chown/setfacl, mkdir, unlink, rename or file-content
 read. Never use it to inspect a media file or recursively walk a library.
+
+Collection errors include a structured errno and the failing directory depth
+and path role where known. Depth zero is `/`; each subsequent component adds
+one. Private paths/component names and exception messages are omitted. The
+collector uses `O_RDONLY | O_DIRECTORY | O_NOFOLLOW`, so the invoking account
+needs directory read/traverse access even though no children are enumerated.
+An authorized administrator may collect metadata where the login account
+cannot; this does not test or grant the Worker's runtime access.
+
+### Owner-reported NAS namespace observation — 2026-11-19
+
+Source: the owner's pasted output from the pinned `c96c6ea` collector, with
+host names, private path components and inode values omitted here. This is
+reported NAS evidence, not a command executed by CI or by a repository agent.
+
+| Observed scope | UID:GID | Mode | Interpretation |
+| --- | --- | --- | --- |
+| Data root and its non-temporary ancestors in the SSH view | 0:0 | 0755 | No group/other namespace write permission visible in these mode bits |
+| Temporary-directory ancestor | 0:0 | 1777 | Sticky directory; the relevant following component is root-owned |
+| Existing primitive acceptance root | 10001:10000 | 2770 | API-owned and shared-group writable |
+| Existing organizer acceptance child | 10001:10000 | 2770 | API-owned and shared-group writable |
+
+The relevant data/root/child observations were on the same visible writable
+`zfuse.zfsv3` mount. POSIX access and default ACL xattrs were reported ABSENT;
+this is not proof that NAS server-side access rules are absent. Login UID
+1001 failed opening the acceptance-root component at depth 6; administrator
+UID 0 collected all eight directory records successfully.
+
+The old `10001:10000` layout matches the primitive harness contract below.
+It must not be reclassified as a failed Worker-only setup or automatically
+chowned/chmodded. The original `worker-cannot-create-in-unit` diagnostic was
+incomplete: its helper considered only ownership/named-user ACL permission.
+Ordinary POSIX permissions would allow the modeled `10002:10000` identity
+through the shared group. The valid remaining objections are the API-owned
+unit and ancestor, shared unit write permission, and mutable parent binding.
+There has been no actual Worker create attempt in this observation.
+
+Next, record the actual API/Worker effective IDs, supplementary groups,
+capabilities, container/host UID and GID maps, and selected data binds. Host
+numeric ownership must follow verified mapping, not just container UID names.
+Mount IDs are namespace-local; compare each opened root within its own
+namespace and correlate the intended bind source's filesystem/device/inode.
+
+After identity is established, use a **new absent sibling** beneath the
+trusted data parent for the Worker permission fixture. Do not put it beneath
+the old API-owned mutable acceptance root. With verified identity mapping,
+a root-owned parent and Worker-owned unit, both 0750 with the shared read
+group, are a possible scoped layout. Provision only the new inodes and
+verify the filesystem's actual resulting owner/mode/ACL state.
+
+Actual zero-capability Worker create/write/fsync/owned-cleanup probes and API/
+foreign-UID denial probes belong only in that disposable fixture. Test both
+the intended API read-only bind and the underlying POSIX denial on a fixture
+writable bind; a read-only mount alone does not test filesystem permissions.
+These results still do not prove remote SMB/NFS service exclusion, absence
+of same-UID writers, or privileged/root exclusion. The production custody
+issuer and every release gate remain unchanged.
 
 ## Configuration backup, candidate validation and rollback (#403)
 
