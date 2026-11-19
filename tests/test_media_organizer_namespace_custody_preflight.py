@@ -78,6 +78,7 @@ def test_group_writable_unit_is_blocked_even_without_extended_acl():
         assert status == 2
         assert report["posix_namespace_permissions"] == "BLOCKED"
         assert report["namespace_exclusive_custody_proven"] is False
+        assert "unit-mode-allows-group-or-world-write" in report["blocking_conditions"]
 
 
 def test_private_worker_owned_unit_reports_only_posix_scope_not_release_authority():
@@ -125,5 +126,16 @@ def test_symlink_component_is_rejected_without_following_target():
 
 
 def test_malformed_acl_xattr_is_not_treated_as_absent():
-    assert PREFLIGHT._decode_acl(b"") if False else True
-    assert PREFLIGHT._read_acl  # function exists for host xattr probe
+    with patch.object(PREFLIGHT.os, "getxattr", return_value=b"\x00\x00\x00\x00"):
+        result = PREFLIGHT._read_acl(123, "system.posix_acl_access")
+    assert result == {"status": "MALFORMED", "entries": []}
+
+
+def test_acl_missing_mandatory_entries_is_malformed():
+    raw = _acl((0x01, 0x7, 0xFFFFFFFF), (0x20, 0x0, 0xFFFFFFFF))
+    try:
+        PREFLIGHT._decode_acl(raw)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("incomplete ACL must be rejected")
