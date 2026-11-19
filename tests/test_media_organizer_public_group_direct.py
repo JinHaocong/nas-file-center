@@ -376,3 +376,69 @@ def test_direct_group_refuses_root_worker_before_any_public_mutation(
     assert not publishing._group_receipt_path(frozen, 1).exists()
     assert (unit / "picture.jpg").read_bytes() == b"picture-original"
     assert (unit / "movie.mp4").read_bytes() == b"movie-original"
+
+def test_direct_group_detects_custody_loss_after_mkdir_before_open(
+    tmp_path, monkeypatch,
+):
+    """A replacement at mkdir→open must be rejected before it is adopted.
+
+    The fence models a revocable external custody proof: it remembers the
+    directory created by this Worker and refuses if the public name no longer
+    denotes that inode. This is synthetic fault injection, not proof that the
+    NAS currently supplies such an OS-enforced lock.
+    """
+    import os
+
+    unit, manifest, frozen = _prepare(tmp_path)
+    name = manifest["groups"][0]["name"]
+    detached = unit / ".nfc-owned-group-detached-for-audit"
+    public = unit / name
+    original_mkdir = publishing.os.mkdir
+    created_identity = {}
+    swapped = []
+
+    def replace_after_worker_mkdir(path, mode=0o777, *, dir_fd=None):
+        result = original_mkdir(path, mode=mode, dir_fd=dir_fd)
+        if path == name and dir_fd is not None and not swapped:
+            owned = public.stat(follow_symlinks=False)
+            created_identity["inode"] = (owned.st_dev, owned.st_ino)
+            public.rename(detached)
+            original_mkdir(public, mode=0o700)
+            foreign = public.stat(follow_symlinks=False)
+            assert (foreign.st_dev, foreign.st_ino) != created_identity["inode"]
+            assert foreign.st_uid == os.geteuid()
+            assert (foreign.st_mode & 0o777) == 0o700
+            swapped.append(True)
+        return result
+
+    def custody_fence():
+        if not created_identity:
+            return
+        try:
+            current = public.stat(follow_symlinks=False)
+        except FileNotFoundError as exc:
+            raise publishing.PublishingConflict(
+                "namespace custody lost after public group creation"
+            ) from exc
+        if (current.st_dev, current.st_ino) != created_identity["inode"]:
+            raise publishing.PublishingConflict(
+                "namespace custody lost after public group creation"
+            )
+
+    monkeypatch.setattr(publishing.os, "mkdir", replace_after_worker_mkdir)
+    with pytest.raises(publishing.PublishingConflict, match="namespace custody lost"):
+        publishing._create_public_group_direct(
+            unit, name, manifest, _authority(manifest), custody_fence,
+            frozen_manifest_path=frozen,
+        )
+
+    assert swapped
+    assert detached.is_dir()
+    assert public.is_dir()
+    assert list(public.iterdir()) == []
+    assert not (public / publishing._PUBLIC_OWNER).exists()
+    assert not publishing._group_receipt_path(frozen, 1).exists()
+    assert not publishing._owned_public(detached, _authority(manifest))
+    assert (unit / "picture.jpg").read_bytes() == b"picture-original"
+    assert (unit / "movie.mp4").read_bytes() == b"movie-original"
+    assert all(Path(row["target"]).is_file() for row in manifest["moves"])
