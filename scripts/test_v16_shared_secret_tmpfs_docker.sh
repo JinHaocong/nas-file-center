@@ -3,15 +3,18 @@
 # CI only: no host media, Docker socket, /data, or application config bind mounts.
 set -Eeuo pipefail
 
-if [[ "$GITHUB_ACTIONS" != "true" ]]; then
+if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
   echo "Refusing outside GitHub Actions; this is not an NAS command" >&2
   exit 2
 fi
 command -v docker >/dev/null || exit 2
 : "$GITHUB_RUN_ID"
 : "$GITHUB_RUN_ATTEMPT"
+: "$RUNNER_TEMP"
 
-VOL="nfc-v16-secret-ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+scratch="$(mktemp -d "$RUNNER_TEMP/nfc-v16-secret-model-XXXXXXXX")"
+VOL="nfc-v16-secret-ci-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${scratch##*-}"
 HOLDER="$VOL-holder"
 IMAGE="python:3.12-slim-bookworm"
 DEST="/run/nfc-recovery-secrets"
@@ -19,15 +22,59 @@ DEST="/run/nfc-recovery-secrets"
 cleanup() {
   docker rm -f "$HOLDER" >/dev/null 2>&1 || true
   docker volume rm "$VOL" >/dev/null 2>&1 || true
+  if [[ -n "$scratch" && "$scratch" == "$RUNNER_TEMP"/nfc-v16-secret-model-* ]]; then
+    rm -rf -- "$scratch"
+  fi
 }
 trap cleanup EXIT INT TERM
 
-docker volume create \
-  --driver local \
-  --opt type=tmpfs \
-  --opt device=tmpfs \
-  --opt 'o=size=1m,uid=10001,gid=10000,mode=2770,noexec,nosuid,nodev' \
-  "$VOL" >/dev/null
+# Only render synthetic host sources; no config/media bind is mounted below.
+# Test the selected volume AFTER both overlays, not an unused base definition.
+mkdir -p "$scratch/config/.nas-file-center-trash" "$scratch/media"
+export HOST_CONFIG_DIR="$scratch/config" HOST_DATA_DIR="$scratch/media"
+export HOST_QUARANTINE_DIR="$scratch/config"
+export NFC_API_UID=10001 NFC_WORKER_UID=10002 NFC_SHARED_GID=10000
+docker compose -f "$repo/compose.komodo.yaml" \
+  -f "$repo/compose.komodo.cross-storage.yaml" \
+  -f "$repo/compose.komodo.archive-recovery-secrets.yaml" \
+  config --format json > "$scratch/merged.json"
+python3 - "$scratch/merged.json" "$scratch/volume.args" <<'PY'
+import json, sys
+from pathlib import Path
+model = json.loads(Path(sys.argv[1]).read_text())
+sources = []
+for service_name, principal in (('nas-file-center-api', '10001:10000'),
+                                ('nas-file-center-worker', '10002:10000')):
+    service = model['services'][service_name]
+    assert service['user'] == principal
+    mounts = [v for v in service['volumes'] if v['target'] == '/run/nfc-recovery-secrets']
+    assert len(mounts) == 1 and mounts[0]['type'] == 'volume'
+    assert not mounts[0].get('read_only', False)
+    sources.append(mounts[0]['source'])
+    assert service['environment']['NFC_SECRET_OWNER_UID'] == '10001'
+    assert service['environment']['NFC_SECRET_GROUP_GID'] == '10000'
+assert sources[0] == sources[1], 'API and Worker must use the same RAM volume'
+definition = model['volumes'][sources[0]]
+assert definition['driver'] == 'local' and not definition.get('external', False)
+options = definition['driver_opts']
+assert set(options) == {'type', 'device', 'o'}
+assert options['type'] == options['device'] == 'tmpfs'
+mount_options = options['o'].split(',')
+option_keys = [part.split('=', 1)[0] for part in mount_options]
+assert len(option_keys) == len(set(option_keys)), 'Duplicate RAM mount options'
+assert {'size=1m', 'uid=10001', 'gid=10000', 'mode=2770',
+        'noexec', 'nosuid', 'nodev'}.issubset(mount_options)
+arguments = ['--driver', definition['driver']]
+for key, value in sorted(options.items()):
+    assert isinstance(value, str) and not any(c in value for c in ('\0', '\n'))
+    arguments.extend(('--opt', f'{key}={value}'))
+# Docker receives these exact rendered options, with a fresh CI-only name.
+# NUL-delimited argv avoids eval or shell parsing of the Compose output.
+Path(sys.argv[2]).write_bytes(b''.join(arg.encode() + b'\0' for arg in arguments))
+print('MERGED_COMPOSE_SELECTED_SHARED_RAM_VOLUME_OK')
+PY
+mapfile -d '' -t VOLUME_ARGS < "$scratch/volume.args"
+docker volume create "${VOLUME_ARGS[@]}" "$VOL" >/dev/null
 
 # Hold one attachment open so the local-driver tmpfs stays mounted.
 docker run --rm -d --name "$HOLDER" --user 10001:10000 \

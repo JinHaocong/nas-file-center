@@ -75,75 +75,34 @@ Zoraxy 反向代理 (SSL Termination)
 nas-file-center-api:8080 (容器内 HTTP 端口，禁止直接映射宿主机端口)
 ```
 
-### `compose.komodo.yaml` (极空间 / Komodo Stack 推荐配置)
+### `compose.komodo.yaml`（Komodo 部署模板）
 
-```yaml
-services:
-  nas-file-center-api:
-    image: kerwinjhc/nas-file-center:1.4.6
-    container_name: nas-file-center-api
-    volumes:
-      - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
-      - /tmp/zfsv3/sata11/15246330601/data:/data:ro
-    networks:
-      - nginx_network
-    environment:
-      - CONFIG_DIR=/config
-      - DATA_MOUNT=/data
-      - ALLOWED_ROOTS=/data
-      - QUARANTINE_ROOT=/data/.nas-file-center-trash
-      - ALLOW_MUTATION=false
-      - ALLOW_DELETE=false
-      - PROTECT_LAST_FILE=true
-      - FCLONES_BINARY=/usr/local/bin/fclones
-      - MTIME_REFRESH_DELAY_SECONDS=2
-      - SESSION_COOKIE_SECURE=true
-      - INITIAL_ADMIN_USERNAME=[[INITIAL_ADMIN_USERNAME]]
-      - INITIAL_ADMIN_PASSWORD=[[INITIAL_ADMIN_PASSWORD]]
-    healthcheck:
-      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health\")' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-    restart: unless-stopped
+使用仓库中的 [compose.komodo.yaml](compose.komodo.yaml)，避免复制与当前分支不一致的配置片段。
+**当前 V1.6 开发分支的权限模板不能直接覆盖运行中的 1.4.6 配置。** 镜像版本尚未发布为 V1.6；
+候选验证需要已审查的镜像摘要、独立配置副本、维护窗口及回滚方案，见
+[NAS 验证与配置备份流程](docs/real-nas-acceptance.md#configuration-backup-candidate-validation-and-rollback-403)。
 
-  nas-file-center-worker:
-    image: kerwinjhc/nas-file-center:1.4.6
-    container_name: nas-file-center-worker
-    command:
-      - python
-      - -m
-      - app.worker
-    volumes:
-      - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
-      - /tmp/zfsv3/sata11/15246330601/data:/data:ro
-    networks:
-      - nginx_network
-    environment:
-      - CONFIG_DIR=/config
-      - DATA_MOUNT=/data
-      - ALLOWED_ROOTS=/data
-      - QUARANTINE_ROOT=/data/.nas-file-center-trash
-      - ALLOW_MUTATION=false
-      - ALLOW_DELETE=false
-      - PROTECT_LAST_FILE=true
-      - FCLONES_BINARY=/usr/local/bin/fclones
-      - MTIME_REFRESH_DELAY_SECONDS=2
-    depends_on:
-      nas-file-center-api:
-        condition: service_healthy
-    restart: unless-stopped
+在 Komodo Stack 的环境变量中提供宿主机路径，真实值保存在私有 Variables 中，例如：
 
-networks:
-  nginx_network:
-    external: true
+```dotenv
+HOST_CONFIG_DIR=[[NFC_CONFIG_HOST]]
+HOST_DATA_DIR=[[NFC_DATA_HOST]]
 ```
 
-默认三重安全状态：
-- `/data:ro` (只读挂载)
-- `ALLOW_MUTATION=false`
-- `ALLOW_DELETE=false`
+`HOST_CONFIG_DIR` 与 `HOST_DATA_DIR` 必须互不嵌套且不是同一目录，避免通过可写配置挂载访问媒体。
+模板保留 `/config/app.db` 和 `/quarantine/.nas-file-center-trash` 容器路径。默认隔离区源为
+`HOST_CONFIG_DIR/.nas-file-center-trash`，API 在隔离区路径及 `/config` 下的同一目录入口均使用只读挂载，
+Worker 使用可写挂载。所有绑定源必须事先存在；模板不会自动创建错误路径。
+跨存储覆盖文件中的 `HOST_QUARANTINE_DIR` 仍表示隔离区的**父目录**。自定义嵌套位置需要单独核实
+所有可写路径入口，不能仅依赖一个只读挂载。不要重写已有隔离记录的绝对路径来适配新模板。
+
+API / Worker 默认 UID 为 `10001` / `10002`，共享 GID 为 `10000`。现有配置目录、SQLite WAL/SHM、
+报告和密码共享卷必须按候选验证流程确认兼容，不进行递归权限修复。
+`MEDIA_PACKAGE_ROOT`、`MEDIA_PACKAGE_FUSE_COMPAT_ENABLED` 和管理员配置继续由 Komodo Variables 提供。
+HTTPS 反向代理仍使用 `nginx_network` 和 `SESSION_COOKIE_SECURE=true`，不暴露宿主机端口。
+
+V1.6 的执行开关及命名空间确认开关保持 `false`。API 媒体挂载为只读；Worker 的写挂载服务于已授权任务，
+不能替代真实 NAS 的 ACL、SMB 并发写入控制或正式验收。
 
 ---
 

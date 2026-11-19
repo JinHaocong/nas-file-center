@@ -50,6 +50,7 @@ jobs:
 
       - name: Validate cross-storage Compose overlays
         env:
+          HOST_CONFIG_DIR: /tmp/nfc-config
           HOST_DATA_DIR: /tmp/nfc-data
           HOST_QUARANTINE_DIR: /tmp/nfc-quarantine
         run: |

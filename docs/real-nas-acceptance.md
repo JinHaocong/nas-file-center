@@ -85,7 +85,9 @@ numeric ownership; stop on any error rather than dropping preservation options.
 1. Record the current image digest, resolved deployment configuration and bind
    sources privately. The repository's application Compose files still select
    `1.4.6`; prepare a candidate configuration pinned to the reviewed candidate
-   image digest, with distinct project/container names if needed. Preserve the
+   image digest, with distinct project/container names. Use an isolated candidate
+   network: attaching identically named services to the production proxy network
+   can also reuse service DNS aliases even when container names differ. Preserve the
    old image/config pair for rollback. Wait for active tasks to finish, stop the
    Worker, then the API, and confirm both stopped. Keep every other writer to
    this config tree stopped throughout backup/copy; a live `cp app.db` is not a
@@ -96,6 +98,19 @@ numeric ownership; stop on any error rather than dropping preservation options.
    original merely to prepare the copy. The built-in `app/db.py::backup_database`
    uses SQLite online backup before schema migration, but does not back up all
    evidence or host permissions and is not a substitute for this snapshot.
+   If quarantine payloads live below the config bind source, the archive includes
+   them too: confirm backup capacity before starting. Preserve the canonical
+   `/quarantine/.nas-file-center-trash` mount path used by historical DB records.
+   Config and media bind sources must be disjoint in both directions, including
+   resolved host aliases. Otherwise the writable config mount can expose media
+   even when `/data` itself is mounted read-only.
+   The Komodo template masks its known `/config/.nas-file-center-trash` alias
+   read-only in the API as well as the canonical quarantine path. Other nested
+   bind/symlink/hard-link layouts require their own verified isolation; an arbitrary
+   external quarantine source is not covered by that one mask. Cross-storage
+   overlays keep `HOST_QUARANTINE_DIR` as the parent of `.nas-file-center-trash`
+   and replace the same leaf mount, rather than shadowing an inherited leaf with
+   a different parent bind. No stored quarantine paths are rebased.
 
    ```bash
    set -euo pipefail
@@ -155,6 +170,12 @@ numeric ownership; stop on any error rather than dropping preservation options.
    completed shared-mode jobs lacking the checkpoint digests described in
    [the execution gate](media-organizer-v16-execution-gate.md#shared-review-compatibility)
    remain blocked; permission repair alone cannot make them trustworthy.
+   Verify the effective shared-secret volume selected by both services, not an
+   unused definition in the YAML. A new isolated candidate volume must match the
+   configured API UID/shared GID and `2770` root contract; the legacy root-owned
+   `0700` channel is not compatible. Changing `driver_opts` in a file does not
+   prove the existing engine volume changed. Do not remove active production
+   secrets or attach the candidate to the production password channel.
 6. For rollback **before media changes**, stop the candidate Worker and API,
    retain the candidate config for diagnosis, and restore the saved old image
    digest plus the untouched original config binding. Validate that resolved

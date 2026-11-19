@@ -1,3 +1,8 @@
+# Candidate source template. Use an independently reviewed image/config copy
+# for V1.6 acceptance; the version below is still the existing release tag.
+# Set HOST_CONFIG_DIR/HOST_DATA_DIR in the stack environment using private
+# Komodo Variables. Bind sources must already exist; no host paths live here.
+# Config and media sources must be disjoint, including resolved host aliases.
 services:
   nas-file-center-api:
     image: kerwinjhc/nas-file-center:1.4.6
@@ -12,16 +17,40 @@ services:
     pull_policy: missing
     container_name: nas-file-center-api
     volumes:
-      - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
+      - type: bind
+        source: ${HOST_CONFIG_DIR:?Set HOST_CONFIG_DIR in the stack environment}
+        target: /config
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOST_CONFIG_DIR:?Set HOST_CONFIG_DIR in the stack environment}/.nas-file-center-trash
+        target: /quarantine/.nas-file-center-trash
+        read_only: true
+        bind:
+          create_host_path: false
+      # The same quarantine subtree is also reachable through writable /config.
+      - type: bind
+        source: ${HOST_CONFIG_DIR:?Set HOST_CONFIG_DIR in the stack environment}/.nas-file-center-trash
+        target: /config/.nas-file-center-trash
+        read_only: true
+        bind:
+          create_host_path: false
       - nfc-recovery-secrets:/run/nfc-recovery-secrets
-      - /tmp/zfsv3/sata11/15246330601/data:/data:ro
+      - type: bind
+        source: ${HOST_DATA_DIR:?Set HOST_DATA_DIR in the stack environment}
+        target: /data
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       - nginx_network
     environment:
       - CONFIG_DIR=/config
       - DATA_MOUNT=/data
       - ALLOWED_ROOTS=/data
-      - QUARANTINE_ROOT=/data/.nas-file-center-trash
+      - QUARANTINE_ROOT=/quarantine/.nas-file-center-trash
+      - MEDIA_PACKAGE_ROOT=[[MEDIA_PACKAGE_ROOT]]
+      - MEDIA_PACKAGE_FUSE_COMPAT_ENABLED=[[MEDIA_PACKAGE_FUSE_COMPAT_ENABLED]]
       - ALLOW_MUTATION=true
       - ALLOW_DELETE=true
       - PROTECT_LAST_FILE=true
@@ -60,16 +89,31 @@ services:
       - -m
       - app.worker
     volumes:
-      - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
+      - type: bind
+        source: ${HOST_CONFIG_DIR:?Set HOST_CONFIG_DIR in the stack environment}
+        target: /config
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${HOST_CONFIG_DIR:?Set HOST_CONFIG_DIR in the stack environment}/.nas-file-center-trash
+        target: /quarantine/.nas-file-center-trash
+        bind:
+          create_host_path: false
       - nfc-recovery-secrets:/run/nfc-recovery-secrets
-      - /tmp/zfsv3/sata11/15246330601/data:/data:rw
+      - type: bind
+        source: ${HOST_DATA_DIR:?Set HOST_DATA_DIR in the stack environment}
+        target: /data
+        bind:
+          create_host_path: false
     networks:
       - nginx_network
     environment:
       - CONFIG_DIR=/config
       - DATA_MOUNT=/data
       - ALLOWED_ROOTS=/data
-      - QUARANTINE_ROOT=/data/.nas-file-center-trash
+      - QUARANTINE_ROOT=/quarantine/.nas-file-center-trash
+      - MEDIA_PACKAGE_ROOT=[[MEDIA_PACKAGE_ROOT]]
+      - MEDIA_PACKAGE_FUSE_COMPAT_ENABLED=[[MEDIA_PACKAGE_FUSE_COMPAT_ENABLED]]
       - ALLOW_MUTATION=true
       - ALLOW_DELETE=true
       - PROTECT_LAST_FILE=true

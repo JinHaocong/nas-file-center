@@ -1,12 +1,24 @@
+# HOST_QUARANTINE_DIR remains the parent of .nas-file-center-trash.
+# Use a source disjoint from writable config binds. Any nested source needs
+# an explicitly verified read-only mask for every API alias before deployment.
 services:
   api:
     environment:
       QUARANTINE_ROOT: /quarantine/.nas-file-center-trash
     volumes:
-      - ${HOST_QUARANTINE_DIR:?Set HOST_QUARANTINE_DIR for cross-storage quarantine}:/quarantine:rw
+      - type: bind
+        source: ${HOST_QUARANTINE_DIR:?Set HOST_QUARANTINE_DIR for cross-storage quarantine}/.nas-file-center-trash
+        target: /quarantine/.nas-file-center-trash
+        read_only: true
+        bind:
+          create_host_path: false
 
   worker:
     environment:
       QUARANTINE_ROOT: /quarantine/.nas-file-center-trash
     volumes:
-      - ${HOST_QUARANTINE_DIR:?Set HOST_QUARANTINE_DIR for cross-storage quarantine}:/quarantine:rw
+      - type: bind
+        source: ${HOST_QUARANTINE_DIR:?Set HOST_QUARANTINE_DIR for cross-storage quarantine}/.nas-file-center-trash
+        target: /quarantine/.nas-file-center-trash
+        bind:
+          create_host_path: false

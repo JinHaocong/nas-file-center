@@ -5,6 +5,7 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - 'compose*.yaml'
       - 'app/batch/media_organizer_*.py'
       - 'app/media_organizer/**'
       - 'app/archive_recovery/**'
