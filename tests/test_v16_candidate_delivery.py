@@ -35,6 +35,16 @@ def test_fresh_install_pulls_the_published_image_without_host_ports():
         assert service["environment"]["MEDIA_ORGANIZER_EXECUTION_ENABLED"] == "false"
 
 
+def test_candidate_publish_rebuilds_for_media_organizer_runtime_and_acceptance_changes():
+    workflow = _workflow()
+    paths = workflow["on"]["push"]["paths"]
+    assert "app/batch/media_organizer_*.py" in paths
+    assert "tests/test_media_organizer_*.py" in paths
+    assert "tests/test_deployment_consistency.py" in paths
+    assert "compose.v16-real-nas-acceptance.yaml" in paths
+    assert "scripts/media_organizer_v16_real_nas_acceptance.py" in paths
+
+
 def test_candidate_trigger_and_release_job_remain_separate():
     workflow = _workflow()
     triggers = workflow.get("on", workflow.get(True))
