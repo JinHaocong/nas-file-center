@@ -192,6 +192,42 @@ numeric ownership; stop on any error rather than dropping preservation options.
    occurred, a config rollback cannot undo it: preserve the matching evidence
    and use reviewed task-specific recovery before switching authority.
 
+## Fresh installation without legacy-data migration
+
+The owner may choose a **fresh V1.6 installation** instead of copying the
+1.4.6 configuration/database. In this mode:
+
+- Keep the existing 1.4.6 containers, config tree, database, volumes and proxy
+  deployment unchanged. Do not stop them for a database migration because no
+  legacy state is imported.
+- Create a new, sibling NVMe config directory and a separate disposable data
+  root. The new config must be provisioned specifically for API UID 10001,
+  Worker UID 10002 and shared GID 10000; never recursively alter the old config.
+- Use `compose.komodo.v16-fresh-install.yaml` with distinct container names,
+  project/network and tmpfs secret volume. It has no attachment to the old
+  `nginx_network`, binds its HTTP port to loopback, and initially mounts the
+  candidate data root read-only in both services.
+- The candidate database and administrator account start empty. Old task
+  history, users, reports, schedules, quarantine records and recovery evidence
+  are intentionally not imported.
+- Keep `ALLOW_MUTATION`, `ALLOW_DELETE`, organizer execution and namespace
+  quiescence flags false. The candidate's loopback HTTP cookie setting is for
+  isolated local acceptance only; production access requires a separately
+  reviewed TLS/proxy configuration.
+- Build and pin the exact candidate image from the reviewed Git commit. Do not
+  use the existing 1.4.6 image tag as a substitute for the candidate.
+- Fresh installation does not waive the independent same-mount acceptance,
+  exclusive namespace custody, API mutation-boundary audit or non-author
+  security sign-off. The candidate Worker must not receive a writable
+  production media mount. A separate owner-approved disposable SATA scope is
+  required before any media write test.
+
+The fresh-install Compose model is validated in CI using temporary directories;
+that validation does not create NAS directories or prove ZFS/FUSE UID/GID
+semantics. First provision and verify only the new config directory. If
+`chown`, setgid, ACL or non-root access is unsupported by the NAS filesystem,
+stop and do not fall back to root or broaden permissions.
+
 ## Required host layout
 
 The owner-created root must already exist and contain exactly these two child directories:

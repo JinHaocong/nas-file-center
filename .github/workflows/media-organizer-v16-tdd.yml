@@ -19,6 +19,7 @@ on:
       - 'scripts/test_v16_media_bind_mount_boundary.sh'
       - 'scripts/test_v16_preview_cross_uid.sh'
       - 'scripts/test_v16_cleanup_cross_uid.sh'
+      - 'scripts/validate_v16_fresh_install_compose.sh'
       - 'scripts/media_organizer_cross_uid_lifecycle.py'
       - 'tests/test_api_route_media_mutation_boundary.py'
       - 'tests/test_quarantine_*.py'
@@ -83,6 +84,9 @@ jobs:
       - name: Real distinct-UID execution, cleanup and explicit recovery (synthetic)
         shell: bash
         run: bash scripts/test_v16_cleanup_cross_uid.sh
+      - name: Validate isolated fresh V1.6 Compose model (synthetic)
+        shell: bash
+        run: bash scripts/validate_v16_fresh_install_compose.sh
   frontend-focused:
     runs-on: ubuntu-latest
     timeout-minutes: 15
