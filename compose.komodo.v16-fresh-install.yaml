@@ -5,12 +5,8 @@
 name: nas-file-center-v16-candidate
 
 x-v16-common: &v16-common
-  image: ${NFC_V16_IMAGE:?Set NFC_V16_IMAGE to the exact locally built candidate image}
-  build:
-    context: .
-    args:
-      FCLONES_VERSION: ${FCLONES_VERSION:-0.35.0}
-  pull_policy: never
+  image: ${NFC_V16_IMAGE:?Set NFC_V16_IMAGE to the published candidate repository@sha256 digest}
+  pull_policy: missing
   restart: unless-stopped
   init: true
   read_only: true
@@ -71,8 +67,8 @@ services:
         bind:
           create_host_path: false
       - nfc-v16-recovery-secrets:/run/nfc-recovery-secrets
-    ports:
-      - "127.0.0.1:${NFC_V16_WEB_PORT:-18080}:8080"
+    # Initial bootstrap is inspected using docker exec. No host port is
+    # published, including on pre-28 Docker engines with localhost caveats.
     networks:
       - v16-private
     healthcheck:

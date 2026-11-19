@@ -205,8 +205,9 @@ The owner may choose a **fresh V1.6 installation** instead of copying the
   Worker UID 10002 and shared GID 10000; never recursively alter the old config.
 - Use `compose.komodo.v16-fresh-install.yaml` with distinct container names,
   project/network and tmpfs secret volume. It has no attachment to the old
-  `nginx_network`, binds its HTTP port to loopback, and initially mounts the
-  candidate data root read-only in both services.
+  `nginx_network`, publishes no host port, and initially mounts the candidate
+  data root read-only in both services. Inspect initial health using
+  `docker exec`; arrange browser/proxy access separately.
 - The candidate database and administrator account start empty. Old task
   history, users, reports, schedules, quarantine records and recovery evidence
   are intentionally not imported.
@@ -214,8 +215,15 @@ The owner may choose a **fresh V1.6 installation** instead of copying the
   quiescence flags false. The candidate's loopback HTTP cookie setting is for
   isolated local acceptance only; production access requires a separately
   reviewed TLS/proxy configuration.
-- Build and pin the exact candidate image from the reviewed Git commit. Do not
-  use the existing 1.4.6 image tag as a substitute for the candidate.
+- GitHub Actions builds the reviewed commit and pushes only
+  `kerwinjhc/nas-file-center:v1.6-candidate-<full-commit-sha>`. It verifies a
+  fresh non-root API bootstrap and waits for that commit's nine non-release
+  workflows before pushing the tested image. The existing main-only stable
+  publisher is separate; candidate publication never updates `1.4.6`,
+  `1.6.0` or `latest`.
+- Set `NFC_V16_IMAGE` to the resulting `repository@sha256:...` registry digest
+  from the publication evidence. Komodo pulls this image; the fresh-install
+  template has no build section, and no NAS compilation is needed.
 - Fresh installation does not waive the independent same-mount acceptance,
   exclusive namespace custody, API mutation-boundary audit or non-author
   security sign-off. The candidate Worker must not receive a writable
@@ -223,7 +231,7 @@ The owner may choose a **fresh V1.6 installation** instead of copying the
   required before any media write test.
 
 The fresh-install Compose model is validated in CI using temporary directories;
-that validation does not create NAS directories or prove ZFS/FUSE UID/GID
+that validation does not create NAS directories or prove NAS/FUSE UID/GID
 semantics. First provision and verify only the new config directory. If
 `chown`, setgid, ACL or non-root access is unsupported by the NAS filesystem,
 stop and do not fall back to root or broaden permissions.

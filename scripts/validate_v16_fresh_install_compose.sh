@@ -15,7 +15,6 @@ export NFC_V16_WORKER_UID=10002
 export NFC_V16_SHARED_GID=10000
 export NFC_V16_ADMIN_USERNAME='candidate-admin'
 export NFC_V16_ADMIN_PASSWORD='disposable-only-password'
-export NFC_V16_WEB_PORT=18080
 
 docker compose -f "$ROOT/compose.komodo.v16-fresh-install.yaml" \
   config --format json > "$TMP/model.json"
@@ -73,6 +72,9 @@ assert Path(wm["/quarantine/.nas-file-center-trash"]["source"]).resolve(strict=T
 assert wm["/quarantine/.nas-file-center-trash"].get("read_only", False) is False
 
 for service in (api, worker):
+    assert "build" not in service
+    assert service["pull_policy"] == "missing"
+    assert not service.get("ports")
     assert service["read_only"] is True
     assert "ALL" in service["cap_drop"]
     assert "no-new-privileges:true" in service["security_opt"]
@@ -82,8 +84,6 @@ for service in (api, worker):
     assert env["MEDIA_ORGANIZER_EXECUTION_ENABLED"] == "false"
     assert env["MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK"] == "false"
 
-assert api["ports"][0]["host_ip"] == "127.0.0.1"
-assert api["ports"][0]["published"] == "18080"
 assert set(api["networks"]) == {"v16-private"}
 assert set(worker["networks"]) == {"v16-private"}
 network = model["networks"]["v16-private"]

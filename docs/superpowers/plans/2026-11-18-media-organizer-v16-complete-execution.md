@@ -377,3 +377,27 @@ failures; it also includes two shared-handoff cases added after the preceding
 full-run collection. Frontend source is unchanged from the verified 1263-test
 suite and 22-case final UI focus. Shell/AST syntax and diff checks passed. The
 seven-fixture actual-UID CI sequence remains to be checked after this push.
+
+## Continuation — hosted candidate delivery and fresh Komodo installation
+
+The owner selected a fresh installation preserving the existing release and
+requested GitHub-hosted image builds and registry delivery through Komodo.
+Do not require the NAS to compile the application or migrate legacy state.
+
+Ruling: publish a distinct full-SHA candidate tag from the trusted development
+branch before the formal release merge. The current application version remains
+the old release version, so reusing the stable publisher could overwrite that
+release tag. Candidate publication does not claim completion of the production
+custody issuer or authorize media execution.
+
+- [x] RED: fourteen delivery regressions failed on the previous local-build
+  configuration and missing candidate publisher/CI evidence gate.
+- [x] GREEN: the candidate-only tag rejects wrong repository, branch and SHA;
+  missing/running CI waits, failed or skipped latest evidence refuses upload.
+  Fresh Compose pulls the registry image without a host build or published port.
+- [ ] Hosted verification: build/load the exact candidate, boot a fresh non-root
+  API with disposable RAM filesystems, require all nine current-commit CI results,
+  push only the tested image and verify its registry digest.
+- [ ] Pin the resulting digest in a separate private Komodo Stack, preserving
+  the old deployment. Start with fresh config and empty read-only bootstrap data;
+  actual SATA workflow acceptance remains separate.
