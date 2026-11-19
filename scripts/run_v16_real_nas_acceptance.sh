@@ -4,7 +4,6 @@ set -euo pipefail
 COMPOSE_FILE="${COMPOSE_FILE:-compose.v16-real-nas-acceptance.yaml}"
 ACCEPTANCE_ROOT="${V16_ACCEPTANCE_HOST_ROOT:?Set V16_ACCEPTANCE_HOST_ROOT to the existing SATA acceptance root}"
 EVIDENCE_DIR="${V16_EVIDENCE_HOST_DIR:?Set V16_EVIDENCE_HOST_DIR to an existing writable evidence directory}"
-ACCEPTANCE_IMAGE="kerwinjhc/nas-file-center@sha256:c5ceaf32813ddc1b3955b661c91c9ca923040ec34d58961003d47e17642d0d32"
 CANDIDATE_SHA="${CANDIDATE_SHA:-$(git rev-parse HEAD)}"
 
 require_dir() {
@@ -48,7 +47,6 @@ test -w "$EVIDENCE_DIR"
 export V16_ACCEPTANCE_HOST_ROOT="$ACCEPTANCE_ROOT"
 export V16_EVIDENCE_HOST_DIR="$EVIDENCE_DIR"
 export CANDIDATE_SHA
-export V16_ACCEPTANCE_IMAGE="$ACCEPTANCE_IMAGE"
 
 docker compose -f "$COMPOSE_FILE" config -q
 docker compose -f "$COMPOSE_FILE" pull v16-real-nas-acceptance

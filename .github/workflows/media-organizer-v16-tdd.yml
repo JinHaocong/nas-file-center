@@ -20,6 +20,8 @@ on:
       - 'scripts/test_v16_preview_cross_uid.sh'
       - 'scripts/test_v16_cleanup_cross_uid.sh'
       - 'scripts/validate_v16_fresh_install_compose.sh'
+      - 'scripts/run_v16_real_nas_acceptance.sh'
+      - 'tests/test_deployment_consistency.py'
       - 'scripts/media_organizer_cross_uid_lifecycle.py'
       - 'tests/test_api_route_media_mutation_boundary.py'
       - 'tests/test_quarantine_*.py'
@@ -87,6 +89,9 @@ jobs:
       - name: Validate isolated fresh V1.6 Compose model (synthetic)
         shell: bash
         run: bash scripts/validate_v16_fresh_install_compose.sh
+      - name: Validate real-NAS harness pulls published digest without local build
+        shell: bash
+        run: pytest -q tests/test_deployment_consistency.py
   frontend-focused:
     runs-on: ubuntu-latest
     timeout-minutes: 15
