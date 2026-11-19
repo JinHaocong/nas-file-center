@@ -764,6 +764,11 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                 if (not _file_matches(_entry(stage_fd, stage.name), op["identity"])
                         or not _file_matches(_entry(parent_fd, path.name), op["identity"])):
                     raise CleanupExecutionBlocked("collision source changed at mutation boundary")
+                # The source basename is still resolved by name at unlinkat.
+                # Revalidate the external exclusion grant AFTER the final
+                # identity check so a revoked custody boundary cannot delete
+                # a replacement that appeared in the check/use interval.
+                assert_exclusive_custody(custody, (stage.parent, path.parent))
                 os.unlink(path.name, dir_fd=parent_fd)
             finally:
                 if staged_file_fd is not None:
@@ -789,6 +794,11 @@ def _mutate_one(op: dict, *, previously_begun: bool,
                     raise CleanupExecutionBlocked("surviving final changed at unlink boundary")
                 if not _file_matches(_entry(parent_fd, path.name), op["identity"]):
                     raise CleanupExecutionBlocked("source identity changed at mutation boundary")
+                # unlinkat cannot bind a child name to the earlier checked FD.
+                # Keep the custody grant live through the last name check and
+                # the mutation boundary; the production issuer must provide
+                # actual exclusion, not a snapshot-only assertion.
+                assert_exclusive_custody(custody, (path.parent, final.parent))
                 os.unlink(path.name, dir_fd=parent_fd)
             finally:
                 os.close(final_fd)
@@ -815,6 +825,14 @@ def _mutate_one(op: dict, *, previously_begun: bool,
             bound = _entry(parent_fd, path.name)
             if bound is None or [int(bound.st_dev), int(bound.st_ino)] != op["identity"]:
                 raise CleanupExecutionBlocked("cleanup directory rebound")
+            # rmdirat is also basename-based. Revalidate custody after the
+            # final inode/emptiness check, then check the binding once more
+            # immediately before the syscall. A real provider must exclude
+            # competing writers throughout this interval.
+            assert_exclusive_custody(custody, (path.parent,))
+            bound = _entry(parent_fd, path.name)
+            if bound is None or [int(bound.st_dev), int(bound.st_ino)] != op["identity"]:
+                raise CleanupExecutionBlocked("cleanup directory rebound at mutation boundary")
             os.rmdir(path.name, dir_fd=parent_fd)
         elif kind in ("group-marker", "stage-marker"):
             if not stat.S_ISREG(info.st_mode):
@@ -834,6 +852,10 @@ def _mutate_one(op: dict, *, previously_begun: bool,
             assert_exclusive_custody(custody, (path.parent,))
             if role_mode:
                 _assert_layout_parent_bindings(path.parent, op, manifest, receipts, parent_fd)
+            _verify_marker(parent_fd, path.name, witness)
+            # Marker removal is name-based too; the final custody check must
+            # remain adjacent to the unlinkat mutation boundary.
+            assert_exclusive_custody(custody, (path.parent,))
             _verify_marker(parent_fd, path.name, witness)
             os.unlink(path.name, dir_fd=parent_fd)
         else:
