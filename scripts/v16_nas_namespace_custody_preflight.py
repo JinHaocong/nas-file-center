@@ -83,17 +83,34 @@ def _decode_acl(raw: bytes) -> dict:
     if version != 2:
         raise ValueError("unsupported POSIX ACL xattr version")
     entries = []
+    mandatory = {"USER_OBJ", "GROUP_OBJ", "OTHER"}
+    seen_mandatory = set()
+    seen_named = set()
+    seen_singletons = set()
     for offset in range(4, len(raw), 8):
         tag, perm, ident = struct.unpack_from("<HHI", raw, offset)
         if tag not in _ACL_TAGS or perm & ~0x7:
             raise ValueError("malformed POSIX ACL entry")
+        label = _ACL_TAGS[tag]
+        if label in mandatory | {"MASK"}:
+            if ident != 0xFFFFFFFF or label in seen_singletons:
+                raise ValueError("duplicate or malformed singleton POSIX ACL entry")
+            seen_singletons.add(label)
+            if label in mandatory:
+                seen_mandatory.add(label)
+        elif label in ("USER", "GROUP"):
+            if ident == 0xFFFFFFFF or (label, ident) in seen_named:
+                raise ValueError("duplicate or malformed named POSIX ACL entry")
+            seen_named.add((label, ident))
         entries.append({
-            "tag": _ACL_TAGS[tag],
-            "id": ident if tag in (0x02, 0x08) else None,
+            "tag": label,
+            "id": ident if label in ("USER", "GROUP") else None,
             "perm": perm,
         })
-    if not entries:
-        raise ValueError("empty POSIX ACL")
+    if not entries or seen_mandatory != mandatory:
+        raise ValueError("POSIX ACL is missing mandatory entries")
+    if seen_named and "MASK" not in seen_singletons:
+        raise ValueError("named POSIX ACL entries require a mask")
     mask = next((e["perm"] for e in entries if e["tag"] == "MASK"), 0x7)
     for entry in entries:
         entry["effective_perm"] = (
@@ -251,29 +268,39 @@ def run(argv=None) -> tuple[int, dict]:
                 review.append(f"acl-metadata-unavailable-depth-{index}")
             if record["mount"]["mount_id"] is None:
                 review.append(f"mount-identity-unavailable-depth-{index}")
-            if record["mount"]["read_only"] is True:
-                issues.append(f"read-only-mount-depth-{index}")
-            if record["untrusted_access_writers"]:
-                issues.append(f"untrusted-access-writer-depth-{index}")
-            if record["untrusted_default_writers"]:
-                issues.append(f"untrusted-default-writer-depth-{index}")
-
             # For an ancestor, sticky + a trusted child owner prevents a
             # different UID from renaming/unlinking this exact child name.
+            # The ancestor's write ACL is therefore not a path-rebinding
+            # capability when this exact child is protected by the sticky bit.
             if index < len(records) - 1:
                 child_uid = records[index + 1]["uid"]
+                protected_child = (
+                    record["sticky"] and child_uid in (0, args.worker_uid)
+                    and record["uid"] in (0, args.worker_uid)
+                )
                 if record["uid"] not in (0, args.worker_uid):
                     issues.append(f"untrusted-ancestor-owner-depth-{index}")
                 parent_mode = int(record["mode"], 8)
-                shared_writes = bool(parent_mode & 0o022)
-                if (shared_writes and not (
-                        record["sticky"] and child_uid in (0, args.worker_uid)
-                        and record["uid"] in (0, args.worker_uid))):
+                if (parent_mode & 0o022) and not protected_child:
                     issues.append(f"mutable-ancestor-binding-depth-{index}")
+                if record["untrusted_access_writers"] and not protected_child:
+                    issues.append(f"untrusted-access-writer-depth-{index}")
+            else:
+                if record["untrusted_access_writers"]:
+                    issues.append(f"untrusted-access-writer-depth-{index}")
+                if record["untrusted_default_writers"]:
+                    issues.append(f"untrusted-default-writer-depth-{index}")
 
         target = records[-1]
+        target_mode = int(target["mode"], 8)
+        if target_mode & 0o022:
+            issues.append("unit-mode-allows-group-or-world-write")
+        if target["uid"] not in (0, args.worker_uid):
+            issues.append("untrusted-unit-owner")
         if not target["worker_can_create_entries"]:
             issues.append("worker-cannot-create-in-unit")
+        if target["mount"]["read_only"] is True:
+            issues.append("unit-mount-read-only")
         if target["mount"]["read_only"] is not False:
             review.append("unit-mount-writability-unverified")
         if target["access_acl"]["status"] == "ABSENT":
