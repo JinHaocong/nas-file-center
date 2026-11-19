@@ -66,6 +66,7 @@ def test_group_writable_unit_is_blocked_even_without_extended_acl():
         unit = data / "unit"
         data.mkdir(mode=0o700)
         unit.mkdir(mode=0o770)
+        unit.chmod(0o770)  # mkdir mode is filtered by the process umask
         worker = os.geteuid()
         api = worker + 1 if worker != 10001 else worker + 2
         with patch.object(PREFLIGHT, "_read_acl",
