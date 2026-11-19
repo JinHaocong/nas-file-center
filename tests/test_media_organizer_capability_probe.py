@@ -36,7 +36,11 @@ def test_unsupported_directory_noreplace_reports_failure_without_deleting_neighb
     monkeypatch.setattr(probe_module, "rename_noreplace_at", unsupported)
     report = probe_semantic_organizer_mount(tmp_path)
     assert report["directory_noreplace"] is False
-    assert report["compatible"] is False
+    assert report["group_directory_noreplace_compatible"] is False
+    # Flat publication does not promote a public directory; a directory
+    # rename limitation must not mask independent pinned-file link support.
+    assert report["flat_filesystem_capabilities_compatible"] is True
+    assert report["compatible"] is True
     assert report["cleanup_complete"] is True
     assert sentinel.read_bytes() == b"retain"
     assert list(tmp_path.iterdir()) == [sentinel]
@@ -137,4 +141,21 @@ def test_probe_rejects_widened_private_stage_even_with_noreplace(tmp_path, monke
     assert report["compatible"] is False
     assert report["grouped_publication_authorized"] is False
     assert report["cleanup_complete"] is True
+    assert list(tmp_path.iterdir()) == []
+
+
+
+def test_probe_reports_directory_promotion_separately_from_flat_file_support(tmp_path, monkeypatch):
+    from app.batch import media_organizer_capability_probe as probe_module
+
+    def unsupported_directory_rename(*_args, **_kwargs):
+        raise OSError(errno.EOPNOTSUPP, "synthetic renameat2 unsupported")
+
+    monkeypatch.setattr(probe_module, "rename_noreplace_at", unsupported_directory_rename)
+    report = probe_semantic_organizer_mount(tmp_path)
+    assert report["group_directory_noreplace_compatible"] is False
+    assert report["flat_filesystem_capabilities_compatible"] is True
+    assert report["compatible"] is True
+    assert report["grouped_publication_authorized"] is False
+    assert report["namespace_exclusive_custody_proven"] is False
     assert list(tmp_path.iterdir()) == []

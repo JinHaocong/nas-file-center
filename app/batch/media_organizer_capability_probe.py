@@ -290,20 +290,27 @@ def probe_semantic_organizer_mount(parent: Path) -> dict:
             report["cleanup_complete"] and existing.get("cleanup_complete")
         )
         report["errors"].extend(existing.get("errors", []))
-    report["compatible"] = all(
+    # Flat retained-source publication creates only no-replace file links;
+    # it does not promote a public group directory. Keep directory rename
+    # capabilities separate so an FUSE renameat2 limitation does not falsely
+    # block a safe flat-file primitive path.
+    flat_required = (
+        "directory_fsync", "private_stage_owner_verified",
+        "private_stage_mode_verified", "source_fd_hardlink_noreplace",
+        "source_fd_name_swap_safe", "hardlink_noreplace",
+        "cross_directory_hardlink", "original_probe_compatible",
+        "cleanup_complete",
+    )
+    report["flat_filesystem_capabilities_compatible"] = all(
+        report.get(key) is True for key in flat_required
+    )
+    report["compatible"] = report["flat_filesystem_capabilities_compatible"]
+    report["group_directory_noreplace_compatible"] = all(
         report.get(key) is True for key in (
             "directory_noreplace", "directory_cross_parent_noreplace",
-            "collision_preserved", "directory_fsync",
-            "private_stage_owner_verified", "private_stage_mode_verified",
-            "source_fd_hardlink_noreplace", "source_fd_name_swap_safe",
-            "hardlink_noreplace", "cross_directory_hardlink",
-            "original_probe_compatible", "cleanup_complete",
+            "collision_preserved", "directory_fsync", "cleanup_complete",
         )
     )
-    # Backward-compatible "compatible" is now explicitly a FLAT-FILE-only
-    # capability result. A successful POSIX destination-noreplace test does
-    # NOT prove that the pending directory SOURCE basename cannot be swapped.
-    report["flat_filesystem_capabilities_compatible"] = report["compatible"]
     # No automated test in this probe can prove absence of uncooperative
     # same-UID/root/NAS clients. Never infer permission to publish groups.
     report["grouped_promotion_proven"] = False

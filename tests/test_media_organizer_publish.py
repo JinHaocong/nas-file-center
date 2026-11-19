@@ -489,3 +489,59 @@ def test_same_published_group_identity_survives_resume_after_interruption(
     monkeypatch.setattr(publishing, "_link_one", original)
     assert publish(tmp_path, manifest, frozen, resume=True)["ready_for_retirement"]
     assert all(Path(row["final"]).is_file() for row in manifest["moves"])
+
+
+
+def test_deferred_flat_publication_uses_pinned_links_without_group_custody(tmp_path):
+    root = tmp_path / "flat-work"
+    root.mkdir()
+    (root / "a.jpg").write_bytes(b"image-a")
+    (root / "b.png").write_bytes(b"image-b")
+    preview = preview_semantic_unit(root, allowed_roots=[tmp_path])
+    assert preview["status"] == "ready"
+    manifest = build_frozen_preview_manifest(
+        root, preview_record=preview, allowed_roots=[tmp_path], job_id=921,
+    )
+    manifest["cleanup_policy"] = "deferred"
+    frozen = tmp_path / "private" / "921.manifest.json"
+    save_frozen_preview_manifest(frozen, manifest)
+    stage_frozen_sources(
+        manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
+        lease_fence=lambda: None,
+    )
+    from app.batch.media_organizer_deferred_cleanup import validate_deferred_publication
+    validate_deferred_publication(manifest)
+    result = publish_frozen_stage(
+        manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
+        lease_fence=lambda: None, defer_directory_cleanup=True,
+        namespace_custody=None,
+    )
+    assert result["published_files"] == 2
+    assert result["ready_for_retirement"] is False
+    for row in manifest["moves"]:
+        source, staged, final = map(Path, (row["source"], row["target"], row["final"]))
+        assert source.is_file() and staged.is_file() and final.is_file()
+        assert source.stat().st_ino == staged.stat().st_ino == final.stat().st_ino
+        assert source.read_bytes() == staged.read_bytes() == final.read_bytes()
+
+
+def test_deferred_grouped_publication_still_requires_external_custody(tmp_path):
+    root = tmp_path / "mixed-work"
+    root.mkdir()
+    (root / "a.jpg").write_bytes(b"image")
+    (root / "b.mp4").write_bytes(b"video")
+    preview = preview_semantic_unit(root, allowed_roots=[tmp_path])
+    assert preview["status"] == "ready"
+    manifest = build_frozen_preview_manifest(
+        root, preview_record=preview, allowed_roots=[tmp_path], job_id=922,
+    )
+    manifest["cleanup_policy"] = "deferred"
+    frozen = tmp_path / "private" / "922.manifest.json"
+    save_frozen_preview_manifest(frozen, manifest)
+    from app.batch.media_organizer_deferred_cleanup import (
+        DeferredCleanupConflict, validate_deferred_publication,
+    )
+    with pytest.raises(DeferredCleanupConflict, match="SEC-12"):
+        validate_deferred_publication(manifest, namespace_custody=None)
+    assert not (root / manifest["stage_directory"]).exists()
+    assert not any((root / group["name"]).exists() for group in manifest["groups"])

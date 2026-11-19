@@ -995,7 +995,12 @@ def _publish_with_path_roles(
 
     def guard() -> None:
         fence()
-        assert_exclusive_custody(namespace_custody, sorted(parents))
+        # Public directory creation is the SEC-12 grouped namespace boundary.
+        # A pure flat plan creates no group directory and only publishes
+        # inode-pinned files with linkat no-replace while retaining originals.
+        # Grouped plans still require the external, non-boolean custody proof.
+        if group_rows:
+            assert_exclusive_custody(namespace_custody, sorted(parents))
 
     guard()
     # Validate every prospective group before creating any receipt or marker.
