@@ -65,4 +65,4 @@ def test_real_nas_acceptance_pulls_the_verified_candidate_without_building_on_na
     assert mounts["/evidence"]["bind"]["create_host_path"] is False
     assert "--build" not in runner
     assert 'docker compose -f "$COMPOSE_FILE" pull v16-real-nas-acceptance' in runner
-    assert "compose run --rm v16-real-nas-acceptance" in runner
+    assert 'docker compose -f "$COMPOSE_FILE" run --rm v16-real-nas-acceptance' in runner
