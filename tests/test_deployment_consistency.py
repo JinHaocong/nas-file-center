@@ -78,7 +78,7 @@ def test_real_nas_acceptance_pulls_the_verified_candidate_without_building_on_na
     assert "build" not in service
     assert service["image"] == (
         "kerwinjhc/nas-file-center@sha256:"
-        "c5ceaf32813ddc1b3955b661c91c9ca923040ec34d58961003d47e17642d0d32"
+        "9f8807d772691e7eb2a04b3d400cb5311e0939fa86289b092b20b877e8216372"
     )
     assert service["read_only"] is True
     assert service["network_mode"] == "none"
