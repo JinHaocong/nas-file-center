@@ -39,11 +39,12 @@ def test_candidate_publish_rebuilds_for_media_organizer_runtime_and_acceptance_c
     workflow = _workflow()
     triggers = workflow.get("on", workflow.get(True))
     paths = triggers["push"]["paths"]
-    assert "app/batch/media_organizer_*.py" in paths
-    assert "tests/test_media_organizer_*.py" in paths
-    assert "tests/test_deployment_consistency.py" in paths
-    assert "compose.v16-real-nas-acceptance.yaml" in paths
-    assert "scripts/media_organizer_v16_real_nas_acceptance.py" in paths
+    assert "app/**" in paths
+    assert "frontend/**" in paths
+    assert "Dockerfile" in paths
+    assert "pyproject.toml" in paths
+    assert "compose.v16-real-nas-acceptance.yaml" not in paths
+    assert "tests/test_deployment_consistency.py" not in paths
 
 
 def test_candidate_trigger_and_release_job_remain_separate():
