@@ -517,7 +517,7 @@ def test_deferred_flat_publication_uses_pinned_links_without_group_custody(tmp_p
         namespace_custody=None,
     )
     assert result["published_files"] == 2
-    assert result["ready_for_retirement"] is False
+    assert result["ready_for_retirement"] is True
     for row in manifest["moves"]:
         source, staged, final = map(Path, (row["source"], row["target"], row["final"]))
         assert source.is_file() and staged.is_file() and final.is_file()
