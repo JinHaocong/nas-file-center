@@ -163,6 +163,11 @@ print("API_QUARANTINE_CANONICAL_AND_CONFIG_ALIAS_READONLY_OK")
 os.umask(0o007)
 with open("/config/config-probe.txt", "x") as stream:
     stream.write("api\n")
+# Match the application shared-config contract: provision a NEW 0660 DB before
+# SQLite opens it. A umask cannot add group-write to SQLite default 0644 files.
+# O_EXCL prevents this synthetic fixture from repairing any existing database.
+fd = os.open("/config/app.db", os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o660)
+os.close(fd)
 database = sqlite3.connect("/config/app.db")
 try:
     assert database.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
@@ -171,7 +176,8 @@ try:
     database.commit()
     for suffix in ("", "-wal", "-shm"):
         info = os.stat("/config/app.db" + suffix)
-        assert info.st_gid == 10000 and stat.S_IMODE(info.st_mode) == 0o660
+        assert info.st_gid == 10000 and stat.S_IMODE(info.st_mode) == 0o660, (
+            suffix, info.st_gid, oct(stat.S_IMODE(info.st_mode)))
 finally:
     database.close()
 print("API_CONFIG_AND_EXISTING_DATABASE_PATH_WRITABLE_OK")
