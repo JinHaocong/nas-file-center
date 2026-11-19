@@ -50,4 +50,4 @@ export CANDIDATE_SHA
 
 docker compose -f "$COMPOSE_FILE" config -q
 docker compose -f "$COMPOSE_FILE" pull v16-real-nas-acceptance
-docker compose -f "$COMPOSE_FILE" run --rm v16-real-nas-acceptance
+docker compose -f "$COMPOSE_FILE" run --rm -T v16-real-nas-acceptance
