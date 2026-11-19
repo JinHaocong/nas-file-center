@@ -52,6 +52,11 @@ def test_candidate_trigger_and_release_job_remain_separate():
     assert BRANCH in triggers["push"]["branches"]
     assert "pull_request_target" not in triggers
     assert "refs/heads/main" in workflow["jobs"]["publish"]["if"]
+    push_paths = triggers["push"]["paths"]
+    assert "app/**" in push_paths and "frontend/**" in push_paths
+    assert "Dockerfile" in push_paths and "pyproject.toml" in push_paths
+    assert "compose.v16-real-nas-acceptance.yaml" not in push_paths
+    assert "tests/test_deployment_consistency.py" not in push_paths
     job = _candidate_job()
     assert REPOSITORY in job["if"] and f"refs/heads/{BRANCH}" in job["if"]
     step_names = [step.get("id") for step in job["steps"]]

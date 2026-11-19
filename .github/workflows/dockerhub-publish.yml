@@ -6,14 +6,12 @@ on:
     branches: [main, feature/media-organizer-v16-sdd-foundation]
     paths:
       - '.github/workflows/dockerhub-publish.yml'
+      - 'Dockerfile'
       - 'pyproject.toml'
+      - 'app/**'
+      - 'frontend/**'
       - 'scripts/verify_v16_candidate_ci.py'
       - 'tests/test_v16_candidate_delivery.py'
-      - 'app/batch/media_organizer_*.py'
-      - 'tests/test_media_organizer_*.py'
-      - 'tests/test_deployment_consistency.py'
-      - 'compose.v16-real-nas-acceptance.yaml'
-      - 'scripts/media_organizer_v16_real_nas_acceptance.py'
 
 permissions:
   contents: read
