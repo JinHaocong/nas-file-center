@@ -242,8 +242,9 @@ def enqueue_media_organizer_execution(
         if not Path(unit).is_relative_to(selection):
             raise ValueError("unit must remain within the original preview selection")
         ready = _ready_unit_record(settings, preview_job_id, unit, summary)
-        if maintenance_window_confirmed or ready.get("groups"):
-            check_api_eligibility(settings, Path(unit), (Path(unit),))
+        # Even a flat plan creates a private stage through mkdir/open and
+        # therefore needs exclusive namespace custody before it is queued.
+        check_api_eligibility(settings, Path(unit), (Path(unit),))
         matches = session.scalars(select(WorkJob).where(
             WorkJob.kind == EXECUTE_KIND,
             func.json_extract(WorkJob.state_json, "$.preview_job_id") == preview_job_id,
@@ -725,11 +726,10 @@ def enqueue_media_organizer_recovery(
             raise ValueError("frozen job identity changed")
         if not shared:
             _validate_private_recovery_stage(manifest, manifest_path, phase)
-        if maintenance_window_confirmed or manifest.get("groups") or uses_path_roles(manifest):
-            # A known missing/revoked scope must not consume the one assisted
-            # recovery attempt. This assertion reads no private stage evidence;
-            # the Worker independently reacquires custody before any mutation.
-            check_api_eligibility(settings, selected, _frozen_custody_scope(manifest))
+        # A known missing/revoked scope must not consume the one assisted
+        # recovery attempt, including a flat stage. The Worker independently
+        # reacquires custody before any mutation.
+        check_api_eligibility(settings, selected, _frozen_custody_scope(manifest))
         _require_mutation_slot(session, family_id=failed_job_id if maintenance_window_confirmed else None)
         approved_id = next_media_package_job_id(session, settings)
         job = WorkJob(
@@ -793,15 +793,11 @@ class MediaOrganizerExecuteHandler(TaskHandler):
         def bind_authority(manifest: dict) -> None:
             nonlocal custody, custody_parents
             require_mode(settings, manifest)
-            if mode == "maintenance_window" or manifest.get("groups") or uses_path_roles(manifest):
-                custody_parents = _frozen_custody_scope(manifest)
-                custody = resources.enter_context(acquire_operation_authority(
-                    settings, unit, custody_parents, manifest=manifest,
-                ))
-                assert_operation_authorized(custody, custody_parents)
-            else:
-                custody = None
-                custody_parents = ()
+            custody_parents = _frozen_custody_scope(manifest)
+            custody = resources.enter_context(acquire_operation_authority(
+                settings, unit, custody_parents, manifest=manifest,
+            ))
+            assert_operation_authorized(custody, custody_parents)
 
         frozen_job_id = int(job.id) if original_id is None else original_id
         phase = "new"

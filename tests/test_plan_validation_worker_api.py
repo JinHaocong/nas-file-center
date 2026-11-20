@@ -19,6 +19,7 @@ from app.models import (
 )
 from app.tasks.recovery import acquire_worker_ownership
 from app.worker import process_work_job
+from tests.storage_probe_custody import scoped_probe_namespace
 
 
 def _environment(tmp_path: Path):
@@ -114,6 +115,7 @@ def _create_hardlink_plan(service, data: Path) -> int:
 def test_plan_validation_api_only_enqueues_and_worker_runs_live_probes(
     tmp_path: Path,
     monkeypatch,
+    scoped_probe_namespace,
 ):
     client, data, service = _environment(tmp_path)
     plan_id = _create_hardlink_plan(service, data)

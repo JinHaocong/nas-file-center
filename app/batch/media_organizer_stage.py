@@ -82,7 +82,8 @@ def _write_marker(stage_fd: int, name: str, expected: bytes) -> None:
 
 def _read_marker(stage_fd: int, name: str, expected: bytes) -> bool:
     try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=stage_fd)
+        # A replaced witness may be a FIFO; reject its type without waiting.
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=stage_fd)
     except FileNotFoundError:
         return False
     with os.fdopen(fd, "rb") as stream:
@@ -137,8 +138,9 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None],
                     if preserve_source:
                         # The FD is pinned BEFORE the last name check. A writer
                         # replacing src.name cannot redirect the following link.
+                        # A raced FIFO must not block before fstat rejects it.
                         source_file_fd = os.open(
-                            src.name, os.O_RDONLY | os.O_NOFOLLOW |
+                            src.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK |
                             getattr(os, "O_CLOEXEC", 0), dir_fd=src_fd,
                         )
                         opened = os.fstat(source_file_fd)

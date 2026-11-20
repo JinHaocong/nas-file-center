@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 from tests.test_media_organizer_execute_jobs import (
-    setup, preview, execute_request, worker,
+    setup, preview, execute_request, worker, scoped_namespace,
 )
 
 
@@ -41,7 +41,7 @@ def _contents(directory: Path) -> dict[str, tuple[int, int, bytes]]:
     ) for p in directory.rglob("*") if p.is_file()}
 
 
-def test_full_audit_verifies_every_frozen_source_stage_public_link_and_wrapper(tmp_path):
+def test_full_audit_verifies_every_frozen_source_stage_public_link_and_wrapper(tmp_path, scoped_namespace):
     client, settings, unit, jid, manifest, folder = _completed(tmp_path, extra=27)
     before = _contents(unit)
     journal = folder / "manifest.json.manual-cleanup.json"
@@ -65,7 +65,7 @@ def test_full_audit_verifies_every_frozen_source_stage_public_link_and_wrapper(t
     assert journal.read_bytes() == preserved
 
 
-def test_full_audit_checks_late_file_beyond_first_review_page(tmp_path):
+def test_full_audit_checks_late_file_beyond_first_review_page(tmp_path, scoped_namespace):
     client, settings, unit, jid, manifest, folder = _completed(tmp_path, extra=27)
     last = Path(manifest["moves"][-1]["final"])
     detached = last.with_name("detached-for-audit.jpg")
@@ -79,7 +79,7 @@ def test_full_audit_checks_late_file_beyond_first_review_page(tmp_path):
     assert detached.is_file()
 
 
-def test_full_audit_refuses_unexpected_file_inside_old_classification(tmp_path):
+def test_full_audit_refuses_unexpected_file_inside_old_classification(tmp_path, scoped_namespace):
     client, settings, unit, jid, manifest, folder = _completed(tmp_path)
     unknown = unit / "P1" / "foreign-keep.txt"
     unknown.write_bytes(b"do-not-delete")
@@ -90,7 +90,7 @@ def test_full_audit_refuses_unexpected_file_inside_old_classification(tmp_path):
     assert unknown.read_bytes() == b"do-not-delete"
 
 
-def test_full_audit_refuses_unexpected_private_stage_entry(tmp_path):
+def test_full_audit_refuses_unexpected_private_stage_entry(tmp_path, scoped_namespace):
     client, settings, unit, jid, manifest, folder = _completed(tmp_path)
     foreign = unit / manifest["stage_directory"] / "unexpected.bin"
     foreign.write_bytes(b"preserve-foreign")
@@ -101,7 +101,7 @@ def test_full_audit_refuses_unexpected_private_stage_entry(tmp_path):
     assert foreign.read_bytes() == b"preserve-foreign"
 
 
-def test_full_audit_refuses_tampered_journal_and_remains_read_only(tmp_path):
+def test_full_audit_refuses_tampered_journal_and_remains_read_only(tmp_path, scoped_namespace):
     client, settings, unit, jid, manifest, folder = _completed(tmp_path)
     journal = folder / "manifest.json.manual-cleanup.json"
     journal.write_bytes(b'{"tampered":true}')
@@ -112,7 +112,7 @@ def test_full_audit_refuses_tampered_journal_and_remains_read_only(tmp_path):
     assert journal.read_bytes() == b'{"tampered":true}'
 
 
-def test_full_audit_is_admin_only_and_denies_unfinished_job(tmp_path):
+def test_full_audit_is_admin_only_and_denies_unfinished_job(tmp_path, scoped_namespace):
     client, settings, unit = setup(tmp_path, enabled=True)
     pid = preview(client, settings, unit)
     queued = execute_request(client, pid, unit)

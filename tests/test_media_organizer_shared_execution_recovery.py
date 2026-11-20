@@ -17,7 +17,7 @@ from app.main import create_app
 from app.models import WorkJob
 from app.tasks.context import JobContext
 from tests.test_media_organizer_execute_jobs import (
-    execute_request, preview, recovery_token, setup, worker,
+    execute_request, preview, recovery_token, setup, worker, scoped_namespace,
 )
 from tests.test_media_organizer_grouped_worker_custody import _install_issuer
 from tests.test_media_organizer_shared_handoff import _snapshot
@@ -291,7 +291,7 @@ def test_shared_api_snapshot_does_not_replace_worker_private_recovery_validation
     assert _snapshot(unit) == before
 
 
-def test_legacy_recovery_still_requires_live_private_stage_read(tmp_path, monkeypatch):
+def test_legacy_recovery_still_requires_live_private_stage_read(tmp_path, monkeypatch, scoped_namespace):
     monkeypatch.delenv("NFC_SHARED_CONFIG_GID", raising=False)
     client, settings, unit = setup(tmp_path, enabled=True)
     preview_id = preview(client, settings, unit)

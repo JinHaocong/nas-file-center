@@ -298,12 +298,11 @@ def get_media_organizer_preview(session_factory, settings: Settings, job_id: int
         for row in units:
             if row.get('status') != 'ready':
                 continue
-            if mode == "maintenance_window" or row.get("groups"):
-                try:
-                    unit = Path(row["unit"])
-                    check_api_eligibility(settings, unit, (unit,))
-                except (ValueError, OSError, PermissionError):
-                    continue
+            try:
+                unit = Path(row["unit"])
+                check_api_eligibility(settings, unit, (unit,))
+            except (ValueError, OSError, PermissionError):
+                continue
             confirmation_tokens[row['unit']] = approval_token(job_id, row['unit'])
     return {'job_id': job_id, 'status': status, 'error': error,
             'selection': state.get('selection', ''), 'progress': progress,

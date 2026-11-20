@@ -1,4 +1,8 @@
-"""Exercise production maintenance approvals with disposable media and real Workers."""
+"""Exercise maintenance approvals with disposable media and real Workers.
+
+Positive protocol tests explicitly inject tmp_path-scoped synthetic custody;
+they do not establish production maintenance or NAS acceptance.
+"""
 import hashlib
 import json
 import os
@@ -15,7 +19,7 @@ from app.main import create_app
 from app.models import WorkJob
 from app.tasks.context import JobContext
 from app.worker import process_work_job
-from tests.test_media_organizer_execute_jobs import preview, worker
+from tests.test_media_organizer_execute_jobs import preview, worker, scoped_namespace
 
 
 def make_case(tmp_path, monkeypatch, *, shared=False):
@@ -88,7 +92,7 @@ def test_execution_mode_is_explicit_and_validated():
 
 
 @pytest.mark.parametrize("shared,interrupt", [(False, False), (True, True)])
-def test_maintenance_approvals_reports_recovery_and_zero_rescan(tmp_path, monkeypatch, shared, interrupt):
+def test_maintenance_approvals_reports_recovery_and_zero_rescan(tmp_path, monkeypatch, shared, interrupt, scoped_namespace):
     client, settings, unit = make_case(tmp_path, monkeypatch, shared=shared)
     before = hashes(unit)
     pid = preview(client, settings, unit)
@@ -151,7 +155,7 @@ def test_maintenance_approvals_reports_recovery_and_zero_rescan(tmp_path, monkey
     assert row["status"] == "already_organized" and row["needed_moves"] == row["renamed_count"] == 0
 
 
-def test_mode_switch_or_edited_approval_cannot_authorize_queued_work(tmp_path, monkeypatch):
+def test_mode_switch_or_edited_approval_cannot_authorize_queued_work(tmp_path, monkeypatch, scoped_namespace):
     client, settings, unit = make_case(tmp_path, monkeypatch)
     before = hashes(unit)
     pid = preview(client, settings, unit)
@@ -173,7 +177,7 @@ def test_mode_switch_or_edited_approval_cannot_authorize_queued_work(tmp_path, m
     assert not (settings.reports_dir / "media_organizer-executions" / str(jid)).exists()
 
 
-def test_cleanup_of_recovered_publication_requires_original_approval(tmp_path, monkeypatch):
+def test_cleanup_of_recovered_publication_requires_original_approval(tmp_path, monkeypatch, scoped_namespace):
     client, settings, unit = make_case(tmp_path, monkeypatch)
     pid = preview(client, settings, unit)
     jid = approved(client, f"/api/media-organizer/previews/{pid}/execute", unit=str(unit),
@@ -201,7 +205,7 @@ def test_cleanup_of_recovered_publication_requires_original_approval(tmp_path, m
     assert (unit / "P1/cover.jpg").is_file()
 
 
-def test_active_window_holds_new_units_without_starving_cleanup(tmp_path, monkeypatch):
+def test_active_window_holds_new_units_without_starving_cleanup(tmp_path, monkeypatch, scoped_namespace):
     client, settings, unit = make_case(tmp_path, monkeypatch)
     sibling = unit.parent / "NO.002"
     sibling.mkdir()
@@ -222,7 +226,7 @@ def test_active_window_holds_new_units_without_starving_cleanup(tmp_path, monkey
 
 
 @pytest.mark.parametrize("damage", ["handoff-report", "checkpoint-plan"])
-def test_cleanup_recovery_requires_unchanged_handoff_and_checkpoint(tmp_path, monkeypatch, damage):
+def test_cleanup_recovery_requires_unchanged_handoff_and_checkpoint(tmp_path, monkeypatch, damage, scoped_namespace):
     client, settings, unit = make_case(tmp_path, monkeypatch)
     pid = preview(client, settings, unit)
     jid = approved(client, f"/api/media-organizer/previews/{pid}/execute", unit=str(unit),
@@ -262,7 +266,7 @@ def test_cleanup_recovery_requires_unchanged_handoff_and_checkpoint(tmp_path, mo
 
 
 @pytest.mark.parametrize("damage", [None, "unwitnessed-stage", "changed-source", "config-residue"])
-def test_recover_after_frozen_checkpoint_before_mkdir(tmp_path, monkeypatch, damage):
+def test_recover_after_frozen_checkpoint_before_mkdir(tmp_path, monkeypatch, damage, scoped_namespace):
     client, settings, unit = make_case(tmp_path, monkeypatch)
     before = hashes(unit)
     pid = preview(client, settings, unit)
@@ -321,7 +325,7 @@ def test_recover_after_frozen_checkpoint_before_mkdir(tmp_path, monkeypatch, dam
     engine.dispose()
 
 
-def test_queued_job_with_alternate_predecessor_is_refused(tmp_path, monkeypatch):
+def test_queued_job_with_alternate_predecessor_is_refused(tmp_path, monkeypatch, scoped_namespace):
     client, settings, unit = make_case(tmp_path, monkeypatch)
     before = hashes(unit)
     pid = preview(client, settings, unit)

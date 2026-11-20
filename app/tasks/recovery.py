@@ -335,9 +335,11 @@ def renew_and_assert_worker_lease(
     refreshes acquired_at to now, and COMMITS immediately.
     No lock/transaction remains open across the filesystem syscall.
     """
-    now = utcnow()
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
+        # Waiting for SQLite's writer lock can outlive the lease. A timestamp
+        # captured before acquisition must never renew an already-stale owner.
+        now = utcnow()
         lock = assert_active_worker_lease(session, worker_id, now=now, timeout_seconds=timeout_seconds)
         lock.acquired_at = now
         session.commit()

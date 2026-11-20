@@ -266,6 +266,9 @@ class StorageOptimizationCapabilityProbeHandler(TaskHandler):
         _assert_worker_mutation_authority(context, settings)
         context.checkpoint(progress_message="Running storage capability probes")
 
+        def mutation_fence() -> None:
+            _assert_worker_mutation_authority(context, settings)
+
         if state.get("mode") == "directory":
             directory, identity = _probe_directory_state(
                 state.get("directory"), label="directory",
@@ -274,6 +277,7 @@ class StorageOptimizationCapabilityProbeHandler(TaskHandler):
                 directory,
                 settings.allowed_roots,
                 expected_parent_identity=identity,
+                mutation_fence=mutation_fence,
             )
         elif state.get("mode") == "between":
             source, source_identity = _probe_directory_state(
@@ -288,6 +292,7 @@ class StorageOptimizationCapabilityProbeHandler(TaskHandler):
                 settings.allowed_roots,
                 expected_source_parent_identity=source_identity,
                 expected_destination_parent_identity=destination_identity,
+                mutation_fence=mutation_fence,
             )
         else:
             raise ValueError("Storage capability probe job mode is invalid")
@@ -327,8 +332,16 @@ class PlanValidationHandler(TaskHandler):
 
         from app.service import FileCenterService
 
-        service = FileCenterService(settings)
+        # Plan validation needs only settings and the Worker's session factory.
+        # The API constructor also runs init_db/startup reconciliation, which
+        # must not be replayed as an unfenced side effect of a live Worker job.
+        service = object.__new__(FileCenterService)
+        service.settings = settings
+        service.SessionLocal = context.SessionLocal
         last_total = 0
+
+        def mutation_fence() -> None:
+            _assert_worker_mutation_authority(context, settings)
 
         def progress(current: int, total: int) -> None:
             nonlocal last_total
@@ -341,7 +354,10 @@ class PlanValidationHandler(TaskHandler):
                 progress_message=f"Validating plan #{plan_id}: {current}/{total}",
             )
 
-        result = service.validate_plan(int(plan_id), progress_callback=progress)
+        result = service.validate_plan(
+            int(plan_id), progress_callback=progress,
+            mutation_fence=mutation_fence, worker_id=context.worker_id,
+        )
         plan_status = str(result.get("status") or "unknown")
         final_total = max(1, last_total)
         context.checkpoint(

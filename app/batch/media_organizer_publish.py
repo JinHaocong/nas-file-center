@@ -698,8 +698,9 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
         source_stat = _entry(stage_fd, source_name)
         _check_identity(source_stat, row["identity"], stage / source_name)
         # Open and verify the actual file FD before the LAST basename check.
+        # A raced FIFO must not block before fstat rejects it.
         source_file_fd = os.open(
-            source_name, os.O_RDONLY | os.O_NOFOLLOW |
+            source_name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK |
             getattr(os, "O_CLOEXEC", 0), dir_fd=stage_fd,
         )
         opened = os.fstat(source_file_fd)

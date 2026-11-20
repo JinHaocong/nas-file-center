@@ -11,14 +11,16 @@ import json
 from pathlib import Path
 
 from tests.test_media_organizer_full_cleanup_audit import _completed, _contents
-from tests.test_media_organizer_execute_jobs import setup, preview, execute_request, worker
+from tests.test_media_organizer_execute_jobs import (
+    setup, preview, execute_request, worker, scoped_namespace,
+)
 
 
 def _plan_path(folder: Path) -> Path:
     return folder / "manifest.json.cleanup-plan.json"
 
 
-def test_completed_worker_writes_readonly_cleanup_plan_bound_to_all_links(tmp_path):
+def test_completed_worker_writes_readonly_cleanup_plan_bound_to_all_links(tmp_path, scoped_namespace):
     client, settings, work, jid, manifest, folder = _completed(tmp_path, extra=4)
     plan_file = _plan_path(folder)
     assert plan_file.is_file(), "Worker must persist a cleanup plan before handoff"
@@ -48,7 +50,7 @@ def test_completed_worker_writes_readonly_cleanup_plan_bound_to_all_links(tmp_pa
     assert all(Path(row["final"]).is_file() for row in manifest["moves"])
 
 
-def test_admin_can_page_cleanup_plan_without_modifying_media(tmp_path):
+def test_admin_can_page_cleanup_plan_without_modifying_media(tmp_path, scoped_namespace):
     client, settings, work, jid, manifest, folder = _completed(tmp_path, extra=27)
     before = _contents(work)
     response = client.get(
@@ -70,7 +72,7 @@ def test_admin_can_page_cleanup_plan_without_modifying_media(tmp_path):
     assert _contents(work) == before
 
 
-def test_cleanup_plan_reader_refuses_modified_plan_without_mutation(tmp_path):
+def test_cleanup_plan_reader_refuses_modified_plan_without_mutation(tmp_path, scoped_namespace):
     client, settings, work, jid, _, folder = _completed(tmp_path)
     path = _plan_path(folder)
     plan = json.loads(path.read_text(encoding="utf-8"))
@@ -82,7 +84,7 @@ def test_cleanup_plan_reader_refuses_modified_plan_without_mutation(tmp_path):
     assert _contents(work) == before
 
 
-def test_cleanup_plan_refuses_foreign_existing_path_and_keeps_originals(tmp_path):
+def test_cleanup_plan_refuses_foreign_existing_path_and_keeps_originals(tmp_path, scoped_namespace):
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
     queued = execute_request(client, pid, work)
@@ -100,7 +102,7 @@ def test_cleanup_plan_refuses_foreign_existing_path_and_keeps_originals(tmp_path
     assert result.status_code == 409
 
 
-def test_cleanup_plan_requires_admin_and_finished_publication(tmp_path):
+def test_cleanup_plan_requires_admin_and_finished_publication(tmp_path, scoped_namespace):
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
     queued = execute_request(client, pid, work)

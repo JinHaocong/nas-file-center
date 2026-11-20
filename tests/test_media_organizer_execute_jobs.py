@@ -1,4 +1,8 @@
-"""TDD: admin-confirmed, fail-closed, single-unit execution integration."""
+"""Admin-confirmed, fail-closed, single-unit execution integration.
+
+Positive lifecycle tests explicitly request disposable synthetic custody.
+They are protocol evidence, not production namespace or NAS acceptance.
+"""
 from pathlib import Path
 
 import pytest
@@ -12,6 +16,15 @@ from app.db import create_engine_and_session
 from app.main import create_app
 from app.tasks.recovery import acquire_worker_ownership
 from app.worker import process_work_job
+
+
+@pytest.fixture
+def scoped_namespace(tmp_path, monkeypatch):
+    """Grant only this test's tmp_path scope, with pytest-owned patch teardown."""
+    # Import lazily: the issuer test module reuses the helpers below.
+    from tests.test_media_organizer_grouped_worker_custody import _install_issuer
+
+    return _install_issuer(monkeypatch, tmp_path, allowed=True)
 
 
 def setup(tmp_path, *, enabled=False, mutation=True, deletion=True,
@@ -88,7 +101,7 @@ def test_both_existing_mutation_gates_remain_mandatory(tmp_path, mutation, delet
     assert (work / "photo.jpg").exists()
 
 
-def test_exact_unit_bound_token_required_and_duplicate_request_is_idempotent(tmp_path):
+def test_exact_unit_bound_token_required_and_duplicate_request_is_idempotent(tmp_path, scoped_namespace):
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
     assert execute_request(client, pid, work, "invalid").status_code == 409
@@ -101,7 +114,7 @@ def test_exact_unit_bound_token_required_and_duplicate_request_is_idempotent(tmp
     assert second.json()["job_id"] == first.json()["job_id"]
 
 
-def test_execute_is_never_queued_for_unit_not_in_original_preview(tmp_path):
+def test_execute_is_never_queued_for_unit_not_in_original_preview(tmp_path, scoped_namespace):
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
     other = work.parent / "NO.002"
@@ -125,7 +138,7 @@ def test_admin_authentication_and_request_schema_cannot_be_bypassed(tmp_path):
     assert execute_request(client, pid, work).status_code == 401
 
 
-def test_without_worker_lease_no_file_is_touched(tmp_path):
+def test_without_worker_lease_no_file_is_touched(tmp_path, scoped_namespace):
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
     queued = execute_request(client, pid, work)
@@ -135,7 +148,7 @@ def test_without_worker_lease_no_file_is_touched(tmp_path):
     assert (work / "clip.png").read_bytes() == b"image-2"
 
 
-def test_confirmed_worker_publishes_only_one_unit_and_defers_manual_cleanup(tmp_path):
+def test_confirmed_worker_publishes_only_one_unit_and_defers_manual_cleanup(tmp_path, scoped_namespace):
     client, settings, work = setup(tmp_path, enabled=True)
     sibling = work.parent / "NO.002"
     sibling.mkdir()
@@ -180,7 +193,7 @@ def test_confirmed_worker_publishes_only_one_unit_and_defers_manual_cleanup(tmp_
     assert "workspace" in (selected.get("reason") or "").lower()
 
 
-def test_stale_file_after_preview_fails_before_any_move(tmp_path):
+def test_stale_file_after_preview_fails_before_any_move(tmp_path, scoped_namespace):
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
     queued = execute_request(client, pid, work)
@@ -191,7 +204,7 @@ def test_stale_file_after_preview_fails_before_any_move(tmp_path):
     assert not any(x.name.startswith(".nfc-") for x in work.iterdir())
 
 
-def test_explicit_recovery_reuses_frozen_manifest_after_stage_interruption(tmp_path, monkeypatch):
+def test_explicit_recovery_reuses_frozen_manifest_after_stage_interruption(tmp_path, monkeypatch, scoped_namespace):
     from app.batch import media_organizer_execute_jobs as jobs
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
@@ -224,7 +237,7 @@ def test_explicit_recovery_reuses_frozen_manifest_after_stage_interruption(tmp_p
 
 
 def test_recovery_after_deferred_cleanup_record_interruption_keeps_staging(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, scoped_namespace,
 ):
     """Published-phase recovery only finishes its private manual-review record."""
     from app.batch import media_organizer_execute_jobs as jobs
@@ -267,7 +280,7 @@ def test_recovery_after_deferred_cleanup_record_interruption_keeps_staging(
             str(original_id) / "manifest.json.manual-cleanup.json").is_file()
 
 
-def test_preview_exposes_confirmation_only_to_enabled_admin_and_ready_unit(tmp_path):
+def test_preview_exposes_confirmation_only_to_enabled_admin_and_ready_unit(tmp_path, scoped_namespace):
     off_base = tmp_path / "disabled"
     off_base.mkdir()
     disabled, off_settings, off_work = setup(off_base, enabled=False)
@@ -289,7 +302,7 @@ def test_preview_exposes_confirmation_only_to_enabled_admin_and_ready_unit(tmp_p
     assert enabled.get(f"/api/media-organizer/previews/{on_pid}").status_code == 401
 
 
-def test_execution_worker_rechecks_independent_permission_switch(tmp_path):
+def test_execution_worker_rechecks_independent_permission_switch(tmp_path, scoped_namespace):
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
     queued = execute_request(client, pid, work)
@@ -301,7 +314,7 @@ def test_execution_worker_rechecks_independent_permission_switch(tmp_path):
     assert not any(path.name.startswith(".nfc-") for path in work.iterdir())
 
 
-def test_recovery_request_rejects_tampered_stage_ownership_witness(tmp_path, monkeypatch):
+def test_recovery_request_rejects_tampered_stage_ownership_witness(tmp_path, monkeypatch, scoped_namespace):
     from app.batch import media_organizer_execute_jobs as jobs
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
@@ -328,7 +341,7 @@ def test_recovery_request_rejects_tampered_stage_ownership_witness(tmp_path, mon
     assert (private / ".nfc-stage-authority").read_bytes() == b"foreign-witness"
 
 
-def test_assisted_recovery_confirmation_is_idempotent_after_success(tmp_path, monkeypatch):
+def test_assisted_recovery_confirmation_is_idempotent_after_success(tmp_path, monkeypatch, scoped_namespace):
     from app.batch import media_organizer_execute_jobs as jobs
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
@@ -356,7 +369,7 @@ def test_assisted_recovery_confirmation_is_idempotent_after_success(tmp_path, mo
     assert repeated.json()["status"] == "completed"
 
 
-def test_deferred_execution_never_reaches_last_marker_rmdir_gap(tmp_path, monkeypatch):
+def test_deferred_execution_never_reaches_last_marker_rmdir_gap(tmp_path, monkeypatch, scoped_namespace):
     """The production path does not call rmdir or remove stage owner markers."""
     from app.batch import media_organizer_retire as retirement
     from app.batch import media_organizer_execute_jobs as jobs
@@ -398,7 +411,7 @@ def test_namespace_quiescence_ack_is_required_even_when_other_permission_gates_o
     assert not any(x.name.startswith(".nfc-") for x in work.iterdir())
 
 
-def test_worker_rechecks_quiescence_ack_after_job_was_queued(tmp_path):
+def test_worker_rechecks_quiescence_ack_after_job_was_queued(tmp_path, scoped_namespace):
     """A revoked namespace guarantee fails BEFORE staging any source."""
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
@@ -412,7 +425,7 @@ def test_worker_rechecks_quiescence_ack_after_job_was_queued(tmp_path):
 
 
 def test_worker_requires_manual_cleanup_without_deleting_old_wrapper_or_stage(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, scoped_namespace,
 ):
     """The production WorkJob must never call the legacy unsafe retirement."""
     from app.batch import media_organizer_publish as publishing

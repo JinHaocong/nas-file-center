@@ -13,6 +13,7 @@ from app.service import FileCenterService
 from app.storage_optimization.capability import probe_storage_optimization_capabilities
 from app.tasks.recovery import acquire_worker_ownership
 from app.worker import process_work_job
+from tests.storage_probe_custody import scoped_probe_namespace
 
 
 def _client(tmp_path: Path, *, allow_mutation: bool = True):
@@ -68,7 +69,7 @@ def test_storage_capability_probe_is_admin_only(tmp_path: Path):
     assert member.status_code == 403
 
 
-def test_admin_storage_capability_probe_returns_closed_states_and_zero_residue(tmp_path: Path):
+def test_admin_storage_capability_probe_returns_closed_states_and_zero_residue(tmp_path: Path, scoped_probe_namespace):
     client, data = _client(tmp_path)
     _login(client, "admin", "AdminPassword123!")
 
@@ -131,7 +132,7 @@ def test_storage_capability_probe_respects_read_only_mode(tmp_path: Path):
     assert list(data.iterdir()) == []
 
 
-def test_storage_capability_probe_accepts_actual_source_destination_parents(tmp_path: Path):
+def test_storage_capability_probe_accepts_actual_source_destination_parents(tmp_path: Path, scoped_probe_namespace):
     client, data = _client(tmp_path)
     source_parent = data / "keep-parent"
     destination_parent = data / "source-parent"

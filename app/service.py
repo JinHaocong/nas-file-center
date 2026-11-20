@@ -1654,7 +1654,12 @@ class FileCenterService:
             session.commit()
         return {"id": plan.id, "status": plan.status, "items": len(generated.items), "delete_counts": generated.delete_counts}
 
-    def validate_plan(self, plan_id: int, *, progress_callback: Callable[[int, int], None] | None = None) -> dict:
+    def validate_plan(
+        self, plan_id: int, *,
+        progress_callback: Callable[[int, int], None] | None = None,
+        mutation_fence: Callable[[], None] | None = None,
+        worker_id: str | None = None,
+    ) -> dict:
         # Storage optimization validation can run live write probes. Acquire
         # before DB locks so an API validation cannot overlap a Worker or an
         # unfinished organizer maintenance window.
@@ -1665,11 +1670,19 @@ class FileCenterService:
             with media_mutation_lock(self.settings, blocking=False):
                 with self.SessionLocal() as session:
                     assert_no_maintenance_reservation(session)
-                return self._validate_plan_under_media_lock(plan_id, progress_callback=progress_callback)
+                return self._validate_plan_under_media_lock(
+                    plan_id, progress_callback=progress_callback,
+                    mutation_fence=mutation_fence, worker_id=worker_id,
+                )
         except (MediaMutationLockUnavailable, MaintenanceReservationActive) as exc:
             raise StateConflictError(str(exc)) from exc
 
-    def _validate_plan_under_media_lock(self, plan_id: int, *, progress_callback: Callable[[int, int], None] | None = None) -> dict:
+    def _validate_plan_under_media_lock(
+        self, plan_id: int, *,
+        progress_callback: Callable[[int, int], None] | None = None,
+        mutation_fence: Callable[[], None] | None = None,
+        worker_id: str | None = None,
+    ) -> dict:
         with self.SessionLocal() as session:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
@@ -2217,6 +2230,7 @@ class FileCenterService:
                             Path(row.keep_path).parent,
                             Path(row.source_path).parent,
                             self.settings.allowed_roots,
+                            mutation_fence=mutation_fence,
                         )
                     else:
                         if not ownership_can_be_preserved(live_source_metadata):
@@ -2231,6 +2245,7 @@ class FileCenterService:
                             Path(row.keep_path).parent,
                             Path(row.source_path).parent,
                             self.settings.allowed_roots,
+                            mutation_fence=mutation_fence,
                         )
 
                     if capability.capability is not StorageOptimizationCapability.SUPPORTED:
@@ -2247,6 +2262,7 @@ class FileCenterService:
                     local_publish_capability = probe_hardlink_capability(
                         Path(row.source_path).parent,
                         self.settings.allowed_roots,
+                        mutation_fence=mutation_fence,
                     )
                     if (
                         local_publish_capability.capability
@@ -2279,6 +2295,10 @@ class FileCenterService:
 
         with self.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
+            if worker_id is not None:
+                from app.tasks.recovery import assert_active_worker_lease, assert_no_maintenance_reservation
+                assert_active_worker_lease(session, worker_id)
+                assert_no_maintenance_reservation(session)
             plan = session.get(BatchPlan, plan_id)
             rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
             for row in rows:
@@ -2299,6 +2319,14 @@ class FileCenterService:
                 plan.status = "partial"
             else:
                 plan.status = "ready"
+            if worker_id is not None:
+                # The validation may span many files. Recheck within this
+                # transaction; a later WorkJob checkpoint cannot undo a stale
+                # validation result that has already committed.
+                # Flush first: session.get() in the lease assertion can
+                # otherwise autoflush after its timestamp has been sampled.
+                session.flush()
+                assert_active_worker_lease(session, worker_id)
             session.commit()
         return self.plan_detail(plan_id)
 

@@ -575,6 +575,8 @@ class MediaSortPlanStageHandler(TaskHandler):
         if stage == "freeze":
             service.freeze_plan(plan_id, progress_callback=_progress)
         else:
-            service.validate_plan(plan_id, progress_callback=_progress)
+            service.validate_plan(
+                plan_id, progress_callback=_progress, worker_id=context.worker_id,
+            )
         context.checkpoint(progress_current=count, progress_total=count,
                            progress_message=f"{verb}结束，查看 Plan 状态")

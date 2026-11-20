@@ -1,4 +1,8 @@
-"""Exercise maintenance sessions with the production issuer and cooperative lock."""
+"""Exercise maintenance sessions and the real cooperative lock.
+
+Issued-session tests explicitly inject tmp_path-scoped synthetic custody.
+These lifecycle checks are not production maintenance or NAS acceptance.
+"""
 import os
 from contextlib import ExitStack
 from pathlib import Path
@@ -21,6 +25,7 @@ from app.batch.media_organizer_manifest import build_frozen_preview_manifest, sa
 from app.batch.media_organizer_planner import preview_semantic_unit
 from app.batch.media_organizer_publish import PublishingConflict, publish_frozen_stage
 from app.batch.media_organizer_stage import stage_frozen_sources
+from tests.test_media_organizer_execute_jobs import scoped_namespace
 
 
 
@@ -74,7 +79,7 @@ def test_mode_or_legacy_ack_alone_cannot_issue_authority(site):
             pytest.fail("disabled deletion granted an operation session")
 
 
-def test_api_checks_only_the_canonical_unit(site):
+def test_api_checks_only_the_canonical_unit(site, scoped_namespace):
     settings, unit = site
     protected_stage = unit / "private-stage"
     protected_stage.symlink_to("/missing")
@@ -87,7 +92,7 @@ def test_api_checks_only_the_canonical_unit(site):
             authority.check_api_eligibility(settings, bad)
 
 
-def test_live_scope_fencing_and_resource_release(site):
+def test_live_scope_fencing_and_resource_release(site, scoped_namespace):
     settings, unit = site
     old = unit / "old"
     old.mkdir()
@@ -117,7 +122,7 @@ def test_live_scope_fencing_and_resource_release(site):
         authority.assert_operation_authorized(new, (old,))
 
 
-def test_nonroot_and_nofollow_required(site, monkeypatch):
+def test_nonroot_and_nofollow_required(site, monkeypatch, scoped_namespace):
     settings, unit = site
     alias = unit / "alias"
     alias.symlink_to(unit)
@@ -132,13 +137,17 @@ def test_nonroot_and_nofollow_required(site, monkeypatch):
 
 
 def test_maintenance_worker_refuses_real_readonly_mount(site):
-    settings, _ = site
+    """Observe real mount metadata without issuing custody for any host path."""
     for mount in (Path("/sys"), Path("/opt"), Path("/etc")):
         if mount.is_dir() and os.statvfs(mount).f_flag & os.ST_RDONLY:
-            settings.allowed_roots = [mount]
+            # No session is constructed or granted. The real parent validator
+            # must refuse this mount before retaining any directory binding.
+            unissued = SimpleNamespace(
+                _unit=mount, _expected={}, _retired=set(), _bindings={},
+            )
             with pytest.raises(authority.MaintenanceWindowUnavailable, match="writable"):
-                with authority.acquire_operation_authority(settings, mount, (mount,)):
-                    pytest.fail("read-only mount accepted")
+                authority.MaintenanceWindowSession._check_parent(unissued, mount)
+            assert unissued._bindings == {}
             return
     pytest.skip("no read-only directory mount at /sys, /opt or /etc")
 
@@ -155,7 +164,7 @@ def publish(authority, settings, unit, manifest, frozen, parents):
         return save_cleanup_plan(cleanup_plan_path(frozen), manifest)
 
 
-def test_only_planned_future_parents_and_no_overwrite(site):
+def test_only_planned_future_parents_and_no_overwrite(site, scoped_namespace):
     settings, unit = site
     manifest, frozen, parents = grouped(site)
     with pytest.raises((ValueError, OSError)):
@@ -177,7 +186,7 @@ def test_only_planned_future_parents_and_no_overwrite(site):
         assert intruder.read_bytes() == b"keep"
 
 
-def test_only_journal_begun_retirement_allows_missing_parents(site):
+def test_only_journal_begun_retirement_allows_missing_parents(site, scoped_namespace):
     settings, unit = site
     manifest, frozen, parents = grouped(site)
     plan = publish(authority, settings, unit, manifest, frozen, parents)
@@ -229,7 +238,7 @@ def test_only_journal_begun_retirement_allows_missing_parents(site):
             authority.assert_operation_authorized(completed, (old,))
 
 
-def test_maintenance_session_is_bound_to_the_frozen_evidence(site):
+def test_maintenance_session_is_bound_to_the_frozen_evidence(site, scoped_namespace):
     settings, unit = site
     manifest, _, parents = grouped(site)
     with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
@@ -238,7 +247,7 @@ def test_maintenance_session_is_bound_to_the_frozen_evidence(site):
             validate_deferred_publication(changed, namespace_custody=session)
 
 
-def test_child_cannot_reuse_a_parent_session_after_lock_takeover(site):
+def test_child_cannot_reuse_a_parent_session_after_lock_takeover(site, scoped_namespace):
     from app.tasks.media_mutation_lock import media_mutation_lock
 
     settings, unit = site
@@ -265,7 +274,7 @@ def test_child_cannot_reuse_a_parent_session_after_lock_takeover(site):
         os.close(write_fd)
 
 
-def test_untrusted_report_parent_cannot_turn_existing_evidence_into_future_paths(site):
+def test_untrusted_report_parent_cannot_turn_existing_evidence_into_future_paths(site, scoped_namespace):
     settings, unit = site
     manifest, frozen, parents = grouped(site)
     old_folder = frozen.parent
@@ -302,7 +311,7 @@ def flat_stage(site, *, path_roles=False):
 
 
 @pytest.mark.parametrize("invalid", ["omitted", "boolean", "closed"])
-def test_flat_maintenance_refuses_publication_without_live_session(site, invalid):
+def test_flat_maintenance_refuses_publication_without_live_session(site, invalid, scoped_namespace):
     settings, unit = site
     manifest, parents, options = flat_stage(site)
     supplied = {}
@@ -321,7 +330,7 @@ def test_flat_maintenance_refuses_publication_without_live_session(site, invalid
 
 
 @pytest.mark.parametrize("path_roles", [False, True])
-def test_flat_maintenance_refences_session_at_public_link(site, monkeypatch, path_roles):
+def test_flat_maintenance_refences_session_at_public_link(site, monkeypatch, path_roles, scoped_namespace):
     from app.batch import media_organizer_publish as publishing
 
     settings, unit = site
@@ -343,7 +352,7 @@ def test_flat_maintenance_refences_session_at_public_link(site, monkeypatch, pat
     assert not Path(manifest["moves"][0]["final"]).exists()
 
 
-def test_flat_maintenance_refences_session_before_handoff_report(site):
+def test_flat_maintenance_refences_session_before_handoff_report(site, scoped_namespace):
     from app.batch.media_organizer_deferred_cleanup import DeferredCleanupConflict
 
     settings, unit = site

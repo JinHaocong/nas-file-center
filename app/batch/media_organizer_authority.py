@@ -1,4 +1,9 @@
-"""Dispatch strict custody and explicitly scoped maintenance-window operations."""
+"""Require external custody in both strict and maintenance-window operations.
+
+Maintenance coordination and operator acknowledgement cannot exclude an
+uncooperative writer from a name-based filesystem mutation. A session must
+hold a separately issued namespace proof for its entire lifetime.
+"""
 from __future__ import annotations
 
 import os
@@ -53,14 +58,19 @@ def _strict_proof(settings, unit, parents):
 
 
 def check_api_eligibility(settings, unit: Path, parents=()) -> None:
+    parents = tuple(parents)
     if execution_mode(settings) == "strict":
-        with _strict_proof(settings, unit, tuple(parents) or (unit,)):
+        with _strict_proof(settings, unit, parents or (unit,)):
             return
     _validate_selection(settings, unit)
     for parent in parents:
         _scope_path(unit, parent)
     # The API can have a read-only bind and cannot traverse private Worker stages.
     os.close(_open_directory_nofollow(unit))
+    # Acknowledgement/metadata are not a custody grant. This deliberately
+    # refuses with the production issuer until a supported boundary exists.
+    with _strict_proof(settings, unit, parents or (unit,)):
+        return
 
 
 def _evidence_exists(path: Path) -> bool:
@@ -77,9 +87,9 @@ def _evidence_exists(path: Path) -> bool:
 
 
 class MaintenanceWindowSession:
-    """Pinned directory bindings and cooperative serialization for one Worker operation."""
+    """Pinned bindings and cooperative serialization beneath held external custody."""
 
-    def __init__(self, settings, unit, parents, manifest, resources):
+    def __init__(self, settings, unit, parents, manifest, resources, namespace_custody):
         self._worker_pid = os.getpid()
         self._worker_uid = os.geteuid()
         self._settings = settings
@@ -88,6 +98,7 @@ class MaintenanceWindowSession:
         self._manifest = manifest
         self._manifest_digest = _checksum(manifest) if manifest is not None else None
         self._resources = resources
+        self._namespace_custody = namespace_custody
         self._bindings = {}
         self._expected = {}
         self._future = set()
@@ -216,6 +227,9 @@ class MaintenanceWindowSession:
             paths.update(p for p in path.parents if p.is_relative_to(self._unit))
         for path in sorted(paths, key=lambda p: (len(p.parts), p)):
             self._check_parent(path)
+        # The proof is a live resource, not an API-time snapshot. Refresh it
+        # after observational checks at every existing mutation fence.
+        strict.assert_exclusive_custody(self._namespace_custody, sorted(paths))
 
 
 @contextmanager
@@ -231,7 +245,8 @@ def acquire_operation_authority(settings, unit: Path, parents, *, manifest=None)
         raise PermissionError("maintenance execution requires a non-root Worker")
     with media_mutation_lock(settings), ExitStack() as resources:
         _validate_selection(settings, unit)
-        yield MaintenanceWindowSession(settings, unit, parents, manifest, resources)
+        proof = resources.enter_context(_strict_proof(settings, unit, parents or (unit,)))
+        yield MaintenanceWindowSession(settings, unit, parents, manifest, resources, proof)
 
 
 @dataclass(frozen=True)

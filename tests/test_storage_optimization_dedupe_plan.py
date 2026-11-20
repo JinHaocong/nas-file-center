@@ -15,6 +15,7 @@ from app.storage_optimization.capability import (
     StorageOptimizationCapability,
 )
 from app.service import FileCenterService
+from tests.storage_probe_custody import scoped_probe_namespace
 
 
 @pytest.fixture
@@ -188,6 +189,7 @@ def _supported_probe(operation: str) -> CapabilityProbeResult:
 def test_optimization_freeze_and_validate_require_frozen_metadata_and_live_capability(
     storage_dedupe_env,
     monkeypatch,
+    scoped_probe_namespace,
     storage_action: str,
     operation: str,
     probe_name: str,

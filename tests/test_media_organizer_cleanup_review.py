@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 from tests.test_media_organizer_execute_jobs import (
-    setup, preview, execute_request, worker,
+    setup, preview, execute_request, worker, scoped_namespace,
 )
 
 
@@ -32,7 +32,7 @@ def _witness_files(root: Path) -> dict[str, tuple[int, int]]:
             for p in root.rglob("*") if p.is_file()}
 
 
-def test_cleanup_review_exposes_verified_frozen_page_without_mutation(tmp_path):
+def test_cleanup_review_exposes_verified_frozen_page_without_mutation(tmp_path, scoped_namespace):
     client, settings, work, job_id = _completed(tmp_path)
     before = _witness_files(work)
     folder = settings.reports_dir / "media_organizer-executions" / str(job_id)
@@ -73,7 +73,7 @@ def test_cleanup_review_exposes_verified_frozen_page_without_mutation(tmp_path):
     assert all(Path(row["source"]).is_file() for row in review["items"])
 
 
-def test_cleanup_review_refuses_corrupted_private_journal_without_deletion(tmp_path):
+def test_cleanup_review_refuses_corrupted_private_journal_without_deletion(tmp_path, scoped_namespace):
     client, settings, work, job_id = _completed(tmp_path)
     folder = settings.reports_dir / "media_organizer-executions" / str(job_id)
     journal = folder / "manifest.json.manual-cleanup.json"
@@ -85,7 +85,7 @@ def test_cleanup_review_refuses_corrupted_private_journal_without_deletion(tmp_p
     assert journal.read_text(encoding="utf-8") == '{"forged": true}'
 
 
-def test_cleanup_review_refuses_changed_public_file_without_touching_foreign(tmp_path):
+def test_cleanup_review_refuses_changed_public_file_without_touching_foreign(tmp_path, scoped_namespace):
     client, settings, work, job_id = _completed(tmp_path)
     folder = settings.reports_dir / "media_organizer-executions" / str(job_id)
     manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))["manifest"]
@@ -101,7 +101,7 @@ def test_cleanup_review_refuses_changed_public_file_without_touching_foreign(tmp
     assert detached.is_file()
 
 
-def test_cleanup_review_requires_admin_and_finished_handoff(tmp_path):
+def test_cleanup_review_requires_admin_and_finished_handoff(tmp_path, scoped_namespace):
     client, settings, work = setup(tmp_path, enabled=True)
     pid = preview(client, settings, work)
     queued = execute_request(client, pid, work)
@@ -116,7 +116,7 @@ def test_cleanup_review_requires_admin_and_finished_handoff(tmp_path):
     assert unauth.status_code == 401
 
 
-def test_cleanup_review_rejects_invalid_pagination(tmp_path):
+def test_cleanup_review_rejects_invalid_pagination(tmp_path, scoped_namespace):
     client, settings, work, job_id = _completed(tmp_path)
     for query in ("page=0", "page_size=0", "page_size=101"):
         result = client.get(
@@ -166,7 +166,7 @@ def _shared_completed(tmp_path, monkeypatch):
 
 
 def test_group_shared_private_evidence_is_readable_by_api_without_world_access(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, scoped_namespace,
 ):
     import os
     import stat
@@ -190,7 +190,7 @@ def test_group_shared_private_evidence_is_readable_by_api_without_world_access(
 
 
 def test_group_shared_cleanup_journal_invalid_private_mode_fails_closed(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, scoped_namespace,
 ):
     import stat
 

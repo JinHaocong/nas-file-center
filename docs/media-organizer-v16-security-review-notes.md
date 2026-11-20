@@ -1,10 +1,14 @@
 # V1.6 Media Organizer — Security Review Notes (Not a Release Approval)
 
-**Scope:** Draft PR #397, semantic organizer execution and private-media boundary handling.
-**Status:** Internal implementation review and synthetic CI evidence. **Independent security review has not occurred.**
-**NAS mount tests:** Not performed. Do not merge, deploy or enable execution as a result of this note.
+**Current review:** [2026-11-20 security packet](security/v16-review-2026-11-20.md) supersedes the historical checkpoints below. Both strict and maintenance execution now require externally issued namespace custody, including flat staging. The live issuer remains unavailable; execution/cleanup/recovery are held closed.
 
-## Findings and actions
+**Scope:** Draft PR #397, semantic organizer execution and private-media boundary handling.
+**Status:** Internal implementation review and synthetic CI evidence. **Formal non-author security review is still missing.**
+**NAS evidence:** Disposable SATA/ZFuse maintenance lifecycle passed at `f93f9d74d4992c291b685a177acc72941f6e8325`. This is historical maintenance evidence, not current-source or strict-custody approval. Do not merge, deploy or enable execution as a result of these notes.
+
+## Historical findings and actions
+
+The table and checkpoint narrative below record earlier implementations. They are not a statement that historical pending-directory promotion, flat-path exceptions or acknowledgement-only maintenance remain authorized. Use the dated packet above for current reachability, containment and remaining release gates.
 
 | ID | Severity | Finding | Current action | Release gate |
 |---|---|---|---|---|

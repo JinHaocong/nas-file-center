@@ -1,7 +1,9 @@
 # V1.6 maintenance-window operations
 
-Status: implemented candidate; candidate CI, real SATA full-lifecycle acceptance and release review remain required.
-Owner operating-contract approval: 2026-11-19.
+Status: **security hold, 2026-11-20**. Both execution modes now require a separately issued, live external namespace-custody proof. The production issuer remains unavailable, so API execution/cleanup/recovery submissions and previously queued Worker operations fail closed. Preview and read-only evidence review remain available.
+
+Historical owner operating-contract approval: 2026-11-19. The owner-approved disposable SATA/ZFuse lifecycle passed at `f93f9d74d4992c291b685a177acc72941f6e8325`; that evidence does not authorize the changed source or prove exclusion of competing writers. The stronger 2026-11-20 safety requirement supersedes acknowledgement-only execution.
+Current findings and review boundary: [security review packet](security/v16-review-2026-11-20.md).
 Design: [accepted maintenance-window contract](superpowers/specs/2026-11-19-v16-maintenance-window-proposal.md).
 Implementation plan: [maintenance-window plan](superpowers/plans/2026-11-19-v16-maintenance-window.md).
 
@@ -9,7 +11,9 @@ Implementation plan: [maintenance-window plan](superpowers/plans/2026-11-19-v16-
 
 The default is `MEDIA_ORGANIZER_EXECUTION_MODE=strict`. Its production custody issuer still refuses execution on an unproven backend. A boolean acknowledgement, a writable directory, the API/Worker UID split, or the application lock is not strict namespace custody.
 
-The separately selected `maintenance_window` mode supports the existing in-place organizer with an operator-maintained pause on other writes. The owner must keep that pause in effect throughout execution, the wait for independent cleanup confirmation, cleanup and any recovery. It covers the selected unit and writes to the same underlying files through other shares, names, hardlinks, writable handles or backing paths. If a writer violates the pause, a substituted file can be deleted between the last check and a name-based cleanup syscall; detection and recovery cannot promise to restore it.
+The separately selected `maintenance_window` mode retains its scoped confirmations, frozen evidence, application reservation and cooperative lock, but those controls no longer grant mutation authority by themselves. The API must obtain external custody eligibility; each Worker must independently acquire and hold that resource through execution or cleanup and refresh it at every existing mutation fence. Recovery follows the same rule. Flat plans also require custody because they create a stage through a separate directory-create/open sequence.
+
+The earlier acknowledgement-only contract depended on the operator stopping all other writers throughout execution, the wait for independent cleanup confirmation, cleanup and recovery. Baseline experiments showed that a violating writer could substitute a file or empty directory immediately before cleanup and lose that replacement, even when the subsequent canonical scan reported zero changes. It could also substitute an unwitnessed new group or stage before the first inode capture. These are reasons for the current hold; repeated inode checks do not make these syscalls atomic or grant external exclusion.
 
 The application retains its no-overwrite, pinned-source, no-follow, frozen identity, unknown-entry refusal, journal and final zero-change scan checks. Successful maintenance execution always reports `assurance_level=maintenance_window` and `namespace_exclusive_custody_proven=false`. It does not establish release readiness.
 
@@ -26,7 +30,7 @@ The organizer remains disabled and strict in the committed deployment templates.
 | MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK | Leave false; never used as maintenance proof | false |
 | NFC_SHARED_CONFIG_GID | Shared config group for distinct API/Worker UIDs | Deployment group, normally 10000 |
 
-Configuration is only an eligibility gate. Each execution, cleanup, execution recovery and cleanup recovery request must also include its exact existing operation confirmation token and the strict JSON boolean `maintenance_window_confirmed: true`. The UI supplies four separate, initially unchecked acknowledgements bound to the current unit/job or reviewed plan. String values such as `"true"` are invalid.
+Configuration is only an eligibility gate and cannot enable the currently held production path. Each execution, cleanup, execution recovery and cleanup recovery request must also include its exact existing operation confirmation token and the strict JSON boolean `maintenance_window_confirmed: true`; it additionally requires the external custody issuer. The UI supplies four separate, initially unchecked acknowledgements bound to the current unit/job or reviewed plan. String values such as `"true"` are invalid. No environment switch, acknowledgement, non-root identity or application lock bypasses the unavailable issuer.
 
 Do not switch a frozen job between modes. An absent mode in legacy evidence means strict. The mode is bound to the preview, approval, WorkJob, frozen manifest and recovery evidence; mismatches fail closed. Finish or recover a maintenance family with its original mode and evidence.
 
@@ -40,11 +44,15 @@ The Worker holds an FD-based lock while dispatching a job and while performing s
 
 A frozen unfinished maintenance family reserves application mutation processing across process restarts and the wait for cleanup approval. Unrelated writes remain queued; the family's cleanup and recovery can run ahead of them. Read-only previews remain eligible. Successful journal finalization and the real 0/0 scan release the reservation. A post-freeze failure preserves the window. Clearing visible task history does not discard the underlying organizer evidence.
 
-Storage capability probes and plan validation can create temporary entries, so they also acquire the cooperative lock and check the reservation. They return a conflict while another operation or maintenance window owns it. API cancellation of a queued archive task performs no media directory removal; a later Worker owns eligible cleanup.
+Storage capability probes and storage-plan validation can create temporary entries, so they also acquire the cooperative lock and check the reservation. They return a conflict while another operation or maintenance window owns it. Their scratch names additionally require held external namespace custody; with the current unavailable issuer a real probe returns `unknown` before any scratch write, and storage-plan validation cannot report support. Ordinary read-only plan validation remains synchronous. If a previously authorized test operation loses authority after creating scratch, it retains that evidence instead of performing stale cleanup. API cancellation of a queued archive task performs no media directory removal; a later Worker owns eligible cleanup.
+
+The storage-optimization executor independently requires the same external resource for fresh execution and mutating recovery, including older `.new`/`.old`/published transactions that do not run initial probes again. It retains their media and journals when the live issuer refuses. Completed read-only reconciliation remains available. Do not remove existing anchors or fabricate a completed journal to bypass this hold.
 
 These controls coordinate this application's cooperative writers. They do not exclude other NAS applications, SMB/NFS services, privileged processes, same-UID programs or external aliases.
 
 ## Workflow and recovery
+
+The following lifecycle describes the protocol once a supported custody provider has been independently implemented and reviewed. **It cannot currently be started or resumed on a production mount.** Do not clear existing reservations or delete retained originals/stages to bypass the hold. Existing immutable review snapshots remain readable.
 
 1. Select the approved disposable unit and complete its read-only preview.
 2. Verify the unit, planned mappings and conflicts. Pause other writers, acknowledge the maintenance window, and submit the exact per-unit execution token.
@@ -57,11 +65,13 @@ The reservation is intentionally conservative after frozen work fails. There is 
 
 ## Acceptance and completion
 
-Local tests exercise the actual nonroot maintenance authority through API enqueue, Worker dispatch, independent cleanup, publication/cleanup interruption, recovery and the final 0/0 scan. They compare file payload hashes and counts; a planner metadata fingerprint alone is not treated as payload verification. Separate lock tests use real subprocesses and retain exclusion after an expired database lease.
+Positive local lifecycle tests now explicitly inject a custody fixture confined to pytest's temporary directory. They still exercise API enqueue, nonroot Worker dispatch, independent cleanup, publication/cleanup interruption, recovery and the final 0/0 scan without removing the previous assertions. They are synthetic protocol evidence, not proof that the production issuer can grant custody. Separate tests use the unmodified production issuer and require refusal before staging, publication, cleanup or recovery, including previously queued jobs. Separate lock tests use real subprocesses and retain exclusion after an expired database lease.
 
-The physical SATA acceptance must still run the ordinary production mode with distinct real API and Worker identities, the API's read-only media mount, no permissive synthetic custody issuer and a new isolated config/data fixture. It must cover mixed P/V, the 200-file bucket boundary, historical/overlapping names, refusals, independent cleanup and interruptions, and compare payload hashes/counts before and after. Record the exact candidate commit and image digest.
+Test payload comparisons do not mean the application's cleanup inventory verifies frozen payload SHA-256 values. Its inventory currently compares dev/inode/size/mtime and explicitly reports `file_content_hashes_verified=false`. Content custody and the requested frozen-content verification remain independent review topics.
 
-The standalone `scripts/v16_nas_maintenance_acceptance.py` helper performs this acceptance in a newly created `nfc-v16-maintenance-<random>` subtree. It requires a locally available immutable image ID or repository digest and an exact matching candidate revision label. The Docker publication workflow first runs the same helper against its exact locally built candidate on a synthetic Linux fixture. This Docker result is distinct from physical SATA evidence.
+The old physical SATA acceptance is complete for its recorded immutable candidate and must not be repeated as evidence for the new head. Any future changed-candidate acceptance must wait for an independently reviewed, supported custody mechanism and separate owner authorization. It must use distinct real API and Worker identities, the API's read-only media mount, no permissive synthetic custody issuer and a new isolated config/data fixture. It must cover mixed P/V, the 200-file bucket boundary, historical/overlapping names, refusals, independent cleanup and interruptions, and compare payload hashes/counts before and after. Record the exact candidate commit and image digest.
+
+The standalone `scripts/v16_nas_maintenance_acceptance.py` helper retains its full-lifecycle requirements and has not been weakened to convert refusal into success. With the currently unavailable production issuer it cannot produce a new lifecycle PASS. It uses a newly created `nfc-v16-maintenance-<random>` subtree, a locally available immutable image ID or repository digest, and an exact matching candidate revision label. Candidate image publication remains explicit-dispatch only and still requires this acceptance; no publication is authorized by this security patch.
 
 The host helper creates only its new private fixture, with separate API-owned shared config and Worker-owned media. It starts two isolated containers with no network connectivity, no extra capabilities and read-only roots. Only the new config/data paths are bound, with the API data bind read-only. HTTP requests run over loopback inside the API container; the real leased Worker dispatcher executes jobs. The helper verifies real runtime IDs, capabilities, mount modes and shared-config lock contention, rejects unconfirmed API actions and keeps the strict issuer closed. Its mixed, 201-photo-plus-video and historical-overlap fixtures each require matching payload hashes/counts and a 0/0 second scan; explicit test-only interruption wrappers exercise publication and cleanup recovery without replacing the production authority.
 
