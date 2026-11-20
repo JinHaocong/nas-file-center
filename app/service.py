@@ -275,6 +275,18 @@ def _get_active_execution_job(session, plan_id: int) -> WorkJob | None:
     ).first()
 
 
+def _get_active_plan_validation_job(session, plan_id: int) -> WorkJob | None:
+    return session.scalars(
+        select(WorkJob)
+        .where(
+            WorkJob.kind == "batch-plan-validate",
+            WorkJob.status.in_(ACTIVE_EXECUTION_JOB_STATUSES),
+            func.cast(func.json_extract(WorkJob.state_json, "$.plan_id"), Integer) == plan_id,
+        )
+        .order_by(WorkJob.id.desc())
+    ).first()
+
+
 def _is_restart_recovered_execution_job(session, work_job_id: int) -> bool:
     return session.scalar(
         select(TaskEvent.id)
@@ -3091,6 +3103,11 @@ class FileCenterService:
                     raise StateConflictError(
                         f"Plan #{plan_id} has active freeze/validation task #{active_stage}"
                     )
+            active_validation_job = _get_active_plan_validation_job(session, plan_id)
+            if active_validation_job is not None:
+                raise StateConflictError(
+                    f"Plan #{plan_id} has active validation task #{active_validation_job.id}"
+                )
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:
                 raise StateConflictError(
@@ -3504,6 +3521,12 @@ class FileCenterService:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
                 raise KeyError(plan_id)
+
+            active_validation_job = _get_active_plan_validation_job(session, plan_id)
+            if active_validation_job is not None:
+                raise StateConflictError(
+                    f"Cannot delete plan #{plan_id}: active validation task #{active_validation_job.id}"
+                )
 
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:

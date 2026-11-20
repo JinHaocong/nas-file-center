@@ -38,13 +38,11 @@ from app.media.catalog import (
 from app.media.corrupt_delete import build_corrupt_delete_preview, create_corrupt_delete_plan
 from app.path_safety import UnsafePathError
 from app.scanners.diagnostics import diagnose_duplicate_pair
-from app.storage_optimization.capability import (
-    probe_storage_optimization_between,
-    probe_storage_optimization_capabilities,
+from app.storage_optimization.jobs import (
+    enqueue_plan_validation,
+    enqueue_storage_optimization_probe,
 )
 from app.service import StateConflictError
-from app.tasks.media_mutation_lock import media_mutation_lock, MediaMutationLockUnavailable
-from app.tasks.recovery import assert_no_maintenance_reservation, MaintenanceReservationActive
 from app.planning.dedupe_preview import (
     DedupeEmptyPlanError,
     DedupeError,
@@ -863,11 +861,13 @@ def diagnose_scan_pair(request: Request, payload: DedupeDiagnosticRequest):
 
 @router.post(
     "/storage-optimization/capabilities",
+    status_code=202,
     dependencies=[Depends(require_admin_user)],
 )
 def storage_optimization_capabilities(
     request: Request,
     payload: StorageOptimizationCapabilityRequest,
+    admin_user: User = Depends(require_admin_user),
 ):
     settings = request.app.state.settings
     if not settings.allow_mutation:
@@ -875,23 +875,14 @@ def storage_optimization_capabilities(
             status_code=409,
             detail="Storage capability probe requires ALLOW_MUTATION=true",
         )
-    # These probes create and remove scratch entries in media directories.
-    # They participate in the same cooperative boundary as Worker jobs.
     try:
-        with media_mutation_lock(settings, blocking=False):
-            with request.app.state.service.SessionLocal() as session:
-                assert_no_maintenance_reservation(session)
-            if payload.directory is not None:
-                return probe_storage_optimization_capabilities(
-                    payload.directory, settings.allowed_roots,
-                )
-            assert payload.source_directory is not None
-            assert payload.destination_directory is not None
-            return probe_storage_optimization_between(
-                payload.source_directory, payload.destination_directory,
-                settings.allowed_roots,
-            )
-    except (MediaMutationLockUnavailable, MaintenanceReservationActive) as exc:
+        return enqueue_storage_optimization_probe(
+            request.app.state.service.SessionLocal,
+            settings,
+            payload,
+            user_id=admin_user.id,
+        )
+    except (ValueError, OSError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -1734,7 +1725,7 @@ def freeze(
         raise HTTPException(409, str(exc)) from exc
 
 
-@router.post("/plans/{plan_id}/validate")
+@router.post("/plans/{plan_id}/validate", status_code=202)
 def validate(
     request: Request,
     plan_id: int,
@@ -1742,9 +1733,15 @@ def validate(
 ):
     _require_restricted_plan_admin(request, plan_id, current_user)
     try:
-        return request.app.state.service.validate_plan(plan_id)
+        return enqueue_plan_validation(
+            request.app.state.service.SessionLocal,
+            plan_id,
+            user_id=current_user.id,
+        )
     except KeyError as exc:
         raise HTTPException(404, "plan not found") from exc
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 

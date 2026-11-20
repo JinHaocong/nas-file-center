@@ -164,3 +164,9 @@ from app.batch.media_organizer_execute_jobs import MediaOrganizerExecuteHandler 
 # Separate explicitly confirmed semantic cleanup/finalization WorkJob.
 # Its production namespace-custody issuer is deliberately fail-closed.
 from app.batch.media_organizer_cleanup_jobs import MediaOrganizerCleanupHandler as MediaOrganizerCleanupHandler
+
+# API-side media write probes and plan validation execute only in the Worker.
+from app.storage_optimization.jobs import (
+    PlanValidationHandler as PlanValidationHandler,
+    StorageOptimizationCapabilityProbeHandler as StorageOptimizationCapabilityProbeHandler,
+)

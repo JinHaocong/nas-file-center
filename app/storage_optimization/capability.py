@@ -138,10 +138,22 @@ def _result(
     )
 
 
+def _matches_parent_identity(
+    observed: os.stat_result,
+    expected: tuple[int, int] | None,
+) -> bool:
+    return expected is None or (
+        int(observed.st_dev), int(observed.st_ino)
+    ) == (int(expected[0]), int(expected[1]))
+
+
 def probe_hardlink_between(
     source_directory: Path | str,
     destination_directory: Path | str,
     allowed_roots: Iterable[Path | str],
+    *,
+    expected_source_parent_identity: tuple[int, int] | None = None,
+    expected_destination_parent_identity: tuple[int, int] | None = None,
 ) -> CapabilityProbeResult:
     """Positively prove hard-link support between two actual parent directories.
 
@@ -167,6 +179,17 @@ def probe_hardlink_between(
             )
             source_parent_st = os.fstat(source_parent_fd)
             destination_parent_st = os.fstat(destination_parent_fd)
+            if (
+                not _matches_parent_identity(source_parent_st, expected_source_parent_identity)
+                or not _matches_parent_identity(destination_parent_st, expected_destination_parent_identity)
+            ):
+                return _result(
+                    StorageOptimizationCapability.UNKNOWN,
+                    "hardlink",
+                    "hardlink_probe_parent_identity_changed",
+                    source_parent_st,
+                    destination_parent_st,
+                )
 
             source_fd = -1
             try:
@@ -288,14 +311,25 @@ def probe_hardlink_between(
 def probe_hardlink_capability(
     directory: Path | str,
     allowed_roots: Iterable[Path | str],
+    *,
+    expected_parent_identity: tuple[int, int] | None = None,
 ) -> CapabilityProbeResult:
-    return probe_hardlink_between(directory, directory, allowed_roots)
+    return probe_hardlink_between(
+        directory,
+        directory,
+        allowed_roots,
+        expected_source_parent_identity=expected_parent_identity,
+        expected_destination_parent_identity=expected_parent_identity,
+    )
 
 
 def probe_reflink_between(
     source_directory: Path | str,
     destination_directory: Path | str,
     allowed_roots: Iterable[Path | str],
+    *,
+    expected_source_parent_identity: tuple[int, int] | None = None,
+    expected_destination_parent_identity: tuple[int, int] | None = None,
 ) -> CapabilityProbeResult:
     """Positively prove FICLONE + copy-on-write independence between parents."""
     if not hasattr(fcntl, "ioctl"):
@@ -322,6 +356,17 @@ def probe_reflink_between(
             )
             source_parent_st = os.fstat(source_parent_fd)
             destination_parent_st = os.fstat(destination_parent_fd)
+            if (
+                not _matches_parent_identity(source_parent_st, expected_source_parent_identity)
+                or not _matches_parent_identity(destination_parent_st, expected_destination_parent_identity)
+            ):
+                return _result(
+                    StorageOptimizationCapability.UNKNOWN,
+                    "reflink",
+                    "reflink_probe_parent_identity_changed",
+                    source_parent_st,
+                    destination_parent_st,
+                )
 
             source_fd = -1
             clone_fd = -1
@@ -442,17 +487,31 @@ def probe_reflink_between(
 def probe_reflink_capability(
     directory: Path | str,
     allowed_roots: Iterable[Path | str],
+    *,
+    expected_parent_identity: tuple[int, int] | None = None,
 ) -> CapabilityProbeResult:
-    return probe_reflink_between(directory, directory, allowed_roots)
+    return probe_reflink_between(
+        directory,
+        directory,
+        allowed_roots,
+        expected_source_parent_identity=expected_parent_identity,
+        expected_destination_parent_identity=expected_parent_identity,
+    )
 
 
 def probe_storage_optimization_capabilities(
     directory: Path | str,
     allowed_roots: Iterable[Path | str],
+    *,
+    expected_parent_identity: tuple[int, int] | None = None,
 ) -> dict[str, dict[str, str | int | bool | None]]:
     return {
-        "hardlink": probe_hardlink_capability(directory, allowed_roots).to_dict(),
-        "reflink": probe_reflink_capability(directory, allowed_roots).to_dict(),
+        "hardlink": probe_hardlink_capability(
+            directory, allowed_roots, expected_parent_identity=expected_parent_identity,
+        ).to_dict(),
+        "reflink": probe_reflink_capability(
+            directory, allowed_roots, expected_parent_identity=expected_parent_identity,
+        ).to_dict(),
     }
 
 
@@ -460,16 +519,23 @@ def probe_storage_optimization_between(
     source_directory: Path | str,
     destination_directory: Path | str,
     allowed_roots: Iterable[Path | str],
+    *,
+    expected_source_parent_identity: tuple[int, int] | None = None,
+    expected_destination_parent_identity: tuple[int, int] | None = None,
 ) -> dict[str, dict[str, str | int | bool | None]]:
     return {
         "hardlink": probe_hardlink_between(
             source_directory,
             destination_directory,
             allowed_roots,
+            expected_source_parent_identity=expected_source_parent_identity,
+            expected_destination_parent_identity=expected_destination_parent_identity,
         ).to_dict(),
         "reflink": probe_reflink_between(
             source_directory,
             destination_directory,
             allowed_roots,
+            expected_source_parent_identity=expected_source_parent_identity,
+            expected_destination_parent_identity=expected_destination_parent_identity,
         ).to_dict(),
     }
