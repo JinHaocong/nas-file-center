@@ -129,6 +129,14 @@ def test_reentrant_holder_excludes_other_threads_and_releases_on_exception(confi
     thread.join(timeout=4)
 
 
+def test_media_mutation_lock_uses_non_hidden_filename(config):
+    lock_module = _lock_module()
+    assert LOCK_NAME == "media-mutation.lock"
+    assert not LOCK_NAME.startswith(".")
+    with lock_module.media_mutation_lock(config):
+        assert (config.config_dir / LOCK_NAME).is_file()
+
+
 def test_refuses_lock_symlink_and_unsafe_permissions(config):
     lock_module = _lock_module()
     lock_path = config.config_dir / LOCK_NAME
