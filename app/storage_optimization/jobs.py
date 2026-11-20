@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 from app.config import Settings
 from app.exceptions import StateConflictError
-from app.models import AuditEvent, BatchPlan, WorkJob, utcnow
+from app.models import AuditEvent, BatchPlan, BatchPlanItem, WorkJob, utcnow
 from app.path_safety import is_reserved_quarantine_path
 from app.storage_optimization.capability import (
     probe_storage_optimization_between,
