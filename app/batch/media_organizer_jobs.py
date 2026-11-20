@@ -406,6 +406,12 @@ class MediaOrganizerPreviewHandler(TaskHandler):
         for staged, final in ((stage_data, data), (stage_summary, summary_path)):
             os.link(staged, final, follow_symlinks=False)
             os.unlink(staged)
+        # Persist both no-replace report links, including the final summary marker.
+        report_fd = _open_directory_nofollow(data.parent)
+        try:
+            os.fsync(report_fd)
+        finally:
+            os.close(report_fd)
         context.checkpoint(progress_current=final_stats['unit_count'],
                            progress_message='只读整理预览完成',
                            checkpoint_data={'schema_version': 1, 'execution_mode': mode, 'finished': True,

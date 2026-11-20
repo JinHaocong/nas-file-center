@@ -154,3 +154,20 @@ def test_worker_preview_does_not_require_atomic_directory_renameat2(tmp_path, mo
     assert mapping_root.is_dir()
     assert (mapping_root / f"{record['mapping_id']}.jsonl").is_file()
     assert not mapping_root.with_name(mapping_root.name + ".staging").exists()
+
+
+
+def test_worker_refuses_preexisting_mapping_directory_without_adopting_it(tmp_path):
+    from app.batch.media_organizer_jobs import mapping_report_root
+
+    _, settings, job = setup(tmp_path)
+    mapping_root = mapping_report_root(settings, int(job.id))
+    mapping_root.mkdir(mode=0o700)
+    sentinel = mapping_root / "foreign.jsonl"
+    sentinel.write_text("preserve")
+
+    with pytest.raises(ValueError, match="already exists"):
+        MediaOrganizerPreviewHandler().run(job, FakeContext(), settings)
+
+    assert sentinel.read_text() == "preserve"
+    assert not report_files(settings, int(job.id))[1].exists()
