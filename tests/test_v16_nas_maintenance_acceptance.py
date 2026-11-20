@@ -1,4 +1,8 @@
-"""Local behavioral tests for the stand-alone physical acceptance driver."""
+"""Local behavioral tests for the stand-alone physical acceptance driver.
+
+Positive lifecycle cases explicitly inject disposable custody in both local
+processes. They are protocol tests, not production or physical NAS acceptance.
+"""
 from contextlib import ExitStack
 import json
 import os
@@ -106,10 +110,67 @@ def local_server(tmp_path_factory):
                 process.wait(timeout=15)
 
 
+def _serve_synthetic_fixture():
+    """Test-only subprocess entry point; no production environment bypass."""
+    import uvicorn
+    from tests.test_media_organizer_grouped_worker_custody import _install_issuer
+
+    with pytest.MonkeyPatch.context() as patch:
+        _install_issuer(patch, Path(sys.argv[1]), allowed=True)
+        uvicorn.run("app.main:app", fd=int(sys.argv[2]))
+
+
+@pytest.fixture
+def synthetic_server(tmp_path, monkeypatch):
+    """Admit only this temporary tree in the real API and parent Worker."""
+    from tests.test_media_organizer_grouped_worker_custody import _install_issuer
+
+    if os.geteuid() == 0:
+        pytest.skip("The production maintenance authority requires an unprivileged Worker")
+    data, config = tmp_path / "data", tmp_path / "config"
+    data.mkdir()
+    config.mkdir()
+    config.chmod(0o2770)
+    password = secrets.token_urlsafe(32)
+    env = {**os.environ, **nas.CONFIG, "CONFIG_DIR": str(config), "DATA_MOUNT": str(data),
+           "ALLOWED_ROOTS": str(data), "QUARANTINE_ROOT": str(data / ".trash"),
+           "NFC_SHARED_CONFIG_GID": str(os.getegid()), "INITIAL_ADMIN_PASSWORD": password}
+    _install_issuer(monkeypatch, tmp_path, allowed=True)
+    bootstrap = (
+        "from tests.test_v16_nas_maintenance_acceptance import _serve_synthetic_fixture; "
+        "_serve_synthetic_fixture()"
+    )
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        with subprocess.Popen(
+            [sys.executable, "-c", bootstrap, str(tmp_path), str(sock.fileno())],
+            pass_fds=(sock.fileno(),), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ) as process:
+            try:
+                for _ in range(180):
+                    try:
+                        if nas.http(port, "GET", "/health")["status"] == 200:
+                            break
+                    except OSError:
+                        pass
+                    assert process.poll() is None
+                    time.sleep(.2)
+                else:
+                    pytest.fail("Synthetic API failed to start")
+                login = nas.http(port, "POST", "/api/auth/login",
+                                 {"username": nas.CONFIG["INITIAL_ADMIN_USERNAME"], "password": password})
+                assert login["status"] == 200 and login["cookie"]
+                yield data, env, port, login["cookie"]
+            finally:
+                process.terminate()
+                process.wait(timeout=15)
+
+
 @pytest.mark.parametrize("case", ["mixed", "historical", "boundary"])
-def test_ordinary_http_and_real_dispatch_recovery(local_server, case, monkeypatch):
+def test_ordinary_http_and_real_dispatch_recovery(synthetic_server, case, monkeypatch):
     from app.config import Settings
-    data, env, port, cookie = local_server
+    data, env, port, cookie = synthetic_server
     for key in [*nas.CONFIG, "INITIAL_ADMIN_PASSWORD"]:
         monkeypatch.setenv(key, env[key])
     settings = Settings(_env_file=None)
@@ -126,6 +187,80 @@ def test_ordinary_http_and_real_dispatch_recovery(local_server, case, monkeypatc
     assert [item["phase"] for item in evidence["recovery_jobs"]] == ["execution", "cleanup"]
     assert len(evidence["jobs"]) == 6  # initial preview, execute, recovery, cleanup, recovery, final preview
     assert [job["interruption"] for job in evidence["jobs"] if job["interruption"]] == ["publication", "cleanup"]
+
+
+def test_live_http_and_acceptance_driver_refuse_unproven_custody(local_server, monkeypatch):
+    from sqlalchemy import select
+    from app.batch.media_organizer_execute_jobs import approval_token
+    from app.config import Settings
+    from app.db import create_engine_and_session
+    from app.models import WorkJob
+
+    data, env, port, cookie = local_server
+    for key in [*nas.CONFIG, "INITIAL_ADMIN_PASSWORD"]:
+        monkeypatch.setenv(key, env[key])
+    settings = Settings(_env_file=None)
+    unit = nas.seed_case(data, "mixed")
+
+    def snapshot():
+        bindings = {}
+        for path in [unit, *unit.rglob("*")]:
+            info = path.lstat()
+            bindings[str(path.relative_to(unit))] = (
+                info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
+                info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+            )
+        return nas.inventory(unit), bindings
+
+    def request(method, path, body=None):
+        return nas.http(port, method, path, body, cookie)
+
+    def run_job(jid, fault=None):
+        return nas.dispatch(settings, jid, fault)
+
+    before = snapshot()
+    queued = request("POST", "/api/media-organizer/previews", {"selection": str(unit.parent)})
+    assert queued["status"] == 200
+    pid = queued["body"]["job_id"]
+    assert run_job(pid)["dispatch_completed"] is True
+    preview = request("GET", f"/api/media-organizer/previews/{pid}")
+    assert preview["status"] == 200
+    report = preview["body"]
+    assert str(unit) not in report["confirmation_tokens"]
+    assert next(row for row in report["units"] if row["unit"] == str(unit))["status"] == "ready"
+
+    engine, sessions = create_engine_and_session(settings.database_path)
+    try:
+        with sessions() as session:
+            before_jobs = session.scalars(select(WorkJob.id).order_by(WorkJob.id)).all()
+            assert session.scalars(select(WorkJob.id).where(
+                WorkJob.kind == "media-organizer-execute",
+            )).all() == []
+        denied = request("POST", f"/api/media-organizer/previews/{pid}/execute", {
+            "unit": str(unit), "confirmation": approval_token(pid, str(unit)),
+            "maintenance_window_confirmed": True,
+        })
+        assert denied["status"] == 409
+        assert "custody" in denied["body"]["detail"].lower()
+        with sessions() as session:
+            assert session.scalars(select(WorkJob.id).order_by(WorkJob.id)).all() == before_jobs
+        assert snapshot() == before
+
+        # The unmodified physical driver also cannot claim completion with
+        # the live issuer: its ready preview intentionally has no token.
+        evidence = {}
+        with pytest.raises(KeyError) as refused:
+            nas.run_case("mixed", unit, request, run_job, lambda: nas.inventory(unit), evidence)
+        assert refused.value.args == (str(unit),)
+        assert evidence["complete"] is False
+        assert len(evidence["jobs"]) == 1 and evidence["recovery_jobs"] == []
+        with sessions() as session:
+            assert session.scalars(select(WorkJob.id).where(
+                WorkJob.kind == "media-organizer-execute",
+            )).all() == []
+        assert snapshot() == before
+    finally:
+        engine.dispose()
 
 
 def test_mount_evidence_from_real_open_fd(tmp_path):
