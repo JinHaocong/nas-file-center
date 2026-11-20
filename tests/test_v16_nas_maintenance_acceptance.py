@@ -124,7 +124,8 @@ def test_ordinary_http_and_real_dispatch_recovery(local_server, case, monkeypatc
     assert evidence["second_scan"] == {"needed_moves": 0, "renamed_count": 0}
     assert set(evidence["simulated_interruptions"]) == {"publication", "cleanup"}
     assert [item["phase"] for item in evidence["recovery_jobs"]] == ["execution", "cleanup"]
-    assert [job["interruption"] for job in evidence["jobs"]] == ["publication", None, "cleanup", None]
+    assert len(evidence["jobs"]) == 6  # initial preview, execute, recovery, cleanup, recovery, final preview
+    assert [job["interruption"] for job in evidence["jobs"] if job["interruption"]] == ["publication", "cleanup"]
 
 
 def test_mount_evidence_from_real_open_fd(tmp_path):
