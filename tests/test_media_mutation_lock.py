@@ -147,6 +147,27 @@ def test_refuses_lock_symlink_and_unsafe_permissions(config):
             pytest.fail("accepted a writable public lock")
 
 
+def test_existing_lock_open_handles_zfuse_nofollow_enoent(config, monkeypatch):
+    lock_module = _lock_module()
+    lock_path = config.config_dir / LOCK_NAME
+    lock_path.write_text("")
+    lock_path.chmod(0o600)
+    original_open = os.open
+
+    def zfuse_open(path, flags, *args, **kwargs):
+        if (
+            os.fspath(path) == LOCK_NAME
+            and flags & getattr(os, "O_NOFOLLOW", 0)
+            and not flags & os.O_CREAT
+        ):
+            raise FileNotFoundError(2, "simulated zfuse O_NOFOLLOW lookup failure", os.fspath(path))
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(lock_module.os, "open", zfuse_open)
+    with lock_module.media_mutation_lock(config):
+        lock_module.assert_media_mutation_lock(config)
+
+
 def test_config_path_cannot_hide_a_symlink_with_parent_traversal(config):
     lock_module = _lock_module()
     root = config.config_dir

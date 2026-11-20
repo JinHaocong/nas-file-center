@@ -115,6 +115,46 @@ def test_shared_db_init_lock_is_group_writable(
         assert lock.stat().st_gid == os.getegid()
 
 
+def test_shared_db_init_lock_handles_zfuse_existing_file_open_without_nofollow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.db as db_module
+
+    config = _shared_config(monkeypatch, tmp_path)
+    lock = config / ".db-init.lock"
+    lock.write_bytes(b"")
+    lock.chmod(0o660)
+    original_open = os.open
+
+    def zfuse_open(path, flags, *args, **kwargs):
+        if (
+            Path(path).name == lock.name
+            and flags & getattr(os, "O_NOFOLLOW", 0)
+            and not flags & os.O_CREAT
+        ):
+            raise FileNotFoundError(2, "simulated zfuse O_NOFOLLOW lookup failure", str(path))
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(db_module.os, "open", zfuse_open)
+    with _db_init_lock(lock):
+        assert lock.stat().st_gid == os.getegid()
+        assert (lock.stat().st_mode & 0o777) == 0o660
+
+
+def test_shared_db_init_lock_rejects_symlink_without_touching_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _shared_config(monkeypatch, tmp_path)
+    target = tmp_path / "outside.lock"
+    target.write_bytes(b"unchanged")
+    lock = config / ".db-init.lock"
+    lock.symlink_to(target)
+    with pytest.raises(PermissionError, match="SHARED_CONFIG"):
+        with _db_init_lock(lock):
+            pytest.fail("followed a database init lock symlink")
+    assert target.read_bytes() == b"unchanged"
+
+
 def test_shared_config_rejects_world_writable_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -22,7 +22,11 @@ from app.config_sharing import shared_config_gid
 
 _LOCK_NAME = ".media-mutation.lock"
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-_FILE_FLAGS = os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+# Existing lock-file opens are validated by _validate() using the pinned
+# directory FD plus pre/post lstat and fstat identity checks. Avoid O_NOFOLLOW
+# here because the NAS zfuse mount can return ENOENT for an existing regular
+# lock file when that flag is supplied.
+_FILE_FLAGS = os.O_RDWR | os.O_CLOEXEC | os.O_NONBLOCK
 
 
 class MediaMutationLockUnavailable(PermissionError):
