@@ -53,6 +53,39 @@ def require_shared_directory(directory: Path, gid: int) -> None:
         os.close(fd)
 
 
+def pinned_directory_entry_path(directory_fd: int, name: str) -> str:
+    """Return a proc-fd path to one entry below a verified, already-open directory.
+
+    Some NAS FUSE implementations support fstatat/stat(dir_fd=...) but return
+    ENOENT for openat/open(dir_fd=...) on an existing regular file. Resolving
+    /proc/self/fd/<fd>/<name> keeps the directory inode pinned while using the
+    ordinary absolute-path open operation. Callers must still compare the
+    opened descriptor with a no-follow stat of the named entry before use.
+    """
+    if (
+        not isinstance(name, str)
+        or not name
+        or name in {".", ".."}
+        or os.path.basename(name) != name
+        or "\\x00" in name
+    ):
+        raise PermissionError(f"{_ERROR}: invalid pinned directory entry name")
+    opened_directory = os.fstat(directory_fd)
+    proc_directory = f"/proc/self/fd/{directory_fd}"
+    try:
+        named_directory = os.stat(proc_directory)
+    except OSError as exc:
+        raise PermissionError(f"{_ERROR}: pinned directory FD is not addressable through procfs") from exc
+    if (
+        not stat.S_ISDIR(opened_directory.st_mode)
+        or not stat.S_ISDIR(named_directory.st_mode)
+        or (opened_directory.st_dev, opened_directory.st_ino)
+        != (named_directory.st_dev, named_directory.st_ino)
+    ):
+        raise PermissionError(f"{_ERROR}: pinned directory FD identity mismatch")
+    return f"{proc_directory}/{name}"
+
+
 def require_shared_file(path: Path, gid: int, mode: int) -> None:
     try:
         st = os.lstat(path)

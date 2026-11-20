@@ -18,14 +18,14 @@ import threading
 from typing import Iterator
 
 from app.config import Settings
-from app.config_sharing import shared_config_gid
+from app.config_sharing import shared_config_gid, pinned_directory_entry_path
 
 _LOCK_NAME = ".media-mutation.lock"
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 # Existing lock-file opens are validated by _validate() using the pinned
-# directory FD plus pre/post lstat and fstat identity checks. Avoid O_NOFOLLOW
-# here because the NAS zfuse mount can return ENOENT for an existing regular
-# lock file when that flag is supplied.
+# directory FD plus pre/post lstat and fstat identity checks. Use its procfs
+# handle for open(): this NAS zfuse mount returns ENOENT for openat() on an
+# existing regular file even though stat(..., dir_fd=...) succeeds.
 _FILE_FLAGS = os.O_RDWR | os.O_CLOEXEC | os.O_NONBLOCK
 
 
@@ -192,16 +192,15 @@ def media_mutation_lock(settings: Settings, *, blocking: bool = True) -> Iterato
             # A second flock on the pinned directory prevents accepting a
             # replacement lock-file inode while another holder is unwinding.
             _acquire_flock(directory_fd, blocking=blocking)
+            entry_path = pinned_directory_entry_path(directory_fd, _LOCK_NAME)
             with _fd_guard:
                 try:
-                    file_fd = os.open(_LOCK_NAME, _FILE_FLAGS, dir_fd=directory_fd)
+                    file_fd = os.open(entry_path, _FILE_FLAGS)
                 except FileNotFoundError:
                     if path in _bindings:
                         raise MediaMutationLockUnavailable("Media mutation lock file disappeared")
                     mode = 0o600 if gid is None else 0o660
-                    file_fd = os.open(
-                        _LOCK_NAME, _FILE_FLAGS | os.O_CREAT | os.O_EXCL, mode, dir_fd=directory_fd,
-                    )
+                    file_fd = os.open(entry_path, _FILE_FLAGS | os.O_CREAT | os.O_EXCL, mode)
                     _open_fds.add(file_fd)
                     os.fchmod(file_fd, mode)
                 else:

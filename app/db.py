@@ -12,6 +12,7 @@ from app.config_sharing import (
     shared_config_gid,
     ensure_shared_database,
     ensure_shared_init_lock,
+    pinned_directory_entry_path,
 )
 import stat
 
@@ -87,14 +88,16 @@ def _shared_db_init_lock(lock_file_path: Path, gid: int):
             raise PermissionError("SHARED_CONFIG: unsafe database init lock entry")
         file_identity = (before.st_dev, before.st_ino)
 
-        # Do not pass O_NOFOLLOW for this existing-file open: the NAS zfuse
-        # mount returned ENOENT for a validated regular lock entry. Instead,
-        # open relative to the pinned directory and verify the opened inode
-        # against both pre-open and post-open no-follow stat observations
+        # This NAS zfuse mount allows stat(..., dir_fd=...) but returns ENOENT
+        # when openat() opens an existing regular file. Resolve the entry through
+        # the already-open directory FD's procfs handle instead: the directory
+        # inode remains pinned, while open() uses ordinary absolute-path lookup.
+        # The opened inode is still checked against pre/post no-follow stats
         # before flocking or yielding. O_NONBLOCK prevents FIFO substitution
         # from hanging the API/Worker startup path.
         file_flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
-        file_fd = os.open(lock_file_path.name, file_flags, dir_fd=directory_fd)
+        entry_path = pinned_directory_entry_path(directory_fd, lock_file_path.name)
+        file_fd = os.open(entry_path, file_flags)
         _shared_db_init_lock_binding(directory_fd, lock_file_path, file_fd, gid,
                                      directory_identity, file_identity)
         lock_file = os.fdopen(file_fd, "r+")

@@ -115,7 +115,7 @@ def test_shared_db_init_lock_is_group_writable(
         assert lock.stat().st_gid == os.getegid()
 
 
-def test_shared_db_init_lock_handles_zfuse_existing_file_open_without_nofollow(
+def test_shared_db_init_lock_uses_pinned_proc_fd_when_zfuse_openat_returns_enoent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import app.db as db_module
@@ -127,18 +127,38 @@ def test_shared_db_init_lock_handles_zfuse_existing_file_open_without_nofollow(
     original_open = os.open
 
     def zfuse_open(path, flags, *args, **kwargs):
-        if (
-            Path(path).name == lock.name
-            and flags & getattr(os, "O_NOFOLLOW", 0)
-            and not flags & os.O_CREAT
-        ):
-            raise FileNotFoundError(2, "simulated zfuse O_NOFOLLOW lookup failure", str(path))
+        if Path(path).name == lock.name and kwargs.get("dir_fd") is not None:
+            raise FileNotFoundError(2, "simulated zfuse openat lookup failure", str(path))
         return original_open(path, flags, *args, **kwargs)
 
     monkeypatch.setattr(db_module.os, "open", zfuse_open)
     with _db_init_lock(lock):
         assert lock.stat().st_gid == os.getegid()
         assert (lock.stat().st_mode & 0o777) == 0o660
+
+
+def test_pinned_directory_entry_path_requires_a_real_directory_fd(tmp_path):
+    from app.config_sharing import pinned_directory_entry_path
+
+    directory_fd = os.open(tmp_path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        entry = pinned_directory_entry_path(directory_fd, ".db-init.lock")
+        assert entry == f"/proc/self/fd/{directory_fd}/.db-init.lock"
+        assert os.stat(f"/proc/self/fd/{directory_fd}").st_ino == os.fstat(directory_fd).st_ino
+        for invalid in ("", ".", "..", "../escape", "nested/name"):
+            with pytest.raises(PermissionError, match="SHARED_CONFIG"):
+                pinned_directory_entry_path(directory_fd, invalid)
+    finally:
+        os.close(directory_fd)
+
+    regular_file = tmp_path / "not-a-directory"
+    regular_file.write_text("x")
+    file_fd = os.open(regular_file, os.O_RDONLY)
+    try:
+        with pytest.raises(PermissionError, match="SHARED_CONFIG"):
+            pinned_directory_entry_path(file_fd, ".db-init.lock")
+    finally:
+        os.close(file_fd)
 
 
 def test_shared_db_init_lock_rejects_symlink_without_touching_target(
