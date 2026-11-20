@@ -464,7 +464,8 @@ IMAGE_INFO = ('{"id":{{json .ID}},"revision":{{json (index .Config.Labels "org.o
               '"volumes":{{json .Config.Volumes}},"digests":{{json .RepoDigests}}}')
 CONTAINER_INFO = ('{"id":{{json .ID}},"name":{{json .Name}},"image":{{json .Image}},'
                   '"label":{{json (index .Config.Labels "nfc.v16.maintenance-fixture")}},'
-                  '"mounts":{{json .Mounts}},"host":{{json .HostConfig}},"user":{{json .Config.User}}}')
+                  '"mounts":{{json .Mounts}},"host":{{json .HostConfig}},"user":{{json .Config.User}},'
+                  '"state":{{json .State}}}')
 
 
 def docker(args, operation, data=None, timeout=90):
@@ -474,7 +475,9 @@ def docker(args, operation, data=None, timeout=90):
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Failure(f"{operation}: Docker unavailable or timed out ({type(exc).__name__})") from None
     if result.returncode:
-        raise Failure(f"{operation}: docker exited {result.returncode}")
+        detail = (result.stderr or "").strip()
+        suffix = f"; stderr: {detail[-2000:]}" if detail else ""
+        raise Failure(f"{operation}: docker exited {result.returncode}{suffix}")
     return result.stdout.strip()
 
 
@@ -568,6 +571,25 @@ def remove_container(fixturefd, fixture, role, cid, image, report):
     if (info["id"], info["image"], info["label"], info["name"]) != (cid, image, fixture.name, "/" + name):
         record["state"] = "identity_mismatch"
         raise Failure(f"cleanup {role} container identity mismatch")
+    state = info.get("state") or {}
+    record["pre_removal_state"] = {
+        key: state.get(key) for key in
+        ("Status", "Running", "Paused", "Restarting", "OOMKilled", "Dead",
+         "ExitCode", "Error", "StartedAt", "FinishedAt", "Pid")
+    }
+    # Preserve bounded stdout/stderr before --force destroys the only live
+    # source of startup diagnostics. In particular, a later SIGKILL event
+    # caused by this cleanup must not be mistaken for an OOM root cause.
+    try:
+        logs = subprocess.run([*DOCKER, "logs", "--timestamps", "--tail", "250", cid],
+                              capture_output=True, text=True, timeout=30, check=False)
+        record["logs"] = {
+            "exit_code": logs.returncode,
+            "stdout_tail": logs.stdout[-12000:],
+            "stderr_tail": logs.stderr[-12000:],
+        }
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        record["logs_capture_error"] = type(exc).__name__
     docker(["rm", "--force", cid], f"remove disposable {role}")
     report["removed_containers"].append(cid)
     record["state"] = "removed"
