@@ -16,17 +16,22 @@ the installed service. Temporary API and Worker containers use only that
 fixture and a separate temporary config, with restricted identities,
 capabilities, read-only container roots and no network.
 
-Before container startup, the host controller provisions only three empty files
-inside the newly created fixture's API-owned `/config` root: `app.db`,
-`.db-init.lock`, and `.media-mutation.lock`. They are created with
-`O_CREAT|O_EXCL` through the pinned config directory FD, then bound to API UID
-10001, GID 10000 and mode 0660 with file and directory fsync. Existing entries
-are never overwritten. After API bootstrap, both API and Worker independently
+Before container startup, the host controller provisions only the empty
+`app.db` file inside the newly created fixture's API-owned `/config` root.
+It is created with `O_CREAT|O_EXCL` through the pinned config directory FD,
+then bound to API UID 10001, GID 10000 and mode 0660 with file and directory
+fsync. Existing entries are never overwritten. The dot-prefixed
+`.db-init.lock` and `.media-mutation.lock` are deliberately not host-created:
+the owning API/Worker processes create and validate these locks at runtime.
+The latest physical SATA attempt showed that a host-created `.db-init.lock`
+could be verified by the host controller but returned `ENOENT` to API
+`lstat` on the bind-mounted zfuse filesystem. The helper therefore avoids
+pre-creating those dotfiles and lets the application create them in its own
+mount namespace. After API bootstrap, both API and Worker independently
 perform an `O_EXCL` create, write, fsync, inode-binding check and
 identity-checked removal in each writable application directory: `reports`,
-`backups`, `logs`, and `home`. The three fixed root-level bootstrap files are
-separately inode-pinned and validated. Any failure stops the run before
-organizer scenarios.
+`backups`, `logs`, and `home`. Any failure stops the run before organizer
+scenarios.
 These files and probes are confined to the new disposable fixture; no
 installed config or production database is touched.
 

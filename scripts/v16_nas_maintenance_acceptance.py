@@ -117,7 +117,7 @@ def new_dir(stack, parent, name, uid, gid, mode):
 
 
 CONFIG_DIRECTORIES = ("reports", "backups", "logs", "home")
-CONFIG_BOOTSTRAP_FILES = ("app.db", ".db-init.lock", ".media-mutation.lock")
+CONFIG_BOOTSTRAP_FILES = ("app.db",)
 
 
 def provision_config_directories(stack, config_fd):
@@ -134,12 +134,14 @@ def provision_config_directories(stack, config_fd):
 
 
 def provision_config_files(stack, config_fd):
-    """Create only the three empty, fixed bootstrap files in a new fixture.
+    """Pre-create only app.db in a new fixture; runtime roles create lock files.
 
-    The API validates these pre-created inodes instead of having to create its
-    database/init/cooperative-lock files during first boot. O_EXCL, pinned
-    dir_fd identity checks and fsync make this fail closed on unsupported NAS
-    file-creation semantics. This never targets an installed config directory.
+    The database file is provisioned by the host because API startup requires
+    it before SQLite initialization. The dot-prefixed init and media locks are
+    deliberately created by their owning application processes: on the target
+    zfuse bind mount, host-created .db-init.lock was recorded on the host but
+    returned ENOENT to API lstat during startup. O_EXCL, pinned dir_fd identity
+    checks and fsync keep this limited to the disposable fixture.
     """
     expected_entries = set(CONFIG_DIRECTORIES)
     require(set(os.listdir(config_fd)) == expected_entries,

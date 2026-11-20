@@ -428,6 +428,10 @@ def test_disposable_config_layout_is_preprovisioned(tmp_path, monkeypatch):
     assert sorted(path.name for path in config.iterdir()) == ["backups", "home", "logs", "reports"]
 
 
+def test_only_database_file_is_host_preprovisioned():
+    assert nas.CONFIG_BOOTSTRAP_FILES == ("app.db",)
+
+
 def test_disposable_config_bootstrap_files_are_preprovisioned(tmp_path, monkeypatch):
     monkeypatch.setattr(nas, "API", os.geteuid())
     monkeypatch.setattr(nas, "GROUP", os.getegid())
