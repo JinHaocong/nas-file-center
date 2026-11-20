@@ -67,7 +67,7 @@ def pinned_directory_entry_path(directory_fd: int, name: str) -> str:
         or not name
         or name in {".", ".."}
         or os.path.basename(name) != name
-        or "\\x00" in name
+        or chr(0) in name
     ):
         raise PermissionError(f"{_ERROR}: invalid pinned directory entry name")
     opened_directory = os.fstat(directory_fd)
