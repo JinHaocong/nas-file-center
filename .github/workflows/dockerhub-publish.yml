@@ -145,7 +145,7 @@ jobs:
               assert db.execute('SELECT count(*) FROM users').fetchone()[0] == 1
               for table in ('work_jobs', 'schedules', 'quarantine_entries'):
                   assert db.execute(f'SELECT count(*) FROM {table}').fetchone()[0] == 0
-              for name in ('app.db', 'app.db-wal', 'app.db-shm', '.db-init.lock'):
+              for name in ('app.db', 'app.db-wal', 'app.db-shm', 'db-init.lock'):
                   info = Path('/config', name).lstat()
                   assert (info.st_gid, stat.S_IMODE(info.st_mode)) == (10000, 0o660)
           for name in ('reports', 'backups', 'logs', 'home'):

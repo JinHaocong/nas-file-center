@@ -47,6 +47,12 @@ def test_candidate_publish_rebuilds_for_media_organizer_runtime_and_acceptance_c
     assert "tests/test_deployment_consistency.py" not in paths
 
 
+def test_candidate_api_bootstrap_checks_the_visible_db_init_lock_name():
+    smoke = next(step for step in _candidate_job()["steps"] if step.get("id") == "smoke")
+    assert "'db-init.lock'" in smoke["run"]
+    assert "'.db-init.lock'" not in smoke["run"]
+
+
 def test_candidate_trigger_and_release_job_remain_separate():
     workflow = _workflow()
     triggers = workflow.get("on", workflow.get(True))
