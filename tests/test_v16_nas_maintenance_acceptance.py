@@ -350,3 +350,54 @@ def test_failed_create_unwinds_and_removes_daemon_committed_container(tmp_path, 
             nas.run_containers(rootfd, fixturefd, fixture, children, DIGEST, report)
     assert not daemon and not (fixture / "worker.cid").exists()
     assert report["removed_containers"] == [cid] and report["container_cleanup"]["worker"]["state"] == "removed"
+
+
+def test_container_cleanup_captures_state_and_logs_before_force_remove(tmp_path, monkeypatch):
+    cid = "e" * 64
+    fixture = tmp_path / (nas.PREFIX + "diagnostics")
+    fixture.mkdir()
+    info = {
+        "id": cid, "image": DIGEST, "label": fixture.name,
+        "name": f"/{fixture.name}-api",
+        "state": {"Status": "running", "Running": True, "OOMKilled": False,
+                  "ExitCode": 0, "Error": "", "Pid": 4321},
+    }
+    calls = []
+    def docker(args, operation, *other, **kwargs):
+        calls.append(("docker", args[0]))
+        if args[0] == "inspect":
+            return json.dumps(info)
+        if args[0] == "rm":
+            return cid
+        raise AssertionError(args)
+    class Logs:
+        returncode = 0
+        stdout = "api startup line\\n"
+        stderr = "uvicorn diagnostic\\n"
+    def run(args, **kwargs):
+        calls.append(("logs", args[1]))
+        assert args[1] == "logs" and args[-1] == cid
+        return Logs()
+    monkeypatch.setattr(nas, "docker", docker)
+    monkeypatch.setattr(nas.subprocess, "run", run)
+    report = {"removed_containers": [], "container_cleanup": {}}
+    with ExitStack() as stack:
+        fd = nas.open_tree(stack, tmp_path)
+        nas.remove_container(fd, fixture, "api", cid, DIGEST, report)
+    assert calls == [("docker", "inspect"), ("logs", "logs"), ("docker", "rm")]
+    record = report["container_cleanup"]["api"]
+    assert record["pre_removal_state"]["OOMKilled"] is False
+    assert record["pre_removal_state"]["Running"] is True
+    assert "api startup line" in record["logs"]["stdout_tail"]
+    assert "uvicorn diagnostic" in record["logs"]["stderr_tail"]
+    assert record["state"] == "removed"
+
+
+def test_docker_failure_retains_bounded_stderr(monkeypatch):
+    class Result:
+        returncode = 137
+        stdout = ""
+        stderr = "exec process was killed"
+    monkeypatch.setattr(nas.subprocess, "run", lambda *args, **kwargs: Result())
+    with pytest.raises(nas.Failure, match=r"docker exited 137; stderr: exec process was killed"):
+        nas.docker(["exec", "container", "python"], "API bootstrap")
