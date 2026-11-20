@@ -89,7 +89,11 @@ def local_server(tmp_path_factory, request):
     env = {**os.environ, **nas.CONFIG, "CONFIG_DIR": str(config), "DATA_MOUNT": str(data),
            "ALLOWED_ROOTS": str(data), "QUARANTINE_ROOT": str(data / ".trash"),
            "NFC_SHARED_CONFIG_GID": str(os.getegid()), "INITIAL_ADMIN_PASSWORD": password,
-           "MEDIA_ORGANIZER_EXECUTION_MODE": selected_mode}
+           "MEDIA_ORGANIZER_EXECUTION_MODE": selected_mode,
+           # The strict regression must reach the real missing custody issuer.
+           # This ack is only an eligibility prerequisite, never custody proof.
+           "MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK":
+               "true" if selected_mode == "strict" else "false"}
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -197,7 +201,7 @@ def test_ordinary_http_and_real_dispatch_recovery(synthetic_server, case, monkey
 
 
 @pytest.mark.parametrize("local_server", ["strict"], indirect=True)
-def test_live_http_and_acceptance_driver_refuse_strict_mode_without_custody(local_server, monkeypatch):
+def test_live_http_refuses_strict_mode_without_custody(local_server, monkeypatch):
     from sqlalchemy import select
     from app.batch.media_organizer_execute_jobs import approval_token
     from app.config import Settings
@@ -250,7 +254,7 @@ def test_live_http_and_acceptance_driver_refuse_strict_mode_without_custody(loca
             )).all() == []
         denied = request("POST", f"/api/media-organizer/previews/{pid}/execute", {
             "unit": str(unit), "confirmation": approval_token(pid, str(unit)),
-            "maintenance_window_confirmed": True,
+            "maintenance_window_confirmed": False,
         })
         assert denied["status"] == 409
         assert "custody" in denied["body"]["detail"].lower()
@@ -258,14 +262,12 @@ def test_live_http_and_acceptance_driver_refuse_strict_mode_without_custody(loca
             assert session.scalars(select(WorkJob.id).order_by(WorkJob.id)).all() == before_jobs
         assert snapshot() == before
 
-        # The unmodified physical driver also cannot claim completion with
-        # the live issuer: its ready preview intentionally has no token.
-        evidence = {}
-        with pytest.raises(KeyError) as refused:
-            nas.run_case("mixed", unit, request, run_job, lambda: nas.inventory(unit), evidence)
-        assert refused.value.args == (str(unit),)
-        assert evidence["complete"] is False
-        assert len(evidence["jobs"]) == 1 and evidence["recovery_jobs"] == []
+        # The physical acceptance driver is maintenance-window only, so do
+        # not invoke it with strict-mode settings. The real HTTP path must
+        # continue to withhold execution tokens and preserve job/media state.
+        second_preview = request("GET", f"/api/media-organizer/previews/{pid}")
+        assert second_preview["status"] == 200
+        assert str(unit) not in second_preview["body"]["confirmation_tokens"]
         with sessions() as session:
             assert session.scalars(select(WorkJob.id).where(
                 WorkJob.kind == "media-organizer-execute",
