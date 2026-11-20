@@ -101,6 +101,13 @@ def _create_hardlink_plan(service, data: Path) -> int:
     )
     plan_id = int(created["id"])
     assert service.freeze_plan(plan_id).status == "frozen"
+    # Revalidation of a previously-ready plan must also be serialized against
+    # a second validation, execution enqueue and metadata deletion.
+    with service.SessionLocal() as session:
+        plan = session.get(BatchPlan, plan_id)
+        assert plan is not None
+        plan.status = "ready"
+        session.commit()
     return plan_id
 
 
