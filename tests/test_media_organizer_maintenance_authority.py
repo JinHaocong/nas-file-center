@@ -61,7 +61,7 @@ def grouped(site):
     preview = preview_semantic_unit(unit, allowed_roots=settings.allowed_roots)
     manifest = build_frozen_preview_manifest(unit, preview_record=preview,
                                               allowed_roots=settings.allowed_roots, job_id=9)
-    manifest.update(cleanup_policy="deferred", execution_mode="maintenance_window")
+    manifest.update(cleanup_policy="deferred", execution_mode=authority.execution_mode(settings))
     frozen = settings.reports_dir / "media_organizer-executions/9/manifest.json"
     save_frozen_preview_manifest(frozen, manifest)
     parents = {unit, old, unit / manifest["stage_directory"],
@@ -303,7 +303,7 @@ def flat_stage(site, *, path_roles=False):
         unit, preview_record=preview, allowed_roots=settings.allowed_roots, job_id=9,
     )
     assert manifest["groups"] == []
-    manifest.update(cleanup_policy="deferred", execution_mode="maintenance_window")
+    manifest.update(cleanup_policy="deferred", execution_mode=authority.execution_mode(settings))
     if path_roles:
         manifest["path_role_policy"] = POLICY
     frozen = settings.reports_dir / "media_organizer-executions/9/manifest.json"
