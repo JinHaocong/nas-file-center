@@ -269,7 +269,7 @@ def http(port, method, path, body=None, cookie=None):
 def run_case(case, unit, request, worker, snapshot, evidence):
     unit = str(unit)
     expected = GROUPS[case]
-    evidence.update(complete=False, jobs=[], refusals=[], simulated_interruptions=[])
+    evidence.update(complete=False, jobs=[], refusals=[], simulated_interruptions=[], recovery_jobs=[])
     def call(method, path, body=None, code=200):
         response = request(method, path, body)
         require(response["status"] == code, f"{method} {path}: expected {code}, received {response['status']}")
@@ -306,10 +306,11 @@ def run_case(case, unit, request, worker, snapshot, evidence):
     require({name.partition(" [")[0]: count for name, count in planned.items()} == expected,
             "planned group sizes differ from expected")
     jid = approve(path + "/execute", unit=unit, confirmation=report["confirmation_tokens"][unit])
-    if case == "historical":
-        work(jid, "publication")
-        jid = approve(f"/api/media-organizer/executions/{jid}/recover",
-                      confirmation=f"RECOVER_MEDIA_ORGANIZER_EXECUTION_{jid}")
+    # Every organizing shape must prove publication interruption and recovery.
+    work(jid, "publication")
+    jid = approve(f"/api/media-organizer/executions/{jid}/recover",
+                  confirmation=f"RECOVER_MEDIA_ORGANIZER_EXECUTION_{jid}")
+    evidence["recovery_jobs"].append({"phase": "execution", "job_id": jid})
     work(jid)
     base = f"/api/media-organizer/executions/{jid}"
     status = call("GET", base)
@@ -319,11 +320,12 @@ def run_case(case, unit, request, worker, snapshot, evidence):
         review = call("GET", base + "/" + suffix)
         require(review["verification_scope"] == "worker_handoff_snapshot", "missing Worker cleanup handoff")
     cid = approve(base + "/cleanup", confirmation=review["confirmation"])
-    if case == "historical":
-        work(cid, "cleanup")
-        token = call("GET", base)["cleanup"]["recovery_confirmation"]
-        require(isinstance(token, str) and token, "missing cleanup recovery token")
-        cid = approve(f"/api/media-organizer/cleanups/{cid}/recover", confirmation=token)
+    # Exercise the cleanup-scanned-zero interruption and explicit recovery too.
+    work(cid, "cleanup")
+    token = call("GET", base)["cleanup"]["recovery_confirmation"]
+    require(isinstance(token, str) and token, "missing cleanup recovery token")
+    cid = approve(f"/api/media-organizer/cleanups/{cid}/recover", confirmation=token)
+    evidence["recovery_jobs"].append({"phase": "cleanup", "job_id": cid})
     work(cid)
     final = call("GET", base)
     require(final["finalized"] is True and final["namespace_exclusive_custody_proven"] is False

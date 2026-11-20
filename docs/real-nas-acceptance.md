@@ -2,6 +2,53 @@
 
 Status: **RELEASE BLOCKED — HOST EVIDENCE AND SEPARATE APPROVAL REQUIRED**
 
+## Current final Maintenance Window lifecycle harness (2026-11-20)
+
+This section is authoritative for the current Draft PR #397 candidate and
+supersedes the older primitive-only harness instructions below.
+
+The pinned helper `scripts/v16_nas_maintenance_acceptance.py` runs directly
+on the NAS host as a root controller. It creates one random, inode-pinned
+disposable fixture beneath the supplied existing SATA data root; it does not
+walk or mount existing media directories, alter the installed API/Worker,
+modify the production config/quarantine trees, pull/build an image, or enable
+the installed service. Temporary API and Worker containers use only that
+fixture and a separate temporary config, with restricted identities,
+capabilities, read-only container roots and no network.
+
+The candidate is pinned independently from the helper source:
+- Docker image: `kerwinjhc/nas-file-center@sha256:3c33ce5387e71475875d34802cb654182153cd96d49882bc3e2e57b04325120c`
+- OCI revision expected by `--candidate-sha`: `153ae05780d6eebdc8db2723914e6b446119d4a2`
+- Helper source: exact GitHub PR #397 HEAD; verify its SHA-256 before execution.
+  The helper commit SHA is not the image OCI revision.
+
+The helper exercises three disposable organizing units:
+1. Mixed images/videos: 2 pictures and 1 video.
+2. Bucket boundary: 201 pictures (200 in `P`, 1 in `P_1`) and 1 video.
+3. Historical/conflicting layout: pre-existing classification directories plus
+   mixed source media.
+
+**Each scenario** must exercise a simulated interruption after publication,
+explicit execution recovery, a simulated interruption at the cleanup
+zero-scan checkpoint, explicit cleanup recovery, final file-count and
+SHA-256/inventory reconciliation, and a canonical second scan with
+`needed_moves=0` and `renamed_count=0`.
+
+The runtime mode is explicitly `maintenance_window`. Keep all other writers
+out of the newly created fixture from before the first organizer mutation
+through publication, cleanup and recovery. The application lock coordinates
+cooperating internal tasks only. This mode intentionally reports
+`namespace_exclusive_custody_proven=false`; it does not establish isolation
+against root/admin, same-UID programs, or SMB/NFS/NAS clients that violate the
+maintenance window. Do not represent this as strict namespace custody.
+
+Success requires both `status=PASS_MAINTENANCE_LIFECYCLE` and
+`NFC_MAINTENANCE_EXIT=0`. This is disposable real-filesystem acceptance
+evidence only. It does not close independent security review #398, open
+findings #399/#401/#402, the separate cleanup review #400, or authorize merge,
+production deployment, or execution against original media.
+
+
 The existing one-shot Docker Compose task tests real-filesystem primitives,
 flat publication and refusal of grouped publication on an approved disposable
 NAS directory. It does **not** test complete V1.6 cleanup/recovery or establish

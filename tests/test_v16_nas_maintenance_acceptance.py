@@ -122,8 +122,9 @@ def test_ordinary_http_and_real_dispatch_recovery(local_server, case, monkeypatc
     nas.run_case(case, unit, request, run_job, lambda: nas.inventory(unit), evidence)
     assert evidence["complete"] and evidence["before"]["hashes"] == evidence["after"]["hashes"]
     assert evidence["second_scan"] == {"needed_moves": 0, "renamed_count": 0}
-    if case == "historical":
-        assert set(evidence["simulated_interruptions"]) == {"publication", "cleanup"}
+    assert set(evidence["simulated_interruptions"]) == {"publication", "cleanup"}
+    assert [item["phase"] for item in evidence["recovery_jobs"]] == ["execution", "cleanup"]
+    assert [job["interruption"] for job in evidence["jobs"]] == ["publication", None, "cleanup", None]
 
 
 def test_mount_evidence_from_real_open_fd(tmp_path):
