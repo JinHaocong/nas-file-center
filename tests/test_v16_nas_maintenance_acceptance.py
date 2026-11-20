@@ -254,6 +254,35 @@ def test_new_fixture_recorded_before_metadata_validation(tmp_path, monkeypatch):
         assert untouched["fixture_created"] is False and "fixture" not in untouched
 
 
+def test_fixture_root_is_searchable_but_not_listable(tmp_path, monkeypatch):
+    import stat
+
+    fixture = tmp_path / (nas.PREFIX + "searchable")
+    report = {}
+
+    def provision(stack, parent, name, uid, gid, mode):
+        assert (uid, gid, mode) == (0, 0, 0o711)
+        initial = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        assert stat.S_IMODE(initial.st_mode) == 0o700
+        os.chmod(fixture, mode)
+        fd = os.open(name, nas.DIRECTORY, dir_fd=parent)
+        stack.callback(os.close, fd)
+        return fd
+
+    monkeypatch.setattr(nas, "provision_new_directory", provision)
+    with ExitStack() as stack:
+        parent_fd = nas.open_tree(stack, tmp_path)
+        fd = nas.create_fixture(stack, parent_fd, fixture, report)
+        info = os.fstat(fd)
+        assert stat.S_IMODE(info.st_mode) == 0o711
+        assert info.st_mode & stat.S_IXOTH
+        assert not info.st_mode & stat.S_IROTH
+        assert report["fixture_created"] is True
+        assert report["report_destination_verified"] is True
+
+    fixture.rmdir()
+
+
 def test_parent_default_acl_refuses_creation(tmp_path, monkeypatch):
     fixture = tmp_path / (nas.PREFIX + "acl")
     report = {}

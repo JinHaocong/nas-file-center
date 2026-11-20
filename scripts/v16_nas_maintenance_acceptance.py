@@ -106,7 +106,11 @@ def create_fixture(stack, parent, path, report):
     except FileExistsError:
         raise Failure("fixture name collision; preexisting directory untouched") from None
     report.update(fixture_created=True, fixture=str(path), report_destination_verified=False)
-    fd = provision_new_directory(stack, parent, path.name, 0, 0, 0o700)
+    # The fixture is a root-owned ancestor of the config/data bind-mount
+    # sources. ZFuse checks ancestor traversal from non-root container UIDs
+    # even when a child is mounted separately. Keep it non-listable while
+    # granting search-only access to API/Worker (other execute, no read).
+    fd = provision_new_directory(stack, parent, path.name, 0, 0, 0o711)
     report["report_destination_verified"] = True
     return fd
 
