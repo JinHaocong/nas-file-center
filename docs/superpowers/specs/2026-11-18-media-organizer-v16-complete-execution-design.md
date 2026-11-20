@@ -9,11 +9,15 @@ PR: #397
 
 The user needs an actual completed organizer, not a read-only preview or a safety blocker.
 
-1. Selected-root recursively finds eligible semantic units; image/video paths are separated into their reviewed `P` and `V` groups, with bounded per-group numbering and a collision-safe suffix policy.
+1. Selected-root recursively finds eligible semantic units; image/video paths are separated into their reviewed `P` and `V` groups, with bounded per-group numbering. The selected organizing unit is scanned in full, so in-scope legacy P/V wrappers are inputs to the same frozen plan rather than reasons to suffix a new group name. If a proposed P/V target is occupied by an entry outside the frozen input set, block and preserve it; do not overwrite, adopt or suffix around a foreign occupant.
 2. A homogeneous directory already fully organized must be skipped; original scattered/historical group names (including `P1`) are reconciled by the frozen plan. Never overwrite an existing file/directory or adopt a foreign group.
 3. Preview → exact-unit confirmation → freeze → validate → stage → publish → verified source cleanup → finalized → second scan **zero changes**. A failed or interrupted job resumes from immutable journal/receipt checks without deleting/moving unrelated files.
 4. Real media are not used for RED/GREEN or acceptance. Real SATA tests use the owner's dedicated disposable root. All production execution flags remain OFF until acceptance.
 5. Security requirement: **no deletion or relocation of a foreign source entry**, even if the source path changes after a last identity check. Success must be supported by actual filesystem constraints, not an extra stat or operator ACK.
+
+### 2026-11-20 clarification — P/V destination collisions
+
+The user confirmed that each selected organizing unit is processed as a complete scope. Existing `P`, `P1`, `photos`, `V`, and equivalent in-scope classification wrappers are therefore collected and reconciled by the same frozen plan. A separate `P_1`/`V_1` suffix is not a normal response to an in-scope legacy directory. If the canonical destination is occupied by an entry not proven to be part of the frozen input set, the unit must be blocked for review without overwriting, adopting, relocating, or suffixing around that foreign entry. Existing tests cover both idempotent canonical buckets and refusal of an empty foreign final bucket.
 
 ## Known Physical Constraint
 
