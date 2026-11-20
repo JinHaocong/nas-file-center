@@ -375,8 +375,8 @@ def test_container_cleanup_captures_state_and_logs_before_force_remove(tmp_path,
         stdout = "api startup line\\n"
         stderr = "uvicorn diagnostic\\n"
     def run(args, **kwargs):
-        calls.append(("logs", args[1]))
-        assert args[1] == "logs" and args[-1] == cid
+        calls.append(("logs", args[3]))
+        assert args[3] == "logs" and args[-1] == cid
         return Logs()
     monkeypatch.setattr(nas, "docker", docker)
     monkeypatch.setattr(nas.subprocess, "run", run)
