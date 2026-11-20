@@ -347,7 +347,7 @@ def test_failed_create_unwinds_and_removes_daemon_committed_container(tmp_path, 
         fixturefd = walk(stack, fixture)
         children = {name: walk(stack, fixture / name) for name in ("config", "data")}
         with pytest.raises(nas.Failure, match="lost create response"):
-            nas.run_containers(rootfd, fixturefd, fixture, children, DIGEST, report)
+            nas.run_containers(rootfd, fixturefd, fixture, children, {}, DIGEST, report)
     assert not daemon and not (fixture / "worker.cid").exists()
     assert report["removed_containers"] == [cid] and report["container_cleanup"]["worker"]["state"] == "removed"
 
