@@ -116,6 +116,22 @@ def new_dir(stack, parent, name, uid, gid, mode):
     return provision_new_directory(stack, parent, name, uid, gid, mode)
 
 
+CONFIG_DIRECTORIES = ("reports", "backups", "logs", "home")
+
+
+def provision_config_directories(stack, config_fd):
+    """Pre-provision the disposable shared config layout before API startup.
+
+    Production startup validates these directories and refuses to repair
+    incompatible existing entries. Creating them in the host controller keeps
+    the fixture layout deterministic on NAS FUSE mounts.
+    """
+    return {
+        name: new_dir(stack, config_fd, name, API, GROUP, 0o2770)
+        for name in CONFIG_DIRECTORIES
+    }
+
+
 def provision_new_directory(stack, parent, name, uid, gid, mode):
     fd = open_dir(stack, name, parent)
     check_binding(parent, name, fd)
@@ -595,7 +611,7 @@ def remove_container(fixturefd, fixture, role, cid, image, report):
     record["state"] = "removed"
 
 
-def run_containers(rootfd, fixturefd, fixture, childfds, image, report):
+def run_containers(rootfd, fixturefd, fixture, childfds, config_subdirs, image, report):
     source = Path(__file__).read_text(encoding="utf-8")
     bindings = {"/" + name: identity(os.fstat(fd)) for name, fd in childfds.items()}
     ids = {}
@@ -606,6 +622,8 @@ def run_containers(rootfd, fixturefd, fixture, childfds, image, report):
             check_binding(actual, fixture.name, fixturefd)
             for name, fd in childfds.items():
                 check_binding(fixturefd, name, fd)
+            for name, fd in config_subdirs.items():
+                check_binding(childfds["config"], name, fd)
     def remove(role):
         remove_container(fixturefd, fixture, role, ids.get(role), image, report)
     def rpc(role, op, **args):
@@ -728,9 +746,20 @@ def main(argv=None):
             fixture = root / (PREFIX + secrets.token_hex(12))
             fixturefd = create_fixture(stack, rootfd, fixture, report)
             publish_report(fixturefd, {**report, "status": "INCOMPLETE"})
-            children = {"config": new_dir(stack, fixturefd, "config", API, GROUP, 0o2770),
-                        "data": new_dir(stack, fixturefd, "data", WORKER, GROUP, 0o750)}
-            run_containers(rootfd, fixturefd, fixture, children, image, report)
+            config_fd = new_dir(stack, fixturefd, "config", API, GROUP, 0o2770)
+            data_fd = new_dir(stack, fixturefd, "data", WORKER, GROUP, 0o750)
+            config_subdirs = provision_config_directories(stack, config_fd)
+            report["config_layout"] = {
+                name: {
+                    "identity": identity(os.fstat(fd)),
+                    "uid": os.fstat(fd).st_uid,
+                    "gid": os.fstat(fd).st_gid,
+                    "mode": oct(stat.S_IMODE(os.fstat(fd).st_mode)),
+                }
+                for name, fd in config_subdirs.items()
+            }
+            children = {"config": config_fd, "data": data_fd}
+            run_containers(rootfd, fixturefd, fixture, children, config_subdirs, image, report)
             require(set(report["cases"]) == set(GROUPS) and all(r.get("complete") for r in report["cases"].values())
                     and len(report["removed_containers"]) == 2, "case or container cleanup evidence incomplete")
             report["status"] = PASS
