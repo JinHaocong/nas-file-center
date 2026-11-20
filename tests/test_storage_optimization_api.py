@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -7,8 +8,10 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
 from app.auth.password import hash_password
-from app.models import User
+from app.models import User, WorkJob
 from app.service import FileCenterService
+from app.tasks.recovery import acquire_worker_ownership
+from app.worker import process_work_job
 
 
 def _client(tmp_path: Path, *, allow_mutation: bool = True):
@@ -74,13 +77,37 @@ def test_admin_storage_capability_probe_returns_closed_states_and_zero_residue(t
         headers={"Origin": "http://testserver"},
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert set(payload) == {"hardlink", "reflink"}
-    assert payload["hardlink"]["capability"] in {"supported", "unsupported", "unknown"}
-    assert payload["reflink"]["capability"] in {"supported", "unsupported", "unknown"}
-    assert payload["hardlink"]["operation"] == "hardlink"
-    assert payload["reflink"]["operation"] == "reflink"
+    assert response.status_code == 202
+    queued = response.json()
+    assert queued["status"] == "queued"
+    assert isinstance(queued["work_job_id"], int)
+    assert [
+        path.name
+        for path in data.iterdir()
+        if path.name.startswith(".__nfc_hardlink_probe_")
+        or path.name.startswith(".__nfc_reflink_probe_")
+    ] == []
+
+    service = client.app.state.service
+    worker_id = f"storage-probe-worker-{queued['work_job_id']}"
+    assert acquire_worker_ownership(service.engine, service.SessionLocal, worker_id=worker_id)
+    assert process_work_job(
+        service.settings,
+        queued["work_job_id"],
+        session_factory=service.SessionLocal,
+        engine=service.engine,
+        worker_id=worker_id,
+    ) is True
+
+    with service.SessionLocal() as session:
+        job = session.get(WorkJob, queued["work_job_id"])
+        assert job is not None and job.status == "completed"
+        result = json.loads(job.checkpoint_json or "{}")["result"]
+    assert set(result) == {"hardlink", "reflink"}
+    assert result["hardlink"]["capability"] in {"supported", "unsupported", "unknown"}
+    assert result["reflink"]["capability"] in {"supported", "unsupported", "unknown"}
+    assert result["hardlink"]["operation"] == "hardlink"
+    assert result["reflink"]["operation"] == "reflink"
     assert [
         path.name
         for path in data.iterdir()
@@ -120,8 +147,26 @@ def test_storage_capability_probe_accepts_actual_source_destination_parents(tmp_
         headers={"Origin": "http://testserver"},
     )
 
-    assert response.status_code == 200
-    payload = response.json()
+    assert response.status_code == 202
+    queued = response.json()
+    assert queued["status"] == "queued"
+    assert not any(path.name.startswith(".__nfc_") for path in source_parent.iterdir())
+    assert not any(path.name.startswith(".__nfc_") for path in destination_parent.iterdir())
+
+    service = client.app.state.service
+    worker_id = f"storage-probe-pair-worker-{queued['work_job_id']}"
+    assert acquire_worker_ownership(service.engine, service.SessionLocal, worker_id=worker_id)
+    assert process_work_job(
+        service.settings,
+        queued["work_job_id"],
+        session_factory=service.SessionLocal,
+        engine=service.engine,
+        worker_id=worker_id,
+    ) is True
+    with service.SessionLocal() as session:
+        job = session.get(WorkJob, queued["work_job_id"])
+        assert job is not None and job.status == "completed"
+        payload = json.loads(job.checkpoint_json or "{}")["result"]
     assert set(payload) == {"hardlink", "reflink"}
     assert payload["hardlink"]["parent_inode"] == destination_parent.stat().st_ino
     assert payload["hardlink"]["source_parent_inode"] == source_parent.stat().st_ino

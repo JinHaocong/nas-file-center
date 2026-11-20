@@ -1,4 +1,5 @@
 import { api } from './client';
+import { tasksApi } from './tasks';
 import {
   AuditEvent,
   DashboardSummary,
@@ -42,6 +43,19 @@ export const dashboardApi = {
   getSummary: () => api.get<DashboardSummary>('/api/dashboard/summary'),
 };
 
+async function waitForWorkJob(jobId: number, operation: string) {
+  const deadline = Date.now() + 30 * 60 * 1000;
+  while (Date.now() < deadline) {
+    const task = await tasksApi.getTaskDetail(jobId);
+    if (task.status === 'completed') return task;
+    if (task.status === 'failed' || task.status === 'cancelled') {
+      throw new Error(task.error || `${operation}任务 #${jobId} 未成功完成`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }
+  throw new Error(`${operation}任务 #${jobId} 仍在后台运行，请到任务中心查看`);
+}
+
 export const scansApi = {
   listScans: (page = 1, pageSize = 20) =>
     api.get<PaginatedResponse<ScanJob>>(`/api/scans?page=${page}&page_size=${pageSize}`),
@@ -74,11 +88,18 @@ export const scansApi = {
 };
 
 export const storageOptimizationApi = {
-  probeCapabilities: (payload: StorageOptimizationCapabilityRequest) =>
-    api.post<StorageOptimizationCapabilitiesResponse>(
+  probeCapabilities: async (payload: StorageOptimizationCapabilityRequest) => {
+    const queued = await api.post<{ work_job_id: number; status: string }>(
       '/api/storage-optimization/capabilities',
       payload,
-    ),
+    );
+    const task = await waitForWorkJob(queued.work_job_id, '存储能力探测');
+    const result = task.checkpoint?.result as StorageOptimizationCapabilitiesResponse | undefined;
+    if (!result || !result.hardlink || !result.reflink) {
+      throw new Error(`存储能力探测任务 #${queued.work_job_id} 未返回完整结果`);
+    }
+    return result;
+  },
 };
 
 export const mediaApi = {
@@ -180,7 +201,13 @@ export const plansApi = {
     }>;
   }) => api.post<{ id: number; status: string; expected_changes: number }>('/api/plans', payload),
   freezePlan: (id: number) => api.post<{ id: number; status: string }>(`/api/plans/${id}/freeze`),
-  validatePlan: (id: number) => api.post<Plan>(`/api/plans/${id}/validate`),
+  validatePlan: async (id: number) => {
+    const queued = await api.post<{ plan_id: number; work_job_id: number; status: string }>(
+      `/api/plans/${id}/validate`,
+    );
+    await waitForWorkJob(queued.work_job_id, '计划校验');
+    return api.get<Plan>(`/api/plans/${id}?page=1&page_size=50`);
+  },
   executePlan: (id: number) =>
     api.post<{ plan_id: number; work_job_id: number; status: string }>(`/api/plans/${id}/execute`),
   deletePlan: (id: number) => api.delete<DeletePlanResponse>(`/api/plans/${id}`),
