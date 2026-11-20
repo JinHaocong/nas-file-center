@@ -401,3 +401,26 @@ def test_docker_failure_retains_bounded_stderr(monkeypatch):
     monkeypatch.setattr(nas.subprocess, "run", lambda *args, **kwargs: Result())
     with pytest.raises(nas.Failure, match=r"docker exited 137; stderr: exec process was killed"):
         nas.docker(["exec", "container", "python"], "API bootstrap")
+
+
+
+def test_disposable_config_layout_is_preprovisioned(tmp_path, monkeypatch):
+    calls = []
+    def fake_new_dir(stack, parent, name, uid, gid, mode):
+        assert (uid, gid, mode) == (nas.API, nas.GROUP, 0o2770)
+        os.mkdir(name, mode=0o700, dir_fd=parent)
+        fd = os.open(name, nas.DIRECTORY, dir_fd=parent)
+        stack.callback(os.close, fd)
+        calls.append(name)
+        return fd
+    monkeypatch.setattr(nas, "new_dir", fake_new_dir)
+    config = tmp_path / "config"
+    config.mkdir()
+    with ExitStack() as stack:
+        config_fd = nas.open_tree(stack, config)
+        result = nas.provision_config_directories(stack, config_fd)
+        assert tuple(result) == nas.CONFIG_DIRECTORIES
+        assert all(nas.identity(os.fstat(fd)) == nas.identity((config / name).stat())
+                   for name, fd in result.items())
+    assert calls == ["reports", "backups", "logs", "home"]
+    assert sorted(path.name for path in config.iterdir()) == ["backups", "home", "logs", "reports"]
