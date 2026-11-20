@@ -488,8 +488,25 @@ def test_config_file_creation_probe_covers_root_and_shared_subdirectories(tmp_pa
         child = config / name
         child.mkdir(mode=0o2770)
         child.chmod(0o2770)
+    original_open = os.open
+    observed_creates = []
+
+    def zfuse_open(path, flags, *args, **kwargs):
+        if flags & os.O_CREAT:
+            observed_creates.append((os.fspath(path), flags, kwargs))
+            assert os.fspath(path).startswith("/proc/self/fd/")
+            assert kwargs.get("dir_fd") is None
+            assert flags & os.O_RDWR
+            assert flags & os.O_EXCL
+            assert not flags & getattr(os, "O_NOFOLLOW", 0)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(nas.os, "open", zfuse_open)
     result = nas.probe_config_file_creation(config)
-    assert set(result) == set(nas.CONFIG_DIRECTORIES)
+    expected = {"root", *nas.CONFIG_DIRECTORIES}
+    assert set(result) == expected
+    assert len(observed_creates) == len(expected)
+    assert all(item["creation_path"] == "pinned_proc_fd" for item in result.values())
     assert all(item["created_fsynced_removed"] for item in result.values())
     assert sorted(path.name for path in config.iterdir()) == sorted(nas.CONFIG_DIRECTORIES)
     assert all(not list((config / name).iterdir()) for name in nas.CONFIG_DIRECTORIES)

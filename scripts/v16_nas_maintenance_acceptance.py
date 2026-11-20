@@ -137,11 +137,11 @@ def provision_config_files(stack, config_fd):
     """Pre-create only app.db in a new fixture; runtime roles create lock files.
 
     The database file is provisioned by the host because API startup requires
-    it before SQLite initialization. The dot-prefixed init and media locks are
-    deliberately created by their owning application processes: on the target
-    zfuse bind mount, host-created .db-init.lock was recorded on the host but
-    returned ENOENT to API lstat during startup. O_EXCL, pinned dir_fd identity
-    checks and fsync keep this limited to the disposable fixture.
+    it before SQLite initialization. The non-hidden init and media locks are
+    deliberately created by their owning application processes through pinned
+    /proc/self/fd directory handles: host-created lock entries were previously
+    invisible in the API's ZFuse mount view. O_EXCL and inode checks keep this
+    limited to the disposable fixture.
     """
     expected_entries = set(CONFIG_DIRECTORIES)
     require(set(os.listdir(config_fd)) == expected_entries,
@@ -181,34 +181,48 @@ def provision_config_files(stack, config_fd):
 
 
 def probe_config_file_creation(config_root=Path("/config")):
-    """Prove API/Worker can create, fsync and remove a private file in each config dir."""
+    """Probe root and child config directories using the production pinned-procfd create path."""
     results = {}
     with ExitStack() as stack:
         root_fd = open_tree(stack, config_root)
-        for label in CONFIG_DIRECTORIES:
-            directory_fd = open_dir(stack, label, root_fd)
+        targets = [("root", root_fd)]
+        targets.extend((label, open_dir(stack, label, root_fd)) for label in CONFIG_DIRECTORIES)
+        for label, directory_fd in targets:
             directory = os.fstat(directory_fd)
             mode = stat.S_IMODE(directory.st_mode)
             require(stat.S_ISDIR(directory.st_mode) and directory.st_gid == GROUP
                     and (mode & 0o2070) == 0o2070 and (mode & 0o007) == 0,
                     f"config write-probe directory permissions mismatch: {label}")
-            name = "nfc-v16-write-probe-" + secrets.token_hex(12)
-            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-            flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+            proc_directory = f"/proc/self/fd/{directory_fd}"
             try:
-                file_fd = os.open(name, flags, 0o600, dir_fd=directory_fd)
+                proc_info = os.stat(proc_directory)
             except OSError as exc:
                 raise Failure(
-                    f"config O_EXCL create probe failed in {label}: {type(exc).__name__} errno={exc.errno}"
+                    f"config pinned directory handle unavailable in {label}: {type(exc).__name__} errno={exc.errno}"
+                ) from None
+            require(stat.S_ISDIR(proc_info.st_mode) and identity(proc_info) == identity(directory),
+                    f"config pinned directory identity mismatch: {label}")
+            name = "nfc-v16-write-probe-" + secrets.token_hex(12)
+            entry_path = f"{proc_directory}/{name}"
+            flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+            try:
+                file_fd = os.open(entry_path, flags, 0o660)
+            except OSError as exc:
+                raise Failure(
+                    f"config pinned-procfd O_EXCL create probe failed in {label}: "
+                    f"{type(exc).__name__} errno={exc.errno}"
                 ) from None
             expected = None
             try:
                 info = os.fstat(file_fd)
                 expected = identity(info)
                 require(stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid()
-                        and info.st_gid == GROUP and stat.S_IMODE(info.st_mode) == 0o600
-                        and info.st_nlink == 1,
-                        f"config write-probe file identity or permissions mismatch: {label}")
+                        and info.st_gid == GROUP and info.st_nlink == 1,
+                        f"config write-probe file identity or ownership mismatch: {label}")
+                os.fchmod(file_fd, 0o660)
+                info = os.fstat(file_fd)
+                require(stat.S_IMODE(info.st_mode) == 0o660,
+                        f"config write-probe chmod failed: {label}")
                 payload = b"nas-file-center-v16-config-write-probe"
                 require(os.write(file_fd, payload) == len(payload),
                         f"short config write-probe write: {label}")
@@ -229,7 +243,8 @@ def probe_config_file_creation(config_root=Path("/config")):
                     os.fsync(directory_fd)
             results[label] = {
                 "directory_identity": identity(directory), "file_identity": expected,
-                "uid": os.geteuid(), "gid": GROUP, "created_fsynced_removed": True,
+                "uid": os.geteuid(), "gid": GROUP, "creation_path": "pinned_proc_fd",
+                "created_fsynced_removed": True,
             }
     return results
 
@@ -760,12 +775,15 @@ def run_containers(rootfd, fixturefd, fixture, childfds, config_subdirs, image, 
             docker(["start", raw], f"start {role}")
             evidence["runtime"] = rpc(role, "attest")
         check_paths()
+        # Exercise the same pinned-procfd O_EXCL create path used by production
+        # before API startup, including /config itself. This catches config-root
+        # ZFuse failures before db-init.lock can abort application bootstrap.
+        report["config_write_probes"] = {}
+        for role in ("api", "worker"):
+            report["config_write_probes"][role] = rpc(role, "config-probe")
+        check_paths()
         password = secrets.token_urlsafe(36)
         rpc("api", "bootstrap", password=password)
-        report["config_write_probes"] = {
-            "api": rpc("api", "config-probe"),
-            "worker": rpc("worker", "config-probe"),
-        }
         report["cooperative_lock"] = lock_check([*DOCKER, "exec", "-i", ids["api"], "python", "-c", LOCK_HOLDER],
                                                 lambda: rpc("worker", "lock"))
         def request(method, path, body=None):

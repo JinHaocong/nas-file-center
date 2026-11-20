@@ -78,7 +78,8 @@ def _shared_db_init_lock(lock_file_path: Path, gid: int):
         # This also prevents cooperating API/Worker processes from replacing
         # the lock entry while another initializer is acquiring it.
         fcntl.flock(directory_fd, fcntl.LOCK_EX)
-        ensure_shared_init_lock(lock_file_path, gid)
+        # Reuse the already locked directory FD; ZFuse requires the pinned procfd create path.
+        ensure_shared_init_lock(lock_file_path, gid, directory_fd=directory_fd)
 
         before = os.stat(lock_file_path.name, dir_fd=directory_fd, follow_symlinks=False)
         if (

@@ -110,7 +110,7 @@ def test_db_init_lock_uses_non_hidden_name_for_zfuse():
     assert not DB_INIT_LOCK_NAME.startswith(".")
 
 
-def test_shared_group_file_creation_uses_exclusive_create_without_nofollow(
+def test_shared_group_file_creation_uses_pinned_proc_fd_and_exclusive_create(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import app.config_sharing as sharing_module
@@ -118,11 +118,15 @@ def test_shared_group_file_creation_uses_exclusive_create_without_nofollow(
     config = _shared_config(monkeypatch, tmp_path)
     lock = config / DB_INIT_LOCK_NAME
     original_open = os.open
-    observed_flags: list[int] = []
+    observed_paths: list[str] = []
 
     def zfuse_open(path, flags, *args, **kwargs):
-        if os.fspath(path) == os.fspath(lock) and flags & os.O_CREAT:
-            observed_flags.append(flags)
+        if Path(os.fspath(path)).name == lock.name and flags & os.O_CREAT:
+            if os.fspath(path) == os.fspath(lock):
+                raise FileNotFoundError(2, "simulated ZFuse absolute O_CREAT failure", os.fspath(path))
+            observed_paths.append(os.fspath(path))
+            assert os.fspath(path).startswith("/proc/self/fd/")
+            assert kwargs.get("dir_fd") is None
             assert flags & os.O_EXCL
             assert not flags & getattr(os, "O_NOFOLLOW", 0)
         return original_open(path, flags, *args, **kwargs)
@@ -130,7 +134,35 @@ def test_shared_group_file_creation_uses_exclusive_create_without_nofollow(
     monkeypatch.setattr(sharing_module.os, "open", zfuse_open)
     with _db_init_lock(lock):
         assert lock.is_file()
-    assert len(observed_flags) == 1
+    assert len(observed_paths) == 1
+
+
+def test_shared_database_creation_uses_pinned_proc_fd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.config_sharing as sharing_module
+
+    config = _shared_config(monkeypatch, tmp_path)
+    database = config / "app.db"
+    original_open = os.open
+    observed_paths: list[str] = []
+
+    def zfuse_open(path, flags, *args, **kwargs):
+        if Path(os.fspath(path)).name == database.name and flags & os.O_CREAT:
+            if os.fspath(path) == os.fspath(database):
+                raise FileNotFoundError(2, "simulated ZFuse absolute O_CREAT failure", os.fspath(path))
+            observed_paths.append(os.fspath(path))
+            assert os.fspath(path).startswith("/proc/self/fd/")
+            assert flags & os.O_EXCL
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(sharing_module.os, "open", zfuse_open)
+    engine, _ = create_engine_and_session(database)
+    engine.dispose()
+    assert database.is_file()
+    assert database.stat().st_gid == os.getegid()
+    assert (database.stat().st_mode & 0o777) == 0o660
+    assert len(observed_paths) == 1
 
 
 def test_shared_db_init_lock_is_group_writable(
