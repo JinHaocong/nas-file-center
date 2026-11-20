@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from sqlalchemy import select
+
 from app.models import WorkJob
 from app.service import StateConflictError
 from test_storage_optimization_api import _client, _login
@@ -42,6 +44,10 @@ def test_api_storage_probe_cannot_write_during_unfinished_maintenance(tmp_path):
         headers={"Origin": "http://testserver"},
     )
     assert response.status_code == 409, response.text
+    with client.app.state.service.SessionLocal() as session:
+        assert session.scalar(select(WorkJob.id).where(
+            WorkJob.kind == "storage-optimization-capability-probe",
+        )) is None, "a maintenance reservation must reject queued scratch writers"
     assert data.stat().st_ctime_ns == before
     assert list(data.iterdir()) == []
 

@@ -89,6 +89,11 @@ def enqueue_storage_optimization_probe(
         session.execute(text("BEGIN IMMEDIATE"))
         if not settings.allow_mutation:
             raise ValueError("Storage capability probe requires ALLOW_MUTATION=true")
+        # The reservation is checked inside the enqueue transaction so a
+        # pending scratch-writing job cannot cross an unfinished maintenance
+        # window. Lazy import avoids the Worker handler/recovery import cycle.
+        from app.tasks.recovery import assert_no_maintenance_reservation
+        assert_no_maintenance_reservation(session)
         job = WorkJob(
             kind=STORAGE_OPTIMIZATION_PROBE_JOB_KIND,
             status="queued",
@@ -136,6 +141,8 @@ def enqueue_plan_validation(
 ) -> dict[str, Any]:
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
+        from app.tasks.recovery import assert_no_maintenance_reservation
+        assert_no_maintenance_reservation(session)
         plan = session.get(BatchPlan, int(plan_id))
         if plan is None:
             raise KeyError(f"Plan #{plan_id} not found")

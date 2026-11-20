@@ -56,7 +56,11 @@ def test_candidate_api_bootstrap_checks_the_visible_db_init_lock_name():
 def test_candidate_trigger_and_release_job_remain_separate():
     workflow = _workflow()
     triggers = workflow.get("on", workflow.get(True))
-    assert BRANCH in triggers["push"]["branches"]
+    # Candidate publication is explicitly dispatched on the development
+    # branch; ordinary Draft PR pushes must never publish Docker images.
+    assert "workflow_dispatch" in triggers
+    assert BRANCH not in triggers["push"]["branches"]
+    assert triggers["push"]["branches"] == ["main"]
     assert "pull_request_target" not in triggers
     assert "refs/heads/main" in workflow["jobs"]["publish"]["if"]
     push_paths = triggers["push"]["paths"]
