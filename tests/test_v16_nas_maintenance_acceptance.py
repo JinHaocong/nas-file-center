@@ -189,7 +189,7 @@ def test_ordinary_http_and_real_dispatch_recovery(synthetic_server, case, monkey
     assert [job["interruption"] for job in evidence["jobs"] if job["interruption"]] == ["publication", "cleanup"]
 
 
-def test_live_http_and_acceptance_driver_refuse_unproven_custody(local_server, monkeypatch):
+def test_live_http_and_acceptance_driver_refuse_strict_mode_without_custody(local_server, monkeypatch):
     from sqlalchemy import select
     from app.batch.media_organizer_execute_jobs import approval_token
     from app.config import Settings
@@ -199,6 +199,10 @@ def test_live_http_and_acceptance_driver_refuse_unproven_custody(local_server, m
     data, env, port, cookie = local_server
     for key in [*nas.CONFIG, "INITIAL_ADMIN_PASSWORD"]:
         monkeypatch.setenv(key, env[key])
+    # This test specifically exercises the strict fail-closed contract. The
+    # separate maintenance-window lifecycle test above covers operator-confirmed
+    # execution without a strict namespace issuer.
+    monkeypatch.setenv("MEDIA_ORGANIZER_EXECUTION_MODE", "strict")
     settings = Settings(_env_file=None)
     unit = nas.seed_case(data, "mixed")
 
