@@ -1,6 +1,6 @@
 # V1.6 maintenance-window operating contract
 
-**Decision date:** 2026-11-21  
+**Decision date:** 2026-11-21
 **Owner decision:** During a batch organize operation, no other file-modifying operation will be performed. This pause remains in effect through the separately confirmed cleanup or any interruption recovery.
 
 ## Supported assurance level for this NAS
