@@ -169,6 +169,23 @@ def _read_acl(fd: int, name: str) -> dict:
         return {"status": "MALFORMED", "entries": []}
 
 
+def _fuse_option_indicators(fs_type: str, mount_options: set[str], super_options: set[str]) -> dict:
+    """Record visible mount options, never interpret them as external-writer custody.
+
+    Absence of default_permissions in mountinfo does not establish that the
+    kernel never checks permissions: ACL negotiation can enable checks too.
+    Presence cannot establish host root/same-UID/SMB/NFS exclusion.
+    """
+    is_fuse = "fuse" in fs_type.lower()
+    combined = mount_options | super_options
+    return {
+        "is_fuse": is_fuse,
+        "default_permissions_option_observed": ("default_permissions" in combined if is_fuse else None),
+        "allow_other_option_observed": ("allow_other" in combined if is_fuse else None),
+        "assurance": "MOUNT_OPTION_OBSERVATION_ONLY" if is_fuse else "NOT_FUSE",
+    }
+
+
 def _mount_record(fd: int) -> dict:
     try:
         with open(f"/proc/self/fdinfo/{fd}", "r", encoding="utf-8") as src:
@@ -196,6 +213,9 @@ def _mount_record(fd: int) -> dict:
                     "mount_id": ids[0],
                     "fs_type": after[0],
                     "read_only": "ro" in mount_access or "ro" in super_access,
+                    "fuse_option_indicators": _fuse_option_indicators(
+                        after[0], mount_access, super_access,
+                    ),
                 })
         return found[0] if len(found) == 1 else {
             "mount_id": None, "fs_type": None, "read_only": None,
@@ -362,6 +382,12 @@ def run(argv=None) -> tuple[int, dict]:
             issues.append("untrusted-unit-owner")
         if target["worker_can_create_entries"] is False:
             issues.append("worker-cannot-create-in-unit")
+        fuse_indicators = target["mount"].get("fuse_option_indicators")
+        if (fuse_indicators and fuse_indicators["is_fuse"]
+                and not fuse_indicators["default_permissions_option_observed"]):
+            # Absence from mountinfo is inconclusive, not proof that ACL/mode
+            # checking is disabled. External-writer exclusion remains unproven.
+            review.append("fuse-default-permissions-option-unobserved")
         if target["mount"]["read_only"] is True:
             issues.append("unit-mount-read-only")
         if target["mount"]["read_only"] is not False:
@@ -410,6 +436,8 @@ def run(argv=None) -> tuple[int, dict]:
             "smb_nfs_write_exclusion": "NOT_PROVEN",
             "same_uid_process_exclusion": "NOT_PROVEN",
             "root_admin_exclusion": "NOT_PROVEN",
+            "alternate_mount_alias_exclusion": "NOT_PROVEN",
+            "fuse_permission_enforcement": "NOT_PROVEN_BY_MOUNT_OPTIONS",
             "namespace_exclusive_custody_proven": False,
             "release_ready": False,
             "note": (

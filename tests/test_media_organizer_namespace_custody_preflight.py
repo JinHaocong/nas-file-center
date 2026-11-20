@@ -351,3 +351,54 @@ def test_acl_missing_mandatory_entries_is_malformed():
         pass
     else:
         raise AssertionError("incomplete ACL must be rejected")
+
+
+def test_fuse_mount_options_are_readonly_indicators_not_exclusive_custody():
+    observed = PREFLIGHT._fuse_option_indicators(
+        "zfuse.zfsv3", {"rw", "relatime"}, {"rw", "default_permissions", "allow_other"},
+    )
+    assert observed == {
+        "is_fuse": True,
+        "default_permissions_option_observed": True,
+        "allow_other_option_observed": True,
+        "assurance": "MOUNT_OPTION_OBSERVATION_ONLY",
+    }
+    missing = PREFLIGHT._fuse_option_indicators("zfuse.zfsv3", {"rw"}, {"rw"})
+    assert missing["default_permissions_option_observed"] is False
+    assert missing["assurance"] == "MOUNT_OPTION_OBSERVATION_ONLY"
+    local = PREFLIGHT._fuse_option_indicators("ext4", {"rw"}, {"rw"})
+    assert local["default_permissions_option_observed"] is None
+    assert local["assurance"] == "NOT_FUSE"
+
+
+def test_fuse_without_visible_default_permissions_is_review_not_execution_grant():
+    with tempfile.TemporaryDirectory(prefix="nfc-fuse-options-only-") as raw:
+        data = Path(raw) / "data"
+        unit = data / "unit"
+        data.mkdir(mode=0o700)
+        unit.mkdir(mode=0o700)
+        data.chmod(0o700)
+        unit.chmod(0o700)
+        mount = {
+            "mount_id": "620", "fs_type": "zfuse.zfsv3", "read_only": False,
+            "fuse_option_indicators": PREFLIGHT._fuse_option_indicators(
+                "zfuse.zfsv3", {"rw"}, {"rw"},
+            ),
+        }
+        with patch.object(PREFLIGHT, "_read_acl",
+                          return_value={"status": "ABSENT", "entries": []}), patch.object(
+            PREFLIGHT, "_mount_record", return_value=mount,
+        ):
+            status, report = PREFLIGHT.run([
+                "--data-root", str(data), "--unit", str(unit),
+                "--worker-uid", "10002", "--api-uid", "10001",
+            ])
+    assert status == 2
+    assert "fuse-default-permissions-option-unobserved" in report["review_conditions"]
+    assert report["scope"]["unit_mount"]["fuse_option_indicators"]["assurance"] == (
+        "MOUNT_OPTION_OBSERVATION_ONLY"
+    )
+    assert report["fuse_permission_enforcement"] == "NOT_PROVEN_BY_MOUNT_OPTIONS"
+    assert report["alternate_mount_alias_exclusion"] == "NOT_PROVEN"
+    assert report["namespace_exclusive_custody_proven"] is False
+    assert report["release_ready"] is False
