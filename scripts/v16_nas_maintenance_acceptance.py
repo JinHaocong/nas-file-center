@@ -158,7 +158,7 @@ def provision_config_files(stack, config_fd):
             raise Failure(f"unexpected pre-existing config bootstrap file: {name}") from None
         stack.callback(os.close, fd)
         created = os.fstat(fd)
-        require(stat.S_ISREG(created.st_mode) and created.st_uid == 0
+        require(stat.S_ISREG(created.st_mode) and created.st_uid == os.geteuid()
                 and created.st_dev == parent.st_dev and created.st_nlink == 1,
                 f"new config bootstrap file has unexpected initial identity: {name}")
         os.fchown(fd, API, GROUP)
@@ -216,11 +216,15 @@ def probe_config_file_creation(config_root=Path("/config")):
                         f"config write-probe binding changed: {label}")
             finally:
                 os.close(file_fd)
-            current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-            require(stat.S_ISREG(current.st_mode) and identity(current) == expected,
-                    f"config write-probe cleanup binding changed: {label}")
-            os.unlink(name, dir_fd=directory_fd)
-            os.fsync(directory_fd)
+                if expected is not None:
+                    try:
+                        current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        raise Failure(f"config write-probe entry disappeared before cleanup: {label}") from None
+                    require(stat.S_ISREG(current.st_mode) and identity(current) == expected,
+                            f"config write-probe cleanup binding changed; foreign entry preserved: {label}")
+                    os.unlink(name, dir_fd=directory_fd)
+                    os.fsync(directory_fd)
             results[label] = {
                 "directory_identity": identity(directory), "file_identity": expected,
                 "uid": os.geteuid(), "gid": GROUP, "created_fsynced_removed": True,
