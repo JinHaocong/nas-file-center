@@ -119,6 +119,20 @@ def enqueue_storage_optimization_probe(
         return {"work_job_id": int(job.id), "status": "queued"}
 
 
+def plan_requires_worker_validation(
+    session_factory: sessionmaker,
+    plan_id: int,
+) -> bool:
+    with session_factory() as session:
+        plan = session.get(BatchPlan, int(plan_id))
+        if plan is None:
+            raise KeyError(f"Plan #{plan_id} not found")
+        return session.scalar(select(BatchPlanItem.id).where(
+            BatchPlanItem.plan_id == int(plan_id),
+            BatchPlanItem.operation.in_(("hardlink_optimize", "reflink_optimize")),
+        ).limit(1)) is not None
+
+
 def enqueue_plan_validation(
     session_factory: sessionmaker,
     plan_id: int,

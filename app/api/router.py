@@ -41,6 +41,7 @@ from app.scanners.diagnostics import diagnose_duplicate_pair
 from app.storage_optimization.jobs import (
     enqueue_plan_validation,
     enqueue_storage_optimization_probe,
+    plan_requires_worker_validation,
 )
 from app.service import StateConflictError
 from app.planning.dedupe_preview import (
@@ -1725,7 +1726,7 @@ def freeze(
         raise HTTPException(409, str(exc)) from exc
 
 
-@router.post("/plans/{plan_id}/validate", status_code=202)
+@router.post("/plans/{plan_id}/validate")
 def validate(
     request: Request,
     plan_id: int,
@@ -1733,11 +1734,17 @@ def validate(
 ):
     _require_restricted_plan_admin(request, plan_id, current_user)
     try:
-        return enqueue_plan_validation(
-            request.app.state.service.SessionLocal,
-            plan_id,
-            user_id=current_user.id,
-        )
+        if plan_requires_worker_validation(request.app.state.service.SessionLocal, plan_id):
+            queued = enqueue_plan_validation(
+                request.app.state.service.SessionLocal,
+                plan_id,
+                user_id=current_user.id,
+            )
+            return JSONResponse(status_code=202, content=queued)
+        # Non-storage plans are read-only during validation and retain their
+        # historical synchronous API contract. Only live hardlink/reflink
+        # capability probes are delegated to the Worker.
+        return request.app.state.service.validate_plan(plan_id)
     except KeyError as exc:
         raise HTTPException(404, "plan not found") from exc
     except StateConflictError as exc:

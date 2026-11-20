@@ -202,11 +202,14 @@ export const plansApi = {
   }) => api.post<{ id: number; status: string; expected_changes: number }>('/api/plans', payload),
   freezePlan: (id: number) => api.post<{ id: number; status: string }>(`/api/plans/${id}/freeze`),
   validatePlan: async (id: number) => {
-    const queued = await api.post<{ plan_id: number; work_job_id: number; status: string }>(
+    const response = await api.post<Plan | { plan_id: number; work_job_id: number; status: string }>(
       `/api/plans/${id}/validate`,
     );
-    await waitForWorkJob(queued.work_job_id, '计划校验');
-    return api.get<Plan>(`/api/plans/${id}?page=1&page_size=50`);
+    if ('work_job_id' in response) {
+      await waitForWorkJob(response.work_job_id, '计划校验');
+      return api.get<Plan>(`/api/plans/${id}?page=1&page_size=50`);
+    }
+    return response;
   },
   executePlan: (id: number) =>
     api.post<{ plan_id: number; work_job_id: number; status: string }>(`/api/plans/${id}/execute`),
