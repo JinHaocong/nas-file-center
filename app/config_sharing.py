@@ -96,8 +96,12 @@ def require_shared_file(path: Path, gid: int, mode: int) -> None:
 
 
 def _new_group_file(path: Path, gid: int, mode: int) -> None:
-    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
-    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    # O_CREAT|O_EXCL is the atomic no-replace guard: an existing entry,
+    # including a symlink, is never followed or overwritten. Avoid O_NOFOLLOW
+    # on the create call because the target NAS zfuse mount returns ENOENT for
+    # this flag combination. Existing entries are checked with lstat below
+    # and with pinned descriptor/inode validation before any lock is used.
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
     try:
         fd = os.open(path, flags, mode)
     except FileExistsError:

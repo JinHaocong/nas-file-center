@@ -13,7 +13,7 @@ import pytest
 from app.config import Settings
 
 
-LOCK_NAME = ".media-mutation.lock"
+LOCK_NAME = "media-mutation.lock"
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ def _process(script, config):
 def external_holder(config):
     script = """
 import fcntl, pathlib, sys
-path = pathlib.Path(sys.argv[1]) / ".media-mutation.lock"
+path = pathlib.Path(sys.argv[1]) / "media-mutation.lock"
 with path.open("a") as lock:
     path.chmod(0o600)
     fcntl.flock(lock, fcntl.LOCK_EX)

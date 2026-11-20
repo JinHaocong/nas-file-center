@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import text
 
-from app.db import create_engine_and_session, _db_init_lock
+from app.db import create_engine_and_session, _db_init_lock, DB_INIT_LOCK_NAME
 from app.archive_recovery.integration import write_report, report_path
 
 
@@ -105,11 +105,39 @@ def test_legacy_report_mode_remains_private_without_shared_config(
     assert (report_path(settings, 33).stat().st_mode & 0o777) == 0o600
 
 
+def test_db_init_lock_uses_non_hidden_name_for_zfuse():
+    assert DB_INIT_LOCK_NAME == "db-init.lock"
+    assert not DB_INIT_LOCK_NAME.startswith(".")
+
+
+def test_shared_group_file_creation_uses_exclusive_create_without_nofollow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.config_sharing as sharing_module
+
+    config = _shared_config(monkeypatch, tmp_path)
+    lock = config / DB_INIT_LOCK_NAME
+    original_open = os.open
+    observed_flags: list[int] = []
+
+    def zfuse_open(path, flags, *args, **kwargs):
+        if os.fspath(path) == os.fspath(lock) and flags & os.O_CREAT:
+            observed_flags.append(flags)
+            assert flags & os.O_EXCL
+            assert not flags & getattr(os, "O_NOFOLLOW", 0)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(sharing_module.os, "open", zfuse_open)
+    with _db_init_lock(lock):
+        assert lock.is_file()
+    assert len(observed_flags) == 1
+
+
 def test_shared_db_init_lock_is_group_writable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = _shared_config(monkeypatch, tmp_path)
-    lock = config / ".db-init.lock"
+    lock = config / DB_INIT_LOCK_NAME
     with _db_init_lock(lock):
         assert (lock.stat().st_mode & 0o777) == 0o660
         assert lock.stat().st_gid == os.getegid()
@@ -121,7 +149,7 @@ def test_shared_db_init_lock_uses_pinned_proc_fd_when_zfuse_openat_returns_enoen
     import app.db as db_module
 
     config = _shared_config(monkeypatch, tmp_path)
-    lock = config / ".db-init.lock"
+    lock = config / DB_INIT_LOCK_NAME
     lock.write_bytes(b"")
     lock.chmod(0o660)
     original_open = os.open
@@ -142,8 +170,8 @@ def test_pinned_directory_entry_path_requires_a_real_directory_fd(tmp_path):
 
     directory_fd = os.open(tmp_path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
-        entry = pinned_directory_entry_path(directory_fd, ".db-init.lock")
-        assert entry == f"/proc/self/fd/{directory_fd}/.db-init.lock"
+        entry = pinned_directory_entry_path(directory_fd, DB_INIT_LOCK_NAME)
+        assert entry == f"/proc/self/fd/{directory_fd}/{DB_INIT_LOCK_NAME}"
         assert os.stat(f"/proc/self/fd/{directory_fd}").st_ino == os.fstat(directory_fd).st_ino
         for invalid in ("", ".", "..", "../escape", "nested/name"):
             with pytest.raises(PermissionError, match="SHARED_CONFIG"):
@@ -156,7 +184,7 @@ def test_pinned_directory_entry_path_requires_a_real_directory_fd(tmp_path):
     file_fd = os.open(regular_file, os.O_RDONLY)
     try:
         with pytest.raises(PermissionError, match="SHARED_CONFIG"):
-            pinned_directory_entry_path(file_fd, ".db-init.lock")
+            pinned_directory_entry_path(file_fd, DB_INIT_LOCK_NAME)
     finally:
         os.close(file_fd)
 
@@ -167,7 +195,7 @@ def test_shared_db_init_lock_rejects_symlink_without_touching_target(
     config = _shared_config(monkeypatch, tmp_path)
     target = tmp_path / "outside.lock"
     target.write_bytes(b"unchanged")
-    lock = config / ".db-init.lock"
+    lock = config / DB_INIT_LOCK_NAME
     lock.symlink_to(target)
     with pytest.raises(PermissionError, match="SHARED_CONFIG"):
         with _db_init_lock(lock):

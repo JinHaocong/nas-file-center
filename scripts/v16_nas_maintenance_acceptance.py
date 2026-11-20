@@ -192,7 +192,7 @@ def probe_config_file_creation(config_root=Path("/config")):
             require(stat.S_ISDIR(directory.st_mode) and directory.st_gid == GROUP
                     and (mode & 0o2070) == 0o2070 and (mode & 0o007) == 0,
                     f"config write-probe directory permissions mismatch: {label}")
-            name = ".nfc-v16-write-probe-" + secrets.token_hex(12)
+            name = "nfc-v16-write-probe-" + secrets.token_hex(12)
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
             flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
             try:

@@ -20,7 +20,7 @@ from typing import Iterator
 from app.config import Settings
 from app.config_sharing import shared_config_gid, pinned_directory_entry_path
 
-_LOCK_NAME = ".media-mutation.lock"
+_LOCK_NAME = "media-mutation.lock"
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 # Existing lock-file opens are validated by _validate() using the pinned
 # directory FD plus pre/post lstat and fstat identity checks. Use its procfs

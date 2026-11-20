@@ -21,6 +21,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.auth.password import hash_password
 from app.models import Base, FilterPolicy, IndexRoot, IndexedPath, MediaAsset, OrganizerProfile, User, Workflow, WorkflowRevision, WorkJob
+
+DB_INIT_LOCK_NAME = "db-init.lock"
 from app.download_verification.models import DownloadVerificationRun, DownloadVerificationItem, DownloadVerificationSource  # Register additive tables before create_all
 
 
@@ -304,7 +306,7 @@ def init_db(
     if backups_dir is None and db_path is not None:
         backups_dir = db_path.parent / "backups"
 
-    lock_file = (db_path.parent / ".db-init.lock") if db_path else Path("/tmp/.nas-file-center-db-init.lock")
+    lock_file = (db_path.parent / DB_INIT_LOCK_NAME) if db_path else Path("/tmp/nas-file-center-db-init.lock")
 
     with _db_init_lock(lock_file):
         inspector = inspect(engine)

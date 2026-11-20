@@ -20,14 +20,15 @@ Before container startup, the host controller provisions only the empty
 `app.db` file inside the newly created fixture's API-owned `/config` root.
 It is created with `O_CREAT|O_EXCL` through the pinned config directory FD,
 then bound to API UID 10001, GID 10000 and mode 0660 with file and directory
-fsync. Existing entries are never overwritten. The dot-prefixed
-`.db-init.lock` and `.media-mutation.lock` are deliberately not host-created:
-the owning API/Worker processes create and validate these locks at runtime.
-The latest physical SATA attempt showed that a host-created `.db-init.lock`
-could be verified by the host controller but returned `ENOENT` to API
-`lstat` on the bind-mounted zfuse filesystem. The helper therefore avoids
-pre-creating those dotfiles and lets the application create them in its own
-mount namespace. After API bootstrap, both API and Worker independently
+fsync. Existing entries are never overwritten. The visible `db-init.lock` and `media-mutation.lock` entries are
+deliberately not host-created: the owning API/Worker processes create and
+validate these locks at runtime. The latest physical SATA attempts showed
+that the target zfuse bind mount returns `ENOENT` for dot-prefixed lock
+entries, both when the host pre-created the file and when the API attempted
+exclusive creation. The application therefore uses non-dot lock names.
+The DB lock's creation uses `O_CREAT|O_EXCL` without `O_NOFOLLOW`:
+`O_EXCL` is the atomic no-replace guard, existing symlinks are rejected by
+`lstat`, and opened entries are checked against pinned inode identities. After API bootstrap, both API and Worker independently
 perform an `O_EXCL` create, write, fsync, inode-binding check and
 identity-checked removal in each writable application directory: `reports`,
 `backups`, `logs`, and `home`. Any failure stops the run before organizer
