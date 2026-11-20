@@ -120,3 +120,37 @@ def test_worker_persists_and_pages_the_complete_mapping_for_a_ready_unit(tmp_pat
     assert first["moves"][0]["target_name"] == "001.jpg"
     assert last["moves"][-1]["target_name"] == "037.jpg"
     assert all("identity" not in row for row in first["moves"] + last["moves"])
+
+
+
+def test_worker_preview_does_not_require_atomic_directory_renameat2(tmp_path, monkeypatch):
+    import errno
+    import app.batch.media_organizer_jobs as jobs
+
+    calls = []
+
+    def unsupported_directory_rename(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise OSError(errno.EOPNOTSUPP, "renameat2 unsupported by filesystem")
+
+    # The preview publisher must not call this primitive. It creates its
+    # job-scoped mapping directory exclusively and publishes the summary last.
+    monkeypatch.setattr(
+        jobs, "rename_noreplace_at", unsupported_directory_rename, raising=False,
+    )
+    root, settings, job = setup(tmp_path)
+    work = root / "author" / "NO.003"
+    for index in range(37):
+        item(work / f"photo-{index:03d}.jpg")
+
+    jobs.MediaOrganizerPreviewHandler().run(job, FakeContext(), settings)
+
+    data, summary = jobs.report_files(settings, int(job.id))
+    mapping_root = jobs.mapping_report_root(settings, int(job.id))
+    records = [json.loads(line) for line in data.read_text(encoding="utf-8").splitlines()]
+    record = next(row for row in records if row["unit"] == str(work))
+    assert calls == []
+    assert summary.is_file()
+    assert mapping_root.is_dir()
+    assert (mapping_root / f"{record['mapping_id']}.jsonl").is_file()
+    assert not mapping_root.with_name(mapping_root.name + ".staging").exists()

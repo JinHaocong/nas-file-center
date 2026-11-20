@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import time
 from pathlib import Path
 
@@ -13,7 +14,6 @@ from app.batch.media_organizer_planner import _check_scope, _normalized_excluded
 from app.batch.media_organizer_reports import (
     mapping_identifier, read_preview_mapping, read_preview_page,
 )
-from app.fs_ops import rename_noreplace_at
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_scan import write_semantic_preview
 from app.config import Settings
@@ -117,6 +117,68 @@ def _new_private(path: Path):
 def mapping_report_root(settings: Settings, job_id: int) -> Path:
     data, _ = report_files(settings, job_id)
     return data.parent / f"{job_id}.semantic-maps"
+
+
+def _create_mapping_report_directory(directory: Path, shared_gid: int | None) -> None:
+    """Exclusively create the final mapping directory without directory rename.
+
+    The directory name is job-ID scoped and is created with mkdirat/O_EXCL
+    semantics before any mapping rows are written. The completed WorkJob plus
+    the summary file linked last is the publication marker. If a Worker stops
+    midway, the incomplete directory is preserved but cannot be read through
+    the API because the job is not completed and no summary marker exists.
+    """
+    if shared_gid is not None:
+        require_shared_directory(directory.parent, shared_gid)
+    parent_fd = _open_directory_nofollow(directory.parent)
+    mapping_fd = None
+    try:
+        parent_info = os.fstat(parent_fd)
+        parent_named = os.stat(directory.parent, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(parent_info.st_mode)
+            or not stat.S_ISDIR(parent_named.st_mode)
+            or (parent_info.st_dev, parent_info.st_ino)
+            != (parent_named.st_dev, parent_named.st_ino)
+        ):
+            raise PermissionError("preview mapping parent identity changed")
+
+        mode = 0o2770 if shared_gid is not None else 0o700
+        # mkdirat is the atomic no-replace primitive needed here. Unlike
+        # renameat2(RENAME_NOREPLACE), ZFuse supports exclusive directory
+        # creation; an existing or raced destination is never adopted.
+        os.mkdir(directory.name, mode=mode, dir_fd=parent_fd)
+        mapping_fd = os.open(
+            directory.name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+            dir_fd=parent_fd,
+        )
+        created = os.fstat(mapping_fd)
+        if (
+            not stat.S_ISDIR(created.st_mode)
+            or created.st_uid != os.geteuid()
+            or (shared_gid is not None and created.st_gid != shared_gid)
+        ):
+            raise PermissionError("new preview mapping directory owner/group mismatch")
+        # fchmod is limited to the inode created by the exclusive mkdir above.
+        os.fchmod(mapping_fd, mode)
+        created = os.fstat(mapping_fd)
+        named = os.stat(directory.name, dir_fd=parent_fd, follow_symlinks=False)
+        parent_after = os.stat(directory.parent, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(named.st_mode)
+            or (created.st_dev, created.st_ino) != (named.st_dev, named.st_ino)
+            or stat.S_IMODE(created.st_mode) != mode
+            or (parent_info.st_dev, parent_info.st_ino)
+            != (parent_after.st_dev, parent_after.st_ino)
+        ):
+            raise PermissionError("new preview mapping directory binding or mode changed")
+        os.fsync(mapping_fd)
+        os.fsync(parent_fd)
+    finally:
+        if mapping_fd is not None:
+            os.close(mapping_fd)
+        os.close(parent_fd)
 
 
 def get_media_organizer_mapping(
@@ -270,16 +332,11 @@ class MediaOrganizerPreviewHandler(TaskHandler):
         stage_data = data.with_name(data.name + '.staging')
         stage_summary = summary_path.with_name(summary_path.name + '.staging')
         final_mappings = mapping_report_root(settings, int(job.id))
-        stage_mappings = final_mappings.with_name(final_mappings.name + '.staging')
-        for path in (data, summary_path, stage_data, stage_summary,
-                     final_mappings, stage_mappings):
+        for path in (data, summary_path, stage_data, stage_summary, final_mappings):
             if os.path.lexists(path):
                 raise ValueError('preview report already exists; preserve evidence for review')
         shared_gid = shared_config_gid()
-        if shared_gid is None:
-            stage_mappings.mkdir(mode=0o700)
-        else:
-            ensure_shared_report_directory(stage_mappings, shared_gid)
+        _create_mapping_report_directory(final_mappings, shared_gid)
         last_tick = 0.0
 
         def check_cancelled():
@@ -300,7 +357,7 @@ class MediaOrganizerPreviewHandler(TaskHandler):
                 quarantine_root=settings.quarantine_root,
                 exclude_roots=_excluded(settings),
                 exclude_dir_names=_excluded_names(settings), out=out,
-                mapping_root=stage_mappings, max_items=10,
+                mapping_root=final_mappings, max_items=10,
                 check_cancelled=check_cancelled, on_progress=progress,
             )
             out.flush()
@@ -310,15 +367,39 @@ class MediaOrganizerPreviewHandler(TaskHandler):
             json.dump(final_stats, out, ensure_ascii=False)
             out.flush()
             os.fsync(out.fileno())
-        # Publish the complete mapping directory without replacing any
-        # existing evidence. The summary remains the final report marker.
+        # Mapping files were written directly beneath the exclusively-created
+        # job-scoped final directory and fsynced there. Do not rename a directory:
+        # the target ZFuse filesystem returns EOPNOTSUPP for renameat2(RENAME_NOREPLACE).
+        # Revalidate the final directory binding and fsync it before publishing
+        # the summary marker. API readers require a completed WorkJob and this
+        # summary marker, so a partial directory from an interrupted preview
+        # remains inaccessible and is preserved for diagnosis.
         report_fd = _open_directory_nofollow(data.parent)
+        mapping_fd = _open_directory_nofollow(final_mappings)
         try:
-            rename_noreplace_at(
-                report_fd, stage_mappings.name, report_fd, final_mappings.name,
+            mapping_info = os.fstat(mapping_fd)
+            mapping_named = os.stat(
+                final_mappings.name, dir_fd=report_fd, follow_symlinks=False,
             )
+            if (
+                not stat.S_ISDIR(mapping_info.st_mode)
+                or not stat.S_ISDIR(mapping_named.st_mode)
+                or (mapping_info.st_dev, mapping_info.st_ino)
+                != (mapping_named.st_dev, mapping_named.st_ino)
+                or (shared_gid is not None and (
+                    mapping_info.st_gid != shared_gid
+                    or stat.S_IMODE(mapping_info.st_mode) != 0o2770
+                ))
+                or (shared_gid is None and (
+                    mapping_info.st_uid != os.geteuid()
+                    or stat.S_IMODE(mapping_info.st_mode) != 0o700
+                ))
+            ):
+                raise PermissionError("preview mapping directory binding or permissions changed")
+            os.fsync(mapping_fd)
             os.fsync(report_fd)
         finally:
+            os.close(mapping_fd)
             os.close(report_fd)
         # Summary is the final durable publication marker. No overwrite even
         # if a competing process creates a destination after preflight.
