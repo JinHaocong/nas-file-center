@@ -3175,6 +3175,11 @@ class FileCenterService:
                 raise StateConflictError(
                     f"Plan must be validated before execution (status must be 'ready' or 'partial'), current status={plan.status}"
                 )
+            active_validation_job = _get_active_plan_validation_job(session, plan_id)
+            if active_validation_job is not None:
+                raise StateConflictError(
+                    f"Plan #{plan_id} has active validation task #{active_validation_job.id}"
+                )
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:
                 raise StateConflictError(
@@ -3557,6 +3562,12 @@ class FileCenterService:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
                 raise KeyError(plan_id)
+
+            active_validation_job = _get_active_plan_validation_job(session, plan_id)
+            if active_validation_job is not None:
+                raise StateConflictError(
+                    f"Cannot delete plan #{plan_id}: active validation task #{active_validation_job.id}"
+                )
 
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:

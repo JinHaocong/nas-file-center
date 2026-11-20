@@ -6,7 +6,6 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.auth.password import hash_password
 from app.config import Settings
 from app.main import create_app
 from app.models import (
@@ -15,7 +14,6 @@ from app.models import (
     DuplicateFile,
     DuplicateGroup,
     ScanJob,
-    User,
     WorkJob,
     utcnow,
 )
@@ -152,6 +150,11 @@ def test_plan_validation_api_only_enqueues_and_worker_runs_live_probes(
         headers={"Origin": "http://testserver"},
     )
     assert execution.status_code == 409
+    deletion = client.delete(
+        f"/api/plans/{plan_id}",
+        headers={"Origin": "http://testserver"},
+    )
+    assert deletion.status_code == 409
 
     worker_id = f"plan-validation-worker-{queued['work_job_id']}"
     assert acquire_worker_ownership(service.engine, service.SessionLocal, worker_id=worker_id)
