@@ -189,7 +189,10 @@ def test_production_flock_contention_through_real_subprocess(local_server, monke
     settings = Settings(_env_file=None, CONFIG_DIR=env["CONFIG_DIR"])
     evidence = nas.lock_check([sys.executable, "-c", nas.LOCK_HOLDER], lambda: nas.probe_lock(settings), env=env)
     assert evidence["worker_refused_while_api_holds"] and evidence["worker_acquired_after_release"]
-    assert evidence["lock_identity"] == nas.identity((Path(env["CONFIG_DIR"]) / ".media-mutation.lock").stat())
+    from app.tasks.media_mutation_lock import _LOCK_NAME
+    assert _LOCK_NAME == "media-mutation.lock"
+    assert not _LOCK_NAME.startswith(".")
+    assert evidence["lock_identity"] == nas.identity((Path(env["CONFIG_DIR"]) / _LOCK_NAME).stat())
 
 
 def test_lock_holder_ready_on_high_descriptor():
@@ -472,8 +475,8 @@ def test_config_bootstrap_refuses_existing_entry_without_overwrite(tmp_path, mon
         with pytest.raises(nas.Failure, match="unexpected entry"):
             nas.provision_config_files(stack, config_fd)
     assert original.read_bytes() == b"do-not-overwrite"
-    assert not (config / ".db-init.lock").exists()
-    assert not (config / ".media-mutation.lock").exists()
+    assert not (config / "db-init.lock").exists()
+    assert not (config / "media-mutation.lock").exists()
 
 
 def test_config_file_creation_probe_covers_root_and_shared_subdirectories(tmp_path, monkeypatch):

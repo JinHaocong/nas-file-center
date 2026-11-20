@@ -490,10 +490,10 @@ def attest(role, expected):
 
 
 def probe_lock(settings):
-    from app.tasks.media_mutation_lock import MediaMutationLockBusy, media_mutation_lock
+    from app.tasks.media_mutation_lock import MediaMutationLockBusy, media_mutation_lock, _LOCK_NAME
     try:
         with media_mutation_lock(settings, blocking=False):
-            return {"locked": True, "identity": identity((settings.config_dir / ".media-mutation.lock").stat())}
+            return {"locked": True, "identity": identity((settings.config_dir / _LOCK_NAME).stat())}
     except MediaMutationLockBusy:
         return {"busy": True}
 
@@ -577,10 +577,10 @@ print(json.dumps(result))
 """
 LOCK_HOLDER = """import json, sys
 from app.config import Settings
-from app.tasks.media_mutation_lock import media_mutation_lock
+from app.tasks.media_mutation_lock import media_mutation_lock, _LOCK_NAME
 settings = Settings(_env_file=None)
 with media_mutation_lock(settings, blocking=False):
-    st = (settings.config_dir / '.media-mutation.lock').stat()
+    st = (settings.config_dir / _LOCK_NAME).stat()
     print(json.dumps([st.st_dev, st.st_ino]), flush=True)
     sys.stdin.buffer.read(1)
 """
