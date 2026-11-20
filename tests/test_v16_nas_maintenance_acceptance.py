@@ -71,7 +71,13 @@ def test_collection_inventory_rejects_foreign_entry(tmp_path):
 
 
 @pytest.fixture(scope="module")
-def local_server(tmp_path_factory):
+def local_server(tmp_path_factory, request):
+    # Use one consistent mode in the actual HTTP server and its Worker.
+    # The strict-denial regression parametrizes the fixture independently;
+    # other callers retain the maintenance-window lifecycle defaults.
+    selected_mode = getattr(request, "param", "maintenance_window")
+    if selected_mode not in ("strict", "maintenance_window"):
+        raise ValueError("invalid fixture execution mode")
     if os.geteuid() == 0:
         pytest.skip("The production maintenance authority requires an unprivileged Worker")
     base = tmp_path_factory.mktemp("maintenance-http")
@@ -82,7 +88,8 @@ def local_server(tmp_path_factory):
     password = secrets.token_urlsafe(32)
     env = {**os.environ, **nas.CONFIG, "CONFIG_DIR": str(config), "DATA_MOUNT": str(data),
            "ALLOWED_ROOTS": str(data), "QUARANTINE_ROOT": str(data / ".trash"),
-           "NFC_SHARED_CONFIG_GID": str(os.getegid()), "INITIAL_ADMIN_PASSWORD": password}
+           "NFC_SHARED_CONFIG_GID": str(os.getegid()), "INITIAL_ADMIN_PASSWORD": password,
+           "MEDIA_ORGANIZER_EXECUTION_MODE": selected_mode}
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
@@ -189,6 +196,7 @@ def test_ordinary_http_and_real_dispatch_recovery(synthetic_server, case, monkey
     assert [job["interruption"] for job in evidence["jobs"] if job["interruption"]] == ["publication", "cleanup"]
 
 
+@pytest.mark.parametrize("local_server", ["strict"], indirect=True)
 def test_live_http_and_acceptance_driver_refuse_strict_mode_without_custody(local_server, monkeypatch):
     from sqlalchemy import select
     from app.batch.media_organizer_execute_jobs import approval_token
@@ -199,11 +207,11 @@ def test_live_http_and_acceptance_driver_refuse_strict_mode_without_custody(loca
     data, env, port, cookie = local_server
     for key in [*nas.CONFIG, "INITIAL_ADMIN_PASSWORD"]:
         monkeypatch.setenv(key, env[key])
-    # This test specifically exercises the strict fail-closed contract. The
-    # separate maintenance-window lifecycle test above covers operator-confirmed
-    # execution without a strict namespace issuer.
-    monkeypatch.setenv("MEDIA_ORGANIZER_EXECUTION_MODE", "strict")
+    # The API subprocess and dispatching Worker must use the same strict mode.
+    # A Worker-only mode override would fail during the read-only preview.
+    assert env["MEDIA_ORGANIZER_EXECUTION_MODE"] == "strict"
     settings = Settings(_env_file=None)
+    assert settings.media_organizer_execution_mode == "strict"
     unit = nas.seed_case(data, "mixed")
 
     def snapshot():
