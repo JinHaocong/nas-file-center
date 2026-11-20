@@ -16,6 +16,18 @@ the installed service. Temporary API and Worker containers use only that
 fixture and a separate temporary config, with restricted identities,
 capabilities, read-only container roots and no network.
 
+Before container startup, the host controller provisions only three empty files
+inside the newly created fixture's API-owned `/config` root: `app.db`,
+`.db-init.lock`, and `.media-mutation.lock`. They are created with
+`O_CREAT|O_EXCL` through the pinned config directory FD, then bound to API UID
+10001, GID 10000 and mode 0660 with file and directory fsync. Existing entries
+are never overwritten. After API bootstrap, both API and Worker independently
+perform an `O_EXCL` create, write, fsync, inode-binding check and
+identity-checked removal in `/config` and each of `reports`, `backups`,
+`logs`, and `home`. Any failure stops the run before organizer scenarios.
+These files and probes are confined to the new disposable fixture; no
+installed config or production database is touched.
+
 The candidate is pinned independently from the helper source:
 - Docker image: `kerwinjhc/nas-file-center@sha256:3c33ce5387e71475875d34802cb654182153cd96d49882bc3e2e57b04325120c`
 - OCI revision expected by `--candidate-sha`: `153ae05780d6eebdc8db2723914e6b446119d4a2`

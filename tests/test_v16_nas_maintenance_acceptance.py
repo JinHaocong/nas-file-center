@@ -426,3 +426,63 @@ def test_disposable_config_layout_is_preprovisioned(tmp_path, monkeypatch):
                    for name, fd in result.items())
     assert calls == ["reports", "backups", "logs", "home"]
     assert sorted(path.name for path in config.iterdir()) == ["backups", "home", "logs", "reports"]
+
+
+def test_disposable_config_bootstrap_files_are_preprovisioned(tmp_path, monkeypatch):
+    monkeypatch.setattr(nas, "API", os.geteuid())
+    monkeypatch.setattr(nas, "GROUP", os.getegid())
+    config = tmp_path / "config"
+    config.mkdir(mode=0o2770)
+    config.chmod(0o2770)
+    for name in nas.CONFIG_DIRECTORIES:
+        child = config / name
+        child.mkdir(mode=0o2770)
+        child.chmod(0o2770)
+    with ExitStack() as stack:
+        config_fd = nas.open_tree(stack, config)
+        records = nas.provision_config_files(stack, config_fd)
+        assert set(records) == set(nas.CONFIG_BOOTSTRAP_FILES)
+        assert all(nas.identity(os.stat(name, dir_fd=config_fd, follow_symlinks=False))
+                   == records[name]["identity"] for name in nas.CONFIG_BOOTSTRAP_FILES)
+    for name in nas.CONFIG_BOOTSTRAP_FILES:
+        info = (config / name).stat()
+        assert info.st_uid == nas.API and info.st_gid == nas.GROUP
+        assert nas.stat.S_IMODE(info.st_mode) == 0o660
+        assert info.st_size == 0 and info.st_nlink == 1
+
+
+def test_config_bootstrap_refuses_existing_entry_without_overwrite(tmp_path, monkeypatch):
+    monkeypatch.setattr(nas, "API", os.geteuid())
+    monkeypatch.setattr(nas, "GROUP", os.getegid())
+    config = tmp_path / "config"
+    config.mkdir(mode=0o2770)
+    config.chmod(0o2770)
+    for name in nas.CONFIG_DIRECTORIES:
+        child = config / name
+        child.mkdir(mode=0o2770)
+        child.chmod(0o2770)
+    original = config / "app.db"
+    original.write_bytes(b"do-not-overwrite")
+    with ExitStack() as stack:
+        config_fd = nas.open_tree(stack, config)
+        with pytest.raises(nas.Failure, match="unexpected entry"):
+            nas.provision_config_files(stack, config_fd)
+    assert original.read_bytes() == b"do-not-overwrite"
+    assert not (config / ".db-init.lock").exists()
+    assert not (config / ".media-mutation.lock").exists()
+
+
+def test_config_file_creation_probe_covers_root_and_shared_subdirectories(tmp_path, monkeypatch):
+    monkeypatch.setattr(nas, "GROUP", os.getegid())
+    config = tmp_path / "config"
+    config.mkdir(mode=0o2770)
+    config.chmod(0o2770)
+    for name in nas.CONFIG_DIRECTORIES:
+        child = config / name
+        child.mkdir(mode=0o2770)
+        child.chmod(0o2770)
+    result = nas.probe_config_file_creation(config)
+    assert set(result) == {"root", *nas.CONFIG_DIRECTORIES}
+    assert all(item["created_fsynced_removed"] for item in result.values())
+    assert sorted(path.name for path in config.iterdir()) == sorted(nas.CONFIG_DIRECTORIES)
+    assert all(not list((config / name).iterdir()) for name in nas.CONFIG_DIRECTORIES)

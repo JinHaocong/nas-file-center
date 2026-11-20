@@ -117,6 +117,7 @@ def new_dir(stack, parent, name, uid, gid, mode):
 
 
 CONFIG_DIRECTORIES = ("reports", "backups", "logs", "home")
+CONFIG_BOOTSTRAP_FILES = ("app.db", ".db-init.lock", ".media-mutation.lock")
 
 
 def provision_config_directories(stack, config_fd):
@@ -130,6 +131,101 @@ def provision_config_directories(stack, config_fd):
         name: new_dir(stack, config_fd, name, API, GROUP, 0o2770)
         for name in CONFIG_DIRECTORIES
     }
+
+
+def provision_config_files(stack, config_fd):
+    """Create only the three empty, fixed bootstrap files in a new fixture.
+
+    The API validates these pre-created inodes instead of having to create its
+    database/init/cooperative-lock files during first boot. O_EXCL, pinned
+    dir_fd identity checks and fsync make this fail closed on unsupported NAS
+    file-creation semantics. This never targets an installed config directory.
+    """
+    expected_entries = set(CONFIG_DIRECTORIES)
+    require(set(os.listdir(config_fd)) == expected_entries,
+            "unexpected entry in new disposable config root")
+    parent = os.fstat(config_fd)
+    require(stat.S_ISDIR(parent.st_mode) and parent.st_uid == API
+            and parent.st_gid == GROUP and stat.S_IMODE(parent.st_mode) == 0o2770,
+            "disposable config root identity or permissions mismatch")
+    records = {}
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+    flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    for name in CONFIG_BOOTSTRAP_FILES:
+        try:
+            fd = os.open(name, flags, 0o600, dir_fd=config_fd)
+        except FileExistsError:
+            raise Failure(f"unexpected pre-existing config bootstrap file: {name}") from None
+        stack.callback(os.close, fd)
+        created = os.fstat(fd)
+        require(stat.S_ISREG(created.st_mode) and created.st_uid == 0
+                and created.st_dev == parent.st_dev and created.st_nlink == 1,
+                f"new config bootstrap file has unexpected initial identity: {name}")
+        os.fchown(fd, API, GROUP)
+        os.fchmod(fd, 0o660)
+        os.fsync(fd)
+        info = os.fstat(fd)
+        named = os.stat(name, dir_fd=config_fd, follow_symlinks=False)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == API and info.st_gid == GROUP
+                and stat.S_IMODE(info.st_mode) == 0o660 and info.st_nlink == 1
+                and identity(named) == identity(info),
+                f"config bootstrap file identity or permissions mismatch: {name}")
+        records[name] = {
+            "identity": identity(info), "uid": info.st_uid, "gid": info.st_gid,
+            "mode": oct(stat.S_IMODE(info.st_mode)), "size": info.st_size,
+        }
+    os.fsync(config_fd)
+    return records
+
+
+def probe_config_file_creation(config_root=Path("/config")):
+    """Prove API/Worker can create, fsync and remove a private file in each config dir."""
+    results = {}
+    with ExitStack() as stack:
+        root_fd = open_tree(stack, config_root)
+        for label in ("root", *CONFIG_DIRECTORIES):
+            directory_fd = root_fd if label == "root" else open_dir(stack, label, root_fd)
+            directory = os.fstat(directory_fd)
+            mode = stat.S_IMODE(directory.st_mode)
+            require(stat.S_ISDIR(directory.st_mode) and directory.st_gid == GROUP
+                    and (mode & 0o2070) == 0o2070 and (mode & 0o007) == 0,
+                    f"config write-probe directory permissions mismatch: {label}")
+            name = ".nfc-v16-write-probe-" + secrets.token_hex(12)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+            try:
+                file_fd = os.open(name, flags, 0o600, dir_fd=directory_fd)
+            except OSError as exc:
+                raise Failure(
+                    f"config O_EXCL create probe failed in {label}: {type(exc).__name__} errno={exc.errno}"
+                ) from None
+            expected = None
+            try:
+                info = os.fstat(file_fd)
+                expected = identity(info)
+                require(stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid()
+                        and info.st_gid == GROUP and stat.S_IMODE(info.st_mode) == 0o600
+                        and info.st_nlink == 1,
+                        f"config write-probe file identity or permissions mismatch: {label}")
+                payload = b"nas-file-center-v16-config-write-probe"
+                require(os.write(file_fd, payload) == len(payload),
+                        f"short config write-probe write: {label}")
+                os.fsync(file_fd)
+                named = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                require(stat.S_ISREG(named.st_mode) and identity(named) == expected,
+                        f"config write-probe binding changed: {label}")
+            finally:
+                os.close(file_fd)
+            current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            require(stat.S_ISREG(current.st_mode) and identity(current) == expected,
+                    f"config write-probe cleanup binding changed: {label}")
+            os.unlink(name, dir_fd=directory_fd)
+            os.fsync(directory_fd)
+            results[label] = {
+                "directory_identity": identity(directory), "file_identity": expected,
+                "uid": os.geteuid(), "gid": GROUP, "created_fsynced_removed": True,
+            }
+    return results
 
 
 def provision_new_directory(stack, parent, name, uid, gid, mode):
@@ -402,6 +498,8 @@ def in_container(req):
     if op == "attest":
         return runtime
     if role == "api":
+        if op == "config-probe":
+            return probe_config_file_creation(Path("/config"))
         if op == "bootstrap":
             deadline = time.monotonic() + 15
             while not Path("/tmp/nfc-bootstrap").exists() and time.monotonic() < deadline:
@@ -421,6 +519,8 @@ def in_container(req):
         return http(8080, req["method"], req["path"], req.get("body"), req.get("cookie"))
     from app.config import Settings
     settings = Settings(_env_file=None)
+    if op == "config-probe":
+        return probe_config_file_creation(settings.config_dir)
     if op == "lock":
         return probe_lock(settings)
     if op == "dispatch":
@@ -626,6 +726,10 @@ def run_containers(rootfd, fixturefd, fixture, childfds, config_subdirs, image, 
                 check_binding(fixturefd, name, fd)
             for name, fd in config_subdirs.items():
                 check_binding(childfds["config"], name, fd)
+            for name, record in report.get("config_files", {}).items():
+                named = os.stat(name, dir_fd=childfds["config"], follow_symlinks=False)
+                require(stat.S_ISREG(named.st_mode) and identity(named) == record["identity"],
+                        f"config bootstrap file binding changed: {name}")
     def remove(role):
         remove_container(fixturefd, fixture, role, ids.get(role), image, report)
     def rpc(role, op, **args):
@@ -652,6 +756,10 @@ def run_containers(rootfd, fixturefd, fixture, childfds, config_subdirs, image, 
         check_paths()
         password = secrets.token_urlsafe(36)
         rpc("api", "bootstrap", password=password)
+        report["config_write_probes"] = {
+            "api": rpc("api", "config-probe"),
+            "worker": rpc("worker", "config-probe"),
+        }
         report["cooperative_lock"] = lock_check([*DOCKER, "exec", "-i", ids["api"], "python", "-c", LOCK_HOLDER],
                                                 lambda: rpc("worker", "lock"))
         def request(method, path, body=None):
@@ -751,6 +859,7 @@ def main(argv=None):
             config_fd = new_dir(stack, fixturefd, "config", API, GROUP, 0o2770)
             data_fd = new_dir(stack, fixturefd, "data", WORKER, GROUP, 0o750)
             config_subdirs = provision_config_directories(stack, config_fd)
+            report["config_files"] = provision_config_files(stack, config_fd)
             report["config_layout"] = {
                 name: {
                     "identity": identity(os.fstat(fd)),
