@@ -1,9 +1,10 @@
 """Explicitly confirmed, default-disabled one-unit semantic execution.
 
-Only a Worker holding the exclusive lease may mutate media. The HTTP API
-queues one reviewed unit; a frozen checksum manifest is written before any
-file operation. Failed jobs never auto-retry: assisted continuation requires
-a separate explicit request and uses the SAME original job's custody proof.
+Only a non-root Worker holding the exclusive lease and the selected authority
+contract may mutate media. The HTTP API queues one reviewed unit; a frozen
+checksum manifest is written before any file operation. Failed jobs never
+auto-retry: assisted continuation requires a separate explicit request and
+uses the SAME original job's strict proof or maintenance-window agreement.
 
 This feature stays off unless MEDIA_ORGANIZER_EXECUTION_ENABLED is explicitly
 enabled alongside ALLOW_MUTATION and ALLOW_DELETE.
@@ -76,14 +77,14 @@ def _require_enabled(settings: Settings) -> None:
             "Execution requires MEDIA_ORGANIZER_EXECUTION_ENABLED, "
             "ALLOW_MUTATION and ALLOW_DELETE"
         )
-    # A file-identity check followed by name-based directory rename/rmdir
-    # cannot exclude an uncooperative concurrent writer. An independently
-    # reviewed/exclusively quiescent namespace is an additional REQUIREMENT.
-    # This acknowledgement is deliberately false in every default deploy.
+    # Strict mode requires a separately verified external namespace proof.
+    # Maintenance-window mode instead requires a fresh literal operator
+    # acknowledgement on every execute/recovery/cleanup WorkJob; it is an
+    # operational promise, not an OS-enforced exclusion mechanism.
     if (execution_mode(settings) == "strict"
             and not getattr(settings, "media_organizer_namespace_quiescence_ack", False)):
         raise ValueError(
-            "Execution blocked: MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK "
+            "Strict execution blocked: MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK "
             "requires verified exclusive namespace custody"
         )
 
@@ -132,10 +133,11 @@ def _require_mutation_slot(session, *, family_id: int | None = None) -> None:
 
 
 def _require_nonroot_mutation_worker() -> None:
-    """V1.6 must not run destructive work as container/host UID 0.
+    """V1.6 destructive work must run as a dedicated non-root Worker.
 
-    This is necessary, not sufficient: mount and namespace custody must also
-    be proved independently. A boolean acknowledgement alone is not authority.
+    Strict mode additionally requires external namespace custody. Maintenance
+    mode relies on a separately confirmed operator pause of all other writers;
+    that weaker assurance is never reported as strict custody.
     """
     if not hasattr(os, "geteuid") or os.geteuid() == 0:
         raise PermissionError(
@@ -242,8 +244,9 @@ def enqueue_media_organizer_execution(
         if not Path(unit).is_relative_to(selection):
             raise ValueError("unit must remain within the original preview selection")
         ready = _ready_unit_record(settings, preview_job_id, unit, summary)
-        # Even a flat plan creates a private stage through mkdir/open and
-        # therefore needs exclusive namespace custody before it is queued.
+        # Even a flat plan creates a private stage through mkdir/open.
+        # Strict mode checks external custody here; maintenance mode validates
+        # scope now and requires a literal operator acknowledgement at enqueue.
         check_api_eligibility(settings, Path(unit), (Path(unit),))
         matches = session.scalars(select(WorkJob).where(
             WorkJob.kind == EXECUTE_KIND,
@@ -796,6 +799,7 @@ class MediaOrganizerExecuteHandler(TaskHandler):
             custody_parents = _frozen_custody_scope(manifest)
             custody = resources.enter_context(acquire_operation_authority(
                 settings, unit, custody_parents, manifest=manifest,
+                maintenance_window_confirmed=state.get("maintenance_window_confirmed") is True,
             ))
             assert_operation_authorized(custody, custody_parents)
 

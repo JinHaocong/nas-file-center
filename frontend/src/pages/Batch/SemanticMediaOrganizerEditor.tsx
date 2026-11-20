@@ -30,8 +30,9 @@ export const SemanticMaintenanceConfirmation: React.FC<{
 }> = ({ id, checked, disabled, onChange }) => (
   <div className="nfc-v2-batch-field">
     <p id={`${id}-description`} className="nfc-form-note">
-      维护窗口模式：请暂停对当前作品及同一批文件的其他写入，包括共享访问、同步任务和其他应用，
-      直到清理或恢复全部完成。若其他程序仍在修改，替换的文件可能被误删，无法保证恢复。
+      维护窗口模式依赖人工暂停其他写入，不是操作系统级隔离。请暂停共享访问、云盘同步/上传下载、
+      照片导入及其他应用对本批文件的写入，直到清理或恢复全部完成。若其他程序仍在修改，
+      替换的文件可能被误删，无法保证恢复。
     </p>
     <label htmlFor={id}>
       <input id={id} type="checkbox" checked={checked} disabled={disabled}

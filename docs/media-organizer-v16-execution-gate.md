@@ -1,3 +1,9 @@
+> **2026-11-21 owner decision — maintenance-window mode supersedes the earlier strict-only hold text below.**
+>
+> The owner explicitly confirms that no other file-modifying operation will run during batch organization, and that the pause remains until cleanup/recovery completes. The code now separates strict mode (still default-deny, requires external custody) from `maintenance_window` mode (fresh job-bound operator acknowledgement + non-root Worker + NFC mutation lock/lease + pinned scope). This mode is not kernel-enforced exclusion and must continue reporting `namespace_exclusive_custody_proven=false`. See [maintenance-window operating contract](security/v16-maintenance-window-operating-contract.md).
+>
+> The NAS audit found root OpenList and PikPak/Rclone RW writers that can access the Worker-owned 0700 scratch. They must remain idle throughout the full operation. No production containers are modified.
+
 # Media Organizer V1.6 — Safe Execution Gate (Draft)
 
 **Status: single-unit Worker/API/UI integration exists behind an independent default-OFF feature gate. This is a Draft PR, not approved for NAS deployment.**

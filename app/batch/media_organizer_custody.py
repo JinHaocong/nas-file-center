@@ -1,12 +1,12 @@
-"""Production fail-closed grouped namespace custody provider (#402).
+"""Strict-mode production namespace custody provider (#402).
 
-The separate API/Worker UIDs and /data:ro API bind are necessary controls, NOT
-a proof that no same-UID/root/SMB/NAS-mapped writer can rebind source names.
+This provider intentionally has no live issuer until host/NAS ACL and mount
+semantics prove external writer exclusion. Strict mode remains fail-closed.
 
-There is deliberately NO live issuer until the host NAS ACL/mount semantics
-and exclusive external namespace custody have been independently verified.
-Tests may monkeypatch the provider for an isolated tmp_path fixture only.
-Neither an environment boolean nor a Worker lease can mint custody.
+The separate operator-confirmed maintenance-window contract is implemented
+in media_organizer_authority.py. It does NOT call this provider and is never
+reported as strict namespace custody. Its documented assumption is that the
+operator pauses all other writers for the full execute/cleanup/recovery window.
 """
 from __future__ import annotations
 

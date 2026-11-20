@@ -1,8 +1,7 @@
-"""Regression for namespace hold at the former final name-use boundaries.
+"""Strict mode refuses unproven final name-use mutations.
 
-Temporary fixtures use a synthetic issuer only to prepare retained originals.
-The operation under test has no production custody grant. The injected
-replacement would occur immediately before a real syscall if that hold failed.
+These adversarial replacement cases are outside the operator-declared
+maintenance-window threat model and remain blocked in strict mode.
 """
 import os
 from pathlib import Path
@@ -15,6 +14,7 @@ from app.batch import media_organizer_custody as custody
 from app.batch import media_organizer_publish as publishing
 from app.batch import media_organizer_finalize as finalizing
 from tests.test_media_organizer_maintenance_authority import grouped, publish
+from app.batch.media_organizer_manifest import save_frozen_preview_manifest
 from tests.test_media_organizer_grouped_worker_custody import _install_issuer
 
 
@@ -25,7 +25,7 @@ def _site(tmp_path):
     unit.mkdir(parents=True, mode=0o700)
     settings = SimpleNamespace(
         config_dir=config, reports_dir=config / "reports", allowed_roots=[unit.parent],
-        quarantine_root=unit.parent / "trash", media_organizer_execution_mode="maintenance_window",
+        quarantine_root=unit.parent / "trash", media_organizer_execution_mode="strict",
         allow_mutation=True, allow_delete=True, media_organizer_execution_enabled=True,
         media_organizer_namespace_quiescence_ack=True,
     )
@@ -43,6 +43,8 @@ def _contents(unit):
 def test_cleanup_hold_prevents_late_replacement_mutation(tmp_path, monkeypatch, kind):
     settings, unit = _site(tmp_path)
     manifest, frozen, parents = grouped((settings, unit))
+    manifest["execution_mode"] = "strict"
+    save_frozen_preview_manifest(frozen, manifest)
     with monkeypatch.context() as preparation_only:
         _install_issuer(preparation_only, tmp_path, allowed=True)
         plan = publish(authority, settings, unit, manifest, frozen, parents)
@@ -82,6 +84,8 @@ def test_cleanup_hold_prevents_late_replacement_mutation(tmp_path, monkeypatch, 
 def test_group_hold_prevents_adopting_an_unwitnessed_replacement(tmp_path, monkeypatch):
     settings, unit = _site(tmp_path)
     manifest, frozen, parents = grouped((settings, unit))
+    manifest["execution_mode"] = "strict"
+    save_frozen_preview_manifest(frozen, manifest)
     before = _contents(unit)
     group = Path(manifest["groups"][0]["destination"])
     detached = tmp_path / "new-group-detached"

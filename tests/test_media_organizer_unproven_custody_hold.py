@@ -1,8 +1,7 @@
-"""Real issuer denial at API/Worker boundaries, including maintenance mode.
+"""Strict mode stays fail-closed; maintenance mode uses explicit operator confirmation.
 
-Synthetic issuers are used only to prepare historical pending job fixtures.
-The operation under test always uses the unchanged production issuer unless
-the test explicitly verifies revocation of an already acquired scoped proof.
+Synthetic issuers are used only for strict-mode disposable fixtures. Positive
+maintenance-window lifecycle tests run without a synthetic namespace issuer.
 """
 from pathlib import Path
 
@@ -68,10 +67,9 @@ def _queue(client, settings, unit, pid):
     })
 
 
-@pytest.mark.parametrize("mode", ["strict", "maintenance_window"])
 @pytest.mark.parametrize("grouped", [False, True], ids=["flat", "grouped"])
-def test_all_execution_submissions_refuse_unproven_namespace(tmp_path, mode, grouped):
-    client, settings, unit = _site(tmp_path, mode, grouped=grouped)
+def test_strict_execution_submission_refuses_without_namespace_custody(tmp_path, grouped):
+    client, settings, unit = _site(tmp_path, "strict", grouped=grouped)
     pid = preview(client, settings, unit)
     before = _snapshot(unit)
     response = _queue(client, settings, unit, pid)
@@ -93,32 +91,25 @@ def test_flat_preview_does_not_offer_confirmation_without_custody(tmp_path):
     assert (unit / "photo.jpg").read_bytes() == b"original photo"
 
 
-def test_maintenance_eligibility_does_not_consume_parent_scope_before_proof(
-    tmp_path, monkeypatch,
-):
+def test_maintenance_api_eligibility_does_not_request_strict_custody(tmp_path, monkeypatch):
     _, settings, unit = _site(tmp_path, "maintenance_window")
     selected_parent = unit / "P1"
     selected_parent.mkdir()
-    observed = []
 
-    class Proof:
-        def assert_exclusive(self, parent):
-            observed.append(parent)
-            if parent == selected_parent:
-                raise custody.NamespaceCustodyUnavailable("selected parent not protected")
+    def strict_issuer_must_not_be_called(*_args):
+        raise AssertionError("maintenance-window eligibility must not request strict custody")
 
-    monkeypatch.setattr(custody, "verified_namespace_custody", lambda *_: Proof())
-    with pytest.raises(custody.NamespaceCustodyUnavailable, match="not protected"):
-        authority.check_api_eligibility(settings, unit, iter((unit, selected_parent)))
-    assert selected_parent in observed
+    monkeypatch.setattr(custody, "verified_namespace_custody", strict_issuer_must_not_be_called)
+    authority.check_api_eligibility(settings, unit, (unit, selected_parent))
+    with pytest.raises(authority.MaintenanceWindowUnavailable, match="out-of-scope"):
+        authority.check_api_eligibility(settings, unit, (unit.parent,))
 
 
-@pytest.mark.parametrize("mode", ["strict", "maintenance_window"])
 @pytest.mark.parametrize("grouped", [False, True], ids=["flat", "grouped"])
-def test_previously_queued_execution_cannot_bypass_worker_custody(
-    tmp_path, monkeypatch, mode, grouped,
+def test_previously_queued_strict_execution_cannot_bypass_worker_custody(
+    tmp_path, monkeypatch, grouped,
 ):
-    client, settings, unit = _site(tmp_path, mode, grouped=grouped)
+    client, settings, unit = _site(tmp_path, "strict", grouped=grouped)
     pid = preview(client, settings, unit)
     with monkeypatch.context() as admitted_fixture:
         _install_issuer(admitted_fixture, tmp_path, allowed=True)
@@ -135,11 +126,10 @@ def test_previously_queued_execution_cannot_bypass_worker_custody(
 
 
 @pytest.mark.parametrize("operation", ["execution-recovery", "cleanup", "cleanup-recovery"])
-@pytest.mark.parametrize("mode", ["strict", "maintenance_window"])
-def test_cleanup_and_recovery_reacquire_proof_and_preserve_historical_evidence(
-    tmp_path, monkeypatch, operation, mode,
+def test_strict_cleanup_and_recovery_reacquire_proof_and_preserve_historical_evidence(
+    tmp_path, monkeypatch, operation,
 ):
-    client, settings, unit = _site(tmp_path, mode, grouped=False)
+    client, settings, unit = _site(tmp_path, "strict", grouped=False)
     pid = preview(client, settings, unit)
     with monkeypatch.context() as admitted_fixture:
         _install_issuer(admitted_fixture, tmp_path, allowed=True)
@@ -166,7 +156,7 @@ def test_cleanup_and_recovery_reacquire_proof_and_preserve_historical_evidence(
             path = base + "/cleanup"
             token = review.json()["confirmation"]
             if operation == "cleanup-recovery":
-                queued = client.post(path, json={"confirmation": token, **_ack(mode)})
+                queued = client.post(path, json={"confirmation": token, **_ack(settings.media_organizer_execution_mode)})
                 assert queued.status_code == 200, queued.text
                 cid = queued.json()["job_id"]
 
@@ -183,7 +173,7 @@ def test_cleanup_and_recovery_reacquire_proof_and_preserve_historical_evidence(
     before_evidence = _snapshot(evidence)
     with client.app.state.service.SessionLocal() as session:
         before_ids = session.scalars(select(WorkJob.id)).all()
-    rejected = client.post(path, json={"confirmation": token, **_ack(mode)})
+    rejected = client.post(path, json={"confirmation": token, **_ack(settings.media_organizer_execution_mode)})
     assert rejected.status_code == 409, rejected.text
     assert "custody" in rejected.text.lower()
     assert _snapshot(unit) == before_media
@@ -197,38 +187,28 @@ def test_cleanup_and_recovery_reacquire_proof_and_preserve_historical_evidence(
         assert review.json()["cleanup_authorized"] is False
 
 
-def test_real_maintenance_session_cannot_be_issued_from_ack_and_lock_alone(tmp_path):
+def test_maintenance_session_requires_literal_operator_confirmation_and_not_strict_issuer(
+    tmp_path, monkeypatch,
+):
     _, settings, unit = _site(tmp_path, "maintenance_window")
     before = _snapshot(unit)
-    with pytest.raises(custody.NamespaceCustodyUnavailable, match="not proven"):
+
+    def strict_issuer_must_not_be_called(*_args):
+        raise AssertionError("maintenance mode must not request strict namespace custody")
+
+    monkeypatch.setattr(custody, "verified_namespace_custody", strict_issuer_must_not_be_called)
+
+    with pytest.raises(authority.MaintenanceWindowUnavailable, match="literal operator confirmation"):
         with authority.acquire_operation_authority(settings, unit, (unit,)):
-            pytest.fail("operator acknowledgement issued unproven mutation authority")
-    assert _snapshot(unit) == before
+            pytest.fail("missing operator confirmation granted a maintenance session")
 
-
-def test_maintenance_session_refreshes_and_releases_its_scoped_proof(tmp_path, monkeypatch):
-    _, settings, unit = _site(tmp_path, "maintenance_window")
-
-    class RevocableFixture:
-        active = True
-        closed = False
-        checks = 0
-
-        def assert_exclusive(self, parent):
-            assert Path(parent).is_relative_to(unit)
-            if not self.active or self.closed:
-                raise custody.NamespaceCustodyUnavailable("fixture custody revoked")
-            self.checks += 1
-
-        def close(self):
-            self.closed = True
-
-    proof = RevocableFixture()
-    monkeypatch.setattr(custody, "verified_namespace_custody", lambda *_: proof)
-    with authority.acquire_operation_authority(settings, unit, (unit,)) as session:
+    with authority.acquire_operation_authority(
+        settings, unit, (unit,), maintenance_window_confirmed=True,
+    ) as session:
+        assert session.assurance_level == "maintenance_window"
+        assert session.namespace_exclusive_custody_proven is False
         authority.assert_operation_authorized(session, (unit,))
-        assert proof.checks > 0, "maintenance session never acquired its external proof"
-        proof.active = False
-        with pytest.raises(custody.NamespaceCustodyUnavailable, match="revoked"):
-            authority.assert_operation_authorized(session, (unit,))
-    assert proof.closed, "operation did not release its held namespace resource"
+
+    with pytest.raises(authority.MaintenanceWindowUnavailable):
+        authority.assert_operation_authorized(session, (unit,))
+    assert _snapshot(unit) == before

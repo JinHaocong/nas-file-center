@@ -351,7 +351,10 @@ class MediaOrganizerCleanupHandler(TaskHandler):
                 session, state, _cleanup_ancestry(session, job, state, settings), settings,
             )
             frozen, manifest = _frozen_cleanup_plan(settings, state, original)
-        with acquire_operation_authority(settings, unit, _cleanup_scope(manifest), manifest=manifest) as proof:
+        with acquire_operation_authority(
+            settings, unit, _cleanup_scope(manifest), manifest=manifest,
+            maintenance_window_confirmed=state.get("maintenance_window_confirmed") is True,
+        ) as proof:
             self._finalize(job, context, settings, state, frozen, manifest, proof)
 
     def _finalize(self, job, context, settings, state, frozen, manifest, proof) -> None:

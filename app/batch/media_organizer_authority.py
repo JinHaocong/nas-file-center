@@ -1,8 +1,11 @@
-"""Require external custody in both strict and maintenance-window operations.
+"""Authorize strict custody or an explicitly operator-confirmed maintenance window.
 
-Maintenance coordination and operator acknowledgement cannot exclude an
-uncooperative writer from a name-based filesystem mutation. A session must
-hold a separately issued namespace proof for its entire lifetime.
+Strict mode requires an externally issued namespace proof. Maintenance-window
+mode is a weaker operational assurance: the administrator confirms that all
+other file writers (shared clients, sync jobs and other applications) are
+paused until cleanup/recovery completes. The Worker still holds the NFC
+mutation lock and lease and pins every selected directory identity, but this
+is NOT kernel-enforced exclusion from root, same-UID or NAS-mapped writers.
 """
 from __future__ import annotations
 
@@ -18,7 +21,7 @@ from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_manifest import _checksum
 
 
-class MaintenanceWindowUnavailable(ValueError):
+class MaintenanceWindowUnavailable(strict.NamespaceCustodyUnavailable):
     """A maintenance-window prerequisite changed or cannot be verified."""
 
 
@@ -65,12 +68,13 @@ def check_api_eligibility(settings, unit: Path, parents=()) -> None:
     _validate_selection(settings, unit)
     for parent in parents:
         _scope_path(unit, parent)
-    # The API can have a read-only bind and cannot traverse private Worker stages.
-    os.close(_open_directory_nofollow(unit))
-    # Acknowledgement/metadata are not a custody grant. This deliberately
-    # refuses with the production issuer until a supported boundary exists.
-    with _strict_proof(settings, unit, parents or (unit,)):
-        return
+    # This endpoint performs no mutation. In maintenance-window mode it only
+    # validates the selected unit and canonical scope; the Worker receives a
+    # mutation session later, after the exact WorkJob stores a literal
+    # maintenance_window_confirmed=true acknowledgement.
+    fd = _open_directory_nofollow(unit)
+    os.close(fd)
+    return
 
 
 def _evidence_exists(path: Path) -> bool:
@@ -87,9 +91,21 @@ def _evidence_exists(path: Path) -> bool:
 
 
 class MaintenanceWindowSession:
-    """Pinned bindings and cooperative serialization beneath held external custody."""
+    """Pinned directory bindings under an explicitly confirmed maintenance window.
 
-    def __init__(self, settings, unit, parents, manifest, resources, namespace_custody):
+    This session is not a strict namespace-custody proof. It serializes NFC
+    mutations and revalidates the frozen scope, while relying on the operator
+    to keep all external writers paused for the full operation/recovery window.
+    """
+
+    assurance_level = "maintenance_window"
+    namespace_exclusive_custody_proven = False
+
+    def __init__(self, settings, unit, parents, manifest, resources, *, operator_confirmed):
+        if operator_confirmed is not True:
+            raise MaintenanceWindowUnavailable(
+                "maintenance mutation requires explicit operator confirmation"
+            )
         self._worker_pid = os.getpid()
         self._worker_uid = os.geteuid()
         self._settings = settings
@@ -98,7 +114,6 @@ class MaintenanceWindowSession:
         self._manifest = manifest
         self._manifest_digest = _checksum(manifest) if manifest is not None else None
         self._resources = resources
-        self._namespace_custody = namespace_custody
         self._bindings = {}
         self._expected = {}
         self._future = set()
@@ -227,13 +242,16 @@ class MaintenanceWindowSession:
             paths.update(p for p in path.parents if p.is_relative_to(self._unit))
         for path in sorted(paths, key=lambda p: (len(p.parts), p)):
             self._check_parent(path)
-        # The proof is a live resource, not an API-time snapshot. Refresh it
-        # after observational checks at every existing mutation fence.
-        strict.assert_exclusive_custody(self._namespace_custody, sorted(paths))
+        # External writers are excluded by the operator's maintenance-window
+        # commitment, not by a kernel-enforced namespace lock. Never report
+        # this session as strict namespace custody.
 
 
 @contextmanager
-def acquire_operation_authority(settings, unit: Path, parents, *, manifest=None):
+def acquire_operation_authority(
+    settings, unit: Path, parents, *, manifest=None,
+    maintenance_window_confirmed: bool = False,
+):
     parents = tuple(parents)
     if execution_mode(settings) == "strict":
         with _strict_proof(settings, unit, parents or (unit,)) as proof:
@@ -241,12 +259,18 @@ def acquire_operation_authority(settings, unit: Path, parents, *, manifest=None)
         return
     from app.tasks.media_mutation_lock import media_mutation_lock
 
+    if maintenance_window_confirmed is not True:
+        raise MaintenanceWindowUnavailable(
+            "maintenance-window mutation requires literal operator confirmation"
+        )
     if not hasattr(os, "geteuid") or os.geteuid() == 0:
         raise PermissionError("maintenance execution requires a non-root Worker")
     with media_mutation_lock(settings), ExitStack() as resources:
         _validate_selection(settings, unit)
-        proof = resources.enter_context(_strict_proof(settings, unit, parents or (unit,)))
-        yield MaintenanceWindowSession(settings, unit, parents, manifest, resources, proof)
+        yield MaintenanceWindowSession(
+            settings, unit, parents, manifest, resources,
+            operator_confirmed=maintenance_window_confirmed,
+        )
 
 
 @dataclass(frozen=True)

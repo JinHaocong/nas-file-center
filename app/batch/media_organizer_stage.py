@@ -1,4 +1,4 @@
-"""Frozen-file staging with exclusive custody and fail-closed reconciliation.
+"""Frozen-file staging with pinned identity and fail-closed reconciliation.
 
 The guarded execution Worker calls this module only after immutable freeze.
 In deferred V1.6 jobs the stage is an exclusive inode-bound hardlink; the
@@ -32,7 +32,7 @@ _MAX_MARKER = 256
 
 
 class StagingConflict(ValueError):
-    """Cannot prove exclusive custody of the frozen stage or a source file."""
+    """A frozen source or stage identity/permission invariant was violated."""
 
 
 def _authority(manifest: dict) -> bytes:

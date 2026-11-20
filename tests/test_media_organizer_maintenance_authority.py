@@ -1,7 +1,7 @@
-"""Exercise maintenance sessions and the real cooperative lock.
+"""Exercise operator-confirmed maintenance sessions and the real cooperative lock.
 
-Issued-session tests explicitly inject tmp_path-scoped synthetic custody.
-These lifecycle checks are not production maintenance or NAS acceptance.
+These tests do not inject strict namespace custody. They exercise the weaker
+maintenance-window contract on disposable tmp_path media.
 """
 import os
 from contextlib import ExitStack
@@ -25,7 +25,13 @@ from app.batch.media_organizer_manifest import build_frozen_preview_manifest, sa
 from app.batch.media_organizer_planner import preview_semantic_unit
 from app.batch.media_organizer_publish import PublishingConflict, publish_frozen_stage
 from app.batch.media_organizer_stage import stage_frozen_sources
-from tests.test_media_organizer_execute_jobs import scoped_namespace
+
+
+def acquire_operation_authority(settings, unit, parents, *, manifest=None):
+    return authority.acquire_operation_authority(
+        settings, unit, parents, manifest=manifest,
+        maintenance_window_confirmed=True,
+    )
 
 
 
@@ -75,11 +81,11 @@ def test_mode_or_legacy_ack_alone_cannot_issue_authority(site):
     settings.media_organizer_execution_mode = "maintenance_window"
     settings.allow_delete = False
     with pytest.raises((ValueError, PermissionError)):
-        with authority.acquire_operation_authority(settings, unit, (unit,)):
+        with acquire_operation_authority(settings, unit, (unit,)):
             pytest.fail("disabled deletion granted an operation session")
 
 
-def test_api_checks_only_the_canonical_unit(site, scoped_namespace):
+def test_api_checks_only_the_canonical_unit(site):
     settings, unit = site
     protected_stage = unit / "private-stage"
     protected_stage.symlink_to("/missing")
@@ -92,13 +98,13 @@ def test_api_checks_only_the_canonical_unit(site, scoped_namespace):
             authority.check_api_eligibility(settings, bad)
 
 
-def test_live_scope_fencing_and_resource_release(site, scoped_namespace):
+def test_live_scope_fencing_and_resource_release(site):
     settings, unit = site
     old = unit / "old"
     old.mkdir()
     before = set(os.listdir("/proc/self/fd"))
     with pytest.raises(RuntimeError, match="interruption"):
-        with authority.acquire_operation_authority(settings, unit, (unit, old)) as session:
+        with acquire_operation_authority(settings, unit, (unit, old)) as session:
             for value in (session, authority.fence_operation_authority(session, lambda: None)):
                 with pytest.raises(NamespaceCustodyUnavailable):
                     assert_exclusive_custody(value, (unit,))
@@ -118,21 +124,21 @@ def test_live_scope_fencing_and_resource_release(site, scoped_namespace):
     with pytest.raises((OSError, ValueError)):
         authority.assert_operation_authorized(session, (unit,))
     assert set(os.listdir("/proc/self/fd")) == before
-    with authority.acquire_operation_authority(settings, unit, (unit, old)) as new:
+    with acquire_operation_authority(settings, unit, (unit, old)) as new:
         authority.assert_operation_authorized(new, (old,))
 
 
-def test_nonroot_and_nofollow_required(site, monkeypatch, scoped_namespace):
+def test_nonroot_and_nofollow_required(site, monkeypatch):
     settings, unit = site
     alias = unit / "alias"
     alias.symlink_to(unit)
     for bad in (alias, unit / "missing", unit / ".." / "unit"):
         with pytest.raises((OSError, ValueError)):
-            with authority.acquire_operation_authority(settings, unit, (unit, bad)):
+            with acquire_operation_authority(settings, unit, (unit, bad)):
                 pytest.fail("unsafe parent accepted")
     monkeypatch.setattr(os, "geteuid", lambda: 0)
     with pytest.raises(PermissionError):
-        with authority.acquire_operation_authority(settings, unit, (unit,)):
+        with acquire_operation_authority(settings, unit, (unit,)):
             pytest.fail("root Worker accepted")
 
 
@@ -153,7 +159,7 @@ def test_maintenance_worker_refuses_real_readonly_mount(site):
 
 
 def publish(authority, settings, unit, manifest, frozen, parents):
-    with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
+    with acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
         def fence():
             authority.assert_operation_authorized(session, parents)
         validate_deferred_publication(manifest, namespace_custody=session)
@@ -164,14 +170,14 @@ def publish(authority, settings, unit, manifest, frozen, parents):
         return save_cleanup_plan(cleanup_plan_path(frozen), manifest)
 
 
-def test_only_planned_future_parents_and_no_overwrite(site, scoped_namespace):
+def test_only_planned_future_parents_and_no_overwrite(site):
     settings, unit = site
     manifest, frozen, parents = grouped(site)
     with pytest.raises((ValueError, OSError)):
-        with authority.acquire_operation_authority(settings, unit, parents | {unit / "P [foreign]"},
+        with acquire_operation_authority(settings, unit, parents | {unit / "P [foreign]"},
                                                    manifest=manifest):
             pytest.fail("unplanned missing parent accepted")
-    with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
+    with acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
         fence = lambda: authority.assert_operation_authorized(session, parents)
         validate_deferred_publication(manifest, namespace_custody=session)
         stage_frozen_sources(manifest, frozen_manifest_path=frozen, allowed_roots=settings.allowed_roots,
@@ -186,7 +192,7 @@ def test_only_planned_future_parents_and_no_overwrite(site, scoped_namespace):
         assert intruder.read_bytes() == b"keep"
 
 
-def test_only_journal_begun_retirement_allows_missing_parents(site, scoped_namespace):
+def test_only_journal_begun_retirement_allows_missing_parents(site):
     settings, unit = site
     manifest, frozen, parents = grouped(site)
     plan = publish(authority, settings, unit, manifest, frozen, parents)
@@ -196,7 +202,7 @@ def test_only_journal_begun_retirement_allows_missing_parents(site, scoped_names
         bound.mkdir()
         try:
             with pytest.raises((OSError, ValueError)):
-                with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest):
+                with acquire_operation_authority(settings, unit, parents, manifest=manifest):
                     pytest.fail("existing cleanup-plan directory inode was replaced")
         finally:
             bound.rmdir()
@@ -204,14 +210,14 @@ def test_only_journal_begun_retirement_allows_missing_parents(site, scoped_names
     old = unit / "P1"
     old.rename(unit / "detached")
     with pytest.raises((OSError, ValueError)):
-        with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest):
+        with acquire_operation_authority(settings, unit, parents, manifest=manifest):
             pytest.fail("absent old source directory accepted without its private journal")
     (unit / "detached").rename(old)
     options = dict(frozen_manifest_path=frozen, allowed_roots=settings.allowed_roots,
                    confirmation=cleanup_confirmation(9, str(unit), plan["plan_sha256"]))
     unknown = old / "unknown"
     unknown.write_bytes(b"preserve")
-    with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
+    with acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
         with pytest.raises(CleanupExecutionBlocked):
             finish_deferred_cleanup(manifest, custody=session, **options)
     assert unknown.read_bytes() == b"preserve"
@@ -222,38 +228,38 @@ def test_only_journal_begun_retirement_allows_missing_parents(site, scoped_names
             raise RuntimeError("power loss after rmdir")
 
     with pytest.raises(RuntimeError, match="power loss"):
-        with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
+        with acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
             finish_deferred_cleanup(manifest, custody=session, after_mutation=crash_after_wrapper_removal,
                                     **options)
     assert not old.exists()
-    with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest) as resumed:
+    with acquire_operation_authority(settings, unit, parents, manifest=manifest) as resumed:
         result = finish_deferred_cleanup(manifest, custody=resumed, **options)
     assert result["assurance_level"] == "maintenance_window"
     assert result["namespace_exclusive_custody_proven"] is False
     assert result["needed_moves"] == result["renamed_count"] == 0
-    with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest) as completed:
+    with acquire_operation_authority(settings, unit, parents, manifest=manifest) as completed:
         authority.assert_operation_authorized(completed, parents)
         old.mkdir()
         with pytest.raises((ValueError, OSError)):
             authority.assert_operation_authorized(completed, (old,))
 
 
-def test_maintenance_session_is_bound_to_the_frozen_evidence(site, scoped_namespace):
+def test_maintenance_session_is_bound_to_the_frozen_evidence(site):
     settings, unit = site
     manifest, _, parents = grouped(site)
-    with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
+    with acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
         changed = {**manifest, "input_fingerprint": "a different preview snapshot"}
         with pytest.raises(ValueError):
             validate_deferred_publication(changed, namespace_custody=session)
 
 
-def test_child_cannot_reuse_a_parent_session_after_lock_takeover(site, scoped_namespace):
+def test_child_cannot_reuse_a_parent_session_after_lock_takeover(site):
     from app.tasks.media_mutation_lock import media_mutation_lock
 
     settings, unit = site
     read_fd, write_fd = os.pipe()
     try:
-        with authority.acquire_operation_authority(settings, unit, (unit,)) as session:
+        with acquire_operation_authority(settings, unit, (unit,)) as session:
             pid = os.fork()
             if pid == 0:
                 os.close(write_fd)
@@ -274,7 +280,7 @@ def test_child_cannot_reuse_a_parent_session_after_lock_takeover(site, scoped_na
         os.close(write_fd)
 
 
-def test_untrusted_report_parent_cannot_turn_existing_evidence_into_future_paths(site, scoped_namespace):
+def test_untrusted_report_parent_cannot_turn_existing_evidence_into_future_paths(site):
     settings, unit = site
     manifest, frozen, parents = grouped(site)
     old_folder = frozen.parent
@@ -283,7 +289,7 @@ def test_untrusted_report_parent_cannot_turn_existing_evidence_into_future_paths
     foreign_folder.mkdir()
     old_folder.symlink_to(foreign_folder, target_is_directory=True)
     with pytest.raises((OSError, ValueError)):
-        with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest):
+        with acquire_operation_authority(settings, unit, parents, manifest=manifest):
             pytest.fail("symlinked report directory hid private lifecycle evidence")
 
 
@@ -304,19 +310,19 @@ def flat_stage(site, *, path_roles=False):
     save_frozen_preview_manifest(frozen, manifest)
     parents = (unit, unit / manifest["stage_directory"])
     options = dict(frozen_manifest_path=frozen, allowed_roots=settings.allowed_roots)
-    with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
+    with acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
         stage_frozen_sources(manifest, **options,
                              lease_fence=lambda: authority.assert_operation_authorized(session, parents))
     return manifest, parents, options
 
 
 @pytest.mark.parametrize("invalid", ["omitted", "boolean", "closed"])
-def test_flat_maintenance_refuses_publication_without_live_session(site, invalid, scoped_namespace):
+def test_flat_maintenance_refuses_publication_without_live_session(site, invalid):
     settings, unit = site
     manifest, parents, options = flat_stage(site)
     supplied = {}
     if invalid == "closed":
-        with authority.acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
+        with acquire_operation_authority(settings, unit, parents, manifest=manifest) as session:
             supplied = {"namespace_custody": session}
     elif invalid == "boolean":
         supplied = {"namespace_custody": True}
@@ -330,14 +336,14 @@ def test_flat_maintenance_refuses_publication_without_live_session(site, invalid
 
 
 @pytest.mark.parametrize("path_roles", [False, True])
-def test_flat_maintenance_refences_session_at_public_link(site, monkeypatch, path_roles, scoped_namespace):
+def test_flat_maintenance_refences_session_at_public_link(site, monkeypatch, path_roles):
     from app.batch import media_organizer_publish as publishing
 
     settings, unit = site
     manifest, parents, options = flat_stage(site, path_roles=path_roles)
     real_link = publishing._link_one
     with ExitStack() as stack:
-        session = stack.enter_context(authority.acquire_operation_authority(
+        session = stack.enter_context(acquire_operation_authority(
             settings, unit, parents, manifest=manifest,
         ))
 
@@ -352,13 +358,13 @@ def test_flat_maintenance_refences_session_at_public_link(site, monkeypatch, pat
     assert not Path(manifest["moves"][0]["final"]).exists()
 
 
-def test_flat_maintenance_refences_session_before_handoff_report(site, scoped_namespace):
+def test_flat_maintenance_refences_session_before_handoff_report(site):
     from app.batch.media_organizer_deferred_cleanup import DeferredCleanupConflict
 
     settings, unit = site
     manifest, parents, options = flat_stage(site)
     with ExitStack() as stack:
-        session = stack.enter_context(authority.acquire_operation_authority(
+        session = stack.enter_context(acquire_operation_authority(
             settings, unit, parents, manifest=manifest,
         ))
         publish_frozen_stage(manifest, **options, namespace_custody=session,

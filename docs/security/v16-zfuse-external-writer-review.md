@@ -1,3 +1,5 @@
+> **2026-11-21 owner decision:** Strict namespace custody remains unavailable, but the owner explicitly guarantees no other file-writing operations will run during batch organization and until cleanup/recovery completes. V1.6 will use the separately labelled `maintenance_window` assurance for this NAS; it does not claim OS-enforced exclusion. The root OpenList/Rclone RW writers confirmed by the live audit must remain idle. See [operating contract](v16-maintenance-window-operating-contract.md). The strict-custody investigation below remains relevant only if strict mode is required.
+
 # V1.6 ZFuse external-writer custody: verification decision (2026-11-20)
 
 **Current decision: BLOCKED.** PR #397 remains Draft. This is a falsifiable
