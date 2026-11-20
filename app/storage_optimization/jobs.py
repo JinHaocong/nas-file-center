@@ -21,11 +21,6 @@ from app.storage_optimization.capability import (
 from app.tasks.context import JobContext
 from app.tasks.handlers_base import TaskHandler, register_handler
 from app.tasks.media_mutation_lock import assert_media_mutation_lock
-from app.tasks.recovery import (
-    assert_active_worker_lease,
-    assert_no_maintenance_reservation,
-    renew_and_assert_worker_lease,
-)
 
 STORAGE_OPTIMIZATION_PROBE_JOB_KIND = "storage-optimization-capability-probe"
 PLAN_VALIDATION_JOB_KIND = "batch-plan-validate"
@@ -217,6 +212,12 @@ def enqueue_plan_validation(
 def _assert_worker_mutation_authority(context: JobContext, settings: Settings) -> None:
     if not context.worker_id:
         raise PermissionError("Storage operation requires active Worker authority")
+    from app.tasks.recovery import (
+        assert_active_worker_lease,
+        assert_no_maintenance_reservation,
+        renew_and_assert_worker_lease,
+    )
+
     assert_media_mutation_lock(settings)
     with context.SessionLocal() as session:
         session.execute(text("BEGIN IMMEDIATE"))

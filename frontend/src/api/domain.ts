@@ -1,5 +1,5 @@
 import { api } from './client';
-import { tasksApi } from './tasks';
+import { tasksApi as taskActionsApi } from './tasks';
 import {
   AuditEvent,
   DashboardSummary,
@@ -46,7 +46,7 @@ export const dashboardApi = {
 async function waitForWorkJob(jobId: number, operation: string) {
   const deadline = Date.now() + 30 * 60 * 1000;
   while (Date.now() < deadline) {
-    const task = await tasksApi.getTaskDetail(jobId);
+    const task = await taskActionsApi.getTaskDetail(jobId);
     if (task.status === 'completed') return task;
     if (task.status === 'failed' || task.status === 'cancelled') {
       throw new Error(task.error || `${operation}任务 #${jobId} 未成功完成`);
