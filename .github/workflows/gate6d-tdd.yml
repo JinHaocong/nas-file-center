@@ -15,10 +15,13 @@ on:
       - 'app/db.py'
       - 'app/config.py'
       - 'app/api/router.py'
+      - 'app/storage_optimization/**'
       - 'app/execution/executor.py'
       - 'app/service.py'
       - 'app/tasks/**'
       - 'tests/test_gate6d_*.py'
+      - 'tests/test_storage_optimization_api.py'
+      - 'tests/test_plan_validation_worker_api.py'
       - 'frontend/src/pages/Media/**'
       - 'frontend/src/types/media.ts'
       - 'frontend/src/api/domain.ts'
@@ -64,7 +67,7 @@ jobs:
       - name: Run Gate6-D focused tests
         env:
           PYTHONPATH: .
-        run: pytest -q tests/test_gate6d_*.py
+        run: pytest -q tests/test_gate6d_*.py tests/test_storage_optimization_api.py tests/test_plan_validation_worker_api.py
 
   frontend:
     # Draft PRs use focused checks; full gates run when marked Ready,

@@ -10,6 +10,7 @@ from app.main import create_app
 from app.auth.password import hash_password
 from app.models import User, WorkJob
 from app.service import FileCenterService
+from app.storage_optimization.capability import probe_storage_optimization_capabilities
 from app.tasks.recovery import acquire_worker_ownership
 from app.worker import process_work_job
 
@@ -185,3 +186,22 @@ def test_storage_capability_probe_rejects_partial_pair_shape(tmp_path: Path):
     )
 
     assert response.status_code == 422
+
+
+
+def test_probe_parent_identity_mismatch_fails_closed_without_creating_scratch(tmp_path: Path):
+    data = tmp_path / "data"
+    data.mkdir()
+    info = data.stat()
+
+    result = probe_storage_optimization_capabilities(
+        data,
+        [data],
+        expected_parent_identity=(int(info.st_dev), int(info.st_ino) + 1),
+    )
+
+    assert result["hardlink"]["capability"] == "unknown"
+    assert result["hardlink"]["reason"] == "hardlink_probe_parent_identity_changed"
+    assert result["reflink"]["capability"] == "unknown"
+    assert result["reflink"]["reason"] == "reflink_probe_parent_identity_changed"
+    assert not any(path.name.startswith(".__nfc_") for path in data.iterdir())
