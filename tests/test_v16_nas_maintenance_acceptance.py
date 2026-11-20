@@ -482,7 +482,7 @@ def test_config_file_creation_probe_covers_root_and_shared_subdirectories(tmp_pa
         child.mkdir(mode=0o2770)
         child.chmod(0o2770)
     result = nas.probe_config_file_creation(config)
-    assert set(result) == {"root", *nas.CONFIG_DIRECTORIES}
+    assert set(result) == set(nas.CONFIG_DIRECTORIES)
     assert all(item["created_fsynced_removed"] for item in result.values())
     assert sorted(path.name for path in config.iterdir()) == sorted(nas.CONFIG_DIRECTORIES)
     assert all(not list((config / name).iterdir()) for name in nas.CONFIG_DIRECTORIES)

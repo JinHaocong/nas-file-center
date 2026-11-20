@@ -183,8 +183,8 @@ def probe_config_file_creation(config_root=Path("/config")):
     results = {}
     with ExitStack() as stack:
         root_fd = open_tree(stack, config_root)
-        for label in ("root", *CONFIG_DIRECTORIES):
-            directory_fd = root_fd if label == "root" else open_dir(stack, label, root_fd)
+        for label in CONFIG_DIRECTORIES:
+            directory_fd = open_dir(stack, label, root_fd)
             directory = os.fstat(directory_fd)
             mode = stat.S_IMODE(directory.st_mode)
             require(stat.S_ISDIR(directory.st_mode) and directory.st_gid == GROUP

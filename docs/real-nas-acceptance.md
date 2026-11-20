@@ -23,8 +23,10 @@ inside the newly created fixture's API-owned `/config` root: `app.db`,
 10001, GID 10000 and mode 0660 with file and directory fsync. Existing entries
 are never overwritten. After API bootstrap, both API and Worker independently
 perform an `O_EXCL` create, write, fsync, inode-binding check and
-identity-checked removal in `/config` and each of `reports`, `backups`,
-`logs`, and `home`. Any failure stops the run before organizer scenarios.
+identity-checked removal in each writable application directory: `reports`,
+`backups`, `logs`, and `home`. The three fixed root-level bootstrap files are
+separately inode-pinned and validated. Any failure stops the run before
+organizer scenarios.
 These files and probes are confined to the new disposable fixture; no
 installed config or production database is touched.
 
