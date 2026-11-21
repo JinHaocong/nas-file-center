@@ -224,10 +224,20 @@ def scoped_nas_compat_job(job, settings) -> Iterator[None]:
         yield
         return
     if not _approved_media_job(job, settings):
-        yield
-        verify_optional_worker_runtime()
+        try:
+            yield
+        finally:
+            try:
+                verify_optional_worker_runtime()
+            except BaseException:
+                # A normal task may not continue if it somehow raised DAC.
+                os._exit(70)
         return
-    _set_job_dac_effective(True)
+    try:
+        _set_job_dac_effective(True)
+    except BaseException:
+        # A capset may have succeeded before its post-check failed.
+        os._exit(70)
     try:
         yield
     finally:
