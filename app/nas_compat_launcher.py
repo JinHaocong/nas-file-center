@@ -134,6 +134,8 @@ def verify_optional_worker_runtime() -> None:
         if enabled != "false":
             raise PermissionError("NAS_COMPAT: unsupported enable value")
         return
+    if os.environ.get("MEDIA_ORGANIZER_EXECUTION_MODE") != "maintenance_window":
+        raise PermissionError("NAS_COMPAT: runtime is not maintenance-window mode")
     assert_nas_compat_worker_identity(
         _uid("NFC_NAS_COMPAT_WORKER_UID"), _uid("NFC_NAS_COMPAT_WORKER_GID"),
     )
