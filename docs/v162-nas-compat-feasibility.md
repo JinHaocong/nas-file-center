@@ -84,3 +84,21 @@ viable execution boundary, then implement the guarded NAS mode with
 security regressions. Keep V1.6.1 available for rollback. Do not
 modify production `/data` ACLs, media, backup, progress database or
 recovery evidence.
+
+## Second synthetic experiment: temporary root startup, non-root runtime
+
+Plain `--cap-add DAC_OVERRIDE` on UID 10002 is not necessarily effective.
+The CI probe now additionally checks an explicit **test-only launcher**:
+a root-started container with only DAC_OVERRIDE/SETUID/SETGID, using
+`PR_SET_KEEPCAPS` + `capset` + `PR_CAP_AMBIENT_RAISE` and finally
+`execve` into a process with real/effective UID 10002, GID 10000 and
+**only effective DAC_OVERRIDE**. The probe verifies `CapEff=0x2`,
+`NoNewPrivs=1` and root-owned fixture read/write after the exec.
+
+This tests whether retaining non-root database/report ownership is
+mechanically possible **without a persistent root Worker**. It is still
+only a synthetic CI feasibility check. The test-only launcher is not a
+production command or authorization. Even if it passes, the elevated
+capability applies to **every Worker task and all mounted paths**.
+Implementing such a mode requires a separate runtime confinement and
+threat-model review; it cannot be merged into the default profile.
