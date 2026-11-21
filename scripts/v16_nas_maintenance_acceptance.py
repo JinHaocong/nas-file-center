@@ -331,7 +331,10 @@ def dispatch(settings, jid, fault=None):
     from app.tasks.context import JobContext
     from app.tasks.recovery import acquire_worker_ownership
     from app.worker import process_work_job, WorkerHeartbeatThread
-    require(os.geteuid() != 0 and type(jid) is int and jid > 0, "nonroot Worker and positive job ID required")
+    from app.nas_compat_worker import is_nas_compat_root_worker
+    require((os.geteuid() != 0 or is_nas_compat_root_worker(settings))
+            and type(jid) is int and jid > 0,
+            "approved Worker identity and positive job ID required")
     require(fault in (None, "publication", "cleanup"), "unknown simulated interruption")
     fired = []
     engine, factory = create_engine_and_session(settings.database_path)
@@ -465,7 +468,7 @@ def run_case(case, unit, request, worker, snapshot, evidence):
                     namespace_exclusive_custody_proven=False, assurance_level=final["assurance_level"])
 
 
-def runtime_status(process, uid):
+def runtime_status(process, uid, *, nas_root_worker=False):
     path = Path("/proc") / process / "status"
     fields = dict(line.split(":", 1) for line in path.read_text().splitlines() if ":" in line)
     values = {key: list(map(int, fields[key].split())) for key in ("Uid", "Gid", "Groups")}
@@ -475,9 +478,14 @@ def runtime_status(process, uid):
         maps = Path("/proc") / process / name
         values[name] = [list(map(int, line.split())) for line in maps.read_text().splitlines()]
         require(values[name] == [[0, 0, 4294967295]], f"unexpected {name} for {process}")
+    expected_caps = {"CapInh": 0, "CapPrm": 2, "CapEff": 2, "CapBnd": 2,
+                     "CapAmb": 0} if nas_root_worker else {
+                         "CapInh": 0, "CapPrm": 0, "CapEff": 0,
+                         "CapBnd": 0, "CapAmb": 0,
+                     }
     require(values["Uid"] == [uid] * 4 and values["Gid"] == [GROUP] * 4
             and set(values["Groups"]) <= {GROUP} and values["NoNewPrivs"] == 1
-            and all(values[k] == 0 for k in values if k.startswith("Cap")),
+            and all(values[k] == expected_caps[k] for k in expected_caps),
             f"runtime credentials or capabilities differ for {process}")
     return values
 
@@ -495,8 +503,15 @@ def mount_evidence(fd):
 
 
 def attest(role, expected):
-    uid = {"api": API, "worker": WORKER}[role]
-    evidence = {"self": runtime_status("self", uid), "pid1": runtime_status("1", uid), "mounts": {}}
+    root_worker = role == "worker" and os.environ.get("NFC_NAS_COMPAT_ROOT_WORKER_ENABLED") == "true"
+    uid = API if role == "api" else (0 if root_worker else WORKER)
+    evidence = {"self": runtime_status("self", uid, nas_root_worker=root_worker),
+                "pid1": runtime_status("1", uid, nas_root_worker=root_worker),
+                "mounts": {}}
+    if root_worker:
+        from app.config import Settings
+        from app.nas_compat_worker import verify_worker_runtime
+        verify_worker_runtime(Settings(_env_file=None))
     with ExitStack() as stack:
         for path, readonly in (("/data", role == "api"), ("/config", False), ("/", True), ("/tmp", False)):
             fd = open_dir(stack, path)
@@ -624,8 +639,9 @@ def docker(args, operation, data=None, timeout=90):
     return result.stdout.strip()
 
 
-def container_command(image, fixture, role):
-    uid = {"api": API, "worker": WORKER}[role]
+def container_command(image, fixture, role, *, nas_root_worker=False):
+    root_worker = role == "worker" and nas_root_worker
+    uid = API if role == "api" else (0 if root_worker else WORKER)
     name = fixture.name
     args = ["create", "--pull=never", "--cidfile", str(fixture / (role + ".cid")),
             "--name", f"{name}-{role}", "--label", f"nfc.v16.maintenance-fixture={name}",
@@ -636,17 +652,24 @@ def container_command(image, fixture, role):
             "--mount", f"type=bind,src={fixture}/data,dst=/data" + (",readonly" if role == "api" else "")]
     for key, value in CONFIG.items():
         args.extend(["--env", f"{key}={value}"])
+    args.extend(["--env", f"NFC_NAS_COMPAT_ROOT_WORKER_ENABLED={'true' if root_worker else 'false'}"])
+    if root_worker:
+        # Root retains only DAC_OVERRIDE, never CHOWN/SETUID/SETGID/SYS_ADMIN.
+        args.extend(["--cap-add", "DAC_OVERRIDE"])
     args.extend([image, "-c", API_START if role == "api" else WORKER_START])
     return args
 
 
-def verify_container(info, cid, image, fixture, role):
+def verify_container(info, cid, image, fixture, role, *, nas_root_worker=False):
+    root_worker = role == "worker" and nas_root_worker
+    worker_uid = 0 if root_worker else WORKER
+    allowed_caps = (["DAC_OVERRIDE"], ["CAP_DAC_OVERRIDE"]) if root_worker else ([], None)
     require(info["id"] == cid and info["image"] == image and info["label"] == fixture.name
             and info["name"] == f"/{fixture.name}-{role}", f"incorrect {role} container identity")
     host = info["host"]
-    require(info["user"] == f"{API if role == 'api' else WORKER}:{GROUP}"
+    require(info["user"] == f"{API if role == 'api' else worker_uid}:{GROUP}"
             and host["ReadonlyRootfs"] is True and host["NetworkMode"] == "none"
-            and host["Privileged"] is False and host["CapDrop"] == ["ALL"] and not host["CapAdd"]
+            and host["Privileged"] is False and host["CapDrop"] == ["ALL"] and host["CapAdd"] in allowed_caps
             and not host["PortBindings"] and not host["GroupAdd"]
             and host["SecurityOpt"] in (["no-new-privileges"], ["no-new-privileges=true"])
             and set(host["Tmpfs"]) == {"/tmp"}, f"unexpected {role} Docker security configuration")
@@ -738,7 +761,8 @@ def remove_container(fixturefd, fixture, role, cid, image, report):
     record["state"] = "removed"
 
 
-def run_containers(rootfd, fixturefd, fixture, childfds, config_subdirs, image, report):
+def run_containers(rootfd, fixturefd, fixture, childfds, config_subdirs, image, report, *,
+                   nas_root_worker=False):
     source = Path(__file__).read_text(encoding="utf-8")
     bindings = {"/" + name: identity(os.fstat(fd)) for name, fd in childfds.items()}
     ids = {}
@@ -769,12 +793,15 @@ def run_containers(rootfd, fixturefd, fixture, childfds, config_subdirs, image, 
         for role in ("worker", "api"):
             check_paths()
             cleanup.callback(remove, role)
-            raw = docker(container_command(image, fixture, role), f"create {role}")
+            raw = docker(container_command(image, fixture, role, nas_root_worker=nas_root_worker),
+                         f"create {role}")
             require(re.fullmatch(FULL_ID, raw), "Docker returned invalid container ID")
             ids[role] = raw
             info = json.loads(docker(["inspect", "--type", "container", "--format", CONTAINER_INFO, raw],
                                      f"inspect {role}"))
-            evidence = report["roles"][role] = verify_container(info, raw, image, fixture, role)
+            evidence = report["roles"][role] = verify_container(
+                info, raw, image, fixture, role, nas_root_worker=nas_root_worker,
+            )
             check_paths()
             docker(["start", raw], f"start {role}")
             evidence["runtime"] = rpc(role, "attest")
@@ -858,8 +885,11 @@ def main(argv=None):
     parser.add_argument("--data-root", required=True, help="existing absolute media mount path on this host")
     parser.add_argument("--image", required=True, help="already loaded image ID or repository digest")
     parser.add_argument("--candidate-sha", required=True, help="full org.opencontainers.image.revision expected")
+    parser.add_argument("--nas-root-worker", action="store_true",
+                        help="opt in to 0:10000 Worker with only DAC_OVERRIDE (scratch fixture only)")
     args = parser.parse_args(argv)
     report = {"status": FAIL, "zero_exit_required": True, "candidate_sha": args.candidate_sha,
+              "nas_root_worker": args.nas_root_worker, "expected_worker_uid": 0 if args.nas_root_worker else WORKER,
               "requested_image": args.image, "roles": {}, "cases": {}, "removed_containers": [], "container_cleanup": {},
               "namespace_exclusive_custody_proven": False, "release_ready": False,
               "limits": ["External writers must stay paused throughout execution, cleanup, and recovery.",
@@ -885,7 +915,8 @@ def main(argv=None):
             fixturefd = create_fixture(stack, rootfd, fixture, report)
             publish_report(fixturefd, {**report, "status": "INCOMPLETE"})
             config_fd = new_dir(stack, fixturefd, "config", API, GROUP, 0o2770)
-            data_fd = new_dir(stack, fixturefd, "data", WORKER, GROUP, 0o750)
+            data_fd = new_dir(stack, fixturefd, "data",
+                              0 if args.nas_root_worker else WORKER, GROUP, 0o750)
             config_subdirs = provision_config_directories(stack, config_fd)
             report["config_files"] = provision_config_files(stack, config_fd)
             report["config_layout"] = {
@@ -898,7 +929,8 @@ def main(argv=None):
                 for name, fd in config_subdirs.items()
             }
             children = {"config": config_fd, "data": data_fd}
-            run_containers(rootfd, fixturefd, fixture, children, config_subdirs, image, report)
+            run_containers(rootfd, fixturefd, fixture, children, config_subdirs, image, report,
+                           nas_root_worker=args.nas_root_worker)
             require(set(report["cases"]) == set(GROUPS) and all(r.get("complete") for r in report["cases"].values())
                     and len(report["removed_containers"]) == 2, "case or container cleanup evidence incomplete")
             report["status"] = PASS

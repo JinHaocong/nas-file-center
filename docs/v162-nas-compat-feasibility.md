@@ -85,3 +85,42 @@ can Release Validation and independent review approve a production overlay.
 **Current state:** development branch only; PR #406 remains Draft. No production
 image, Komodo update, NAS write, ACL migration or real-media test is authorized
 by this document.
+
+
+## One-shot ZOS/zfuse same-mount lifecycle acceptance (prepared, not executed)
+
+The existing durable full-lifecycle driver
+\`scripts/v16_nas_maintenance_acceptance.py\` now accepts
+\`--nas-root-worker\` for the owner-approved **disposable** NAS test.
+It retains the original non-root mode when the flag is omitted. The root
+mode creates a fresh randomly named fixture beneath one existing explicitly
+approved scratch parent, mounts only that fixture's fresh \`data\` and
+\`config\` children into two no-network temporary containers, and requires
+an immutable candidate Docker image ID/revision. API stays UID 10001,
+\`/data:ro\`, no caps; Worker uses UID 0:GID 10000 plus only DAC_OVERRIDE.
+
+The tool exercises the real API, synthetic P/V grouping, real WorkJob
+execution, interrupted publication recovery, explicitly confirmed cleanup,
+cleanup recovery, and a zero-change second preview. It retains the
+\`acceptance-report.json\` and fixture evidence for review; do not
+automatically delete the fixture or manually remove unknown leftovers.
+The existing script confirms container identity before force-removing
+only its own test containers.
+
+**Requires a separately agreed existing scratch parent on the same ZOS mount,
+a locally loaded exact-commit candidate Docker image, a stopped external
+writer window and explicit permission to write scratch files.** Not a
+generic command to run against original media. A pass is an NAS scratch
+compatibility observation, not proof against hostile concurrent writers.
+
+Illustrative *after explicit approval* (placeholders are not executable):
+
+\`\`\`bash
+sudo python3 scripts/v16_nas_maintenance_acceptance.py \
+  --data-root "/approved/existing/disposable-scratch-parent" \
+  --image "sha256:<immutable-built-candidate-image-id>" \
+  --candidate-sha "<exact-40-char-PR-commit>" \
+  --nas-root-worker
+\`\`\`
+
+No task has been started against the owner's NAS or current Komodo stack.
