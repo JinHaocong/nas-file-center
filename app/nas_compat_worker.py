@@ -36,7 +36,7 @@ def is_nas_compat_root_worker(settings=None) -> bool:
     try:
         if (os.getresuid() != (0, 0, 0)
                 or os.getresgid() != (_SHARED_GID, _SHARED_GID, _SHARED_GID)
-                or os.getgroups()
+                or any(group != _SHARED_GID for group in os.getgroups())
                 or os.environ.get("NFC_SHARED_CONFIG_GID") != str(_SHARED_GID)
                 or os.environ.get("MEDIA_ORGANIZER_EXECUTION_MODE") != "maintenance_window"):
             return False
@@ -79,5 +79,5 @@ def verify_worker_runtime(settings) -> None:
             observed = {"diagnostic_error": type(exc).__name__}
         raise PermissionError(
             "NAS compatibility Worker must run as 0:10000 with only effective DAC_OVERRIDE, "
-            f"no supplementary groups and no-new-privileges; observed={observed}"
+            f"no extra supplementary groups and no-new-privileges; observed={observed}"
         )
