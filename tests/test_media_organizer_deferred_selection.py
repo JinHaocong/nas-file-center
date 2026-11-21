@@ -99,5 +99,10 @@ def test_deferred_eligibility_handles_only_permission_denied(private_tree, monke
     config.nas_compat_api_deferred_selection_enabled = False
     monkeypatch.setattr(authority, "_open_directory_nofollow",
         lambda *_: (_ for _ in ()).throw(PermissionError(errno.EACCES, "private")))
-    with pytest.raises(PermissionError):
+    # With the opt-in disabled, the strict scope verifier must reject the
+    # inaccessible path before the API reaches the directory-open fallback.
+    # _check_scope wraps EACCES as a ValueError, not PermissionError.
+    monkeypatch.setattr(authority, "_open_directory_nofollow",
+        lambda *_: pytest.fail("disabled compatibility unexpectedly opened a directory"))
+    with pytest.raises(ValueError, match="missing or inaccessible directory"):
         authority.check_api_eligibility(config, unit, (unit,))
