@@ -65,7 +65,19 @@ def verify_worker_runtime(settings) -> None:
     if getattr(settings, "media_organizer_execution_mode", "strict") != "maintenance_window":
         raise PermissionError("NAS compatibility Root Worker requires maintenance_window mode")
     if not is_nas_compat_root_worker(settings):
+        try:
+            status = _status()
+            observed = {
+                "uid": os.getresuid(), "gid": os.getresgid(), "groups": os.getgroups(),
+                "CapInh": status.get("CapInh"), "CapPrm": status.get("CapPrm"),
+                "CapEff": status.get("CapEff"), "CapBnd": status.get("CapBnd"),
+                "CapAmb": status.get("CapAmb"), "NoNewPrivs": status.get("NoNewPrivs"),
+                "shared_gid": os.environ.get("NFC_SHARED_CONFIG_GID"),
+                "execution_mode": os.environ.get("MEDIA_ORGANIZER_EXECUTION_MODE"),
+            }
+        except Exception as exc:
+            observed = {"diagnostic_error": type(exc).__name__}
         raise PermissionError(
             "NAS compatibility Worker must run as 0:10000 with only effective DAC_OVERRIDE, "
-            "no supplementary groups and no-new-privileges"
+            f"no supplementary groups and no-new-privileges; observed={observed}"
         )
