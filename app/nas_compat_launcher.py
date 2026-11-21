@@ -11,9 +11,13 @@ safety of other WorkJobs, a ZOS/FUSE compatibility result or deployment approval
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import ctypes
+import json
 import os
+from pathlib import Path
 import sys
+from typing import Iterator
 
 
 _CAP_DAC_OVERRIDE = 1
@@ -25,6 +29,9 @@ _CAPABILITY_V3 = 0x20080522
 _PR_SET_KEEPCAPS = 8
 _PR_CAP_AMBIENT = 47
 _PR_CAP_AMBIENT_RAISE = 2
+_PR_CAP_AMBIENT_CLEAR_ALL = 4
+_APPROVED_KINDS = frozenset(('media-organizer-preview', 'media-organizer-execute', 'media-organizer-cleanup'))
+_MUTATION_KINDS = frozenset(('media-organizer-execute', 'media-organizer-cleanup'))
 
 
 class _Header(ctypes.Structure):
@@ -114,17 +121,121 @@ def _drop_to_worker(uid: int, gid: int) -> None:
     assert_nas_compat_worker_identity(uid, gid)
 
 
-def assert_nas_compat_worker_identity(uid: int, gid: int) -> None:
-    """Fail closed when effective privileges/UID changed from approved profile."""
+def assert_nas_compat_worker_identity(uid: int, gid: int, *, phase: str = "handoff") -> None:
+    """Validate the exact non-root identity and capability state.
+
+    handoff: transient elevated state immediately after the root->UID drop;
+    parked: normal Worker with DAC permitted but NOT effective or ambient;
+    scoped: one explicitly approved foreground media-handler call only.
+    """
     if (os.getresuid() != (uid, uid, uid)
             or os.getresgid() != (gid, gid, gid)
             or os.getgroups()
             or _status().get("NoNewPrivs", "").strip() != "1"):
         raise PermissionError("NAS_COMPAT: unexpected runtime identity")
-    inh, prm, eff, bnd, amb = _capsets()
-    if ((inh, prm, eff, amb) != (_DAC_MASK,) * 4
-            or bnd != _STARTUP_MASK):
+    expected = {
+        "handoff": (_DAC_MASK, _DAC_MASK, _DAC_MASK, _STARTUP_MASK, _DAC_MASK),
+        "parked": (0, _DAC_MASK, 0, _STARTUP_MASK, 0),
+        "scoped": (0, _DAC_MASK, _DAC_MASK, _STARTUP_MASK, 0),
+    }.get(phase)
+    if expected is None or _capsets() != expected:
         raise PermissionError("NAS_COMPAT: capability set does not match approved profile")
+
+
+def park_nas_compat_runtime() -> None:
+    """First action after exec: clear ambient/effective before app.worker imports."""
+    if (os.environ.get("NFC_NAS_COMPAT_WORKER_ENABLED") != "true"
+            or os.environ.get("MEDIA_ORGANIZER_EXECUTION_MODE") != "maintenance_window"):
+        raise PermissionError("NAS_COMPAT: unapproved startup mode")
+    uid, gid = _uid("NFC_NAS_COMPAT_WORKER_UID"), _uid("NFC_NAS_COMPAT_WORKER_GID")
+    assert_nas_compat_worker_identity(uid, gid, phase="handoff")
+    libc = _libc()
+    _checked(libc.prctl(_PR_CAP_AMBIENT, _PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0),
+             "clear ambient")
+    header = _Header(_CAPABILITY_V3, 0)
+    data = (_Data * 2)()
+    _checked(libc.capget(ctypes.byref(header), data), "capget")
+    if data[0].permitted != _DAC_MASK or data[1].permitted != 0:
+        raise PermissionError("NAS_COMPAT: inherited unexpected permissions")
+    data[0] = _Data(0, _DAC_MASK, 0)
+    data[1] = _Data()
+    _checked(libc.capset(ctypes.byref(header), data), "capset park")
+    assert_nas_compat_worker_identity(uid, gid, phase="parked")
+
+
+def _set_job_dac_effective(enable: bool) -> None:
+    """Change only this handler thread's effective DAC bit."""
+    uid, gid = _uid("NFC_NAS_COMPAT_WORKER_UID"), _uid("NFC_NAS_COMPAT_WORKER_GID")
+    assert_nas_compat_worker_identity(uid, gid, phase="parked" if enable else "scoped")
+    libc = _libc()
+    header = _Header(_CAPABILITY_V3, 0)
+    data = (_Data * 2)()
+    _checked(libc.capget(ctypes.byref(header), data), "capget")
+    if (data[0].permitted != _DAC_MASK or data[0].inheritable != 0
+            or data[1].permitted != 0 or data[1].effective != 0
+            or data[1].inheritable != 0):
+        raise PermissionError("NAS_COMPAT: unexpected thread capabilities")
+    data[0] = _Data(_DAC_MASK if enable else 0, _DAC_MASK, 0)
+    data[1] = _Data()
+    _checked(libc.capset(ctypes.byref(header), data), "capset scoped DAC")
+    assert_nas_compat_worker_identity(uid, gid, phase="scoped" if enable else "parked")
+
+
+def _approved_media_job(job, settings) -> bool:
+    """Never elevate arbitrary jobs, failed tasks, or unapproved media writes."""
+    if job.kind not in _APPROVED_KINDS:
+        return False
+    if job.status != "running" or type(job.id) is not int or job.id <= 0:
+        raise PermissionError("NAS_COMPAT: approved job must be running")
+    try:
+        state = json.loads(job.state_json or "{}")
+    except (TypeError, ValueError) as exc:
+        raise PermissionError("NAS_COMPAT: invalid frozen job evidence") from exc
+    if not isinstance(state, dict) or state.get("execution_mode") != "maintenance_window":
+        raise PermissionError("NAS_COMPAT: incorrect frozen job mode")
+    unit = state.get("unit" if job.kind in _MUTATION_KINDS else "selection")
+    if (not isinstance(unit, str) or not unit.startswith("/")
+            or ".." in Path(unit).parts or os.path.normpath(unit) != unit
+            or "\x00" in unit
+            or not any(Path(unit).is_relative_to(root) for root in settings.allowed_roots)):
+        raise PermissionError("NAS_COMPAT: invalid job scope")
+    if job.kind in _MUTATION_KINDS:
+        if (state.get("maintenance_window_confirmed") is not True
+                or type(state.get("approved_job_id")) is not int
+                or state["approved_job_id"] != job.id
+                or not isinstance(state.get("confirmation"), str)
+                or not state["confirmation"]
+                or not all(getattr(settings, key, False) is True for key in (
+                    "media_organizer_execution_enabled", "allow_mutation", "allow_delete",
+                ))):
+            raise PermissionError("NAS_COMPAT: missing job-bound mutation approval")
+    return True
+
+
+@contextmanager
+def scoped_nas_compat_job(job, settings) -> Iterator[None]:
+    """Raise effective DAC only for an approved semantic-media WorkJob.
+
+    If revocation fails, terminate immediately. A conventional exception
+    handler must never continue with a potentially elevated capability.
+    """
+    verify_optional_worker_runtime()
+    if os.environ.get("NFC_NAS_COMPAT_WORKER_ENABLED", "false") != "true":
+        yield
+        return
+    if not _approved_media_job(job, settings):
+        yield
+        verify_optional_worker_runtime()
+        return
+    _set_job_dac_effective(True)
+    try:
+        yield
+    finally:
+        try:
+            _set_job_dac_effective(False)
+            verify_optional_worker_runtime()
+        except BaseException:
+            os._exit(70)
 
 
 def verify_optional_worker_runtime() -> None:
@@ -138,6 +249,7 @@ def verify_optional_worker_runtime() -> None:
         raise PermissionError("NAS_COMPAT: runtime is not maintenance-window mode")
     assert_nas_compat_worker_identity(
         _uid("NFC_NAS_COMPAT_WORKER_UID"), _uid("NFC_NAS_COMPAT_WORKER_GID"),
+        phase="parked",
     )
 
 
@@ -154,7 +266,7 @@ def main() -> None:
     _drop_to_worker(uid, gid)
     # The only production command is fixed; no shell or arbitrary command
     # is accepted from request content, CLI args or environment.
-    os.execv(sys.executable, [sys.executable, "-m", "app.worker"])
+    os.execv(sys.executable, [sys.executable, "-m", "app.nas_compat_runtime_entry"])
 
 
 if __name__ == "__main__":

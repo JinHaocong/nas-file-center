@@ -161,3 +161,40 @@ Remaining: inspect how ambient DAC_OVERRIDE affects **all** Worker job types,
 complete the cleanup and hostile-writer security review (#399–#403),
 get independent reviewer approval, and perform a separately owner-approved
 same-mount ZOS disposable validation before adding any production overlay.
+
+
+## Task-scoped DAC capability (experimental safety boundary)
+
+The earlier prototype kept DAC_OVERRIDE effective/ambient in the entire Worker
+process. That was unacceptable even for a candidate because unrelated
+scheduled jobs, archive operations and child processes would inherit or use
+it. The revised **default-off** prototype now performs a two-step handoff:
+
+1. A fixed, root-started launcher drops to UID 10002/GID 10000 with
+   DAC_OVERRIDE in the permitted and ambient sets ONLY long enough to exec a
+   tiny `app.nas_compat_runtime_entry` module.
+2. That module immediately clears *ambient*, *inheritable* and *effective*
+   DAC_OVERRIDE before importing any Worker task/DB/scheduler modules.
+   After startup, `CapPrm=0x2, CapEff=0, CapInh=0, CapAmb=0`. A new
+   exec'd child has no effective DAC permission.
+3. Only the foreground handler for a named
+   `media-organizer-preview`, `media-organizer-execute` or
+   `media-organizer-cleanup` WorkJob may temporarily raise CapEff to
+   `0x2`. Execute and cleanup require the independent mutation flags,
+   exact WorkJob ID, nonempty confirmation and literal job-specific
+   maintenance-window acknowledgement. Ordinary jobs never raise DAC.
+4. The handler finally block revokes CapEff and rechecks the parked identity;
+   an unexpected failure to revoke terminates the Worker rather than
+   proceeding with privileged failure logging. Scheduler, cleanup hooks,
+   SQLite, heartbeat and normal jobs run without effective DAC.
+
+**Security limitation remains:** DAC_OVERRIDE stays in the permitted set
+throughout the Worker process and can be re-enabled by compromised Python
+code. Per-job gating is a defense-in-depth restriction, not a kernel-enforced
+least-privilege guarantee. A separate narrowly confined helper may still be
+required for release. In particular, no code/CI result yet proves hostile
+root writer exclusion, ZOS/FUSE capability behavior or safe final cleanup.
+
+The CI scratch probe tests root-owned DAC access **only during** the scoped
+WorkJob, no ordinary access before/after, and zero CapEff in an exec'd child.
+This is isolated synthetic evidence, NOT NAS acceptance or release approval.
