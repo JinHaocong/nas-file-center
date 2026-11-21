@@ -84,6 +84,19 @@ test('publication recovery uses authenticated execution eligibility without re-r
   assert.ok(html.includes('使用原冻结清单申请安全恢复'));
 });
 
+test('pre-freeze failure hides unusable recovery and directs to fresh preview', () => {
+  const reason = '未形成可验证的冻结检查点，不能自动恢复。请保留证据并重新只读扫描。';
+  const html = renderRoute({
+    ...fixtureExecution(), status: 'failed', manual_cleanup_required: false,
+    error: 'maintenance parent is not writable by the Worker',
+    recovery_available: false, recovery_unavailable_reason: reason,
+  });
+  assert.ok(html.includes(reason));
+  assert.ok(!html.includes('RECOVER_MEDIA_ORGANIZER_EXECUTION_17'));
+  assert.ok(!html.includes('使用原冻结清单申请安全恢复'));
+});
+
+
 test('partial cleanup never claims that all original and staged entries are retained', () => {
   const pending = renderRoute(fixtureExecution());
   assert.ok(pending.includes('均已保留'), 'publication-only status describes retained inputs');

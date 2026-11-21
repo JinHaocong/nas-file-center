@@ -93,6 +93,9 @@ export interface SemanticExecutionStatus extends SemanticExecutionAssurance {
   preview_job_id: number;
   unit: string;
   recovery_of_job_id: number | null;
+  /** Server-proven frozen-checkpoint eligibility; false blocks any recovery form. */
+  recovery_available?: boolean;
+  recovery_unavailable_reason?: string | null;
   manual_cleanup_required: boolean;
   finalized: boolean;
   publication_complete: boolean;

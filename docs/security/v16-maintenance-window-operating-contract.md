@@ -49,6 +49,30 @@ These controls serialize NFC work and detect many identity/evidence changes. The
 
 Therefore the maintenance-window contract is valid only while those external services and all other writers remain idle. Do not claim that 0700, the cooperative lock, FUSE flags or this acknowledgement technically blocks them.
 
+## V1.6.1 — mixed-owner NAS media compatibility
+
+A confirmed maintenance-window session may publish groups into a selected
+directory whose POSIX owner differs from the dedicated Worker, including
+group-writable folders and shared, non-sticky ancestors. This is **only** an
+operational exception for the live session with the frozen manifest, inode
+bindings, cooperative mutation lock and Worker lease. Strict custody keeps
+its former owner/ancestor restrictions.
+
+This change does **not** override Linux permissions: every existing selected
+unit and frozen source wrapper that the Worker mutates must actually be
+writable/searchable by Worker UID 10002. For example, root:root 0755 is still
+not writable as UID 10002; a narrowly scoped ACL or group permission on the
+specific selected directories is required. Do not recursively chmod 0777 or
+chown the entire /data media root. No source file content is modified to
+grant permission.
+
+If a job fails before any durable frozen checkpoint, there is **no verified
+recovery authority**. The API must refuse a recovery request without
+inventing a missing checkpoint or interpreting a missing execution mode as
+strict. The UI must not offer a recovery form in that case; preserve evidence,
+verify the selected directory and perform a new read-only preview. Existing
+genuine frozen/staged/published failures retain the separate recovery path.
+
 ## Failure and recovery rules
 
 If the operator cannot guarantee the pause, do not start the batch. If an unexpected external write is noticed, stop further execution and preserve the stage, originals, journals and reports for review; do not manually delete or retry. A failed job requires its separate explicit recovery flow and a renewed maintenance-window confirmation.
