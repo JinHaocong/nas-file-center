@@ -10,6 +10,7 @@ on:
   pull_request:
     branches:
       - main
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'frontend/**'
       - '.github/workflows/ui-v044-validation.yml'
@@ -26,6 +27,9 @@ jobs:
   backend-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    # Draft PRs use focused checks; full gates run when marked Ready,
+    # on subsequent Ready updates, protected pushes and workflow_dispatch.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     env:
       CONFIG_DIR: /tmp/nfc-config
       DATA_MOUNT: /tmp/nfc-data
@@ -114,6 +118,9 @@ jobs:
     # Pin the browser-only jobs; keep the actual Chromium gates enabled.
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    # Draft PRs use focused checks; full gates run when marked Ready,
+    # on subsequent Ready updates, protected pushes and workflow_dispatch.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     steps:
       - name: Checkout exact candidate HEAD
         uses: actions/checkout@v4
@@ -277,6 +284,9 @@ jobs:
   full-route-visual-audit:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    # Draft PRs use focused checks; full gates run when marked Ready,
+    # on subsequent Ready updates, protected pushes and workflow_dispatch.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     strategy:
       fail-fast: false
       matrix:
@@ -360,6 +370,9 @@ jobs:
     needs: full-route-visual-audit
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Draft PRs use focused checks; full gates run when marked Ready,
+    # on subsequent Ready updates, protected pushes and workflow_dispatch.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     steps:
       - name: Checkout exact candidate HEAD
         uses: actions/checkout@v4

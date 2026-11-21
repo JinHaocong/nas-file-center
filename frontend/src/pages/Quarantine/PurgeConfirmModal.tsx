@@ -59,6 +59,15 @@ export const PurgeConfirmModal: React.FC<Props> = ({
       return quarantineApi.purge(entry.id, { confirmation: 'DELETE' });
     },
     onSuccess: result => {
+      if (result.status === 'queued' && result.work_job_id) {
+        toast.success('永久清除任务 #' + result.work_job_id + ' 已提交 Worker 执行');
+        void queryClient.invalidateQueries({ queryKey: ['tasks'] });
+        void queryClient.invalidateQueries({ queryKey: ['quarantineList'] });
+        void queryClient.invalidateQueries({ queryKey: ['auditEvents'] });
+        onSuccess();
+        onClose();
+        return;
+      }
       setPurgeResult(result);
       toast.success('隔离文件 #' + entry?.id + ' 已按普通文件删除（unlink）语义清除');
       void queryClient.invalidateQueries({ queryKey: ['quarantineList'] });

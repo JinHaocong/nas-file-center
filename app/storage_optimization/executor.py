@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import stat
 import time
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
@@ -21,6 +21,7 @@ from app.models import AuditEvent, BatchPlan, BatchPlanItem, OperationJournal, W
 from app.storage_optimization.capability import (
     FICLONE,
     StorageOptimizationCapability,
+    _hold_probe_custody,
     probe_hardlink_between,
     probe_hardlink_capability,
     probe_reflink_between,
@@ -314,6 +315,7 @@ def _phase_journal(
     phase: str,
     task_id: int,
     user_id: int | None,
+    namespace_fence: Callable[[], None],
     after: dict[str, Any] | None = None,
     terminal_audit: bool = False,
 ) -> None:
@@ -384,6 +386,9 @@ def _phase_journal(
                     ),
                 )
             )
+        # Keep the external proof live at the actual journal write boundary.
+        # This fence must not renew through a second SQLite write transaction.
+        namespace_fence()
         session.commit()
 
 
@@ -432,9 +437,10 @@ def _open_regular(
     *,
     flags: int = os.O_RDONLY,
 ) -> int:
+    # A raced FIFO must not block before the caller's fstat/type check.
     return os.open(
         name,
-        flags | getattr(os, "O_NOFOLLOW", 0),
+        flags | getattr(os, "O_NOFOLLOW", 0) | os.O_NONBLOCK,
         dir_fd=parent_fd,
     )
 
@@ -614,6 +620,7 @@ def _create_new(
     manifest: dict[str, Any],
     session_factory: sessionmaker,
     worker_id: str,
+    mutation_fence: Callable[[], None],
 ) -> os.stat_result:
     new_name = str(manifest["new_name"])
     if _stat_optional(source_parent_fd, new_name) is not None:
@@ -626,7 +633,7 @@ def _create_new(
             worker_id=worker_id,
         )
 
-    renew_and_assert_worker_lease(session_factory, worker_id)
+    mutation_fence()
     if manifest["operation"] == "hardlink_optimize":
         os.link(
             keep_name,
@@ -639,6 +646,7 @@ def _create_new(
         flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         new_fd = os.open(new_name, flags, 0o600, dir_fd=source_parent_fd)
         try:
+            mutation_fence()
             fcntl.ioctl(new_fd, FICLONE, keep_fd)
             os.fsync(new_fd)
             # Full descriptor-bound verification before any SOURCE retirement.
@@ -656,6 +664,7 @@ def _create_new(
             frozen_source = FrozenFileMetadata.from_json_dict(
                 manifest["frozen_source_metadata"]
             )
+            mutation_fence()
             apply_frozen_metadata_fd(new_fd, frozen_source)
             os.fsync(new_fd)
         finally:
@@ -676,6 +685,7 @@ def _ensure_initial_capability(
     manifest: dict[str, Any],
     *,
     allowed_roots: Iterable[Path | str],
+    mutation_fence: Callable[[], None],
 ) -> None:
     keep_parent = Path(str(manifest["keep_path"])).parent
     source_parent = Path(str(manifest["source_path"])).parent
@@ -684,12 +694,14 @@ def _ensure_initial_capability(
             keep_parent,
             source_parent,
             allowed_roots,
+            mutation_fence=mutation_fence,
         )
     else:
         action_probe = probe_reflink_between(
             keep_parent,
             source_parent,
             allowed_roots,
+            mutation_fence=mutation_fence,
         )
     if action_probe.capability is not StorageOptimizationCapability.SUPPORTED:
         raise StateConflictError(
@@ -697,7 +709,9 @@ def _ensure_initial_capability(
             f"{action_probe.capability.value.upper()}:{action_probe.reason}"
         )
 
-    local_probe = probe_hardlink_capability(source_parent, allowed_roots)
+    local_probe = probe_hardlink_capability(
+        source_parent, allowed_roots, mutation_fence=mutation_fence,
+    )
     if local_probe.capability is not StorageOptimizationCapability.SUPPORTED:
         raise StateConflictError(
             "STORAGE_OPTIMIZATION_EXECUTE_LOCAL_PUBLISH_"
@@ -795,6 +809,44 @@ def execute_storage_optimization(
                 raise StateConflictError("STORAGE_OPTIMIZATION_COMPLETED_OLD_ANCHOR_REAPPEARED")
             return f"{manifest['storage_action']} optimization already completed"
 
+        initial_capability_needed = (
+            published is None and existing_new is None and existing_old is None
+            and "prepared_new" not in journals
+        )
+        if initial_capability_needed:
+            # Preserve the read-only frozen-source and reclaim preflight before
+            # requesting mutation authority. None of these checks grants it.
+            fresh_source_stat = _qualify_original(
+                source_parent_fd,
+                source_name,
+                manifest,
+                session_factory=session_factory,
+                worker_id=worker_id,
+                failure_prefix="STORAGE_OPTIMIZATION_SOURCE",
+            )
+            _assert_link_count(
+                fresh_source_stat,
+                1,
+                "STORAGE_OPTIMIZATION_SOURCE_HAS_ADDITIONAL_HARDLINKS",
+            )
+
+        # Read-only reconciliation above may inspect a completed transaction.
+        # Every remaining path, including .new/.old/published recovery, needs
+        # held external namespace custody before extending journal authority
+        # or performing any name-based media mutation.
+        def renew_lease() -> None:
+            renew_and_assert_worker_lease(session_factory, worker_id)
+
+        renew_lease()
+        namespace_fence = _hold_probe_custody(stack, (
+            (source_path.parent, os.fstat(source_parent_fd)),
+            (keep_path.parent, os.fstat(keep_parent_fd)),
+        ), None)
+
+        def mutation_fence() -> None:
+            renew_lease()
+            namespace_fence()
+
         # Once publication has a durable journal, recovery must never create a
         # fresh .new candidate. The published pathname itself is now the
         # authoritative optimized copy; only NFC-owned aliases may remain.
@@ -832,7 +884,7 @@ def execute_storage_optimization(
                     session_factory=session_factory,
                     worker_id=worker_id,
                 )
-                renew_and_assert_worker_lease(session_factory, worker_id)
+                mutation_fence()
                 os.unlink(new_name, dir_fd=source_parent_fd)
                 os.fsync(source_parent_fd)
 
@@ -843,6 +895,7 @@ def execute_storage_optimization(
                 phase="old_retire_intent",
                 task_id=task_id,
                 user_id=user_id,
+                namespace_fence=namespace_fence,
                 after={},
             )
             old_stat = _stat_optional(source_parent_fd, old_name)
@@ -864,7 +917,7 @@ def execute_storage_optimization(
                     session_factory=session_factory,
                     worker_id=worker_id,
                 )
-                renew_and_assert_worker_lease(session_factory, worker_id)
+                mutation_fence()
                 os.unlink(old_name, dir_fd=source_parent_fd)
                 os.fsync(source_parent_fd)
 
@@ -875,6 +928,7 @@ def execute_storage_optimization(
                 phase="completed",
                 task_id=task_id,
                 user_id=user_id,
+                namespace_fence=namespace_fence,
                 after={"published_identity": published_identity},
                 terminal_audit=True,
             )
@@ -883,25 +937,11 @@ def execute_storage_optimization(
         # A fresh transaction must prove capability immediately before creating
         # its first private optimized candidate. Recovery of an already-created
         # .new/.old transaction never invents new capability authority.
-        if (
-            _stat_optional(source_parent_fd, new_name) is None
-            and _stat_optional(source_parent_fd, old_name) is None
-            and "prepared_new" not in journals
-        ):
-            fresh_source_stat = _qualify_original(
-                source_parent_fd,
-                source_name,
-                manifest,
-                session_factory=session_factory,
-                worker_id=worker_id,
-                failure_prefix="STORAGE_OPTIMIZATION_SOURCE",
+        if initial_capability_needed:
+            _ensure_initial_capability(
+                manifest, allowed_roots=allowed_roots,
+                mutation_fence=mutation_fence,
             )
-            _assert_link_count(
-                fresh_source_stat,
-                1,
-                "STORAGE_OPTIMIZATION_SOURCE_HAS_ADDITIONAL_HARDLINKS",
-            )
-            _ensure_initial_capability(manifest, allowed_roots=allowed_roots)
             _phase_journal(
                 session_factory,
                 worker_id=worker_id,
@@ -909,6 +949,7 @@ def execute_storage_optimization(
                 phase="prepare_new_intent",
                 task_id=task_id,
                 user_id=user_id,
+                namespace_fence=namespace_fence,
                 after={},
             )
             journals = _journals(session_factory, manifest)
@@ -928,6 +969,7 @@ def execute_storage_optimization(
             manifest=manifest,
             session_factory=session_factory,
             worker_id=worker_id,
+            mutation_fence=mutation_fence,
         )
         _phase_journal(
             session_factory,
@@ -936,6 +978,7 @@ def execute_storage_optimization(
             phase="prepared_new",
             task_id=task_id,
             user_id=user_id,
+            namespace_fence=namespace_fence,
             after={"new_identity": _identity(new_stat)},
         )
         journals = _journals(session_factory, manifest)
@@ -955,6 +998,7 @@ def execute_storage_optimization(
                 phase="capture_old_intent",
                 task_id=task_id,
                 user_id=user_id,
+                namespace_fence=namespace_fence,
                 after={},
             )
             journals = _journals(session_factory, manifest)
@@ -971,7 +1015,7 @@ def execute_storage_optimization(
                 1,
                 "STORAGE_OPTIMIZATION_SOURCE_HAS_ADDITIONAL_HARDLINKS",
             )
-            renew_and_assert_worker_lease(session_factory, worker_id)
+            mutation_fence()
             os.link(
                 source_name,
                 old_name,
@@ -1043,6 +1087,7 @@ def execute_storage_optimization(
             phase="captured_old",
             task_id=task_id,
             user_id=user_id,
+            namespace_fence=namespace_fence,
             after={"old_identity": _identity(old_stat)},
         )
         journals = _journals(session_factory, manifest)
@@ -1064,6 +1109,7 @@ def execute_storage_optimization(
                 phase="source_retire_intent",
                 task_id=task_id,
                 user_id=user_id,
+                namespace_fence=namespace_fence,
                 after={},
             )
             source_before_retire = _qualify_original(
@@ -1079,7 +1125,7 @@ def execute_storage_optimization(
                 2,
                 "STORAGE_OPTIMIZATION_SOURCE_LINK_COUNT_CHANGED_BEFORE_RETIRE",
             )
-            renew_and_assert_worker_lease(session_factory, worker_id)
+            mutation_fence()
             os.unlink(source_name, dir_fd=source_parent_fd)
             os.fsync(source_parent_fd)
             old_after_retire = _qualify_original(
@@ -1102,6 +1148,7 @@ def execute_storage_optimization(
                 phase="source_retired",
                 task_id=task_id,
                 user_id=user_id,
+                namespace_fence=namespace_fence,
                 after={},
             )
             source_stat = None
@@ -1119,6 +1166,7 @@ def execute_storage_optimization(
                     phase="publish_intent",
                     task_id=task_id,
                     user_id=user_id,
+                    namespace_fence=namespace_fence,
                     after={},
                 )
                 journals = _journals(session_factory, manifest)
@@ -1130,7 +1178,7 @@ def execute_storage_optimization(
                     session_factory=session_factory,
                     worker_id=worker_id,
                 )
-                renew_and_assert_worker_lease(session_factory, worker_id)
+                mutation_fence()
                 os.link(
                     new_name,
                     source_name,
@@ -1194,6 +1242,7 @@ def execute_storage_optimization(
                 phase="published",
                 task_id=task_id,
                 user_id=user_id,
+                namespace_fence=namespace_fence,
                 after={"published_identity": published_identity},
             )
             published = _journals(session_factory, manifest).get("published")
@@ -1226,7 +1275,7 @@ def execute_storage_optimization(
                 int(source_stat.st_ino),
             ):
                 raise StateConflictError("STORAGE_OPTIMIZATION_NEW_ALIAS_FOREIGN")
-            renew_and_assert_worker_lease(session_factory, worker_id)
+            mutation_fence()
             os.unlink(new_name, dir_fd=source_parent_fd)
             os.fsync(source_parent_fd)
 
@@ -1237,6 +1286,7 @@ def execute_storage_optimization(
             phase="old_retire_intent",
             task_id=task_id,
             user_id=user_id,
+            namespace_fence=namespace_fence,
             after={},
         )
 
@@ -1266,7 +1316,7 @@ def execute_storage_optimization(
                 session_factory=session_factory,
                 worker_id=worker_id,
             )
-            renew_and_assert_worker_lease(session_factory, worker_id)
+            mutation_fence()
             os.unlink(old_name, dir_fd=source_parent_fd)
             os.fsync(source_parent_fd)
 
@@ -1277,6 +1327,7 @@ def execute_storage_optimization(
             phase="completed",
             task_id=task_id,
             user_id=user_id,
+            namespace_fence=namespace_fence,
             after={"published_identity": published_identity},
             terminal_audit=True,
         )

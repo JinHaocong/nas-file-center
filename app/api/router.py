@@ -38,9 +38,10 @@ from app.media.catalog import (
 from app.media.corrupt_delete import build_corrupt_delete_preview, create_corrupt_delete_plan
 from app.path_safety import UnsafePathError
 from app.scanners.diagnostics import diagnose_duplicate_pair
-from app.storage_optimization.capability import (
-    probe_storage_optimization_between,
-    probe_storage_optimization_capabilities,
+from app.storage_optimization.jobs import (
+    enqueue_plan_validation,
+    enqueue_storage_optimization_probe,
+    plan_requires_worker_validation,
 )
 from app.service import StateConflictError
 from app.planning.dedupe_preview import (
@@ -861,11 +862,13 @@ def diagnose_scan_pair(request: Request, payload: DedupeDiagnosticRequest):
 
 @router.post(
     "/storage-optimization/capabilities",
+    status_code=202,
     dependencies=[Depends(require_admin_user)],
 )
 def storage_optimization_capabilities(
     request: Request,
     payload: StorageOptimizationCapabilityRequest,
+    admin_user: User = Depends(require_admin_user),
 ):
     settings = request.app.state.settings
     if not settings.allow_mutation:
@@ -873,18 +876,15 @@ def storage_optimization_capabilities(
             status_code=409,
             detail="Storage capability probe requires ALLOW_MUTATION=true",
         )
-    if payload.directory is not None:
-        return probe_storage_optimization_capabilities(
-            payload.directory,
-            settings.allowed_roots,
+    try:
+        return enqueue_storage_optimization_probe(
+            request.app.state.service.SessionLocal,
+            settings,
+            payload,
+            user_id=admin_user.id,
         )
-    assert payload.source_directory is not None
-    assert payload.destination_directory is not None
-    return probe_storage_optimization_between(
-        payload.source_directory,
-        payload.destination_directory,
-        settings.allowed_roots,
-    )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/scans/{scan_job_id}")
@@ -1734,9 +1734,21 @@ def validate(
 ):
     _require_restricted_plan_admin(request, plan_id, current_user)
     try:
+        if plan_requires_worker_validation(request.app.state.service.SessionLocal, plan_id):
+            queued = enqueue_plan_validation(
+                request.app.state.service.SessionLocal,
+                plan_id,
+                user_id=current_user.id,
+            )
+            return JSONResponse(status_code=202, content=queued)
+        # Non-storage plans are read-only during validation and retain their
+        # historical synchronous API contract. Only live hardlink/reflink
+        # capability probes are delegated to the Worker.
         return request.app.state.service.validate_plan(plan_id)
     except KeyError as exc:
         raise HTTPException(404, "plan not found") from exc
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -2017,7 +2029,7 @@ def update_quarantine_retention_policy(
         raise HTTPException(400, str(exc)) from exc
 
 
-@router.post("/quarantine/records/bulk-delete")
+@router.post("/quarantine/records/bulk-delete", status_code=202)
 def bulk_delete_quarantine_records(
     request: Request,
     payload: QuarantineRecordBulkDeleteRequest,
@@ -2061,7 +2073,7 @@ def quarantine_recovery_diagnostic(
         raise HTTPException(404, str(exc)) from exc
 
 
-@router.post("/quarantine/{id}/restore")
+@router.post("/quarantine/{id}/restore", status_code=202)
 def restore_quarantine_entry(
     request: Request,
     id: int,
@@ -2069,7 +2081,7 @@ def restore_quarantine_entry(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        return request.app.state.service.restore_quarantine_entry(
+        return request.app.state.service.enqueue_quarantine_restore(
             id,
             conflict_policy=payload.conflict_policy,
             custom_target=payload.custom_target,
@@ -2157,7 +2169,7 @@ def cleanup_missing_quarantine_record(
         raise HTTPException(400, str(exc)) from exc
 
 
-@router.delete("/quarantine/{id}/record")
+@router.delete("/quarantine/{id}/record", status_code=202)
 def delete_quarantine_record(
     request: Request,
     id: int,
@@ -2181,7 +2193,7 @@ def delete_quarantine_record(
         raise HTTPException(400, str(exc)) from exc
 
 
-@router.post("/quarantine/{id}/purge")
+@router.post("/quarantine/{id}/purge", status_code=202)
 def purge_quarantine_entry(
     request: Request,
     id: int,
@@ -2193,6 +2205,7 @@ def purge_quarantine_entry(
             id,
             confirmation=payload.confirmation,
             is_admin=True,
+            user_id=admin_user.id,
         )
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc

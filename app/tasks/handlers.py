@@ -153,3 +153,20 @@ from app.batch.media_sort_jobs import (
 # Dedicated media-package Worker handlers for preview and confirmed execution.
 from app.batch.media_package_jobs import MediaPackagePreviewHandler as MediaPackagePreviewHandler
 from app.batch.media_package_execute_jobs import MediaPackageExecuteHandler as MediaPackageExecuteHandler
+
+# Read-only semantic media organization previews.
+from app.batch.media_organizer_jobs import MediaOrganizerPreviewHandler as MediaOrganizerPreviewHandler
+
+# Opt-in semantic execution Worker; disabled unless independent mutation gates are enabled.
+from app.batch.media_organizer_execute_jobs import MediaOrganizerExecuteHandler as MediaOrganizerExecuteHandler
+
+
+# Separate explicitly confirmed semantic cleanup/finalization WorkJob.
+# Its production namespace-custody issuer is deliberately fail-closed.
+from app.batch.media_organizer_cleanup_jobs import MediaOrganizerCleanupHandler as MediaOrganizerCleanupHandler
+
+# API-side media write probes and plan validation execute only in the Worker.
+from app.storage_optimization.jobs import (
+    PlanValidationHandler as PlanValidationHandler,
+    StorageOptimizationCapabilityProbeHandler as StorageOptimizationCapabilityProbeHandler,
+)

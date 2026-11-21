@@ -4,8 +4,17 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
 import json
+import os
 from pathlib import Path
 import sqlite3
+
+from app.config_sharing import (
+    shared_config_gid,
+    ensure_shared_database,
+    ensure_shared_init_lock,
+    pinned_directory_entry_path,
+)
+import stat
 
 from sqlalchemy import Engine, create_engine, delete, event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
@@ -15,9 +24,119 @@ from app.models import Base, FilterPolicy, IndexRoot, IndexedPath, MediaAsset, O
 from app.download_verification.models import DownloadVerificationRun, DownloadVerificationItem, DownloadVerificationSource  # Register additive tables before create_all
 
 
+DB_INIT_LOCK_NAME = "db-init.lock"
+
+
+def _shared_db_init_lock_binding(directory_fd: int, lock_file_path: Path, file_fd: int, gid: int,
+                                    directory_identity: tuple[int, int], file_identity: tuple[int, int]) -> None:
+    directory = os.fstat(directory_fd)
+    named_directory = os.stat(lock_file_path.parent, follow_symlinks=False)
+    directory_mode = stat.S_IMODE(directory.st_mode)
+    if (
+        not stat.S_ISDIR(directory.st_mode)
+        or directory.st_gid != gid
+        or (directory_mode & 0o070) != 0o070
+        or not (directory_mode & stat.S_ISGID)
+        or directory_mode & 0o007
+        or (directory.st_dev, directory.st_ino) != directory_identity
+        or (named_directory.st_dev, named_directory.st_ino) != directory_identity
+    ):
+        raise PermissionError("SHARED_CONFIG: database init lock directory binding changed")
+
+    opened = os.fstat(file_fd)
+    named = os.stat(lock_file_path.name, dir_fd=directory_fd, follow_symlinks=False)
+    for info in (opened, named):
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid == 0
+            or info.st_gid != gid
+            or stat.S_IMODE(info.st_mode) != 0o660
+            or info.st_nlink != 1
+            or (info.st_dev, info.st_ino) != file_identity
+        ):
+            raise PermissionError("SHARED_CONFIG: database init lock file binding changed")
+
+
+@contextmanager
+def _shared_db_init_lock(lock_file_path: Path, gid: int):
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    directory_flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    directory_fd = os.open(lock_file_path.parent, directory_flags)
+    file_fd = None
+    lock_file = None
+    try:
+        directory = os.fstat(directory_fd)
+        directory_identity = (directory.st_dev, directory.st_ino)
+        named_directory = os.stat(lock_file_path.parent, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(directory.st_mode)
+            or (named_directory.st_dev, named_directory.st_ino) != directory_identity
+        ):
+            raise PermissionError("SHARED_CONFIG: database init lock directory changed")
+
+        # Match the media-mutation lock order: directory first, then lock file.
+        # This also prevents cooperating API/Worker processes from replacing
+        # the lock entry while another initializer is acquiring it.
+        fcntl.flock(directory_fd, fcntl.LOCK_EX)
+        # Reuse the already locked directory FD; ZFuse requires the pinned procfd create path.
+        ensure_shared_init_lock(lock_file_path, gid, directory_fd=directory_fd)
+
+        before = os.stat(lock_file_path.name, dir_fd=directory_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid == 0
+            or before.st_gid != gid
+            or stat.S_IMODE(before.st_mode) != 0o660
+            or before.st_nlink != 1
+        ):
+            raise PermissionError("SHARED_CONFIG: unsafe database init lock entry")
+        file_identity = (before.st_dev, before.st_ino)
+
+        # This NAS zfuse mount allows stat(..., dir_fd=...) but returns ENOENT
+        # when openat() opens an existing regular file. Resolve the entry through
+        # the already-open directory FD's procfs handle instead: the directory
+        # inode remains pinned, while open() uses ordinary absolute-path lookup.
+        # The opened inode is still checked against pre/post no-follow stats
+        # before flocking or yielding. O_NONBLOCK prevents FIFO substitution
+        # from hanging the API/Worker startup path.
+        file_flags = os.O_RDWR | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+        entry_path = pinned_directory_entry_path(directory_fd, lock_file_path.name)
+        file_fd = os.open(entry_path, file_flags)
+        _shared_db_init_lock_binding(directory_fd, lock_file_path, file_fd, gid,
+                                     directory_identity, file_identity)
+        lock_file = os.fdopen(file_fd, "r+")
+        file_fd = None
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        _shared_db_init_lock_binding(directory_fd, lock_file_path, lock_file.fileno(), gid,
+                                     directory_identity, file_identity)
+        try:
+            yield
+        finally:
+            try:
+                _shared_db_init_lock_binding(directory_fd, lock_file_path, lock_file.fileno(), gid,
+                                             directory_identity, file_identity)
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    finally:
+        if lock_file is not None:
+            lock_file.close()
+        if file_fd is not None:
+            os.close(file_fd)
+        try:
+            fcntl.flock(directory_fd, fcntl.LOCK_UN)
+        finally:
+            os.close(directory_fd)
+
+
 @contextmanager
 def _db_init_lock(lock_file_path: Path):
     lock_file_path.parent.mkdir(parents=True, exist_ok=True)
+    gid = shared_config_gid()
+    if gid is not None:
+        with _shared_db_init_lock(lock_file_path, gid):
+            yield
+        return
+
     with open(lock_file_path, "w") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
@@ -32,6 +151,9 @@ def _db_init_lock(lock_file_path: Path):
 def create_engine_and_session(db_path: Path | str):
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    gid = shared_config_gid()
+    if gid is not None:
+        ensure_shared_database(db_path, gid)
     engine = create_engine(
         f"sqlite:///{db_path}",
         connect_args={"check_same_thread": False},
@@ -186,7 +308,7 @@ def init_db(
     if backups_dir is None and db_path is not None:
         backups_dir = db_path.parent / "backups"
 
-    lock_file = (db_path.parent / ".db-init.lock") if db_path else Path("/tmp/.nas-file-center-db-init.lock")
+    lock_file = (db_path.parent / DB_INIT_LOCK_NAME) if db_path else Path("/tmp/nas-file-center-db-init.lock")
 
     with _db_init_lock(lock_file):
         inspector = inspect(engine)

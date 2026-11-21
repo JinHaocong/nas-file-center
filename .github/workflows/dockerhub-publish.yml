@@ -2,11 +2,21 @@ name: Publish Docker Hub image
 
 on:
   workflow_dispatch:
+  # Main release tags remain automatic. V1.6 feature-branch candidate images
+  # require an explicit workflow_dispatch so ordinary Draft PR pushes cannot
+  # publish to Docker Hub.
   push:
     branches: [main]
     paths:
       - '.github/workflows/dockerhub-publish.yml'
+      - 'Dockerfile'
       - 'pyproject.toml'
+      - 'app/**'
+      - 'frontend/**'
+      - 'scripts/verify_v16_candidate_ci.py'
+      - 'scripts/v16_nas_maintenance_acceptance.py'
+      - 'tests/test_v16_nas_maintenance_acceptance.py'
+      - 'tests/test_v16_candidate_delivery.py'
 
 permissions:
   contents: read
@@ -16,6 +26,203 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  candidate-publish:
+    name: Build and publish isolated V1.6 candidate
+    if: github.repository == 'JinHaocong/nas-file-center' && github.ref == 'refs/heads/feature/media-organizer-v16-sdd-foundation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify candidate identity and candidate-only tag
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'JinHaocong/nas-file-center'
+          test "$GITHUB_REF" = 'refs/heads/feature/media-organizer-v16-sdd-foundation'
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          printf 'tag=kerwinjhc/nas-file-center:v1.6-candidate-%s\n' "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Require the existing authorized Docker Hub token
+        shell: bash
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$DOCKERHUB_TOKEN" ]]; then
+            echo '::error::Missing DOCKERHUB_TOKEN; candidate publication cannot proceed.'
+            exit 1
+          fi
+
+      - name: Test candidate delivery contracts
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python3 -m pip install pytest PyYAML
+          python3 -m pytest tests/test_v16_candidate_delivery.py -q
+          bash scripts/validate_v16_fresh_install_compose.sh
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and load the exact candidate image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ steps.identity.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=v1.6-candidate
+          cache-from: type=gha,scope=v16-candidate
+          cache-to: type=gha,scope=v16-candidate,mode=max
+
+      - name: Verify image and fresh non-root API bootstrap
+        id: smoke
+        shell: bash
+        env:
+          CANDIDATE_IMAGE: ${{ steps.identity.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$CANDIDATE_IMAGE")" = linux/amd64
+          test "$(docker image inspect --format '{{.Config.User}}' "$CANDIDATE_IMAGE")" = 10001:10000
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$CANDIDATE_IMAGE")" = "$GITHUB_SHA"
+          SMOKE_ID="$(docker create --network none --user 10001:10000 --read-only \
+            --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
+            --tmpfs /config:rw,nosuid,nodev,uid=10001,gid=10000,mode=2770 \
+            --tmpfs /data:ro,nosuid,nodev,uid=10002,gid=10000,mode=0550 \
+            --tmpfs /quarantine/.nas-file-center-trash:ro,nosuid,nodev,uid=10002,gid=10000,mode=2770 \
+            --tmpfs /run/nfc-recovery-secrets:rw,noexec,nosuid,nodev,uid=10001,gid=10000,mode=2770 \
+            -e CONFIG_DIR=/config -e DATA_MOUNT=/data -e ALLOWED_ROOTS=/data \
+            -e QUARANTINE_ROOT=/quarantine/.nas-file-center-trash \
+            -e NFC_SHARED_CONFIG_GID=10000 -e NFC_SECRET_OWNER_UID=10001 -e NFC_SECRET_GROUP_GID=10000 \
+            -e ALLOW_MUTATION=false -e ALLOW_DELETE=false \
+            -e MEDIA_ORGANIZER_EXECUTION_ENABLED=false -e MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK=false \
+            -e INITIAL_ADMIN_USERNAME=candidate-admin \
+            -e INITIAL_ADMIN_PASSWORD=disposable-ci-password-only "$CANDIDATE_IMAGE")"
+          cleanup() {
+            rc=$?
+            if [ "$rc" -ne 0 ]; then docker logs --tail 80 "$SMOKE_ID" || true; fi
+            docker rm -f "$SMOKE_ID" >/dev/null || true
+            exit "$rc"
+          }
+          trap cleanup EXIT
+          docker start "$SMOKE_ID" >/dev/null
+          docker exec -i "$SMOKE_ID" python - <<'PY'
+          import json, os, sqlite3, stat, time, urllib.request
+          from pathlib import Path
+          from app.config import Settings
+          assert (os.geteuid(), os.getegid()) == (10001, 10000)
+          for attempt in range(60):
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2) as response:
+                      assert response.status == 200
+                      json.load(response)
+                  break
+              except OSError:
+                  if attempt == 59:
+                      raise
+                  time.sleep(1)
+          settings = Settings()
+          assert not settings.allow_mutation and not settings.allow_delete
+          assert not settings.media_organizer_execution_enabled
+          assert not settings.media_organizer_namespace_quiescence_ack
+          with sqlite3.connect('/config/app.db') as db:
+              assert db.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
+              assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+              assert db.execute('SELECT count(*) FROM users').fetchone()[0] == 1
+              for table in ('work_jobs', 'schedules', 'quarantine_entries'):
+                  assert db.execute(f'SELECT count(*) FROM {table}').fetchone()[0] == 0
+              for name in ('app.db', 'app.db-wal', 'app.db-shm', 'db-init.lock'):
+                  info = Path('/config', name).lstat()
+                  assert (info.st_gid, stat.S_IMODE(info.st_mode)) == (10000, 0o660)
+          for name in ('reports', 'backups', 'logs', 'home'):
+              info = Path('/config', name).lstat()
+              assert (info.st_gid, stat.S_IMODE(info.st_mode)) == (10000, 0o2770)
+          print('FRESH_NONROOT_CANDIDATE_API_BOOTSTRAP_OK')
+          PY
+
+      - name: Real maintenance lifecycle on a disposable Docker fixture
+        shell: bash
+        env:
+          CANDIDATE_IMAGE: ${{ steps.identity.outputs.tag }}
+        run: |
+          set -euo pipefail
+          NFC_MAINTENANCE_ROOT="$(sudo mktemp -d /tmp/nfc-v16-maintenance-ci.XXXXXXXX)"
+          NFC_MAINTENANCE_IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$CANDIDATE_IMAGE")"
+          sudo chmod 0755 "$NFC_MAINTENANCE_ROOT"
+          sudo python3 scripts/v16_nas_maintenance_acceptance.py \
+            --data-root "$NFC_MAINTENANCE_ROOT" \
+            --image "$NFC_MAINTENANCE_IMAGE_ID" \
+            --candidate-sha "$GITHUB_SHA" | tee candidate-maintenance-report.json
+
+      - name: Require current candidate CI before publishing
+        id: ci
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/verify_v16_candidate_ci.py --sha "$GITHUB_SHA"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: kerwinjhc
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push only the tested candidate image and verify its digest
+        id: push
+        shell: bash
+        env:
+          CANDIDATE_IMAGE: ${{ steps.identity.outputs.tag }}
+        run: |
+          set -euo pipefail
+          docker push "$CANDIDATE_IMAGE" | tee candidate-push.log
+          docker image inspect "$CANDIDATE_IMAGE" > candidate-image.json
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          image = json.loads(Path('candidate-image.json').read_text())[0]
+          refs = [ref for ref in image['RepoDigests']
+                  if re.fullmatch(r'kerwinjhc/nas-file-center@sha256:[0-9a-f]{64}', ref)]
+          if len(refs) != 1:
+              raise SystemExit('Expected exactly one published candidate repository digest')
+          ref = refs[0]
+          Path('candidate-image-digest.txt').write_text(ref + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write(f'Candidate source: {os.environ["GITHUB_SHA"]}\n\nImage: `{ref}`\n\n')
+              summary.write('Fresh API bootstrap and candidate CI passed. Production NAS acceptance remains separate.\n')
+          print(ref)
+          PY
+          docker buildx imagetools inspect "$(cat candidate-image-digest.txt)" > candidate-registry-manifest.txt
+
+      - name: Upload candidate publication evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v16-candidate-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: ignore
+          path: |
+            candidate-push.log
+            candidate-image.json
+            candidate-image-digest.txt
+            candidate-registry-manifest.txt
+            candidate-maintenance-report.json
+
   publish:
     name: Build linux/amd64 and push to Docker Hub
     if: github.repository == 'JinHaocong/nas-file-center' && github.ref == 'refs/heads/main'

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { tasksApi } from '../../api/tasks';
 import { TaskProgress } from './TaskProgress';
 import { TaskLogTable } from './TaskLogTable';
@@ -11,6 +12,8 @@ import { TaskDeleteButton } from './TaskDeleteButton';
 import { MediaPackageRecoveryPanel } from './MediaPackageRecoveryPanel';
 import { ConsoleSheet } from '../ui/ConsoleSheet';
 import { StatusBadge } from '../ui/StatusBadge';
+import { ConsoleButton } from '../ui/ConsoleButton';
+import { semanticOrganizerTaskHref } from '../../api/media_organizer';
 
 const LONG_ERROR_THRESHOLD = 240;
 const ERROR_PREVIEW_CHARS = 160;
@@ -36,6 +39,7 @@ const ContextDetails: React.FC<{
 );
 
 export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onViewTask }) => {
+  const navigate = useNavigate();
   const { data: task, isLoading, isError, error } = useQuery({
     queryKey: ['taskDetail', taskId],
     queryFn: () => (taskId ? tasksApi.getTaskDetail(taskId) : Promise.reject('No ID')),
@@ -53,6 +57,7 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
     supports_cancel: false,
     supports_retry: false,
   };
+  const organizerHref = task ? semanticOrganizerTaskHref(task) : null;
 
   const capabilityBadges = (
     <div className="nfc-v2-task-capabilities">
@@ -155,6 +160,20 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
               )}
             </header>
             <TaskActionBar key={task.id} task={task} onViewTask={onViewTask} />
+            {organizerHref && (
+              <div className="nfc-overlay-stack">
+                <p className="nfc-form-note">在智能媒体整理中查看已发布文件、独立清理及恢复状态。</p>
+                {task.payload?.execution_mode === 'maintenance_window' && (
+                  <p className="nfc-form-note">本任务使用维护窗口模式。清理或恢复完成前，请继续暂停对这些文件的其他写入。</p>
+                )}
+                <ConsoleButton variant="secondary" onClick={() => {
+                  onClose();
+                  navigate(organizerHref);
+                }}>
+                  继续整理、清理或恢复
+                </ConsoleButton>
+              </div>
+            )}
           </section>
 
           {task.job_type === 'media_package-package-execute' &&

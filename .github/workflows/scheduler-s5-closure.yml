@@ -221,6 +221,11 @@ jobs:
           ACCEPT_ROOT="${RUNNER_TEMP}/nfc-scheduler-s5-acceptance"
           EVIDENCE_ROOT="${RUNNER_TEMP}/nfc-scheduler-s5-evidence"
           mkdir "${ACCEPT_ROOT}" "${EVIDENCE_ROOT}"
+          # CI-ONLY disposable directories: match the image\'s non-root UID.
+          # Share host-runner group access so the evidence can be inspected
+          # and removed afterwards. Never apply this to NAS production data.
+          sudo chown 10001:"$(id -g)" "${ACCEPT_ROOT}" "${EVIDENCE_ROOT}"
+          sudo chmod 2770 "${ACCEPT_ROOT}" "${EVIDENCE_ROOT}"
 
           docker run --rm             --platform linux/amd64             -v "${PWD}/scripts/scheduler_s5_acceptance.py:/tmp/scheduler_s5_acceptance.py:ro"             -v "${ACCEPT_ROOT}:/tmp/nfc-scheduler-s5-acceptance"             -v "${EVIDENCE_ROOT}:/evidence"             "${TAG}"             python /tmp/scheduler_s5_acceptance.py               --project-test-root /tmp/nfc-scheduler-s5-acceptance               --confirm-synthetic-only YES               --execute-jobs               --candidate-sha "${CANDIDATE_SHA}"               --evidence-json /evidence/scheduler-s5-docker-acceptance.json             2>&1 | tee scheduler-s5-docker-acceptance.log
 

@@ -27,6 +27,7 @@ from app.storage_optimization.capability import (
 from app.storage_optimization.executor import execute_storage_optimization
 from app.storage_optimization.metadata import capture_file_metadata
 from app.tasks.state_machine import JobLeaseLost
+from tests.storage_probe_custody import scoped_probe_namespace
 
 
 WORKER_ID = "storage-opt-test-worker"
@@ -241,7 +242,7 @@ def _emulate_ficlone(dst_fd: int, request: int, src_fd: int):
     return 0
 
 
-def test_hardlink_optimization_success_is_journaled_and_preserves_path(tmp_path: Path):
+def test_hardlink_optimization_success_is_journaled_and_preserves_path(tmp_path: Path, scoped_probe_namespace):
     env = _seed(tmp_path, operation="hardlink_optimize")
 
     reason = execute_storage_optimization(
@@ -292,6 +293,7 @@ def test_hardlink_optimization_success_is_journaled_and_preserves_path(tmp_path:
 def test_reflink_optimization_preserves_independent_inode_semantics(
     tmp_path: Path,
     monkeypatch,
+    scoped_probe_namespace,
 ):
     env = _seed(tmp_path, operation="reflink_optimize")
 
@@ -334,6 +336,7 @@ def test_reflink_optimization_preserves_independent_inode_semantics(
 def test_reflink_publication_crash_recovers_only_owned_aliases(
     tmp_path: Path,
     monkeypatch,
+    scoped_probe_namespace,
 ):
     env = _seed(tmp_path, operation="reflink_optimize")
     import app.storage_optimization.executor as executor_module
@@ -410,6 +413,7 @@ def test_reflink_publication_crash_recovers_only_owned_aliases(
 def test_hardlink_crash_windows_converge_without_payload_loss(
     tmp_path: Path,
     monkeypatch,
+    scoped_probe_namespace,
     crash_phase: str,
 ):
     env = _seed(tmp_path, operation="hardlink_optimize")
@@ -578,6 +582,7 @@ def test_late_source_hardlink_blocks_reclaim_before_transaction_starts(tmp_path:
 def test_hardlink_added_after_old_capture_blocks_source_retirement(
     tmp_path: Path,
     monkeypatch,
+    scoped_probe_namespace,
 ):
     env = _seed(tmp_path, operation="hardlink_optimize")
     import app.storage_optimization.executor as executor_module

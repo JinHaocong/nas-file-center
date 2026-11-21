@@ -1,0 +1,131 @@
+# Fresh V1.6 candidate installation. Does not reuse 1.4.6 config, containers,
+# password volume, project name, proxy network, or database.
+# Initial acceptance is READ-ONLY on the disposable data root; both V1.6 gates
+# and legacy mutation/delete permissions remain OFF.
+name: nas-file-center-v16-candidate
+
+x-v16-common: &v16-common
+  image: ${NFC_V16_IMAGE:?Set NFC_V16_IMAGE to the published candidate repository@sha256 digest}
+  pull_policy: missing
+  restart: unless-stopped
+  init: true
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:mode=1777
+  environment: &v16-environment
+    CONFIG_DIR: /config
+    DATA_MOUNT: /data
+    ALLOWED_ROOTS: /data
+    QUARANTINE_ROOT: /quarantine/.nas-file-center-trash
+    ALLOW_MUTATION: "false"
+    ALLOW_DELETE: "false"
+    PROTECT_LAST_FILE: "true"
+    MEDIA_ORGANIZER_EXECUTION_ENABLED: "false"
+    MEDIA_ORGANIZER_EXECUTION_MODE: "strict"
+    MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"
+    MEDIA_PACKAGE_FUSE_COMPAT_ENABLED: "false"
+    NFC_SHARED_CONFIG_GID: "${NFC_V16_SHARED_GID:-10000}"
+    NFC_SECRET_OWNER_UID: "${NFC_V16_API_UID:-10001}"
+    NFC_SECRET_GROUP_GID: "${NFC_V16_SHARED_GID:-10000}"
+    FCLONES_BINARY: /usr/local/bin/fclones
+    MTIME_REFRESH_DELAY_SECONDS: "2"
+    SESSION_COOKIE_SECURE: "false"
+    INITIAL_ADMIN_USERNAME: "${NFC_V16_ADMIN_USERNAME:?Set a new candidate admin username}"
+    INITIAL_ADMIN_PASSWORD: "${NFC_V16_ADMIN_PASSWORD:?Set a unique candidate admin password}"
+
+services:
+  nas-file-center-v16-api:
+    <<: *v16-common
+    container_name: nas-file-center-v16-api
+    user: "${NFC_V16_API_UID:-10001}:${NFC_V16_SHARED_GID:-10000}"
+    volumes:
+      - type: bind
+        source: ${NFC_V16_CONFIG_DIR:?Set the NEW V1.6 config directory}
+        target: /config
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${NFC_V16_CONFIG_DIR:?Set the NEW V1.6 config directory}/.nas-file-center-trash
+        target: /quarantine/.nas-file-center-trash
+        read_only: true
+        bind:
+          create_host_path: false
+      # Mask the same quarantine inode reachable through writable /config.
+      - type: bind
+        source: ${NFC_V16_CONFIG_DIR:?Set the NEW V1.6 config directory}/.nas-file-center-trash
+        target: /config/.nas-file-center-trash
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${NFC_V16_DATA_DIR:?Set the NEW disposable V1.6 data root}
+        target: /data
+        read_only: true
+        bind:
+          create_host_path: false
+      - nfc-v16-recovery-secrets:/run/nfc-recovery-secrets
+    # Initial bootstrap is inspected using docker exec. No host port is
+    # published, including on pre-28 Docker engines with localhost caveats.
+    networks:
+      - v16-private
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  nas-file-center-v16-worker:
+    <<: *v16-common
+    container_name: nas-file-center-v16-worker
+    user: "${NFC_V16_WORKER_UID:-10002}:${NFC_V16_SHARED_GID:-10000}"
+    command:
+      - python
+      - -m
+      - app.worker
+    volumes:
+      - type: bind
+        source: ${NFC_V16_CONFIG_DIR:?Set the NEW V1.6 config directory}
+        target: /config
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${NFC_V16_CONFIG_DIR:?Set the NEW V1.6 config directory}/.nas-file-center-trash
+        target: /quarantine/.nas-file-center-trash
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${NFC_V16_DATA_DIR:?Set the NEW disposable V1.6 data root}
+        target: /data
+        read_only: true
+        bind:
+          create_host_path: false
+      - nfc-v16-recovery-secrets:/run/nfc-recovery-secrets
+    networks:
+      - v16-private
+    depends_on:
+      nas-file-center-v16-api:
+        condition: service_healthy
+
+networks:
+  v16-private:
+    name: nas-file-center-v16-private
+    driver: bridge
+    internal: true
+
+volumes:
+  nfc-v16-recovery-secrets:
+    name: nas-file-center-v16-candidate-recovery-secrets
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=1m,uid=${NFC_V16_API_UID:-10001},gid=${NFC_V16_SHARED_GID:-10000},mode=2770,noexec,nosuid,nodev"

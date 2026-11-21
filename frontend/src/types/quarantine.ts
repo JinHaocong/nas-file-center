@@ -71,11 +71,13 @@ export interface QuarantineRestoreRequest {
 
 export interface QuarantineRestoreResponse {
   id: number;
-  state: 'restored' | 'skipped';
-  status: 'restored' | 'skipped';
-  restored_to_path: string | null;
-  conflict_policy: string;
-  conflict_resolved: boolean;
+  entry_id?: number;
+  state: 'queued' | 'restored' | 'skipped';
+  status: 'queued' | 'restored' | 'skipped';
+  work_job_id?: number;
+  restored_to_path?: string | null;
+  conflict_policy?: string;
+  conflict_resolved?: boolean;
   reason?: string;
 }
 
@@ -86,8 +88,9 @@ export interface QuarantinePurgeRequest {
 export interface QuarantinePurgeResponse {
   id: number;
   entry_id?: number;
-  state: 'purged';
-  status: 'purged';
+  state: 'active' | 'purging' | 'purged';
+  status: 'queued' | 'purged';
+  work_job_id?: number;
   purged?: boolean;
   purge_semantics?: 'unlink_v1' | string;
   removed_count?: number;

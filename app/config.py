@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 import ipaddress
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,6 +27,26 @@ class Settings(BaseSettings):
     allowed_roots_raw: str = Field(default="/data", validation_alias="ALLOWED_ROOTS")
     allow_delete: bool = Field(default=False, validation_alias="ALLOW_DELETE")
     allow_mutation: bool = Field(default=False, validation_alias="ALLOW_MUTATION")
+    # Separate opt-in gate for the new semantic organizer execution Worker.
+    # Existing mutation permissions alone never enable this feature.
+    media_organizer_execution_enabled: bool = Field(
+        default=False, validation_alias="MEDIA_ORGANIZER_EXECUTION_ENABLED",
+    )
+    media_organizer_execution_mode: Literal["strict", "maintenance_window"] = Field(
+        default="strict", validation_alias="MEDIA_ORGANIZER_EXECUTION_MODE",
+    )
+    # SECURITY HOLD: inode checks cannot make rename/rmdir source-name
+    # operations atomic against uncooperative concurrent writers. Keep this
+    # independent acknowledgement OFF unless exclusive namespace ownership
+    # is externally demonstrated and independently reviewed.
+    media_organizer_namespace_quiescence_ack: bool = Field(
+        default=False, validation_alias="MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK",
+    )
+    # Private deployment value: exact comma-separated directory basenames.
+    # Not an exclusion for files with similar names.
+    media_organizer_excluded_dir_names_raw: str = Field(
+        default="", validation_alias="MEDIA_ORGANIZER_EXCLUDED_DIR_NAMES",
+    )
     quarantine_root: Path = Field(default=Path("/data/.nas-file-center-trash"), validation_alias="QUARANTINE_ROOT")
     protect_last_file: bool = Field(default=True, validation_alias="PROTECT_LAST_FILE")
     fclones_binary: str = Field(default="fclones", validation_alias="FCLONES_BINARY")

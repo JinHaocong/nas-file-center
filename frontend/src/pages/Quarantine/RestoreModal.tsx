@@ -44,12 +44,15 @@ export const RestoreModal: React.FC<Props> = ({
       return quarantineApi.restore(entry.id, payload);
     },
     onSuccess: res => {
-      if (res.state === 'skipped') {
+      if (res.status === 'queued' && res.work_job_id) {
+        toast.info('恢复任务 #' + res.work_job_id + ' 已进入任务中心；Worker 执行完成后文件才会出现在目标位置');
+        void queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      } else if (res.state === 'skipped') {
         toast.info(res.reason || '目标文件已存在，恢复操作已安全跳过');
       } else if (res.conflict_resolved) {
-        toast.success('恢复成功！因原目标路径已存在，已自动重命名保存至: ' + res.restored_to_path);
+        toast.success('恢复成功！因原目标路径已存在，已自动重命名保存至: ' + (res.restored_to_path || '已选目标路径'));
       } else {
-        toast.success('已成功将文件恢复至: ' + res.restored_to_path);
+        toast.success('已成功将文件恢复至: ' + (res.restored_to_path || '原始路径'));
       }
       void queryClient.invalidateQueries({ queryKey: ['quarantineList'] });
       void queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });

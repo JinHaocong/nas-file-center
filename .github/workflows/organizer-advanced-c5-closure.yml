@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'app/organizers/**'
       - 'app/execution/**'
@@ -28,7 +29,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  c5-focused-draft:
+    # Keep legacy organizer behavior covered during development without
+    # rerunning the complete C5/Release regression or rebuilding Docker.
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -e '.[test]'
+      - name: Organizer Advanced focused regression (Draft)
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/test_organizer_advanced_rules_*.py
+
   closure-regression:
+    # Draft PRs use focused checks; full gates run when marked Ready,
+    # on subsequent Ready updates, protected pushes and workflow_dispatch.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
@@ -192,6 +221,9 @@ jobs:
             organizer-c5-scope-review.txt
 
   linux-amd64-docker:
+    # Draft PRs use focused checks; full gates run when marked Ready,
+    # on subsequent Ready updates, protected pushes and workflow_dispatch.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 40
 

@@ -19,13 +19,22 @@ from app.models import BatchPlanItem, ScanJob, WorkJob, utcnow
 from app.tasks.context import JobContext
 from app.tasks.handlers import get_handler
 from app.tasks.logging import log_task_event
+from app.tasks.media_mutation_lock import (
+    MediaMutationLockBusy,
+    MediaMutationLockUnavailable,
+    assert_media_mutation_lock,
+    media_mutation_lock,
+)
 from app.tasks.recovery import (
     acquire_worker_ownership,
     assert_active_worker_lease,
+    assert_no_maintenance_reservation,
     claim_next_job,
     generate_worker_id,
+    MaintenanceReservationActive,
     recover_interrupted_jobs,
     update_worker_heartbeat,
+    work_job_allowed_by_maintenance_reservation,
     WorkerHeartbeatDatabaseBusy,
 )
 from app.tasks.state_machine import (
@@ -95,7 +104,21 @@ def process_work_job(
             initial_admin_username=settings.initial_admin_username,
             initial_admin_password=settings.initial_admin_password,
         )
+    try:
+        with media_mutation_lock(settings):
+            return _process_work_job(settings, work_job_id, session_factory, engine, worker_id)
+    except MediaMutationLockUnavailable:
+        logger.exception("WorkJob %s held because the media mutation lock is unavailable", work_job_id)
+        return False
 
+
+def _process_work_job(
+    settings: Settings,
+    work_job_id: int,
+    session_factory: sessionmaker,
+    engine: Any,
+    worker_id: str | None,
+) -> bool:
     try:
         with session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
@@ -144,6 +167,10 @@ def process_work_job(
             if work.status in TERMINAL_STATES or work.status == JobState.PAUSED.value:
                 session.rollback()
                 return True
+
+            if not work_job_allowed_by_maintenance_reservation(session, work):
+                session.rollback()
+                return False
 
             if work.status == JobState.QUEUED.value:
                 validate_transition(work.status, JobState.RUNNING.value)
@@ -206,6 +233,7 @@ def process_work_job(
 
         with session_factory() as session:
             work = session.get(WorkJob, work_job_id)
+            assert_media_mutation_lock(settings)
             handler.run(work, ctx, settings)
 
         # Finished cleanly -> completed under active lease
@@ -470,7 +498,8 @@ def recover_running_jobs(settings: Settings) -> int:
     )
     worker_id = generate_worker_id()
     if acquire_worker_ownership(engine, SessionLocal, worker_id=worker_id):
-        stats = recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+        with media_mutation_lock(settings):
+            stats = recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
         return stats["recovered_requeued"] + stats["failed_interrupted"] + stats["cancelled"]
     return 0
 
@@ -482,6 +511,9 @@ def _cleanup_transaction_residue_after_recovery(
 ) -> None:
     """Best-effort retirement of NFC-owned terminal transaction metadata."""
     try:
+        assert_media_mutation_lock(settings)
+        with session_factory() as session:
+            assert_no_maintenance_reservation(session)
         from app.quarantine.transaction_residue import cleanup_terminal_transaction_residue
 
         stats = cleanup_terminal_transaction_residue(
@@ -491,19 +523,32 @@ def _cleanup_transaction_residue_after_recovery(
         )
         if any(stats.values()):
             logger.info("Retired terminal transaction residue: %s", stats)
+    except MaintenanceReservationActive:
+        return
     except Exception:
         # Residue cleanup is maintenance only. Unknown or unsafe artifacts are
         # intentionally retained; a cleanup failure must never stop the Worker.
         logger.exception("Terminal transaction residue cleanup failed closed")
 
 
-def _cleanup_archive_after_recovery(settings: Settings, session_factory: sessionmaker, worker_id: str) -> None:
+def _cleanup_archive_after_recovery(
+    settings: Settings, session_factory: sessionmaker, worker_id: str, *, cancelled_only: bool = False,
+) -> bool:
     """Finish only registered archive staging cleanup after Worker lease recovery."""
     try:
+        assert_media_mutation_lock(settings)
+        with session_factory() as session:
+            assert_no_maintenance_reservation(session)
         from app.archive_recovery.integration import cleanup_recovery_after_worker_restart
-        cleanup_recovery_after_worker_restart(settings, session_factory, worker_id)
+        cleanup_recovery_after_worker_restart(
+            settings, session_factory, worker_id, cancelled_only=cancelled_only,
+        )
+    except MaintenanceReservationActive:
+        return False
     except Exception:
         logger.exception("Archive recovery temporary cleanup failed closed")
+        return False
+    return True
 
 
 def worker_loop(
@@ -557,20 +602,12 @@ def worker_loop(
     )
     heartbeat_thread.start()
 
-    if acquired:
-        stats = recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
-        if any(stats.values()):
-            logger.warning("Worker %s recovered interrupted tasks: %s", worker_id, stats)
-        _cleanup_transaction_residue_after_recovery(settings, SessionLocal, worker_id)
-        _cleanup_archive_after_recovery(settings, SessionLocal, worker_id)
-
+    needs_recovery = acquired
+    needs_archive_recovery = True
     last_scheduler_tick_minute = None
 
     try:
-        while True:
-            if stop_event.is_set():
-                break
-
+        while not stop_event.is_set():
             if lease_lost_event.is_set():
                 logger.warning(
                     "Worker %s released task ownership after a confirmed lease denial; "
@@ -583,68 +620,72 @@ def worker_loop(
             if not acquired:
                 acquired = acquire_worker_ownership(engine, SessionLocal, worker_id=worker_id)
                 if not acquired:
-                    time.sleep(poll_seconds)
+                    stop_event.wait(poll_seconds)
                     continue
-                stats = recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
-                if any(stats.values()):
-                    logger.warning("Worker %s recovered interrupted tasks: %s", worker_id, stats)
-                _cleanup_transaction_residue_after_recovery(settings, SessionLocal, worker_id)
-                _cleanup_archive_after_recovery(settings, SessionLocal, worker_id)
-
-            scheduler_now = utcnow()
-            scheduler_minute = scheduler_now.replace(second=0, microsecond=0)
-            if scheduler_minute != last_scheduler_tick_minute:
-                # The Worker owns ticking; API processes never start a scheduler
-                # background timer. A failed tick must remain retryable during
-                # the same UTC minute: ScheduleRun's unique slot identity is the
-                # durable duplicate-dispatch fence.
-                try:
-                    run_scheduler_tick(
-                        SessionLocal,
-                        settings,
-                        owner=worker_id,
-                        now_utc=scheduler_now,
-                    )
-                except Exception:
-                    # Scheduler failure is fail-closed for dispatch and must not
-                    # terminate the existing WorkJob worker loop. Do not mark
-                    # this minute complete so the next loop can retry it.
-                    logger.exception(
-                        "Scheduler tick failed for %s; retrying within the current minute",
-                        scheduler_minute.isoformat(),
-                    )
-                else:
-                    last_scheduler_tick_minute = scheduler_minute
+                needs_recovery = True
 
             try:
-                claimed_id = claim_next_job(engine, SessionLocal, worker_id=worker_id)
+                with media_mutation_lock(settings, blocking=False):
+                    recovered_this_cycle = needs_recovery
+                    if needs_recovery:
+                        stats = recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+                        if any(stats.values()):
+                            logger.warning("Worker %s recovered interrupted tasks: %s", worker_id, stats)
+                        _cleanup_transaction_residue_after_recovery(settings, SessionLocal, worker_id)
+                        needs_archive_recovery = not _cleanup_archive_after_recovery(
+                            settings, SessionLocal, worker_id,
+                        )
+                        needs_recovery = False
+
+                    scheduler_now = utcnow()
+                    scheduler_minute = scheduler_now.replace(second=0, microsecond=0)
+                    if scheduler_minute != last_scheduler_tick_minute:
+                        # This also retires empty, inode-bound output directories
+                        # from archive jobs cancelled through the API between ticks.
+                        if not recovered_this_cycle:
+                            needs_archive_recovery = not _cleanup_archive_after_recovery(
+                                settings, SessionLocal, worker_id, cancelled_only=not needs_archive_recovery,
+                            )
+                        # Failed ticks are retryable. ScheduleRun's slot identity
+                        # provides durable duplicate-dispatch fencing.
+                        try:
+                            run_scheduler_tick(
+                                SessionLocal, settings, owner=worker_id, now_utc=scheduler_now,
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Scheduler tick failed for %s; retrying within the current minute",
+                                scheduler_minute.isoformat(),
+                            )
+                        else:
+                            last_scheduler_tick_minute = scheduler_minute
+
+                    claimed_id = claim_next_job(engine, SessionLocal, worker_id=worker_id)
+                    if claimed_id is not None:
+                        success = process_work_job(
+                            settings, claimed_id, session_factory=SessionLocal,
+                            engine=engine, worker_id=worker_id,
+                        )
+                        if not success:
+                            acquired = False
+                        else:
+                            _cleanup_transaction_residue_after_recovery(settings, SessionLocal, worker_id)
+                            if needs_archive_recovery:
+                                needs_archive_recovery = not _cleanup_archive_after_recovery(
+                                    settings, SessionLocal, worker_id,
+                                )
+                        continue
             except JobLeaseLost:
                 acquired = False
                 continue
-
-            if claimed_id is None:
-                time.sleep(poll_seconds)
-                continue
-
-            try:
-                success = process_work_job(
-                    settings,
-                    claimed_id,
-                    session_factory=SessionLocal,
-                    engine=engine,
-                    worker_id=worker_id,
-                )
-                if success is False:
-                    acquired = False
-                else:
-                    # Retire completed metadata while the lease is still ours;
-                    # later purge/move jobs may already have removed its target.
-                    _cleanup_transaction_residue_after_recovery(settings, SessionLocal, worker_id)
-            except JobLeaseLost:
-                acquired = False
-            except Exception:
-                # Individual job failures do not terminate the worker container
+            except MediaMutationLockBusy:
+                # A live filesystem holder may outlast its database lease.
                 pass
+            except MediaMutationLockUnavailable:
+                logger.exception("Worker %s held because the media mutation lock is unavailable", worker_id)
+            except Exception:
+                logger.exception("Worker %s could not complete a work cycle", worker_id)
+            stop_event.wait(poll_seconds)
     finally:
         logger.info("Worker stopping worker_id=%s pid=%s", worker_id, os.getpid())
         stop_event.set()

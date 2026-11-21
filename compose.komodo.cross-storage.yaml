@@ -1,12 +1,24 @@
+# HOST_QUARANTINE_DIR remains the parent of .nas-file-center-trash.
+# The base masks its known config-root alias. Other nested source layouts need
+# explicit read-only alias mounts; this overlay cannot infer those host paths.
 services:
   nas-file-center-api:
     environment:
       QUARANTINE_ROOT: /quarantine/.nas-file-center-trash
     volumes:
-      - ${HOST_QUARANTINE_DIR:?Set HOST_QUARANTINE_DIR in Komodo stack variables}:/quarantine:rw
+      - type: bind
+        source: ${HOST_QUARANTINE_DIR:?Set HOST_QUARANTINE_DIR in Komodo stack variables}/.nas-file-center-trash
+        target: /quarantine/.nas-file-center-trash
+        read_only: true
+        bind:
+          create_host_path: false
 
   nas-file-center-worker:
     environment:
       QUARANTINE_ROOT: /quarantine/.nas-file-center-trash
     volumes:
-      - ${HOST_QUARANTINE_DIR:?Set HOST_QUARANTINE_DIR in Komodo stack variables}:/quarantine:rw
+      - type: bind
+        source: ${HOST_QUARANTINE_DIR:?Set HOST_QUARANTINE_DIR in Komodo stack variables}/.nas-file-center-trash
+        target: /quarantine/.nas-file-center-trash
+        bind:
+          create_host_path: false

@@ -1,3 +1,4 @@
+"""Probe algorithms under explicit disposable custody, not a production grant."""
 from __future__ import annotations
 
 import errno
@@ -12,6 +13,7 @@ from app.storage_optimization.capability import (
     probe_reflink_between,
     probe_reflink_capability,
 )
+from tests.storage_probe_custody import scoped_probe_namespace
 
 
 def _probe_residue(root: Path) -> list[str]:
@@ -23,7 +25,7 @@ def _probe_residue(root: Path) -> list[str]:
     )
 
 
-def test_hardlink_probe_positive_and_zero_residue(tmp_path: Path):
+def test_hardlink_probe_positive_and_zero_residue(tmp_path: Path, scoped_probe_namespace):
     result = probe_hardlink_capability(tmp_path, [tmp_path])
 
     assert result.capability is StorageOptimizationCapability.SUPPORTED
@@ -34,7 +36,7 @@ def test_hardlink_probe_positive_and_zero_residue(tmp_path: Path):
     assert _probe_residue(tmp_path) == []
 
 
-def test_hardlink_probe_cross_filesystem_style_failure_is_unsupported(monkeypatch, tmp_path: Path):
+def test_hardlink_probe_cross_filesystem_style_failure_is_unsupported(monkeypatch, tmp_path: Path, scoped_probe_namespace):
     def fail_link(*_args, **_kwargs):
         raise OSError(errno.EXDEV, "cross-device link")
 
@@ -61,7 +63,7 @@ def test_hardlink_probe_outside_allowed_roots_is_unknown(tmp_path: Path):
     assert _probe_residue(outside) == []
 
 
-def test_reflink_probe_positive_proves_independent_inode_and_cow(monkeypatch, tmp_path: Path):
+def test_reflink_probe_positive_proves_independent_inode_and_cow(monkeypatch, tmp_path: Path, scoped_probe_namespace):
     def emulate_ficlone(dst_fd: int, request: int, src_fd: int):
         assert request == FICLONE
         src_pos = os.lseek(src_fd, 0, os.SEEK_CUR)
@@ -86,7 +88,7 @@ def test_reflink_probe_positive_proves_independent_inode_and_cow(monkeypatch, tm
     assert _probe_residue(tmp_path) == []
 
 
-def test_reflink_probe_unsupported_ioctl_is_fail_closed(monkeypatch, tmp_path: Path):
+def test_reflink_probe_unsupported_ioctl_is_fail_closed(monkeypatch, tmp_path: Path, scoped_probe_namespace):
     def unsupported(*_args, **_kwargs):
         raise OSError(errno.EOPNOTSUPP, "operation not supported")
 
@@ -99,7 +101,7 @@ def test_reflink_probe_unsupported_ioctl_is_fail_closed(monkeypatch, tmp_path: P
     assert _probe_residue(tmp_path) == []
 
 
-def test_reflink_probe_ioctl_success_without_clone_is_unknown(monkeypatch, tmp_path: Path):
+def test_reflink_probe_ioctl_success_without_clone_is_unknown(monkeypatch, tmp_path: Path, scoped_probe_namespace):
     monkeypatch.setattr(
         "app.storage_optimization.capability.fcntl.ioctl",
         lambda *_args, **_kwargs: 0,
@@ -112,7 +114,7 @@ def test_reflink_probe_ioctl_success_without_clone_is_unknown(monkeypatch, tmp_p
     assert _probe_residue(tmp_path) == []
 
 
-def test_hardlink_probe_between_distinct_parents_proves_actual_route(tmp_path: Path):
+def test_hardlink_probe_between_distinct_parents_proves_actual_route(tmp_path: Path, scoped_probe_namespace):
     source_parent = tmp_path / "keep-parent"
     destination_parent = tmp_path / "source-parent"
     source_parent.mkdir()
@@ -131,7 +133,7 @@ def test_hardlink_probe_between_distinct_parents_proves_actual_route(tmp_path: P
     assert _probe_residue(destination_parent) == []
 
 
-def test_hardlink_probe_between_does_not_trust_equal_st_dev(monkeypatch, tmp_path: Path):
+def test_hardlink_probe_between_does_not_trust_equal_st_dev(monkeypatch, tmp_path: Path, scoped_probe_namespace):
     source_parent = tmp_path / "keep-parent"
     destination_parent = tmp_path / "source-parent"
     source_parent.mkdir()
@@ -165,7 +167,7 @@ def test_hardlink_probe_between_does_not_trust_equal_st_dev(monkeypatch, tmp_pat
     assert _probe_residue(destination_parent) == []
 
 
-def test_reflink_probe_between_uses_keep_parent_as_clone_source(monkeypatch, tmp_path: Path):
+def test_reflink_probe_between_uses_keep_parent_as_clone_source(monkeypatch, tmp_path: Path, scoped_probe_namespace):
     source_parent = tmp_path / "keep-parent"
     destination_parent = tmp_path / "source-parent"
     source_parent.mkdir()
@@ -201,7 +203,7 @@ def test_reflink_probe_between_uses_keep_parent_as_clone_source(monkeypatch, tmp
     assert _probe_residue(destination_parent) == []
 
 
-def test_reflink_probe_between_cross_area_rejection_is_unsupported(monkeypatch, tmp_path: Path):
+def test_reflink_probe_between_cross_area_rejection_is_unsupported(monkeypatch, tmp_path: Path, scoped_probe_namespace):
     source_parent = tmp_path / "keep-parent"
     destination_parent = tmp_path / "source-parent"
     source_parent.mkdir()

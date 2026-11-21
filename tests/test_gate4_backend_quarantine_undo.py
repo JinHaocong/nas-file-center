@@ -115,6 +115,35 @@ def _execute_job(service: FileCenterService, settings: Settings, job_id: int, wo
         session.commit()
 
 
+def _execute_restore_job(
+    service: FileCenterService,
+    settings: Settings,
+    job_id: int,
+    worker_id: str = "worker-gate4-restore",
+) -> dict:
+    handler = get_handler("quarantine-restore")
+    assert handler is not None
+    _acquire_lease(service, worker_id)
+    with service.SessionLocal() as session:
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        job.status = "running"
+        session.commit()
+        context = JobContext(service.engine, service.SessionLocal, job.id, worker_id=worker_id)
+        handler.run(job, context, settings)
+        job.status = "completed"
+        job.finished_at = utcnow()
+        session.commit()
+    with service.SessionLocal() as session:
+        completed = session.get(WorkJob, job_id)
+        assert completed is not None
+        assert completed.status == "completed"
+        assert completed.checkpoint_json
+        checkpoint = json.loads(completed.checkpoint_json)
+        assert checkpoint["schema_version"] == 1
+        return checkpoint["result"]
+
+
 # ==============================================================================
 # 1. Restore Target Conflict Policies: skip, rename, manual
 # ==============================================================================
@@ -153,8 +182,12 @@ def test_restore_conflict_policy_skip(tmp_path: Path):
         f"/api/quarantine/{entry_id}/restore",
         json={"conflict_policy": "skip"},
     )
-    assert resp.status_code == 200
-    res_data = resp.json()
+    assert resp.status_code == 202
+    queued = resp.json()
+    assert queued["status"] == "queued"
+    res_data = _execute_restore_job(
+        service, env["settings"], int(queued["work_job_id"]), "worker-restore-skip"
+    )
     assert res_data["state"] == "skipped"
     assert res_data["status"] == "skipped"
     assert "Destination already exists" in res_data["reason"]
@@ -205,8 +238,11 @@ def test_restore_conflict_policy_rename(tmp_path: Path):
         f"/api/quarantine/{entry_id}/restore",
         json={"conflict_policy": "rename"},
     )
-    assert resp.status_code == 200
-    res_data = resp.json()
+    assert resp.status_code == 202
+    queued = resp.json()
+    res_data = _execute_restore_job(
+        service, env["settings"], int(queued["work_job_id"]), "worker-restore-rename"
+    )
     assert res_data["state"] == "restored"
     assert res_data["conflict_resolved"] is True
     restored_path = Path(res_data["restored_to_path"])
@@ -269,8 +305,12 @@ def test_restore_conflict_policy_manual(tmp_path: Path):
         f"/api/quarantine/{entry_id}/restore",
         json={"conflict_policy": "manual", "custom_target": str(custom_target)},
     )
-    assert resp_success.status_code == 200
-    assert resp_success.json()["state"] == "restored"
+    assert resp_success.status_code == 202
+    queued = resp_success.json()
+    result = _execute_restore_job(
+        service, env["settings"], int(queued["work_job_id"]), "worker-restore-manual"
+    )
+    assert result["state"] == "restored"
     assert custom_target.exists()
     assert custom_target.read_text(encoding="utf-8") == "quarantined content manual"
     assert not quarantine_file.exists()

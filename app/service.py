@@ -24,6 +24,9 @@ from app.batch.plans import OperationItem
 from app.batch.rename import RenameCollisionError, RenameRule, _matches_source_extension, _new_name, build_rename_plan
 from app.batch.stats import collect_tree_stats
 from app.config import Settings
+from app.config_sharing import (
+    shared_config_gid, require_shared_directory, ensure_shared_report_directory,
+)
 from app.db import create_engine_and_session, init_db
 from app.execution.executor import execute_item
 from app.execution.verifier import verify_duplicate_pair
@@ -272,6 +275,18 @@ def _get_active_execution_job(session, plan_id: int) -> WorkJob | None:
     ).first()
 
 
+def _get_active_plan_validation_job(session, plan_id: int) -> WorkJob | None:
+    return session.scalars(
+        select(WorkJob)
+        .where(
+            WorkJob.kind == "batch-plan-validate",
+            WorkJob.status.in_(ACTIVE_EXECUTION_JOB_STATUSES),
+            func.cast(func.json_extract(WorkJob.state_json, "$.plan_id"), Integer) == plan_id,
+        )
+        .order_by(WorkJob.id.desc())
+    ).first()
+
+
 def _is_restart_recovered_execution_job(session, work_job_id: int) -> bool:
     return session.scalar(
         select(TaskEvent.id)
@@ -443,8 +458,25 @@ class FileCenterService:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._quarantine_service_started_at = utcnow()
-        for directory in (settings.config_dir, settings.reports_dir, settings.backups_dir, settings.logs_dir, settings.fclones_home):
-            directory.mkdir(parents=True, exist_ok=True)
+        shared_gid = shared_config_gid()
+        if shared_gid is None:
+            # Preserve historical single-UID behavior when group sharing is
+            # not configured; do not change ownership/modes of existing paths.
+            for directory in (
+                settings.config_dir, settings.reports_dir, settings.backups_dir,
+                settings.logs_dir, settings.fclones_home,
+            ):
+                directory.mkdir(parents=True, exist_ok=True)
+        else:
+            # Only the pre-provisioned /config root is trusted. Create new
+            # shared subdirectories with setgid 2770, and refuse incompatible
+            # existing directories instead of chmod/chown on the host NAS.
+            require_shared_directory(settings.config_dir, shared_gid)
+            for directory in (
+                settings.reports_dir, settings.backups_dir, settings.logs_dir,
+                settings.fclones_home,
+            ):
+                ensure_shared_report_directory(directory, shared_gid)
         self.engine, self.SessionLocal = create_engine_and_session(settings.database_path)
         init_db(
             self.engine,
@@ -1622,7 +1654,35 @@ class FileCenterService:
             session.commit()
         return {"id": plan.id, "status": plan.status, "items": len(generated.items), "delete_counts": generated.delete_counts}
 
-    def validate_plan(self, plan_id: int, *, progress_callback: Callable[[int, int], None] | None = None) -> dict:
+    def validate_plan(
+        self, plan_id: int, *,
+        progress_callback: Callable[[int, int], None] | None = None,
+        mutation_fence: Callable[[], None] | None = None,
+        worker_id: str | None = None,
+    ) -> dict:
+        # Storage optimization validation can run live write probes. Acquire
+        # before DB locks so an API validation cannot overlap a Worker or an
+        # unfinished organizer maintenance window.
+        from app.tasks.media_mutation_lock import media_mutation_lock, MediaMutationLockUnavailable
+        from app.tasks.recovery import assert_no_maintenance_reservation, MaintenanceReservationActive
+
+        try:
+            with media_mutation_lock(self.settings, blocking=False):
+                with self.SessionLocal() as session:
+                    assert_no_maintenance_reservation(session)
+                return self._validate_plan_under_media_lock(
+                    plan_id, progress_callback=progress_callback,
+                    mutation_fence=mutation_fence, worker_id=worker_id,
+                )
+        except (MediaMutationLockUnavailable, MaintenanceReservationActive) as exc:
+            raise StateConflictError(str(exc)) from exc
+
+    def _validate_plan_under_media_lock(
+        self, plan_id: int, *,
+        progress_callback: Callable[[int, int], None] | None = None,
+        mutation_fence: Callable[[], None] | None = None,
+        worker_id: str | None = None,
+    ) -> dict:
         with self.SessionLocal() as session:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
@@ -2170,6 +2230,7 @@ class FileCenterService:
                             Path(row.keep_path).parent,
                             Path(row.source_path).parent,
                             self.settings.allowed_roots,
+                            mutation_fence=mutation_fence,
                         )
                     else:
                         if not ownership_can_be_preserved(live_source_metadata):
@@ -2184,6 +2245,7 @@ class FileCenterService:
                             Path(row.keep_path).parent,
                             Path(row.source_path).parent,
                             self.settings.allowed_roots,
+                            mutation_fence=mutation_fence,
                         )
 
                     if capability.capability is not StorageOptimizationCapability.SUPPORTED:
@@ -2200,6 +2262,7 @@ class FileCenterService:
                     local_publish_capability = probe_hardlink_capability(
                         Path(row.source_path).parent,
                         self.settings.allowed_roots,
+                        mutation_fence=mutation_fence,
                     )
                     if (
                         local_publish_capability.capability
@@ -2232,6 +2295,10 @@ class FileCenterService:
 
         with self.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
+            if worker_id is not None:
+                from app.tasks.recovery import assert_active_worker_lease, assert_no_maintenance_reservation
+                assert_active_worker_lease(session, worker_id)
+                assert_no_maintenance_reservation(session)
             plan = session.get(BatchPlan, plan_id)
             rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
             for row in rows:
@@ -2252,6 +2319,14 @@ class FileCenterService:
                 plan.status = "partial"
             else:
                 plan.status = "ready"
+            if worker_id is not None:
+                # The validation may span many files. Recheck within this
+                # transaction; a later WorkJob checkpoint cannot undo a stale
+                # validation result that has already committed.
+                # Flush first: session.get() in the lease assertion can
+                # otherwise autoflush after its timestamp has been sampled.
+                session.flush()
+                assert_active_worker_lease(session, worker_id)
             session.commit()
         return self.plan_detail(plan_id)
 
@@ -3056,6 +3131,11 @@ class FileCenterService:
                     raise StateConflictError(
                         f"Plan #{plan_id} has active freeze/validation task #{active_stage}"
                     )
+            active_validation_job = _get_active_plan_validation_job(session, plan_id)
+            if active_validation_job is not None:
+                raise StateConflictError(
+                    f"Plan #{plan_id} has active validation task #{active_validation_job.id}"
+                )
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:
                 raise StateConflictError(
@@ -3122,6 +3202,11 @@ class FileCenterService:
             if plan.status not in {"ready", "partial"}:
                 raise StateConflictError(
                     f"Plan must be validated before execution (status must be 'ready' or 'partial'), current status={plan.status}"
+                )
+            active_validation_job = _get_active_plan_validation_job(session, plan_id)
+            if active_validation_job is not None:
+                raise StateConflictError(
+                    f"Plan #{plan_id} has active validation task #{active_validation_job.id}"
                 )
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:
@@ -3470,6 +3555,12 @@ class FileCenterService:
             if plan is None:
                 raise KeyError(plan_id)
 
+            active_validation_job = _get_active_plan_validation_job(session, plan_id)
+            if active_validation_job is not None:
+                raise StateConflictError(
+                    f"Cannot delete plan #{plan_id}: active validation task #{active_validation_job.id}"
+                )
+
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:
                 restart_recovered = _is_restart_recovered_execution_job(
@@ -3499,6 +3590,12 @@ class FileCenterService:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
                 raise KeyError(plan_id)
+
+            active_validation_job = _get_active_plan_validation_job(session, plan_id)
+            if active_validation_job is not None:
+                raise StateConflictError(
+                    f"Cannot delete plan #{plan_id}: active validation task #{active_validation_job.id}"
+                )
 
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:
@@ -5768,6 +5865,27 @@ class FileCenterService:
             raise ValueError("entry_ids must be unique")
         return normalized_ids
 
+    @staticmethod
+    def _quarantine_record_cleanup_identity(entry: QuarantineEntry) -> dict[str, Any]:
+        return {
+            "id": int(entry.id),
+            "state": str(entry.state),
+            "original_path": str(entry.original_path),
+            "quarantine_path": str(entry.quarantine_path),
+            "tx_phase": entry.tx_phase,
+            "transaction_mode": entry.transaction_mode,
+            "authoritative_anchor_path": entry.authoritative_anchor_path,
+            "active_attempt_generation": int(entry.active_attempt_generation or 0),
+            "size": int(entry.size or 0),
+            "content_hash": entry.content_hash,
+            "mtime_ns": int(entry.mtime_ns or 0),
+            "device": int(entry.device or 0),
+            "inode": int(entry.inode or 0),
+            "quarantine_device": int(entry.quarantine_device) if entry.quarantine_device is not None else None,
+            "quarantine_inode": int(entry.quarantine_inode) if entry.quarantine_inode is not None else None,
+            "quarantine_mtime_ns": int(entry.quarantine_mtime_ns) if entry.quarantine_mtime_ns is not None else None,
+        }
+
     def _enqueue_quarantine_record_cleanup(
         self,
         entry_ids: list[int],
@@ -5794,15 +5912,22 @@ class FileCenterService:
                 raise KeyError(f"Quarantine entries not found: {missing}")
 
             ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
+            expected_entries: dict[str, dict[str, Any]] = {}
             for entry in ordered_rows:
-                self._cleanup_empty_terminal_tx_artifacts(entry)
-                self._assert_quarantine_record_deletable(entry)
-
-            if not any(entry.state == "restored" for entry in ordered_rows):
-                session.rollback()
-                raise StateConflictError(
-                    "Worker cleanup queue is only required when at least one restored entry is selected"
-                )
+                if entry.state not in {"restored", "purged", "abandoned", "conflict"}:
+                    session.rollback()
+                    raise StateConflictError(
+                        f"Quarantine entry #{entry.id} is not in a terminal cleanup state "
+                        f"(state={entry.state})"
+                    )
+                if entry.state in {"restored", "purged"}:
+                    self._assert_quarantine_record_deletable(entry)
+                elif entry.quarantine_path and os.path.lexists(entry.quarantine_path):
+                    session.rollback()
+                    raise StateConflictError(
+                        f"Quarantine payload still exists for quarantine entry #{entry.id}"
+                    )
+                expected_entries[str(int(entry.id))] = self._quarantine_record_cleanup_identity(entry)
 
             job = WorkJob(
                 kind="quarantine-record-cleanup",
@@ -5811,8 +5936,10 @@ class FileCenterService:
                     {
                         "entry_ids": normalized_ids,
                         "requested_by_user_id": user_id,
+                        "expected_entries": expected_entries,
                     },
                     ensure_ascii=False,
+                    sort_keys=True,
                 ),
                 progress_current=0,
                 progress_total=len(normalized_ids),
@@ -5851,6 +5978,7 @@ class FileCenterService:
         *,
         operation: str,
     ) -> dict:
+        """Metadata-only retirement; filesystem cleanup must already be complete."""
         with self.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             rows = list(
@@ -5867,7 +5995,6 @@ class FileCenterService:
             ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
             audit_rows: list[dict[str, Any]] = []
             for entry in ordered_rows:
-                self._cleanup_empty_terminal_tx_artifacts(entry)
                 self._assert_quarantine_record_deletable(entry)
                 if entry.state == "restored":
                     session.rollback()
@@ -6128,22 +6255,13 @@ class FileCenterService:
             entry = session.get(QuarantineEntry, entry_id)
             if entry is None:
                 raise KeyError(f"Quarantine entry #{entry_id} not found")
-            self._cleanup_empty_terminal_tx_artifacts(entry)
-            self._assert_quarantine_record_deletable(entry)
-            state = str(entry.state)
+            if entry.state not in {"restored", "purged", "abandoned", "conflict"}:
+                raise StateConflictError(
+                    f"Quarantine entry #{entry_id} is not in a terminal cleanup state "
+                    f"(state={entry.state})"
+                )
 
-        if state == "restored":
-            return self._enqueue_quarantine_record_cleanup([entry_id], user_id=user_id)
-
-        result = self._delete_quarantine_metadata_rows(
-            [entry_id],
-            operation="quarantine.record_delete",
-        )
-        return {
-            "status": result["status"],
-            "deleted": True,
-            "id": entry_id,
-        }
+        return self._enqueue_quarantine_record_cleanup([entry_id], user_id=user_id)
 
     def bulk_delete_quarantine_records(
         self,
@@ -6169,22 +6287,15 @@ class FileCenterService:
             missing = [entry_id for entry_id in normalized_ids if entry_id not in by_id]
             if missing:
                 raise KeyError(f"Quarantine entries not found: {missing}")
-            ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
-            for entry in ordered_rows:
-                self._cleanup_empty_terminal_tx_artifacts(entry)
-                self._assert_quarantine_record_deletable(entry)
-            has_restored = any(entry.state == "restored" for entry in ordered_rows)
+            for entry_id in normalized_ids:
+                entry = by_id[entry_id]
+                if entry.state not in {"restored", "purged", "abandoned", "conflict"}:
+                    raise StateConflictError(
+                        f"Quarantine entry #{entry_id} is not in a terminal cleanup state "
+                        f"(state={entry.state})"
+                    )
 
-        if has_restored:
-            return self._enqueue_quarantine_record_cleanup(
-                normalized_ids,
-                user_id=user_id,
-            )
-
-        return self._delete_quarantine_metadata_rows(
-            normalized_ids,
-            operation="quarantine.record_bulk_delete",
-        )
+        return self._enqueue_quarantine_record_cleanup(normalized_ids, user_id=user_id)
 
     def execute_quarantine_record_cleanup_job(
         self,
@@ -6193,6 +6304,7 @@ class FileCenterService:
         worker_id: str,
         job_id: int,
         user_id: int | None = None,
+        expected_entries: dict[str, dict[str, Any]] | None = None,
     ) -> dict:
         if not worker_id or not str(worker_id).strip():
             raise PermissionError("Quarantine record cleanup requires active Worker authority")
@@ -6204,8 +6316,13 @@ class FileCenterService:
         from app.tasks.recovery import assert_active_worker_lease
 
         normalized_ids = self._normalize_quarantine_cleanup_ids(entry_ids)
+        snapshots: dict[int, dict[str, Any]] = {}
+        cleanup_plans: dict[int, RestoredCleanupPlan] = {}
+        terminal_cleanup_entries: list[QuarantineEntry] = []
 
         with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            assert_active_worker_lease(session, worker_id)
             rows = list(
                 session.scalars(
                     select(QuarantineEntry).where(QuarantineEntry.id.in_(normalized_ids))
@@ -6214,21 +6331,58 @@ class FileCenterService:
             by_id = {int(row.id): row for row in rows}
             missing = [entry_id for entry_id in normalized_ids if entry_id not in by_id]
             if missing:
+                session.rollback()
                 raise KeyError(f"Quarantine entries not found: {missing}")
 
             ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
-            snapshots: dict[int, dict[str, Any]] = {}
-            cleanup_plans: dict[int, RestoredCleanupPlan] = {}
             for entry in ordered_rows:
-                self._assert_quarantine_record_deletable(entry)
                 entry_id = int(entry.id)
-                snapshots[entry_id] = {
-                    "state": str(entry.state),
-                    "original_path": str(entry.original_path),
-                    "quarantine_path": str(entry.quarantine_path),
-                }
+                identity = self._quarantine_record_cleanup_identity(entry)
+                if expected_entries is not None:
+                    expected = expected_entries.get(str(entry_id))
+                    if expected is None or expected != identity:
+                        session.rollback()
+                        raise StateConflictError(
+                            f"QUARANTINE_RECORD_SNAPSHOT_CHANGED: entry #{entry_id} changed after enqueue"
+                        )
+                if entry.state not in {"restored", "purged", "abandoned", "conflict"}:
+                    session.rollback()
+                    raise StateConflictError(
+                        f"Quarantine entry #{entry_id} is not in a terminal cleanup state "
+                        f"(state={entry.state})"
+                    )
+                if entry.state in {"restored", "purged"}:
+                    self._assert_quarantine_record_deletable(entry)
+                elif entry.quarantine_path and os.path.lexists(entry.quarantine_path):
+                    session.rollback()
+                    raise StateConflictError(
+                        f"Quarantine payload still exists for quarantine entry #{entry_id}"
+                    )
+
+                snapshots[entry_id] = identity
                 if entry.state == "restored":
                     cleanup_plans[entry_id] = self._build_restored_cleanup_plan(entry)
+                elif entry.state in {"purged", "abandoned", "conflict"}:
+                    session.expunge(entry)
+                    terminal_cleanup_entries.append(entry)
+            session.commit()
+
+        for entry in terminal_cleanup_entries:
+            entry_id = int(entry.id)
+            with self.SessionLocal() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                assert_active_worker_lease(session, worker_id)
+                current = session.get(QuarantineEntry, entry_id)
+                if (
+                    current is None
+                    or self._quarantine_record_cleanup_identity(current) != snapshots[entry_id]
+                ):
+                    session.rollback()
+                    raise StateConflictError(
+                        f"QUARANTINE_RECORD_SNAPSHOT_CHANGED: entry #{entry_id} changed before cleanup"
+                    )
+                session.commit()
+            self._cleanup_empty_terminal_tx_artifacts(entry)
 
         cleanup_results: dict[int, dict[str, int]] = {}
         for entry_id in normalized_ids:
@@ -6259,11 +6413,11 @@ class FileCenterService:
             for entry in ordered_rows:
                 entry_id = int(entry.id)
                 expected = snapshots[entry_id]
-                if entry.state != expected["state"]:
+                actual = self._quarantine_record_cleanup_identity(entry)
+                if actual != expected:
                     session.rollback()
                     raise StateConflictError(
-                        f"Quarantine entry #{entry_id} changed state during Worker cleanup "
-                        f"(expected={expected['state']}, actual={entry.state})"
+                        f"Quarantine entry #{entry_id} changed during Worker cleanup"
                     )
                 self._assert_quarantine_record_deletable(entry)
                 if entry.state == "restored":

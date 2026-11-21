@@ -48,6 +48,7 @@ def next_media_package_job_id(session: Session, settings: Settings) -> int:
     if root.is_symlink():
         raise ValueError("Unsafe MediaPackage reports root")
     highest = int(session.scalar(select(func.max(WorkJob.id))) or 0)
-    for kind in ("media_package-previews", "media_package-executions"):
+    for kind in ("media_package-previews", "media_package-executions",
+                 "media_organizer-executions"):
         highest = max(highest, _highest_report_id(root / kind))
     return highest + 1

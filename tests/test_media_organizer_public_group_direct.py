@@ -1,0 +1,444 @@
+"""SEC-12: public group creation without renaming a mutable source basename.
+
+These are disposable tmp_path-only tests. A tested helper is NOT sufficient
+to enable grouping under uncooperative same-UID/root NAS writers: the
+mkdirat→openat gap still requires independently proven namespace custody.
+"""
+from pathlib import Path
+
+import pytest
+
+from app.batch import media_organizer_publish as publishing
+from app.batch.media_organizer_stage import stage_frozen_sources, _authority
+from tests.test_media_organizer_pending_group_race import _grouped
+
+
+def _prepare(tmp_path):
+    unit, manifest, frozen = _grouped(tmp_path)
+    stage_frozen_sources(
+        manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
+        lease_fence=lambda: None,
+    )
+    return unit, manifest, frozen
+
+
+def test_public_group_direct_creation_never_moves_a_source_directory(
+    tmp_path, monkeypatch,
+):
+    unit, manifest, frozen = _prepare(tmp_path)
+    name = manifest["groups"][0]["name"]
+    source_snapshot = {
+        str(row["source"]): Path(row["source"]).read_bytes()
+        for row in manifest["moves"]
+    }
+
+    def forbid_source_rename(*_args, **_kwargs):
+        raise AssertionError(
+            "production grouped publishing must never rename a source directory"
+        )
+
+    monkeypatch.setattr(publishing, "rename_noreplace_at", forbid_source_rename)
+    publishing._create_public_group_direct(
+        unit, name, manifest, _authority(manifest), lambda: None,
+        frozen_manifest_path=frozen,
+    )
+    group = unit / name
+    assert group.is_dir()
+    assert publishing._owned_public(group, _authority(manifest))
+    receipt = publishing._group_receipt_path(frozen, 1)
+    bound = publishing._read_group_receipt(receipt, manifest, name, 1)
+    assert (group.stat().st_dev, group.stat().st_ino) == bound
+    assert all(Path(path).read_bytes() == value for path, value in source_snapshot.items())
+    assert not list((unit / manifest["stage_directory"]).glob(".nfc-publish-pending-*"))
+
+
+def test_public_group_direct_creation_refuses_existing_foreign_folder(
+    tmp_path, monkeypatch,
+):
+    unit, manifest, frozen = _prepare(tmp_path)
+    name = manifest["groups"][0]["name"]
+    foreign = unit / name
+    foreign.mkdir()
+    (foreign / "keep.txt").write_bytes(b"foreign-bytes")
+    original_rename = publishing.rename_noreplace_at
+
+    def forbid_source_rename(*_args, **_kwargs):
+        raise AssertionError("wrong source-directory rename")
+
+    monkeypatch.setattr(publishing, "rename_noreplace_at", forbid_source_rename)
+    with pytest.raises(publishing.PublishingConflict):
+        publishing._create_public_group_direct(
+            unit, name, manifest, _authority(manifest), lambda: None,
+            frozen_manifest_path=frozen,
+        )
+    assert (foreign / "keep.txt").read_bytes() == b"foreign-bytes"
+    assert not publishing._group_receipt_path(frozen, 1).exists()
+    assert original_rename is not None
+
+
+def test_direct_group_alone_does_not_bypass_sec12_execution_gate(tmp_path):
+    unit, manifest, frozen = _prepare(tmp_path)
+    with pytest.raises(publishing.PublishingConflict, match="SEC-12"):
+        publishing.publish_frozen_stage(
+            manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
+            lease_fence=lambda: None, defer_directory_cleanup=True,
+        )
+    assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
+
+
+def _fixture_custody(root):
+    class ScopedFixtureCustody:
+        def assert_exclusive(self, folder):
+            assert Path(folder).is_relative_to(root)
+    return ScopedFixtureCustody()
+
+
+def test_deferred_grouped_publication_uses_direct_group_creation_in_synthetic_custody(
+    tmp_path, monkeypatch,
+):
+    """Synthetic custody injection checks the grouped publication branch only.
+
+    This is NOT evidence that a real NAS mount has exclusive custody. Runtime
+    validation must remain fail-closed until an enforceable custody proof exists.
+    """
+    from app.batch import media_organizer_deferred_cleanup as guard
+
+    unit, manifest, frozen = _prepare(tmp_path)
+
+    def forbid_source_directory_rename(*_args, **_kwargs):
+        raise AssertionError("deferred Worker called name-based directory promotion")
+
+    monkeypatch.setattr(publishing, "rename_noreplace_at", forbid_source_directory_rename)
+    outcome = publishing.publish_frozen_stage(
+        manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
+        lease_fence=lambda: None, defer_directory_cleanup=True,
+        namespace_custody=_fixture_custody(tmp_path),
+    )
+    assert outcome["file_count"] == len(manifest["moves"])
+    assert outcome["published_files"] == len(manifest["moves"])
+    for row in manifest["moves"]:
+        original = Path(row["source"])
+        staged = Path(row["target"])
+        final = Path(row["final"])
+        assert final.is_file()
+        assert final.read_bytes() == staged.read_bytes() == original.read_bytes()
+        assert (final.stat().st_dev, final.stat().st_ino) == (
+            original.stat().st_dev, original.stat().st_ino
+        )
+    for group in manifest["groups"]:
+        directory = Path(group["destination"])
+        assert publishing._owned_public(directory, _authority(manifest))
+        assert directory.is_dir()
+    assert not list((unit / manifest["stage_directory"]).glob(".nfc-publish-pending-*"))
+
+
+def test_direct_group_recovery_with_existing_valid_inode_receipt(tmp_path, monkeypatch):
+    """Crash just after group provisioning may resume with its original receipt."""
+    from app.batch import media_organizer_deferred_cleanup as guard
+
+    unit, manifest, frozen = _prepare(tmp_path)
+    first_group = manifest["groups"][0]["name"]
+    publishing._create_public_group_direct(
+        unit, first_group, manifest, _authority(manifest), lambda: None,
+        frozen_manifest_path=frozen,
+    )
+    # Recovery uses the same explicitly scoped synthetic custody.
+    def never_rename(*_args, **_kwargs):
+        raise AssertionError("unexpected source-directory rename during recovery")
+
+    monkeypatch.setattr(publishing, "rename_noreplace_at", never_rename)
+    result = publishing.publish_frozen_stage(
+        manifest, frozen_manifest_path=frozen, allowed_roots=[tmp_path],
+        lease_fence=lambda: None, defer_directory_cleanup=True, resume=True,
+        namespace_custody=_fixture_custody(tmp_path),
+    )
+    assert result["file_count"] == len(manifest["moves"])
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
+    assert all(Path(row["source"]).is_file() for row in manifest["moves"])
+
+
+def test_direct_group_rejects_replaced_public_name_after_inode_bound(
+    tmp_path, monkeypatch,
+):
+    """A raced public basename cannot become the directory behind our receipt."""
+    import os
+
+    unit, manifest, frozen = _prepare(tmp_path)
+    name = manifest["groups"][0]["name"]
+    expected = unit / name
+    detached = unit / "detached-public-owner-for-audit"
+    original_write_receipt = publishing._write_group_receipt
+    swapped = []
+
+    def replace_name_after_receipt(*args, **kwargs):
+        result = original_write_receipt(*args, **kwargs)
+        if not swapped:
+            expected.rename(detached)
+            expected.mkdir()
+            (expected / "foreign.txt").write_bytes(b"foreign-stays")
+            swapped.append(True)
+        return result
+
+    monkeypatch.setattr(publishing, "_write_group_receipt", replace_name_after_receipt)
+    with pytest.raises(publishing.PublishingConflict, match="binding|identity"):
+        publishing._create_public_group_direct(
+            unit, name, manifest, _authority(manifest), lambda: None,
+            frozen_manifest_path=frozen,
+        )
+    assert swapped
+    assert (expected / "foreign.txt").read_bytes() == b"foreign-stays"
+    assert detached.is_dir()
+    assert publishing._owned_public(detached, _authority(manifest))
+    assert not (detached / "foreign.txt").exists()
+
+
+@pytest.mark.parametrize("unsafe_mode", [0o777, 0o770, 0o1777])
+def test_direct_group_refuses_group_or_world_writable_public_parent(
+    tmp_path, unsafe_mode,
+):
+    """Even synthetic direct mkdir must not publish into an openly writable unit."""
+    unit, manifest, frozen = _prepare(tmp_path)
+    name = manifest["groups"][0]["name"]
+    unit.chmod(unsafe_mode)
+    try:
+        with pytest.raises(publishing.PublishingConflict, match="public unit.*(owner|permission|writ)"):
+            publishing._create_public_group_direct(
+                unit, name, manifest, _authority(manifest), lambda: None,
+                frozen_manifest_path=frozen,
+            )
+        assert not (unit / name).exists()
+        assert not publishing._group_receipt_path(frozen, 1).exists()
+        assert (unit / "picture.jpg").read_bytes() == b"picture-original"
+        assert (unit / "movie.mp4").read_bytes() == b"movie-original"
+    finally:
+        unit.chmod(0o700)
+
+
+def test_direct_group_rechecks_parent_mode_after_lease_fence(
+    tmp_path,
+):
+    """A parent becoming writable immediately before mkdir must fail closed."""
+    unit, manifest, frozen = _prepare(tmp_path)
+    name = manifest["groups"][0]["name"]
+    calls = 0
+
+    def change_permissions_mid_operation():
+        nonlocal calls
+        calls += 1
+        # _check_unit calls fence at entry. The helper calls it again
+        # immediately before the exclusive mkdir.
+        if calls == 2:
+            unit.chmod(0o777)
+
+    try:
+        with pytest.raises(publishing.PublishingConflict, match="public unit.*(owner|permission|writ)"):
+            publishing._create_public_group_direct(
+                unit, name, manifest, _authority(manifest),
+                change_permissions_mid_operation,
+                frozen_manifest_path=frozen,
+            )
+        assert calls >= 2
+        assert not (unit / name).exists()
+        assert not publishing._group_receipt_path(frozen, 1).exists()
+        assert (unit / "picture.jpg").read_bytes() == b"picture-original"
+        assert (unit / "movie.mp4").read_bytes() == b"movie-original"
+    finally:
+        unit.chmod(0o700)
+
+
+def test_direct_group_refuses_writable_parent_of_organizing_unit(tmp_path):
+    """A second writer of the unit's parent could rebind the entire unit name."""
+    import stat
+
+    unit, manifest, frozen = _prepare(tmp_path)
+    parent = unit.parent
+    original_mode = stat.S_IMODE(parent.stat().st_mode)
+    parent.chmod(0o777)
+    try:
+        with pytest.raises(publishing.PublishingConflict, match="public unit (?:parent|ancestor).*permission"):
+            publishing._create_public_group_direct(
+                unit, manifest["groups"][0]["name"], manifest,
+                _authority(manifest), lambda: None,
+                frozen_manifest_path=frozen,
+            )
+        assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
+        assert not publishing._group_receipt_path(frozen, 1).exists()
+    finally:
+        parent.chmod(original_mode)
+
+
+def test_direct_group_rechecks_unit_parent_after_fence(tmp_path):
+    """Late chmod of the unit parent must be checked before exclusive mkdir."""
+    import stat
+
+    unit, manifest, frozen = _prepare(tmp_path)
+    parent = unit.parent
+    original_mode = stat.S_IMODE(parent.stat().st_mode)
+    calls = 0
+
+    def loosen_parent():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            parent.chmod(0o777)
+
+    try:
+        with pytest.raises(publishing.PublishingConflict, match="public unit (?:parent|ancestor).*permission"):
+            publishing._create_public_group_direct(
+                unit, manifest["groups"][0]["name"], manifest,
+                _authority(manifest), loosen_parent,
+                frozen_manifest_path=frozen,
+            )
+        assert calls >= 2
+        assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
+        assert not publishing._group_receipt_path(frozen, 1).exists()
+    finally:
+        parent.chmod(original_mode)
+
+
+def _prepare_nested(tmp_path):
+    parent = tmp_path / "ancestor" / "parent"
+    parent.mkdir(parents=True)
+    unit, manifest, frozen = _grouped(parent)
+    stage_frozen_sources(
+        manifest, frozen_manifest_path=frozen, allowed_roots=[parent],
+        lease_fence=lambda: None,
+    )
+    return unit, manifest, frozen
+
+
+def test_direct_group_refuses_writable_higher_ancestor_of_unit(tmp_path):
+    import stat
+
+    unit, manifest, frozen = _prepare_nested(tmp_path)
+    ancestor = unit.parent.parent
+    original_mode = stat.S_IMODE(ancestor.stat().st_mode)
+    ancestor.chmod(0o777)
+    try:
+        with pytest.raises(publishing.PublishingConflict, match="ancestor.*(owner|permission|writ)"):
+            publishing._create_public_group_direct(
+                unit, manifest["groups"][0]["name"], manifest,
+                _authority(manifest), lambda: None,
+                frozen_manifest_path=frozen,
+            )
+        assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
+        assert not publishing._group_receipt_path(frozen, 1).exists()
+    finally:
+        ancestor.chmod(original_mode)
+
+
+def test_direct_group_rechecks_higher_ancestor_after_final_fence(tmp_path):
+    import stat
+
+    unit, manifest, frozen = _prepare_nested(tmp_path)
+    ancestor = unit.parent.parent
+    original_mode = stat.S_IMODE(ancestor.stat().st_mode)
+    calls = 0
+
+    def loosen_ancestor():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            ancestor.chmod(0o777)
+
+    try:
+        with pytest.raises(publishing.PublishingConflict, match="ancestor.*(owner|permission|writ)"):
+            publishing._create_public_group_direct(
+                unit, manifest["groups"][0]["name"], manifest,
+                _authority(manifest), loosen_ancestor,
+                frozen_manifest_path=frozen,
+            )
+        assert calls >= 2
+        assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
+        assert not publishing._group_receipt_path(frozen, 1).exists()
+    finally:
+        ancestor.chmod(original_mode)
+
+
+def test_direct_group_refuses_root_worker_before_any_public_mutation(
+    tmp_path, monkeypatch,
+):
+    """Root has ambient authority and is not an enforceable dedicated Worker UID."""
+    unit, manifest, frozen = _prepare(tmp_path)
+    monkeypatch.setattr(publishing.os, "geteuid", lambda: 0)
+
+    with pytest.raises(
+        publishing.PublishingConflict,
+        match="dedicated non-root Worker",
+    ):
+        publishing._create_public_group_direct(
+            unit, manifest["groups"][0]["name"], manifest,
+            _authority(manifest), lambda: None,
+            frozen_manifest_path=frozen,
+        )
+
+    assert all(not Path(group["destination"]).exists() for group in manifest["groups"])
+    assert not publishing._group_receipt_path(frozen, 1).exists()
+    assert (unit / "picture.jpg").read_bytes() == b"picture-original"
+    assert (unit / "movie.mp4").read_bytes() == b"movie-original"
+
+def test_direct_group_detects_custody_loss_after_mkdir_before_open(
+    tmp_path, monkeypatch,
+):
+    """A replacement at mkdir→open must be rejected before it is adopted.
+
+    The fence models a revocable external custody proof: it remembers the
+    directory created by this Worker and refuses if the public name no longer
+    denotes that inode. This is synthetic fault injection, not proof that the
+    NAS currently supplies such an OS-enforced lock.
+    """
+    import os
+
+    unit, manifest, frozen = _prepare(tmp_path)
+    name = manifest["groups"][0]["name"]
+    detached = unit / ".nfc-owned-group-detached-for-audit"
+    public = unit / name
+    original_mkdir = publishing.os.mkdir
+    created_identity = {}
+    swapped = []
+
+    def replace_after_worker_mkdir(path, mode=0o777, *, dir_fd=None):
+        result = original_mkdir(path, mode=mode, dir_fd=dir_fd)
+        if path == name and dir_fd is not None and not swapped:
+            owned = public.stat(follow_symlinks=False)
+            created_identity["inode"] = (owned.st_dev, owned.st_ino)
+            public.rename(detached)
+            original_mkdir(public, mode=0o700)
+            foreign = public.stat(follow_symlinks=False)
+            assert (foreign.st_dev, foreign.st_ino) != created_identity["inode"]
+            assert foreign.st_uid == os.geteuid()
+            assert (foreign.st_mode & 0o777) == 0o700
+            swapped.append(True)
+        return result
+
+    def custody_fence():
+        if not created_identity:
+            return
+        try:
+            current = public.stat(follow_symlinks=False)
+        except FileNotFoundError as exc:
+            raise publishing.PublishingConflict(
+                "namespace custody lost after public group creation"
+            ) from exc
+        if (current.st_dev, current.st_ino) != created_identity["inode"]:
+            raise publishing.PublishingConflict(
+                "namespace custody lost after public group creation"
+            )
+
+    monkeypatch.setattr(publishing.os, "mkdir", replace_after_worker_mkdir)
+    with pytest.raises(publishing.PublishingConflict, match="namespace custody lost"):
+        publishing._create_public_group_direct(
+            unit, name, manifest, _authority(manifest), custody_fence,
+            frozen_manifest_path=frozen,
+        )
+
+    assert swapped
+    assert detached.is_dir()
+    assert public.is_dir()
+    assert list(public.iterdir()) == []
+    assert not (public / publishing._PUBLIC_OWNER).exists()
+    assert not publishing._group_receipt_path(frozen, 1).exists()
+    assert not publishing._owned_public(detached, _authority(manifest))
+    assert (unit / "picture.jpg").read_bytes() == b"picture-original"
+    assert (unit / "movie.mp4").read_bytes() == b"movie-original"
+    assert all(Path(row["target"]).is_file() for row in manifest["moves"])

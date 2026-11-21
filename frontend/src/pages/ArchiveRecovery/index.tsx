@@ -216,7 +216,7 @@ export const ArchiveRecoveryPage: React.FC = () => {
         <ActionBar>
           <ConsoleButton disabled={!selected || check.isPending || Boolean(taskId)}
             loading={check.isPending} onClick={() => { void check.mutateAsync(selected).catch(() => {}); }}>检测</ConsoleButton>
-          <ConsoleButton variant="primary" disabled={!checkedSourceMatchesSelected || !check.data?.can_write || !check.data?.dependency_available || passwordChannelBlocked || start.isPending || Boolean(taskId)}
+          <ConsoleButton variant="primary" disabled={!checkedSourceMatchesSelected || !check.data?.mutation_enabled || !check.data?.dependency_available || passwordChannelBlocked || start.isPending || Boolean(taskId)}
             loading={start.isPending} onClick={() => { void start.mutateAsync().catch(() => {}); }}>开始恢复</ConsoleButton>
         </ActionBar>
         {passwordChannelBlocked && checkedSourceMatchesSelected && <p className="nfc-archive-recovery-warning" role="alert">
@@ -229,7 +229,7 @@ export const ArchiveRecoveryPage: React.FC = () => {
         {start.isError && <p role="alert">启动失败：{getStructuredApiError(start.error).message}</p>}
         {checkedSourceMatchesSelected && check.data && <div className="nfc-archive-recovery-check-result" role="status">
           <p>实际格式：{check.data.format} · 原包大小：{check.data.source_bytes.toLocaleString()} 字节 · 当前空闲：{check.data.free_bytes.toLocaleString()} 字节</p>
-          <p>写入允许：{check.data.can_write ? '是' : '否'} · 依赖：{check.data.dependency_available ? '可用' : '缺失'}</p>
+          <p>文件写入：{check.data.worker_write_check_required ? 'Worker 执行时验证目录权限' : '未验证'} · 变更开关：{check.data.mutation_enabled ? '已开启' : '未开启'} · 依赖：{check.data.dependency_available ? '可用' : '缺失'}</p>
           <p>密码通道（API 侧）：{check.data.password_channel_available === true ? 'tmpfs 已检测到（还需确认 Worker 共享挂载）' : '未就绪；带密码的恢复不可启动'}</p>
           <p>增强策略：{check.data.deep_strategy}。{check.data.warning}</p>
         </div>}
