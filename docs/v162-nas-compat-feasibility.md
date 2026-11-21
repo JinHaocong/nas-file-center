@@ -126,3 +126,38 @@ granted any capability to the default Worker, performed a ZOS/FUSE
 probe or approved its wider effects on other Worker tasks. A separate
 review must confine the elevated capability to a justifiable set of
 approved operations or explicitly accept/document the residual risk.
+
+## New: protected-folder selection and scratch-only deployment model
+
+The UI now offers a direct absolute-path field alongside the directory picker.
+The API can defer *read-only preview queueing* for a permission-denied child
+only when `NFC_NAS_COMPAT_API_DEFERRED_SELECTION_ENABLED=true`, the API
+runs as non-root, and `maintenance_window` is configured. Before deferral,
+accessible ancestors must be real directories (not symlinks). Missing paths,
+reserved quarantine paths, other namespaces, strict mode, and an enabled
+Worker capability profile cannot use this exception. A completed Worker
+preview and job-bound confirmation remain prerequisites for execution.
+
+Added `compose.v162-nas-compat-scratch.yaml` to demonstrate the eventual
+two-container layout on a **brand-new disposable config and data root**.
+It has no host ports, an internal Docker network, non-root read-only API,
+and a tightly defined root-startup -> non-root Worker launcher. Unlike the
+normal Compose, its test-only Worker startup has DAC_OVERRIDE/SETUID/SETGID
+only during its controlled handoff; the effective Worker must end as UID
+10002/GID 10000 with only DAC_OVERRIDE.
+
+**IMPORTANT:** This scratch topology explicitly keeps `ALLOW_MUTATION=false`,
+`ALLOW_DELETE=false` and `MEDIA_ORGANIZER_EXECUTION_ENABLED=false`
+in BOTH services. It is **not** a runnable production media organizer, a
+security approval, a ZOS/zfuse compatibility proof, or authorization to
+enable writes. It cannot reuse existing NAS or NFC config and data paths.
+Do not deploy it into Komodo or bind it to the real /data root.
+
+`scripts/test_v162_scratch_compose.sh` checks its rendered Compose config
+in CI using only a newly created temporary test root; it does NOT start
+containers, modify files, or invoke any Docker privilege on a real NAS.
+
+Remaining: inspect how ambient DAC_OVERRIDE affects **all** Worker job types,
+complete the cleanup and hostile-writer security review (#399–#403),
+get independent reviewer approval, and perform a separately owner-approved
+same-mount ZOS disposable validation before adding any production overlay.
