@@ -5,6 +5,9 @@ on:
     paths:
       - "scripts/probe_nas_compat_capability.sh"
       - "scripts/probe_nas_compat_ambient.py"
+      - "app/nas_compat_launcher.py"
+      - "app/worker.py"
+      - "tests/test_nas_compat_launcher.py"
       - "docs/v162-nas-compat-feasibility.md"
       - ".github/workflows/v162-nas-compat-feasibility.yml"
   workflow_dispatch:
@@ -22,5 +25,12 @@ jobs:
       - name: Verify probe syntax and isolated test fixture
         run: bash -n scripts/probe_nas_compat_capability.sh
           python3 -m py_compile scripts/probe_nas_compat_ambient.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Gate and root-denial unit tests (no media)
+        run: |
+          python -m pip install pytest
+          python -m pytest -q tests/test_nas_compat_launcher.py
       - name: Compare baseline vs DAC override (CI host only)
         run: bash scripts/probe_nas_compat_capability.sh
