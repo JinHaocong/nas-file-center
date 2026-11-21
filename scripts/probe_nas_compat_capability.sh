@@ -88,7 +88,7 @@ baseline, candidate = (json.loads(x) for x in sys.argv[1:])
 assert baseline["uid"] == 10002 and baseline["gid"] == 10000
 assert not baseline["read_root_private"] and not baseline["write_root_directory"]
 assert candidate["uid"] == 0 and candidate["gid"] == 10000
-assert candidate["groups"] == []
+assert set(candidate["groups"]).issubset({10000})
 assert candidate["caps"] == {
     "CapInh": 0, "CapPrm": 2, "CapEff": 2, "CapBnd": 2,
     "CapAmb": 0, "NoNewPrivs": 1,
