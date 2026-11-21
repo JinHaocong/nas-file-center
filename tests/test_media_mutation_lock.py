@@ -3,6 +3,7 @@ import fcntl
 import importlib
 import os
 import selectors
+import stat
 import subprocess
 import sys
 import threading
@@ -228,3 +229,14 @@ sys.exit(os.waitstatus_to_exitcode(status))
         parent.stdin.write("\n")
         parent.stdin.flush()
         assert parent.wait(timeout=4) == 0
+
+
+
+def test_root_owned_group_lock_file_requires_explicit_root_worker_profile():
+    module = _lock_module()
+    info = os.stat_result((
+        stat.S_IFREG | 0o660, 1, 1, 1, 0, 10000, 0, 0, 0, 0,
+    ))
+    assert module._check_file(info, 10000, allow_root_owner=True) is None
+    with pytest.raises(PermissionError, match="permissions or type"):
+        module._check_file(info, 10000, allow_root_owner=False)
