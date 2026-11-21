@@ -1,0 +1,24 @@
+name: V1.6.2 isolated NAS DAC feasibility
+
+on:
+  pull_request:
+    paths:
+      - "scripts/probe_nas_compat_capability.sh"
+      - "docs/v162-nas-compat-feasibility.md"
+      - ".github/workflows/v162-nas-compat-feasibility.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-dac-capability:
+    name: Non-root Worker DAC capability on disposable CI fixture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify probe syntax and isolated test fixture
+        run: bash -n scripts/probe_nas_compat_capability.sh
+      - name: Compare baseline vs DAC override (CI host only)
+        run: bash scripts/probe_nas_compat_capability.sh
