@@ -185,12 +185,17 @@ it. The revised **default-off** prototype now performs a two-step handoff:
    maintenance-window acknowledgement. Ordinary jobs never raise DAC.
 4. The handler finally block revokes CapEff and rechecks the parked identity;
    an unexpected failure to revoke terminates the Worker rather than
-   proceeding with privileged failure logging. Scheduler, cleanup hooks,
-   SQLite, heartbeat and normal jobs run without effective DAC.
+   proceeding with privileged failure logging. The Worker scheduler,
+   outer dispatch, idle/recovery hooks, heartbeat and unrelated WorkJobs
+   run without effective DAC. **Inside an approved media handler, the
+   capability remains effective for the entire handler call**, including
+   database checkpoints and any helper code executed by that handler.
 
 **Security limitation remains:** DAC_OVERRIDE stays in the permitted set
 throughout the Worker process and can be re-enabled by compromised Python
-code. Per-job gating is a defense-in-depth restriction, not a kernel-enforced
+code. The current handler-level boundary does not isolate individual system
+calls, and code executed inside an approved handler (including checkpoints)
+receives the elevated effective permission. Per-job gating is a defense-in-depth restriction, not a kernel-enforced
 least-privilege guarantee. A separate narrowly confined helper may still be
 required for release. In particular, no code/CI result yet proves hostile
 root writer exclusion, ZOS/FUSE capability behavior or safe final cleanup.
