@@ -80,8 +80,15 @@ def execute_request(client, pid, work, confirmation=None):
 def worker(settings, job_id, *, name="test-execution-owner"):
     engine, factory = create_engine_and_session(settings.database_path)
     assert acquire_worker_ownership(engine, factory, worker_id=name)
-    return process_work_job(settings, job_id, session_factory=factory,
-                            engine=engine, worker_id=name)
+    result = process_work_job(settings, job_id, session_factory=factory,
+                              engine=engine, worker_id=name)
+    if not result:
+        from app.models import WorkJob
+        with factory() as session:
+            job = session.get(WorkJob, job_id)
+            print("WORKER_FAILURE_DIAGNOSTIC", job_id,
+                  getattr(job, "error_code", None), getattr(job, "error_text", None))
+    return result
 
 
 def test_mode_has_a_second_default_off_mutation_switch(tmp_path):
