@@ -1,5 +1,5 @@
-# V1.6.2 disposable two-container probe. NOT a production Komodo overlay.
-# All host roots must be NEW scratch directories; NEVER bind live NAS media.
+# V1.6.2 disposable two-container candidate. NOT a production Komodo overlay.
+# Use only NEW scratch config/data roots; never point this at live media.
 name: nas-file-center-v162-scratch
 
 x-common: &common
@@ -36,7 +36,7 @@ services:
     environment:
       <<: *env
       NFC_NAS_COMPAT_API_DEFERRED_SELECTION_ENABLED: "true"
-      NFC_NAS_COMPAT_WORKER_ENABLED: "false"
+      NFC_NAS_COMPAT_ROOT_WORKER_ENABLED: "false"
     volumes:
       - type: bind
         source: "${NFC_V162_SCRATCH_CONFIG_DIR:?New scratch config directory required}"
@@ -66,16 +66,14 @@ services:
 
   worker:
     <<: *common
-    # Root only during bootstrap. The fixed launcher drops to UID 10002.
+    # Accepted compatibility profile: root UID, shared GID, one DAC capability.
     user: "0:${NFC_V162_SHARED_GID:-10000}"
-    cap_add: [DAC_OVERRIDE, SETUID, SETGID]
-    command: ["python", "-m", "app.nas_compat_launcher"]
+    cap_add: [DAC_OVERRIDE]
+    command: ["python", "-m", "app.worker"]
     environment:
       <<: *env
       NFC_NAS_COMPAT_API_DEFERRED_SELECTION_ENABLED: "false"
-      NFC_NAS_COMPAT_WORKER_ENABLED: "true"
-      NFC_NAS_COMPAT_WORKER_UID: "${NFC_V162_WORKER_UID:-10002}"
-      NFC_NAS_COMPAT_WORKER_GID: "${NFC_V162_SHARED_GID:-10000}"
+      NFC_NAS_COMPAT_ROOT_WORKER_ENABLED: "true"
     volumes:
       - type: bind
         source: "${NFC_V162_SCRATCH_CONFIG_DIR:?New scratch config directory required}"
