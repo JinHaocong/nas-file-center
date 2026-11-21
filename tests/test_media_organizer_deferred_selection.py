@@ -39,7 +39,7 @@ def private_tree(tmp_path, monkeypatch):
 
     # The queueing API is non-root; the Worker must still use real open/stat.
     monkeypatch.setattr(deferred.os, "geteuid", lambda: 10001)
-    monkeypatch.delenv("NFC_NAS_COMPAT_WORKER_ENABLED", raising=False)
+    monkeypatch.delenv("NFC_NAS_COMPAT_ROOT_WORKER_ENABLED", raising=False)
     return media, unit, restricted_lstat
 
 
@@ -54,7 +54,7 @@ def test_private_subdirectory_only_deferred_in_explicit_api_mode(private_tree, m
     for opt in (settings(media, enabled=False), settings(media, mode="strict")):
         with pytest.raises(ValueError, match="inaccessible"):
             jobs._validate_selection(str(unit), opt)
-    monkeypatch.setenv("NFC_NAS_COMPAT_WORKER_ENABLED", "true")
+    monkeypatch.setenv("NFC_NAS_COMPAT_ROOT_WORKER_ENABLED", "true")
     with pytest.raises(ValueError, match="inaccessible"):
         jobs._validate_selection(str(unit), settings(media))
     monkeypatch.setattr(jobs, "_check_scope", original)
