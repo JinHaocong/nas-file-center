@@ -28,7 +28,7 @@ Worker compatibility is explicitly opt-in:
 startup requires:
 
 - real/effective/saved UID exactly 0;
-- real/effective/saved GID exactly 10000, with no supplementary groups;
+- real/effective/saved GID exactly 10000, with no supplementary groups other than the configured GID 10000;
 - \`NFC_SHARED_CONFIG_GID=10000\`;
 - only \`CAP_DAC_OVERRIDE\` in permitted/effective/bounding sets;
 - empty inheritable and ambient capability sets;
