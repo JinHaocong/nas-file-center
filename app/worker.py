@@ -234,11 +234,7 @@ def _process_work_job(
         with session_factory() as session:
             work = session.get(WorkJob, work_job_id)
             assert_media_mutation_lock(settings)
-            # The capability is parked for scheduler, DB, and other WorkJobs.
-            # Scope it only to the approved foreground semantic-media handler.
-            from app.nas_compat_launcher import scoped_nas_compat_job
-            with scoped_nas_compat_job(work, settings):
-                handler.run(work, ctx, settings)
+            handler.run(work, ctx, settings)
 
         # Finished cleanly -> completed under active lease
         with session_factory() as session:
@@ -563,10 +559,9 @@ def worker_loop(
     stop_event: threading.Event | None = None,
 ) -> None:
     settings = settings or get_settings()
-    # The optional NAS DAC profile must be proven before SQLite, recovery,
-    # scheduler or any media WorkJob can execute. Normal mode is unchanged.
-    from app.nas_compat_launcher import verify_optional_worker_runtime
-    verify_optional_worker_runtime()
+    # Validate the explicit root Worker profile before SQLite/recovery/scheduling.
+    from app.nas_compat_worker import verify_worker_runtime
+    verify_worker_runtime(settings)
     engine, SessionLocal = create_engine_and_session(settings.database_path)
     init_db(
         engine,
