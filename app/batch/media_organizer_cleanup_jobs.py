@@ -343,7 +343,7 @@ class MediaOrganizerCleanupHandler(TaskHandler):
         _require_enabled(settings)
         if not context.worker_id:
             raise PermissionError("exclusive Worker lease required for cleanup")
-        _require_mutation_worker_identity()
+        _require_mutation_worker_identity(settings)
         state = _validated_state(job, settings)
         unit = Path(state["unit"])
         with context.SessionLocal() as session:
