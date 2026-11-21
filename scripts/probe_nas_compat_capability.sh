@@ -35,6 +35,14 @@ settings = SimpleNamespace(
     nas_compat_root_worker_enabled=mode,
     media_organizer_execution_mode=os.environ.get("MEDIA_ORGANIZER_EXECUTION_MODE","strict"),
 )
+print(json.dumps({
+    "profile_check": __import__("nas_compat_worker").is_nas_compat_root_worker(settings),
+    "uid": os.getresuid(), "gid": os.getresgid(), "groups": os.getgroups(),
+    "caps": {k: int(status[k], 16) for k in ("CapInh","CapPrm","CapEff","CapBnd","CapAmb")},
+    "no_new_privs": status["NoNewPrivs"],
+    "shared_gid": os.environ.get("NFC_SHARED_CONFIG_GID"),
+    "mode": os.environ.get("MEDIA_ORGANIZER_EXECUTION_MODE"),
+}, sort_keys=True), flush=True)
 verify_worker_runtime(settings)
 can_read = False
 read_error = None
