@@ -1,23 +1,27 @@
-name: V1.6.2 isolated NAS DAC feasibility
+name: V1.6.2 simple NAS Root Worker feasibility
 
 on:
   pull_request:
     paths:
       - "scripts/probe_nas_compat_capability.sh"
-      - "scripts/probe_nas_compat_ambient.py"
-      - "app/nas_compat_launcher.py"
-      - "app/nas_compat_runtime_entry.py"
+      - "app/nas_compat_worker.py"
       - "app/batch/media_organizer_deferred_selection.py"
       - "app/batch/media_organizer_jobs.py"
       - "app/batch/media_organizer_authority.py"
+      - "app/batch/media_organizer_execute_jobs.py"
+      - "app/batch/media_organizer_cleanup_jobs.py"
+      - "app/batch/media_organizer_publish.py"
+      - "app/batch/media_organizer_finalize.py"
+      - "app/tasks/media_mutation_lock.py"
       - "app/config.py"
+      - "app/config_sharing.py"
+      - "app/worker.py"
       - "compose.v162-nas-compat-scratch.yaml"
       - "scripts/test_v162_scratch_compose.sh"
+      - "tests/test_nas_compat_root_worker.py"
+      - "tests/test_media_organizer_nonroot_worker.py"
+      - "tests/test_media_mutation_lock.py"
       - "tests/test_media_organizer_deferred_selection.py"
-      - "frontend/src/pages/Batch/SemanticMediaOrganizerEditor.tsx"
-      - "app/worker.py"
-      - "tests/test_nas_compat_launcher.py"
-      - "tests/test_nas_compat_scoped_capabilities.py"
       - "docs/v162-nas-compat-feasibility.md"
       - ".github/workflows/v162-nas-compat-feasibility.yml"
   workflow_dispatch:
@@ -26,26 +30,27 @@ permissions:
   contents: read
 
 jobs:
-  synthetic-dac-capability:
-    name: Non-root Worker DAC capability on disposable CI fixture
+  synthetic-root-worker:
+    name: UID 0:GID 10000 with DAC_OVERRIDE on disposable CI fixture
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Verify probe syntax and isolated test fixture
-        run: |
-          bash -n scripts/probe_nas_compat_capability.sh
-          python3 -m py_compile scripts/probe_nas_compat_ambient.py
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Gate and root-denial unit tests (no media)
+      - name: Install project and test dependencies
+        run: python -m pip install -e ".[test]"
+      - name: Root Worker identity and regression tests (no NAS)
         run: |
-          python -m pip install pytest
-          python -m pytest -q tests/test_nas_compat_launcher.py tests/test_nas_compat_scoped_capabilities.py
-          # A full dependency install and backend/frontend regression run in
-          # the existing V1.6 media organizer workflow for these changes.
-      - name: Compare baseline vs DAC override (CI host only)
+          python -m pytest -q \
+            tests/test_nas_compat_root_worker.py \
+            tests/test_media_organizer_nonroot_worker.py \
+            tests/test_media_mutation_lock.py \
+            tests/test_media_organizer_deferred_selection.py
+      - name: Verify shell probe syntax
+        run: bash -n scripts/probe_nas_compat_capability.sh
+      - name: Compare non-root baseline with direct 0:10000 Root Worker
         run: bash scripts/probe_nas_compat_capability.sh
-      - name: Check isolated candidate Compose without starting containers
+      - name: Validate isolated two-container Compose without starting containers
         run: bash scripts/test_v162_scratch_compose.sh
