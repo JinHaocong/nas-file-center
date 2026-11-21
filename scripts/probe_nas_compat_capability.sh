@@ -89,6 +89,10 @@ scoped="$(docker run --rm --network none --read-only \
   --mount "type=bind,source=$repo/scripts/probe_nas_compat_ambient.py,target=/probe.py,readonly" \
   --mount "type=bind,source=$repo/app,target=/opt/nfc/app,readonly" \
   -e PYTHONPATH=/opt/nfc \
+  -e NFC_NAS_COMPAT_WORKER_ENABLED=true \
+  -e NFC_NAS_COMPAT_WORKER_UID=10002 \
+  -e NFC_NAS_COMPAT_WORKER_GID=10000 \
+  -e MEDIA_ORGANIZER_EXECUTION_MODE=maintenance_window \
   "$image" python /probe.py "$payload")"
 python3 - "$baseline" "$candidate" "$scoped" <<'PY'
 import json, sys
