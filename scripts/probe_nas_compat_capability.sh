@@ -52,6 +52,7 @@ except OSError as exc:
 print(json.dumps({
     "uid": os.geteuid(), "gid": os.getegid(),
     "no_new_privs": fields.get("NoNewPrivs", "").strip(),
+    "effective_caps_hex": f"{caps:x}",
     "effective_dac_override": cap_dac_override_effective,
     "effective_dac_read_search": bool(caps & (1 << 2)),
     "root_owned_private_read": can_read,
@@ -71,10 +72,19 @@ run_case() {
 }
 baseline="$(run_case)"
 candidate="$(run_case --cap-add DAC_OVERRIDE)"
-python3 - "$baseline" "$candidate" <<'PY'
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ambient="$(docker run --rm --network none --read-only \
+  --user 0:10000 \
+  --cap-drop ALL \
+  --cap-add DAC_OVERRIDE --cap-add SETUID --cap-add SETGID \
+  --security-opt no-new-privileges:true \
+  --mount "type=bind,source=$scratch/media,target=/data" \
+  --mount "type=bind,source=$repo/scripts/probe_nas_compat_ambient.py,target=/probe.py,readonly" \
+  "$image" python /probe.py "$payload")"
+python3 - "$baseline" "$candidate" "$ambient" <<'PY'
 import json, sys
-baseline, candidate = (json.loads(raw) for raw in sys.argv[1:])
-for label, row in (("baseline", baseline), ("dac_override_candidate", candidate)):
+baseline, candidate, ambient = (json.loads(raw) for raw in sys.argv[1:])
+for label, row in (("baseline", baseline), ("dac_override_candidate", candidate), ("ambient_candidate", ambient)):
     print(f"{label}={json.dumps(row, sort_keys=True)}")
     assert row["uid"] == 10002 and row["gid"] == 10000, "Unexpected Worker identity"
     assert row["no_new_privs"] == "1", "no-new-privileges is disabled"
@@ -84,5 +94,10 @@ viable = (candidate["effective_dac_override"] and
           candidate["root_owned_private_read"] and
           candidate["root_owned_directory_write"])
 print("ROOTLESS_DAC_OVERRIDE_FEASIBILITY=" + ("PASS_CI_HOST_ONLY" if viable else "UNSUPPORTED_AS_CONFIGURED"))
+ambient_viable = (ambient["effective_caps_hex"] == "2" and
+                  ambient["effective_dac_override"] and
+                  ambient["root_owned_private_read"] and
+                  ambient["root_owned_directory_write"])
+print("AMBIENT_NONROOT_DAC_OVERRIDE_FEASIBILITY=" + ("PASS_CI_HOST_ONLY" if ambient_viable else "UNSUPPORTED_AS_CONFIGURED"))
 print("CI-only result: not NAS/FUSE compatibility or release authorization.")
 PY
