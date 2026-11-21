@@ -239,8 +239,10 @@ class MaintenanceWindowSession:
     def assert_mutation_allowed(self, parents, *, manifest=None) -> None:
         from app.tasks.media_mutation_lock import assert_media_mutation_lock
 
+        from app.nas_compat_worker import is_nas_compat_root_worker
         if (not self._open or os.getpid() != self._worker_pid
-                or os.geteuid() != self._worker_uid or self._worker_uid == 0):
+                or os.geteuid() != self._worker_uid
+                or (self._worker_uid == 0 and not is_nas_compat_root_worker(self._settings))):
             raise MaintenanceWindowUnavailable("maintenance session is closed or Worker identity changed")
         if manifest is not None and self._manifest_digest != _checksum(manifest):
             raise MaintenanceWindowUnavailable("maintenance session belongs to different frozen evidence")
@@ -275,8 +277,11 @@ def acquire_operation_authority(
         raise MaintenanceWindowUnavailable(
             "maintenance-window mutation requires literal operator confirmation"
         )
-    if not hasattr(os, "geteuid") or os.geteuid() == 0:
-        raise PermissionError("maintenance execution requires a non-root Worker")
+    from app.nas_compat_worker import is_nas_compat_root_worker
+    if not hasattr(os, "geteuid") or (os.geteuid() == 0 and not is_nas_compat_root_worker(settings)):
+        raise PermissionError("maintenance execution requires a non-root Worker or the explicit NAS 0:10000 profile")
+    if os.geteuid() != 0 and getattr(settings, "nas_compat_root_worker_enabled", False):
+        raise PermissionError("NAS compatibility Root Worker profile requires UID 0")
     with media_mutation_lock(settings), ExitStack() as resources:
         _validate_selection(settings, unit)
         yield MaintenanceWindowSession(
@@ -300,10 +305,19 @@ def fence_operation_authority(authority: OperationAuthority, callback) -> _Fence
     return _FencedAuthority(authority, callback)
 
 
-def is_maintenance_session(authority) -> bool:
+def _unwrap_authority(authority):
     while type(authority) is _FencedAuthority:
         authority = authority.authority
-    return type(authority) is MaintenanceWindowSession
+    return authority
+
+
+def maintenance_session_settings(authority):
+    authority = _unwrap_authority(authority)
+    return authority._settings if type(authority) is MaintenanceWindowSession else None
+
+
+def is_maintenance_session(authority) -> bool:
+    return type(_unwrap_authority(authority)) is MaintenanceWindowSession
 
 
 def assert_operation_authorized(authority, parents, *, manifest=None) -> None:
