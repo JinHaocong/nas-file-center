@@ -10,6 +10,8 @@ on:
       - "app/batch/media_organizer_jobs.py"
       - "app/batch/media_organizer_authority.py"
       - "app/config.py"
+      - "compose.v162-nas-compat-scratch.yaml"
+      - "scripts/test_v162_scratch_compose.sh"
       - "tests/test_media_organizer_deferred_selection.py"
       - "frontend/src/pages/Batch/SemanticMediaOrganizerEditor.tsx"
       - "app/worker.py"
@@ -43,3 +45,5 @@ jobs:
           # the existing V1.6 media organizer workflow for these changes.
       - name: Compare baseline vs DAC override (CI host only)
         run: bash scripts/probe_nas_compat_capability.sh
+      - name: Check isolated candidate Compose without starting containers
+        run: bash scripts/test_v162_scratch_compose.sh
