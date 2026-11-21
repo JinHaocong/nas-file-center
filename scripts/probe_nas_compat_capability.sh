@@ -80,6 +80,8 @@ ambient="$(docker run --rm --network none --read-only \
   --security-opt no-new-privileges:true \
   --mount "type=bind,source=$scratch/media,target=/data" \
   --mount "type=bind,source=$repo/scripts/probe_nas_compat_ambient.py,target=/probe.py,readonly" \
+  --mount "type=bind,source=$repo/app,target=/opt/nfc/app,readonly" \
+  -e PYTHONPATH=/opt/nfc \
   "$image" python /probe.py "$payload")"
 python3 - "$baseline" "$candidate" "$ambient" <<'PY'
 import json, sys
