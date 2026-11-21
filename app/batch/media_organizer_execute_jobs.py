@@ -302,6 +302,18 @@ def get_media_organizer_execution(
         checkpoint = json.loads(job.checkpoint_json or "{}")
         mode = state.get("execution_mode", "strict")
         execution_enabled = execution_enabled and mode == execution_mode(settings)
+        # A pre-freeze failure, such as NAS #31's permission denial, has no
+        # durable replay authority. Do not advertise a non-working recovery.
+        failed_original = job.status == "failed" and state.get("recovery_of_job_id") is None
+        recovery_available = (
+            failed_original
+            and checkpoint.get("phase") in RECOVERABLE_PHASES
+            and checkpoint.get("execution_mode", "strict") == mode
+            and (mode != "maintenance_window" or (
+                isinstance(checkpoint.get("manifest_checksum"), str)
+                and len(checkpoint["manifest_checksum"]) == 64
+            ))
+        )
         cleanup = session.scalar(select(WorkJob).where(
             WorkJob.kind == CLEANUP_KIND,
             func.json_extract(WorkJob.state_json, "$.execution_job_id") == job_id,
@@ -331,6 +343,11 @@ def get_media_organizer_execution(
             "preview_job_id": state.get("preview_job_id"),
             "unit": state.get("unit"),
             "recovery_of_job_id": state.get("recovery_of_job_id"),
+            "recovery_available": recovery_available,
+            "recovery_unavailable_reason": (
+                "未形成可验证的冻结检查点，不能自动恢复。请保留现有文件与证据，核查后重新只读扫描。"
+                if failed_original and not recovery_available else None
+            ),
             "manual_cleanup_required": checkpoint.get("phase") == "manual_cleanup_required",
             "finalized": checkpoint.get("phase") == "completed",
             "publication_complete": (
@@ -533,6 +550,12 @@ def _original_recovery_authority(original: WorkJob, settings: Settings):
     if not isinstance(state, dict) or not isinstance(checkpoint, dict):
         raise ValueError("invalid original recovery authority")
     _validate_job_approval(settings, original, state)
+    if not checkpoint.get("phase"):
+        # Before the first checkpoint the Worker cannot have acquired replay
+        # authority. Do not treat missing mode as strict, or backfill evidence.
+        raise ValueError(
+            "no verified frozen checkpoint; preserve evidence and start a new read-only preview"
+        )
     require_mode(settings, checkpoint)
     if state.get("recovery_of_job_id") is not None:
         raise ValueError("nested recovery is forbidden; manual review required")

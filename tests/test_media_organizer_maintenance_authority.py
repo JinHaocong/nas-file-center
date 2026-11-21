@@ -170,6 +170,57 @@ def publish(authority, settings, unit, manifest, frozen, parents):
         return save_cleanup_plan(cleanup_plan_path(frozen), manifest)
 
 
+def test_maintenance_group_accepts_shared_writable_unit_and_untrusted_ancestor(site):
+    """A real session permits ordinary mixed-owner NAS layouts in maintenance.
+
+    The Worker must still have actual write access, valid frozen evidence,
+    the cooperative lock and an active checked session. Strict stays private.
+    """
+    import stat
+    settings, unit = site
+    ancestor = unit.parent
+    original_mode = stat.S_IMODE(ancestor.stat().st_mode)
+    try:
+        ancestor.chmod(0o777)
+        unit.chmod(0o770)
+        manifest, frozen, parents = grouped(site)
+        plan = publish(authority, settings, unit, manifest, frozen, parents)
+        assert plan["plan_sha256"]
+        assert (unit / "P1" / "image.jpg").read_bytes() == b"photo"
+        assert (unit / "video.mp4").read_bytes() == b"video"
+        assert any(Path(row["final"]).exists() for row in manifest["moves"])
+    finally:
+        ancestor.chmod(original_mode)
+
+
+def test_maintenance_group_cannot_claim_weak_policy_without_live_session(site):
+    settings, unit = site
+    manifest, frozen, parents = grouped(site)
+    from app.batch import media_organizer_publish as publishing
+    fd = os.open(unit, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        with pytest.raises(PublishingConflict, match="live maintenance session"):
+            publishing._verify_group_parent_posix_permissions(
+                fd, manifest, namespace_custody=None,
+            )
+    finally:
+        os.close(fd)
+
+
+def test_maintenance_group_still_rejects_unwritable_bound_unit(site):
+    settings, unit = site
+    manifest, frozen, parents = grouped(site)
+    unit.chmod(0o500)
+    try:
+        with pytest.raises(authority.MaintenanceWindowUnavailable, match="writable"):
+            with acquire_operation_authority(
+                settings, unit, parents, manifest=manifest,
+            ):
+                pytest.fail("non-writable selected unit gained authority")
+    finally:
+        unit.chmod(0o700)
+
+
 def test_only_planned_future_parents_and_no_overwrite(site):
     settings, unit = site
     manifest, frozen, parents = grouped(site)

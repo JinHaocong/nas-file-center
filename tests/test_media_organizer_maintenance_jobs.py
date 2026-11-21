@@ -155,6 +155,57 @@ def test_maintenance_approvals_reports_recovery_and_zero_rescan(tmp_path, monkey
     assert row["status"] == "already_organized" and row["needed_moves"] == row["renamed_count"] == 0
 
 
+def test_worker_permission_denied_before_freeze_no_unbound_recovery(tmp_path, monkeypatch):
+    """NAS #31: refuse unsafe replay when Worker fails before first checkpoint."""
+    from app.batch import media_organizer_authority as authority
+    from sqlalchemy import select
+
+    client, settings, unit = make_case(tmp_path, monkeypatch)
+    original_hashes = hashes(unit)
+    pid = preview(client, settings, unit)
+    jid = approved(client, f"/api/media-organizer/previews/{pid}/execute",
+                   unit=str(unit), confirmation=execute.approval_token(pid, str(unit)))
+
+    def refuse_parent(self, parents, *, manifest=None):
+        raise authority.MaintenanceWindowUnavailable(
+            "maintenance parent is not writable by the Worker"
+        )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(authority.MaintenanceWindowSession, "assert_mutation_allowed", refuse_parent)
+        assert worker(settings, jid) is False
+
+    status_resp = client.get(f"/api/media-organizer/executions/{jid}")
+    assert status_resp.status_code == 200
+    status = status_resp.json()
+    assert status["status"] == "failed"
+    assert status["execution_mode"] == "maintenance_window"
+    assert status["progress"]["phase"] is None
+    assert status["recovery_available"] is False
+    assert "冻结检查点" in status["recovery_unavailable_reason"]
+
+    refused = client.post(f"/api/media-organizer/executions/{jid}/recover", json={
+        "confirmation": execute.recovery_token(jid),
+        "maintenance_window_confirmed": True,
+    })
+    assert refused.status_code == 409
+    assert "no verified frozen checkpoint" in refused.json()["detail"]
+    assert hashes(unit) == original_hashes
+    assert not (unit / f".nfc-media-organizer-stage-{jid}").exists()
+
+    with client.app.state.service.SessionLocal() as session:
+        ids = session.scalars(select(WorkJob.id).where(
+            WorkJob.kind == execute.EXECUTE_KIND,
+        )).all()
+        assert ids == [jid], "unverifiable replay cannot queue a new job"
+
+    # A new read-only preview is a separate operation with fresh evidence.
+    fresh = client.post("/api/media-organizer/previews", json={
+        "selection": str(unit.parent),
+    })
+    assert fresh.status_code == 200
+
+
 def test_mode_switch_or_edited_approval_cannot_authorize_queued_work(tmp_path, monkeypatch):
     client, settings, unit = make_case(tmp_path, monkeypatch)
     before = hashes(unit)

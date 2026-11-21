@@ -277,6 +277,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     hasMaintenanceConfirmation(executionStatus, recoveryMaintenanceConfirmed) &&
     executionStatus?.status === 'failed' &&
     executionStatus.recovery_of_job_id == null &&
+    executionStatus.recovery_available !== false &&
     recoveryConfirmation === recoveryToken && !busy && !recoverExecution.isPending);
   const canCleanup = Boolean(!busy && !cleanupPlanFetching &&
     canConfirmSemanticCleanup(executionStatus, cleanupPlan, cleanupConfirmation, cleanupMaintenanceConfirmed));
@@ -739,7 +740,17 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                 </p>
               )}
               {executionStatus.status === 'failed' &&
-                executionStatus.recovery_of_job_id == null && executionStatus.execution_enabled && (
+                executionStatus.recovery_of_job_id == null &&
+                executionStatus.recovery_available === false && (
+                <p className="nfc-form-note" role="status">
+                  {executionStatus.recovery_unavailable_reason ||
+                    '此任务没有可验证的冻结检查点，不能恢复。请保留证据并重新只读扫描。'}
+                </p>
+              )}
+              {executionStatus.status === 'failed' &&
+                executionStatus.recovery_of_job_id == null &&
+                executionStatus.execution_enabled &&
+                executionStatus.recovery_available !== false && (
                 <div className="nfc-v2-batch-form">
                   <div className="nfc-v2-batch-field">
                     <label htmlFor="semantic-recovery-confirmation">人工恢复确认码</label>

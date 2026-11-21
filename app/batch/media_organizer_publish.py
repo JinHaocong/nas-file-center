@@ -31,7 +31,9 @@ from app.batch.media_organizer_stage import (
 from app.batch.media_organizer_path_roles import classify_path_roles, uses_path_roles
 from app.batch.media_organizer_planner import _check_scope
 from app.fs_ops import rename_noreplace_at
-from app.batch.media_organizer_authority import assert_operation_authorized, publication_fence
+from app.batch.media_organizer_authority import (
+    assert_operation_authorized, is_maintenance_session, publication_fence,
+)
 from app.batch.media_organizer_fd_link import link_pinned_inode_noreplace
 
 _PUBLIC_OWNER = ".nfc-publish-owner"
@@ -393,20 +395,37 @@ def _retire_wrappers(unit: Path, manifest: dict, witness: bytes,
     return retired
 
 
-def _verify_group_parent_posix_permissions(unit_fd: int, manifest: dict) -> None:
-    """Necessary permissions check, NOT a proof of exclusive NAS namespace custody.
+def _verify_group_parent_posix_permissions(
+    unit_fd: int, manifest: dict, *, namespace_custody=None,
+) -> None:
+    """Check mode-specific directory ownership without weakening strict custody.
 
-    The opened unit must be owned by this Worker EUID and must not be writable
-    by its group or others. Same-UID/root, ACL and NAS-mapped writers remain
-    outside the guarantees of this check in either execution mode.
+    A live frozen-manifest-bound maintenance session permits mixed NAS owners
+    and shared ancestors, but only while the Worker really has write access.
+    The operator, not the kernel, must exclude all other writers in this mode.
+    A manifest field alone never authorizes this weaker policy.
     """
+    maintenance = manifest.get("execution_mode") == "maintenance_window"
+    maintenance_session = maintenance and is_maintenance_session(namespace_custody)
+    if maintenance and not maintenance_session:
+        raise PublishingConflict("maintenance publication requires a live maintenance session")
     info = os.fstat(unit_fd)
     if (not stat.S_ISDIR(info.st_mode)
             or (int(info.st_dev), int(info.st_ino)) != (
                 manifest["unit_dev"], manifest["unit_ino"])):
         raise PublishingConflict("public unit directory identity changed")
-    if (int(info.st_uid) != os.geteuid()
-            or stat.S_IMODE(info.st_mode) & 0o022):
+    if maintenance_session:
+        # Check the lock, pinned unit identity, approved frozen manifest,
+        # non-root Worker identity and live effective POSIX permissions.
+        assert_operation_authorized(
+            namespace_custody, (Path(manifest["unit"]),), manifest=manifest,
+        )
+        if (os.fstatvfs(unit_fd).f_flag & os.ST_RDONLY
+                or not os.access(".", os.W_OK | os.X_OK,
+                                 dir_fd=unit_fd, effective_ids=True)):
+            raise PublishingConflict("maintenance public unit is not writable by the Worker")
+    elif (int(info.st_uid) != os.geteuid()
+          or stat.S_IMODE(info.st_mode) & 0o022):
         raise PublishingConflict(
             "public unit owner or writable permissions are unsafe"
         )
@@ -432,11 +451,11 @@ def _verify_group_parent_posix_permissions(unit_fd: int, manifest: dict) -> None
                         int(child_info.st_dev), int(child_info.st_ino))):
                 raise PublishingConflict("public unit ancestor binding changed")
             mode = stat.S_IMODE(parent.st_mode)
-            if int(parent.st_uid) not in trusted_owners:
+            if not maintenance_session and int(parent.st_uid) not in trusted_owners:
                 raise PublishingConflict(
                     "public unit ancestor owner is not trusted"
                 )
-            if mode & 0o022:
+            if not maintenance_session and mode & 0o022:
                 # A sticky shared parent (for example /tmp) protects a child
                 # owned by this Worker or root from other users' rename/unlink.
                 if not (mode & stat.S_ISVTX
@@ -453,6 +472,7 @@ def _verify_group_parent_posix_permissions(unit_fd: int, manifest: dict) -> None
 def _create_public_group_direct(
     unit: Path, name: str, manifest: dict, witness: bytes,
     fence: Callable[[], None], *, frozen_manifest_path: Path,
+    namespace_custody=None,
 ) -> None:
     """Provision a no-overwrite public group without SOURCE-directory rename.
 
@@ -481,14 +501,18 @@ def _create_public_group_direct(
                 or not _read_marker(stage_fd, ".nfc-stage-authority", witness)
                 or not _read_marker(stage_fd, ".nfc-stage-complete", witness)):
             raise PublishingConflict("private stage ownership or completion is missing")
-        _verify_group_parent_posix_permissions(unit_fd, manifest)
+        _verify_group_parent_posix_permissions(
+            unit_fd, manifest, namespace_custody=namespace_custody,
+        )
         if _entry(unit_fd, name) is not None:
             raise PublishingConflict("foreign public group already occupied")
         fence()
         # A permissive chmod between preflight and the mutation boundary
         # must fail closed. This check does not replace an OS-enforced
         # exclusive namespace boundary for same-UID/root actors.
-        _verify_group_parent_posix_permissions(unit_fd, manifest)
+        _verify_group_parent_posix_permissions(
+            unit_fd, manifest, namespace_custody=namespace_custody,
+        )
         try:
             os.mkdir(name, mode=0o700, dir_fd=unit_fd)
         except FileExistsError as exc:
@@ -1083,7 +1107,8 @@ def _publish_with_path_roles(
         elif not os.path.lexists(group):
             guard()
             _create_public_group_direct(unit, name, manifest, witness, guard,
-                                        frozen_manifest_path=frozen)
+                                        frozen_manifest_path=frozen,
+                                        namespace_custody=namespace_custody)
     bindings = _group_receipts(manifest, frozen)
     stage = unit / manifest["stage_directory"]
     published = reconciled = 0
@@ -1189,6 +1214,7 @@ def publish_frozen_stage(
                     _create_public_group_direct(
                         unit, name, manifest, witness, lease_fence,
                         frozen_manifest_path=Path(frozen_manifest_path),
+                        namespace_custody=namespace_custody,
                     )
                 else:
                     # Historical non-deferred synthetic library path only.
