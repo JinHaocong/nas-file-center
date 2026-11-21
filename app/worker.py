@@ -559,6 +559,10 @@ def worker_loop(
     stop_event: threading.Event | None = None,
 ) -> None:
     settings = settings or get_settings()
+    # The optional NAS DAC profile must be proven before SQLite, recovery,
+    # scheduler or any media WorkJob can execute. Normal mode is unchanged.
+    from app.nas_compat_launcher import verify_optional_worker_runtime
+    verify_optional_worker_runtime()
     engine, SessionLocal = create_engine_and_session(settings.database_path)
     init_db(
         engine,
