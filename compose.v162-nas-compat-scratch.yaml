@@ -1,0 +1,106 @@
+# V1.6.2 disposable two-container probe. NOT a production Komodo overlay.
+# All host roots must be NEW scratch directories; NEVER bind live NAS media.
+name: nas-file-center-v162-scratch
+
+x-common: &common
+  image: "${NFC_V162_IMAGE:?Provide an exact-head locally built test image}"
+  read_only: true
+  restart: "no"
+  init: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp:mode=1777"]
+  networks: [v162-private]
+
+x-env: &env
+  CONFIG_DIR: /config
+  DATA_MOUNT: /data
+  ALLOWED_ROOTS: /data
+  QUARANTINE_ROOT: /quarantine/.nas-file-center-trash
+  MEDIA_ORGANIZER_EXECUTION_MODE: maintenance_window
+  MEDIA_ORGANIZER_EXECUTION_ENABLED: "false"
+  MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"
+  ALLOW_MUTATION: "false"
+  ALLOW_DELETE: "false"
+  PROTECT_LAST_FILE: "true"
+  NFC_SHARED_CONFIG_GID: "${NFC_V162_SHARED_GID:-10000}"
+  NFC_SECRET_OWNER_UID: "${NFC_V162_API_UID:-10001}"
+  NFC_SECRET_GROUP_GID: "${NFC_V162_SHARED_GID:-10000}"
+  INITIAL_ADMIN_USERNAME: "${NFC_V162_SCRATCH_ADMIN_USERNAME:?New scratch-only admin user required}"
+  INITIAL_ADMIN_PASSWORD: "${NFC_V162_SCRATCH_ADMIN_PASSWORD:?New scratch-only admin password required}"
+
+services:
+  api:
+    <<: *common
+    user: "${NFC_V162_API_UID:-10001}:${NFC_V162_SHARED_GID:-10000}"
+    environment:
+      <<: *env
+      NFC_NAS_COMPAT_API_DEFERRED_SELECTION_ENABLED: "true"
+      NFC_NAS_COMPAT_WORKER_ENABLED: "false"
+    volumes:
+      - type: bind
+        source: "${NFC_V162_SCRATCH_CONFIG_DIR:?New scratch config directory required}"
+        target: /config
+        bind: {create_host_path: false}
+      - type: bind
+        source: "${NFC_V162_SCRATCH_CONFIG_DIR:?New scratch config required}/.nas-file-center-trash"
+        target: /quarantine/.nas-file-center-trash
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: "${NFC_V162_SCRATCH_CONFIG_DIR:?New scratch config required}/.nas-file-center-trash"
+        target: /config/.nas-file-center-trash
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: "${NFC_V162_SCRATCH_DATA_DIR:?New scratch media directory required}"
+        target: /data
+        read_only: true
+        bind: {create_host_path: false}
+      - v162-recovery-secrets:/run/nfc-recovery-secrets
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+
+  worker:
+    <<: *common
+    # Root only during bootstrap. The fixed launcher drops to UID 10002.
+    user: "0:${NFC_V162_SHARED_GID:-10000}"
+    cap_add: [DAC_OVERRIDE, SETUID, SETGID]
+    command: ["python", "-m", "app.nas_compat_launcher"]
+    environment:
+      <<: *env
+      NFC_NAS_COMPAT_API_DEFERRED_SELECTION_ENABLED: "false"
+      NFC_NAS_COMPAT_WORKER_ENABLED: "true"
+      NFC_NAS_COMPAT_WORKER_UID: "${NFC_V162_WORKER_UID:-10002}"
+      NFC_NAS_COMPAT_WORKER_GID: "${NFC_V162_SHARED_GID:-10000}"
+    volumes:
+      - type: bind
+        source: "${NFC_V162_SCRATCH_CONFIG_DIR:?New scratch config directory required}"
+        target: /config
+        bind: {create_host_path: false}
+      - type: bind
+        source: "${NFC_V162_SCRATCH_CONFIG_DIR:?New scratch config required}/.nas-file-center-trash"
+        target: /quarantine/.nas-file-center-trash
+        bind: {create_host_path: false}
+      - type: bind
+        source: "${NFC_V162_SCRATCH_DATA_DIR:?New scratch media directory required}"
+        target: /data
+        bind: {create_host_path: false}
+      - v162-recovery-secrets:/run/nfc-recovery-secrets
+    depends_on:
+      api: {condition: service_healthy}
+
+networks:
+  v162-private:
+    internal: true
+
+volumes:
+  v162-recovery-secrets:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=1m,uid=${NFC_V162_API_UID:-10001},gid=${NFC_V162_SHARED_GID:-10000},mode=2770,noexec,nosuid,nodev"
