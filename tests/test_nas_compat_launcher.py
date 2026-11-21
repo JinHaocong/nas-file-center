@@ -20,6 +20,7 @@ def test_unknown_enable_value_rejected(monkeypatch):
 
 def test_optional_worker_refuses_missing_capability_even_with_valid_uid(monkeypatch):
     monkeypatch.setenv("NFC_NAS_COMPAT_WORKER_ENABLED", "true")
+    monkeypatch.setenv("MEDIA_ORGANIZER_EXECUTION_MODE", "maintenance_window")
     monkeypatch.setenv("NFC_NAS_COMPAT_WORKER_UID", "10002")
     monkeypatch.setenv("NFC_NAS_COMPAT_WORKER_GID", "10000")
     monkeypatch.setattr(compat.os, "getresuid", lambda: (10002, 10002, 10002))
@@ -76,3 +77,11 @@ def test_numeric_identity_must_be_positive_ascii_unprivileged(monkeypatch, value
     monkeypatch.setenv("NFC_NAS_COMPAT_WORKER_UID", value)
     with pytest.raises(PermissionError, match="invalid"):
         compat._uid("NFC_NAS_COMPAT_WORKER_UID")
+
+
+def test_enabled_worker_runtime_rejects_strict_even_if_capabilities_present(monkeypatch):
+    monkeypatch.setenv("NFC_NAS_COMPAT_WORKER_ENABLED", "true")
+    monkeypatch.setenv("MEDIA_ORGANIZER_EXECUTION_MODE", "strict")
+    monkeypatch.setattr(compat, "_uid", lambda *_: pytest.fail("wrong mode inspected UID"))
+    with pytest.raises(PermissionError, match="not maintenance-window mode"):
+        compat.verify_optional_worker_runtime()
