@@ -49,8 +49,15 @@ try:
     os.unlink("/data/probe-created.bin")
 except OSError as exc:
     write_error = errno.errorcode.get(exc.errno, str(exc.errno))
+dir_fd = os.open("/data", os.O_RDONLY | os.O_DIRECTORY)
+try:
+    effective_write_search_access = os.access(".", os.W_OK | os.X_OK,
+                                              dir_fd=dir_fd, effective_ids=True)
+finally:
+    os.close(dir_fd)
 print(json.dumps({
     "uid": os.geteuid(), "gid": os.getegid(),
+    "effective_write_search_access": effective_write_search_access,
     "no_new_privs": fields.get("NoNewPrivs", "").strip(),
     "effective_caps_hex": f"{caps:x}",
     "effective_dac_override": cap_dac_override_effective,
@@ -90,16 +97,19 @@ for label, row in (("baseline", baseline), ("dac_override_candidate", candidate)
     print(f"{label}={json.dumps(row, sort_keys=True)}")
     assert row["uid"] == 10002 and row["gid"] == 10000, "Unexpected Worker identity"
     assert row["no_new_privs"] == "1", "no-new-privileges is disabled"
-if baseline["root_owned_private_read"] or baseline["root_owned_directory_write"]:
+if (baseline["root_owned_private_read"] or baseline["root_owned_directory_write"]
+        or baseline["effective_write_search_access"]):
     raise SystemExit("INVALID_PROBE: unprivileged Worker unexpectedly accessed root-owned fixture")
 viable = (candidate["effective_dac_override"] and
           candidate["root_owned_private_read"] and
-          candidate["root_owned_directory_write"])
+          candidate["root_owned_directory_write"] and
+          candidate["effective_write_search_access"])
 print("ROOTLESS_DAC_OVERRIDE_FEASIBILITY=" + ("PASS_CI_HOST_ONLY" if viable else "UNSUPPORTED_AS_CONFIGURED"))
 ambient_viable = (ambient["effective_caps_hex"] == "2" and
                   ambient["effective_dac_override"] and
                   ambient["root_owned_private_read"] and
-                  ambient["root_owned_directory_write"])
+                  ambient["root_owned_directory_write"] and
+                  ambient["effective_write_search_access"])
 print("AMBIENT_NONROOT_DAC_OVERRIDE_FEASIBILITY=" + ("PASS_CI_HOST_ONLY" if ambient_viable else "UNSUPPORTED_AS_CONFIGURED"))
 print("CI-only result: not NAS/FUSE compatibility or release authorization.")
 PY
