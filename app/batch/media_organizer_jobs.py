@@ -61,8 +61,22 @@ def _excluded_names(settings: Settings) -> list[str]:
 
 def _validate_selection(selection: str, settings: Settings) -> Path:
     chosen = Path(selection).expanduser()
-    _check_scope(chosen, [Path(x) for x in settings.allowed_roots],
-                 Path(settings.quarantine_root) if settings.quarantine_root is not None else None)
+    try:
+        _check_scope(chosen, [Path(x) for x in settings.allowed_roots],
+                     Path(settings.quarantine_root) if settings.quarantine_root is not None else None)
+    except ValueError:
+        # A non-root API cannot stat children of a private 0700 NAS folder.
+        # Only queueing/review is deferred; Worker preview and execution must
+        # fully inspect every component under their own authority.
+        from app.batch.media_organizer_deferred_selection import (
+            deferred_api_selection_enabled, has_permission_denied_tail,
+        )
+        if (not deferred_api_selection_enabled(settings)
+                or not has_permission_denied_tail(
+                    chosen, [Path(x) for x in settings.allowed_roots],
+                    settings.quarantine_root,
+                )):
+            raise
     excluded_names = set(_excluded_names(settings))
     if any(part.casefold() in excluded_names for part in chosen.parts):
         raise ValueError("selected unit is inside an excluded protected directory")

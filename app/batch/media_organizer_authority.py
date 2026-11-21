@@ -9,6 +9,7 @@ is NOT kernel-enforced exclusion from root, same-UID or NAS-mapped writers.
 """
 from __future__ import annotations
 
+import errno
 import os
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
@@ -72,8 +73,19 @@ def check_api_eligibility(settings, unit: Path, parents=()) -> None:
     # validates the selected unit and canonical scope; the Worker receives a
     # mutation session later, after the exact WorkJob stores a literal
     # maintenance_window_confirmed=true acknowledgement.
-    fd = _open_directory_nofollow(unit)
-    os.close(fd)
+    try:
+        fd = _open_directory_nofollow(unit)
+    except PermissionError as exc:
+        from app.batch.media_organizer_deferred_selection import deferred_api_selection_enabled
+        if (not deferred_api_selection_enabled(settings)
+                or exc.errno not in (errno.EACCES, errno.EPERM)):
+            raise
+        # Only API-side eligibility is deferred after a completed Worker
+        # preview/frozen approval; no file authority is granted here.
+        # The Worker separately opens and validates this directory before IO.
+        return
+    else:
+        os.close(fd)
     return
 
 

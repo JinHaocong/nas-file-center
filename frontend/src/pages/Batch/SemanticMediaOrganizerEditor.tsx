@@ -435,7 +435,11 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
             <DirectoryPicker multiple={false} value={selection} disabled={busy}
               placeholder="选择月份、日期、作者、合集或独立作品目录"
               onChange={changeSelection} />
-            <small>递归发现独立作品；只扫描允许的目录，受保护的来源路径会被排除。</small>
+            <label htmlFor="semantic-media-manual-path">或手动输入 NAS 目录路径</label>
+            <input id="semantic-media-manual-path" type="text" autoComplete="off"
+              placeholder="/data/Download/作品目录" value={selection} disabled={busy}
+              onChange={event => changeSelection(event.target.value)} />
+            <small>目录选择器无法展开受保护目录时，可手动输入其绝对路径。仅管理员可发起只读扫描；Worker 会重新检查范围、目录身份和权限，不会因为手动输入而跳过安全验证。</small>
           </div>
           <div className="nfc-v2-batch-notice" role="note">
             <ConsoleIcon name="shield-check" size={19} />
