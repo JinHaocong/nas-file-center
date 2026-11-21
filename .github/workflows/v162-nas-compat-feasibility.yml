@@ -5,6 +5,7 @@ on:
     paths:
       - "scripts/probe_nas_compat_capability.sh"
       - "scripts/v16_nas_maintenance_acceptance.py"
+      - "scripts/v162_run_disposable_nas_acceptance.sh"
       - "tests/test_v16_nas_maintenance_acceptance.py"
       - "app/nas_compat_worker.py"
       - "app/batch/media_organizer_deferred_selection.py"
@@ -56,6 +57,11 @@ jobs:
             -k "opt_in_root_worker_flags or inspected_root_worker_rejects or root_worker_mode_does_not_change or wrong_image_revision_fails_before"
       - name: Verify shell probe syntax
         run: bash -n scripts/probe_nas_compat_capability.sh
+      - name: Verify one-shot NAS acceptance command without executing it
+        run: |
+          bash -n scripts/v162_run_disposable_nas_acceptance.sh
+          bash scripts/v162_run_disposable_nas_acceptance.sh --help
+          ! bash scripts/v162_run_disposable_nas_acceptance.sh --candidate-sha invalid
       - name: Compare non-root baseline with direct 0:10000 Root Worker
         run: bash scripts/probe_nas_compat_capability.sh
       - name: Validate isolated two-container Compose without starting containers
