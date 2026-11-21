@@ -62,7 +62,7 @@ def test_any_capability_deviation_is_rejected(monkeypatch, change):
     (10002, 10000, []),
     (0, 0, []),
     (0, 10000, [0]),
-    (0, 10000, [10000]),
+    (0, 10000, [10001]),
 ])
 def test_wrong_uid_gid_or_supplementary_groups_are_rejected(monkeypatch, uid, gid, groups):
     _root_profile(monkeypatch, uid=uid, gid=gid, groups=groups)
@@ -80,3 +80,9 @@ def test_api_cannot_enable_root_worker_profile(monkeypatch):
     _root_profile(monkeypatch)
     monkeypatch.setenv("NFC_NAS_COMPAT_ROOT_WORKER_ENABLED", "false")
     assert not compat.is_nas_compat_root_worker(_settings(True))
+
+
+def test_docker_primary_gid_may_appear_in_supplementary_group_list(monkeypatch):
+    _root_profile(monkeypatch, groups=[10000])
+    assert compat.is_nas_compat_root_worker(_settings(True))
+    compat.verify_worker_runtime(_settings(True))
