@@ -103,3 +103,31 @@ def test_runtime_identity_phase_requirements(monkeypatch):
         for other in {"handoff", "parked", "scoped"} - {phase}:
             with pytest.raises(PermissionError, match="capability set"):
                 compat.assert_nas_compat_worker_identity(10002, 10000, phase=other)
+
+
+def test_uncertain_dac_enable_terminates_before_work(monkeypatch):
+    _mock_parked(monkeypatch)
+    monkeypatch.setattr(compat, "_set_job_dac_effective",
+        lambda enabled: (_ for _ in ()).throw(PermissionError("post-capset uncertain")))
+    monkeypatch.setattr(compat.os, "_exit",
+        lambda code: (_ for _ in ()).throw(SystemExit(code)))
+    with pytest.raises(SystemExit) as exited:
+        with compat.scoped_nas_compat_job(_job("media-organizer-execute"), _settings()):
+            pytest.fail("handler must not run after uncertain DAC enable")
+    assert exited.value.code == 70
+
+
+def test_normal_job_capability_leak_terminates_instead_of_logging(monkeypatch):
+    _mock_parked(monkeypatch)
+    checks = [None, PermissionError("ordinary job unexpectedly elevated")]
+    def verify():
+        item = checks.pop(0)
+        if item is not None:
+            raise item
+    monkeypatch.setattr(compat, "verify_optional_worker_runtime", verify)
+    monkeypatch.setattr(compat.os, "_exit",
+        lambda code: (_ for _ in ()).throw(SystemExit(code)))
+    with pytest.raises(SystemExit) as exited:
+        with compat.scoped_nas_compat_job(_job("quarantine-restore"), _settings()):
+            pass
+    assert exited.value.code == 70
