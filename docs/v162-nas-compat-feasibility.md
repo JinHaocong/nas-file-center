@@ -102,3 +102,27 @@ production command or authorization. Even if it passes, the elevated
 capability applies to **every Worker task and all mounted paths**.
 Implementing such a mode requires a separate runtime confinement and
 threat-model review; it cannot be merged into the default profile.
+
+## Prototype status: dormant optional startup entrypoint
+
+`app/nas_compat_launcher.py` now contains the **actual production-shaped**
+root-startup -> non-root transition, guarded by
+`NFC_NAS_COMPAT_WORKER_ENABLED=true`, exact numeric UID/GID and
+`MEDIA_ORGANIZER_EXECUTION_MODE=maintenance_window`.
+It checks `NoNewPrivs`, exact startup permitted/effective/bounding
+capabilities (DAC_OVERRIDE, SETUID, SETGID), drops to UID 10002/GID 10000
+with no supplementary groups, removes SETUID/SETGID and all other
+permitted/effective capabilities, raises only DAC_OVERRIDE ambient and
+executes only the fixed `python -m app.worker` command.
+
+`app.worker.worker_loop` checks the final non-root capability profile
+**before any SQLite, scheduler, recovery, or WorkJob operation** when
+opt-in is set. The default Worker is unchanged. The disposable Docker
+probe invokes this same code for its synthetic final exec.
+
+**NOT YET DEPLOYABLE:** No Komodo or default Compose profile calls this
+entrypoint. We intentionally have NOT enabled the mode on any host,
+granted any capability to the default Worker, performed a ZOS/FUSE
+probe or approved its wider effects on other Worker tasks. A separate
+review must confine the elevated capability to a justifiable set of
+approved operations or explicitly accept/document the residual risk.
