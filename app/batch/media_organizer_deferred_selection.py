@@ -21,7 +21,7 @@ def deferred_api_selection_enabled(settings) -> bool:
     if getattr(settings, "media_organizer_execution_mode", "strict") != "maintenance_window":
         return False
     # Never defer filesystem verification in a capability-enabled Worker.
-    if os.environ.get("NFC_NAS_COMPAT_WORKER_ENABLED", "false") == "true":
+    if os.environ.get("NFC_NAS_COMPAT_ROOT_WORKER_ENABLED", "false") == "true":
         return False
     if not hasattr(os, "geteuid") or os.geteuid() == 0:
         return False
