@@ -1,119 +1,92 @@
 #!/usr/bin/env bash
-# Isolated CI-only Docker capability feasibility probe for V1.6.2.
-# Never bind user-controlled data or real NAS storage.
+# CI-only Docker proof of the simple UID 0:GID 10000 + DAC_OVERRIDE profile.
+# Uses only a brand-new temporary directory; never binds a NAS or user data.
 set -Eeuo pipefail
 command -v docker >/dev/null
 command -v python3 >/dev/null
-command -v sudo >/dev/null
-
-scratch="$(mktemp -d "${RUNNER_TEMP:-/tmp}/nfc-v162-capability-XXXXXXXX")"
+scratch="$(mktemp -d "${RUNNER_TEMP:-/tmp}/nfc-v162-root-worker-XXXXXXXX")"
 cleanup() {
   case "$scratch" in
-    "${RUNNER_TEMP:-/tmp}"/nfc-v162-capability-*) sudo rm -rf -- "$scratch" ;;
-    *) echo "Refusing to clean unexpected scratch location" >&2; return 1 ;;
+    "${RUNNER_TEMP:-/tmp}"/nfc-v162-root-worker-*) rm -rf -- "$scratch" ;;
+    *) echo "Refusing to clean unexpected scratch path" >&2; return 1 ;;
   esac
 }
 trap cleanup EXIT
-
 mkdir -p "$scratch/media"
 printf 'synthetic-only\n' > "$scratch/media/root-private.bin"
-sudo chown 0:0 "$scratch/media" "$scratch/media/root-private.bin"
-sudo chmod 0755 "$scratch/media"
-sudo chmod 0600 "$scratch/media/root-private.bin"
-
-image="${NFC_CAP_PROBE_IMAGE:-python:3.12-slim}"
+chmod 0755 "$scratch/media"
+chmod 0600 "$scratch/media/root-private.bin"
+image="${NFC_ROOT_PROBE_IMAGE:-python:3.12-slim}"
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 docker pull "$image" >/dev/null
-
-read -r -d '' payload <<'PY' || true
+payload="$(cat <<'PY'
 import errno, json, os
-with open("/proc/self/status", encoding="utf-8") as stream:
-    fields = dict(line.split(":", 1) for line in stream if ":" in line)
-caps = int(fields["CapEff"].strip(), 16)
-cap_dac_override_effective = bool(caps & (1 << 1))
+from types import SimpleNamespace
+from nas_compat_worker import verify_worker_runtime
+status = {}
+for line in open("/proc/self/status", encoding="ascii"):
+    if ":" in line:
+        key, value = line.split(":", 1)
+        status[key] = value.strip()
+caps = {k: int(status[k], 16) for k in ("CapInh","CapPrm","CapEff","CapBnd","CapAmb")}
+caps["NoNewPrivs"] = int(status["NoNewPrivs"])
+mode = os.environ.get("NFC_NAS_COMPAT_ROOT_WORKER_ENABLED") == "true"
+settings = SimpleNamespace(
+    nas_compat_root_worker_enabled=mode,
+    media_organizer_execution_mode=os.environ.get("MEDIA_ORGANIZER_EXECUTION_MODE","strict"),
+)
+verify_worker_runtime(settings)
 can_read = False
 read_error = None
 try:
-    with open("/data/root-private.bin", "rb") as stream:
-        can_read = stream.read() == b"synthetic-only\n"
+    with open("/data/root-private.bin","rb") as f:
+        can_read = f.read() == b"synthetic-only\n"
 except OSError as exc:
     read_error = errno.errorcode.get(exc.errno, str(exc.errno))
 can_write = False
 write_error = None
 try:
-    fd = os.open("/data/probe-created.bin", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        os.write(fd, b"synthetic-only\n")
-    finally:
-        os.close(fd)
+    fd = os.open("/data/created.bin", os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
+    os.write(fd, b"synthetic-only\n")
+    os.close(fd)
     can_write = True
-    os.unlink("/data/probe-created.bin")
+    os.unlink("/data/created.bin")
 except OSError as exc:
     write_error = errno.errorcode.get(exc.errno, str(exc.errno))
-dir_fd = os.open("/data", os.O_RDONLY | os.O_DIRECTORY)
-try:
-    effective_write_search_access = os.access(".", os.W_OK | os.X_OK,
-                                              dir_fd=dir_fd, effective_ids=True)
-finally:
-    os.close(dir_fd)
 print(json.dumps({
-    "uid": os.geteuid(), "gid": os.getegid(),
-    "effective_write_search_access": effective_write_search_access,
-    "no_new_privs": fields.get("NoNewPrivs", "").strip(),
-    "effective_caps_hex": f"{caps:x}",
-    "effective_dac_override": cap_dac_override_effective,
-    "effective_dac_read_search": bool(caps & (1 << 2)),
-    "root_owned_private_read": can_read,
-    "root_owned_directory_write": can_write,
-    "read_errno": read_error, "write_errno": write_error,
+    "uid": os.geteuid(), "gid": os.getegid(), "groups": os.getgroups(),
+    "caps": caps, "read_root_private": can_read, "write_root_directory": can_write,
+    "read_error": read_error, "write_error": write_error,
 }, sort_keys=True))
 PY
-
+)"
 run_case() {
+  local label="$1"; shift
   docker run --rm --network none --read-only \
-    --user 10002:10000 \
-    --cap-drop ALL \
-    --security-opt no-new-privileges:true \
+    --cap-drop ALL --security-opt no-new-privileges:true \
     "$@" \
-    --mount "type=bind,source=$scratch/media,target=/data,readonly=false" \
+    --mount "type=bind,source=$scratch/media,target=/data" \
+    --mount "type=bind,source=$repo/app/nas_compat_worker.py,target=/opt/nas_compat_worker.py,readonly" \
+    -e PYTHONPATH=/opt \
+    -e NFC_SHARED_CONFIG_GID=10000 \
+    -e MEDIA_ORGANIZER_EXECUTION_MODE=maintenance_window \
     "$image" python -c "$payload"
 }
-baseline="$(run_case)"
-candidate="$(run_case --cap-add DAC_OVERRIDE)"
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-scoped="$(docker run --rm --network none --read-only \
-  --user 0:10000 \
-  --cap-drop ALL \
-  --cap-add DAC_OVERRIDE --cap-add SETUID --cap-add SETGID \
-  --security-opt no-new-privileges:true \
-  --mount "type=bind,source=$scratch/media,target=/data" \
-  --mount "type=bind,source=$repo/scripts/probe_nas_compat_ambient.py,target=/probe.py,readonly" \
-  --mount "type=bind,source=$repo/app,target=/opt/nfc/app,readonly" \
-  -e PYTHONPATH=/opt/nfc \
-  -e NFC_NAS_COMPAT_WORKER_ENABLED=true \
-  -e NFC_NAS_COMPAT_WORKER_UID=10002 \
-  -e NFC_NAS_COMPAT_WORKER_GID=10000 \
-  -e MEDIA_ORGANIZER_EXECUTION_MODE=maintenance_window \
-  "$image" python /probe.py "$payload")"
-python3 - "$baseline" "$candidate" "$scoped" <<'PY'
+baseline="$(run_case baseline --user 10002:10000 -e NFC_NAS_COMPAT_ROOT_WORKER_ENABLED=false)"
+candidate="$(run_case root_worker --user 0:10000 --cap-add DAC_OVERRIDE -e NFC_NAS_COMPAT_ROOT_WORKER_ENABLED=true)"
+python3 - "$baseline" "$candidate" <<'PY'
 import json, sys
-baseline, candidate, scoped = (json.loads(raw) for raw in sys.argv[1:])
-for label, row in (("baseline", baseline), ("dac_override_candidate", candidate), ("scoped_candidate", scoped)):
-    print(f"{label}={json.dumps(row, sort_keys=True)}")
-    assert row["uid"] == 10002 and row["gid"] == 10000, "Unexpected Worker identity"
-    assert row["no_new_privs"] == "1", "no-new-privileges is disabled"
-if (baseline["root_owned_private_read"] or baseline["root_owned_directory_write"]
-        or baseline["effective_write_search_access"]):
-    raise SystemExit("INVALID_PROBE: unprivileged Worker unexpectedly accessed root-owned fixture")
-viable = (candidate["effective_dac_override"] and
-          candidate["root_owned_private_read"] and
-          candidate["root_owned_directory_write"] and
-          candidate["effective_write_search_access"])
-print("ROOTLESS_DAC_OVERRIDE_FEASIBILITY=" + ("PASS_CI_HOST_ONLY" if viable else "UNSUPPORTED_AS_CONFIGURED"))
-scoped_viable = (scoped["effective_caps_hex"] == "2" and
-                 scoped["effective_dac_override"] and
-                 scoped["root_owned_private_read"] and
-                 scoped["root_owned_directory_write"] and
-                 scoped["effective_write_search_access"])
-print("SCOPED_NONROOT_DAC_OVERRIDE_FEASIBILITY=" + ("PASS_CI_HOST_ONLY" if scoped_viable else "UNSUPPORTED_AS_CONFIGURED"))
-print("CI-only result: not NAS/FUSE compatibility or release authorization.")
+baseline, candidate = (json.loads(x) for x in sys.argv[1:])
+assert baseline["uid"] == 10002 and baseline["gid"] == 10000
+assert not baseline["read_root_private"] and not baseline["write_root_directory"]
+assert candidate["uid"] == 0 and candidate["gid"] == 10000
+assert candidate["groups"] == []
+assert candidate["caps"] == {
+    "CapInh": 0, "CapPrm": 2, "CapEff": 2, "CapBnd": 2,
+    "CapAmb": 0, "NoNewPrivs": 1,
+}
+assert candidate["read_root_private"] and candidate["write_root_directory"]
+print("NAS_ROOT_WORKER_FEASIBILITY=PASS_CI_HOST_ONLY")
+print("Baseline non-root is denied; UID 0:GID 10000 with only DAC_OVERRIDE succeeds.")
+print("This proves only ordinary CI Docker behavior, not ZOS/zfuse compatibility.")
 PY
