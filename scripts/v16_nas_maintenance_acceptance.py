@@ -97,10 +97,16 @@ def check_binding(parent, name, child):
             "fixture directory binding changed")
 
 
-def create_fixture(stack, parent, path, report):
+def create_fixture(stack, parent, path, report, *, nas_root_worker=False):
     report["fixture_created"] = False
     report["requested_fixture"] = str(path)
-    require("system.posix_acl_default" not in os.listxattr(parent), "data root has an inherited default ACL")
+    # Traditional two-UID test requires no inherited ACL. In the explicitly
+    # approved root Worker mode, the parent is the owner's real SATA mount and
+    # may have NAS default ACLs. Do not read/change those ACLs: the disposable
+    # new subtree is still inode-bound and never adopts pre-existing entries.
+    if not nas_root_worker:
+        require("system.posix_acl_default" not in os.listxattr(parent),
+                "data root has an inherited default ACL")
     try:
         os.mkdir(path.name, mode=0o700, dir_fd=parent)
     except FileExistsError:
@@ -768,7 +774,8 @@ def run_containers(rootfd, fixturefd, fixture, childfds, config_subdirs, image, 
     ids = {}
     def check_paths():
         with ExitStack() as verification:
-            actual = open_tree(verification, fixture.parent, trusted=True)
+            actual = open_tree(verification, fixture.parent,
+                               trusted=not nas_root_worker)
             require(identity(os.fstat(actual)) == identity(os.fstat(rootfd)), "data root binding changed")
             check_binding(actual, fixture.name, fixturefd)
             for name, fd in childfds.items():
@@ -901,7 +908,11 @@ def main(argv=None):
             validate_inputs(args.data_root, args.image, args.candidate_sha)
             require(os.geteuid() == 0, "root host controller required")
             root = Path(args.data_root)
-            rootfd = open_tree(stack, root, trusted=True)
+            # NAS mount ancestors may belong to other NAS UIDs. This exception
+            # is valid only for the owner's explicit disposable root Worker
+            # test; no symlinks are followed, and directory bindings are
+            # rechecked by pinned descriptors before every fixture operation.
+            rootfd = open_tree(stack, root, trusted=not args.nas_root_worker)
             require(not os.fstatvfs(rootfd).f_flag & os.ST_RDONLY, "data root is read-only")
             report["data_root"] = {"path": str(root), **mount_evidence(rootfd)}
             try:
@@ -912,7 +923,8 @@ def main(argv=None):
             image = validate_image(image_info, args.image, args.candidate_sha)
             report["image"] = image_info
             fixture = root / (PREFIX + secrets.token_hex(12))
-            fixturefd = create_fixture(stack, rootfd, fixture, report)
+            fixturefd = create_fixture(stack, rootfd, fixture, report,
+                                       nas_root_worker=args.nas_root_worker)
             publish_report(fixturefd, {**report, "status": "INCOMPLETE"})
             config_fd = new_dir(stack, fixturefd, "config", API, GROUP, 0o2770)
             data_fd = new_dir(stack, fixturefd, "data",
