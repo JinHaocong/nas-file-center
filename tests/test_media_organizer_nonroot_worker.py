@@ -15,6 +15,7 @@ def _enabled():
         allow_mutation=True,
         allow_delete=True,
         media_organizer_namespace_quiescence_ack=True,
+        nas_compat_root_worker_enabled=False,
     )
 
 
@@ -31,7 +32,7 @@ def test_root_worker_is_rejected_before_any_manifest_or_media_access(monkeypatch
         execution, "_literal_unit",
         lambda *_args: pytest.fail("root worker attempted to resolve a media path"),
     )
-    with pytest.raises(PermissionError, match="dedicated non-root Worker"):
+    with pytest.raises(PermissionError, match="UID 0 is disabled"):
         execution.MediaOrganizerExecuteHandler().run(
             _job(), SimpleNamespace(worker_id="test-lease"), _enabled()
         )
@@ -65,4 +66,23 @@ def test_worker_lease_is_still_mandatory_after_root_guard(monkeypatch):
     with pytest.raises(PermissionError, match="exclusive Worker lease"):
         execution.MediaOrganizerExecuteHandler().run(
             _job(), SimpleNamespace(worker_id=None), _enabled()
+        )
+
+
+
+def test_root_worker_can_reach_frozen_validation_only_when_explicitly_enabled(monkeypatch):
+    from app import nas_compat_worker
+
+    monkeypatch.setattr(execution.os, "geteuid", lambda: 0)
+    settings = _enabled()
+    settings.nas_compat_root_worker_enabled = True
+    monkeypatch.setattr(nas_compat_worker, "is_nas_compat_root_worker", lambda *_: True)
+
+    def reached(*_args):
+        raise RuntimeError("reached frozen unit validation")
+
+    monkeypatch.setattr(execution, "_literal_unit", reached)
+    with pytest.raises(RuntimeError, match="reached frozen unit validation"):
+        execution.MediaOrganizerExecuteHandler().run(
+            _job(), SimpleNamespace(worker_id="test-lease"), settings
         )

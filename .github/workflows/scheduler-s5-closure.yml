@@ -206,7 +206,7 @@ jobs:
           TAG="nas-file-center:scheduler-s5-${CANDIDATE_SHA::7}"
           echo "candidate_sha=${CANDIDATE_SHA}" | tee scheduler-s5-docker-evidence.txt
           echo "candidate_tag=${TAG}" | tee -a scheduler-s5-docker-evidence.txt
-          docker buildx build             --platform linux/amd64             --load             --tag "${TAG}"             . 2>&1 | tee scheduler-s5-docker-build.log
+          docker buildx build             --platform linux/amd64             --load             --tag "${TAG}"             --label "org.opencontainers.image.revision=${CANDIDATE_SHA}"             . 2>&1 | tee scheduler-s5-docker-build.log
           docker image inspect             --format 'id={{.Id}} os={{.Os}} arch={{.Architecture}} created={{.Created}}'             "${TAG}" | tee -a scheduler-s5-docker-evidence.txt
           test "$(docker image inspect --format '{{.Architecture}}' "${TAG}")" = "amd64"
           test "$(docker image inspect --format '{{.Os}}' "${TAG}")" = "linux"
@@ -235,6 +235,47 @@ jobs:
           rm "${EVIDENCE_ROOT}/scheduler-s5-docker-acceptance.json"
           rmdir "${EVIDENCE_ROOT}"
 
+      # Reuses the already-built exact-head candidate. No production NAS,
+      # existing media, Komodo, network, or ACL migration is involved.
+      - name: V1.6.2 Root Worker full lifecycle on disposable CI filesystem
+        if: github.head_ref == 'feat/v1.6.2-nas-compat-feasibility'
+        shell: bash
+        timeout-minutes: 15
+        run: |
+          set -Eeuo pipefail
+          TAG="nas-file-center:scheduler-s5-${CANDIDATE_SHA::7}"
+          IMAGE_ID="$(docker image inspect --format '{{.Id}}' "${TAG}")"
+          # Root-owned throwaway parent under sticky /tmp (NOT the NAS).
+          SCRATCH_PARENT="$(sudo mktemp -d /tmp/nfc-v162-root-accept-ci.XXXXXXXX)"
+          sudo chmod 0755 "${SCRATCH_PARENT}"
+          sudo python3 scripts/v16_nas_maintenance_acceptance.py \
+            --data-root "${SCRATCH_PARENT}" \
+            --image "${IMAGE_ID}" \
+            --candidate-sha "${CANDIDATE_SHA}" \
+            --nas-root-worker \
+            | tee v162-root-worker-lifecycle-ci.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("v162-root-worker-lifecycle-ci.json").read_text())
+          assert report["status"] == "PASS_MAINTENANCE_LIFECYCLE"
+          assert report["nas_root_worker"] is True
+          assert report["expected_worker_uid"] == 0
+          assert report["namespace_exclusive_custody_proven"] is False
+          assert report["release_ready"] is False
+          for role, uid, cap in (("api", 10001, 0), ("worker", 0, 2)):
+              attest = report["roles"][role]["runtime"]
+              assert attest["self"]["Uid"] == [uid]*4
+              assert attest["self"]["CapEff"] == cap
+              assert attest["pid1"]["CapEff"] == cap
+          for case in ("mixed", "boundary", "historical"):
+              assert report["cases"][case]["complete"] is True
+              assert report["cases"][case]["second_scan"] == {
+                  "needed_moves": 0, "renamed_count": 0
+              }
+          print("V1.6.2 disposable root-Worker full lifecycle: PASS_CI_HOST_ONLY")
+          PY
+
       - name: Upload Scheduler S5 Docker evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -247,3 +288,4 @@ jobs:
             scheduler-s5-docker-evidence.txt
             scheduler-s5-docker-acceptance.log
             scheduler-s5-docker-acceptance.json
+            v162-root-worker-lifecycle-ci.json

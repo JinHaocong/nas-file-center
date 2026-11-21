@@ -19,6 +19,7 @@ from typing import Iterator
 
 from app.config import Settings
 from app.config_sharing import shared_config_gid, pinned_directory_entry_path
+from app.nas_compat_worker import is_nas_compat_root_worker
 
 _LOCK_NAME = "media-mutation.lock"
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -42,6 +43,7 @@ class _Lock:
     directory_fd: int
     file_fd: int
     gid: int | None
+    allow_root_owner: bool
 
 
 _local = threading.local()
@@ -104,11 +106,12 @@ def _check_directory(info: os.stat_result, gid: int | None) -> None:
         raise MediaMutationLockUnavailable("Media mutation lock directory permissions are unsafe")
 
 
-def _check_file(info: os.stat_result, gid: int | None) -> None:
+def _check_file(info: os.stat_result, gid: int | None, *, allow_root_owner: bool = False) -> None:
     if gid is None:
         valid = info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) == 0o600
     else:
-        valid = info.st_uid != 0 and info.st_gid == gid and stat.S_IMODE(info.st_mode) == 0o660
+        valid = (info.st_gid == gid and stat.S_IMODE(info.st_mode) == 0o660
+                 and (info.st_uid != 0 or allow_root_owner))
     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or not valid:
         raise MediaMutationLockUnavailable("Media mutation lock file permissions or type are unsafe")
 
@@ -123,8 +126,8 @@ def _validate(path: Path, lock: _Lock) -> None:
                 file = os.fstat(lock.file_fd)
                 named_file = os.stat(_LOCK_NAME, dir_fd=named_directory_fd, follow_symlinks=False)
                 _check_directory(directory, lock.gid)
-                _check_file(file, lock.gid)
-                _check_file(named_file, lock.gid)
+                _check_file(file, lock.gid, allow_root_owner=lock.allow_root_owner)
+                _check_file(named_file, lock.gid, allow_root_owner=lock.allow_root_owner)
                 binding = (_identity(directory), _identity(file))
                 if (
                     binding != (_identity(named_directory), _identity(named_file))
@@ -205,7 +208,10 @@ def media_mutation_lock(settings: Settings, *, blocking: bool = True) -> Iterato
                     os.fchmod(file_fd, mode)
                 else:
                     _open_fds.add(file_fd)
-            lock = _Lock(directory_fd, file_fd, gid)
+            lock = _Lock(
+                directory_fd, file_fd, gid,
+                allow_root_owner=is_nas_compat_root_worker(settings),
+            )
             _validate(path, lock)
             _acquire_flock(file_fd, blocking=blocking)
             _validate(path, lock)

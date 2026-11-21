@@ -19,7 +19,7 @@ from app.batch.media_organizer_cleanup_plan import (
     cleanup_plan_path, _read_existing,
 )
 from app.batch.media_organizer_execute_jobs import (
-    EXECUTE_KIND, ACTIVE, _require_enabled, _require_nonroot_mutation_worker,
+    EXECUTE_KIND, ACTIVE, _require_enabled, _require_mutation_worker_identity,
     _literal_unit, _manifest_file, get_media_organizer_cleanup_plan,
     _approval_fields, _validate_job_approval, _snapshot_review, _require_mutation_slot,
     _validate_publication_family,
@@ -343,7 +343,7 @@ class MediaOrganizerCleanupHandler(TaskHandler):
         _require_enabled(settings)
         if not context.worker_id:
             raise PermissionError("exclusive Worker lease required for cleanup")
-        _require_nonroot_mutation_worker()
+        _require_mutation_worker_identity(settings)
         state = _validated_state(job, settings)
         unit = Path(state["unit"])
         with context.SessionLocal() as session:

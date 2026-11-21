@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     media_organizer_execution_mode: Literal["strict", "maintenance_window"] = Field(
         default="strict", validation_alias="MEDIA_ORGANIZER_EXECUTION_MODE",
     )
+    # API-only opt-in. An inaccessible tail is NOT verified here: only the
+    # Worker may validate it during read-only preview and before any mutation.
+    nas_compat_api_deferred_selection_enabled: bool = Field(
+        default=False, validation_alias="NFC_NAS_COMPAT_API_DEFERRED_SELECTION_ENABLED",
+    )
+    # Opt-in only on the Worker service. API must keep this false and /data:ro.
+    nas_compat_root_worker_enabled: bool = Field(
+        default=False, validation_alias="NFC_NAS_COMPAT_ROOT_WORKER_ENABLED",
+    )
     # SECURITY HOLD: inode checks cannot make rename/rmdir source-name
     # operations atomic against uncooperative concurrent writers. Keep this
     # independent acknowledgement OFF unless exclusive namespace ownership

@@ -559,6 +559,9 @@ def worker_loop(
     stop_event: threading.Event | None = None,
 ) -> None:
     settings = settings or get_settings()
+    # Validate the explicit root Worker profile before SQLite/recovery/scheduling.
+    from app.nas_compat_worker import verify_worker_runtime
+    verify_worker_runtime(settings)
     engine, SessionLocal = create_engine_and_session(settings.database_path)
     init_db(
         engine,
