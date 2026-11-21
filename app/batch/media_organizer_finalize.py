@@ -22,7 +22,9 @@ from app.batch.media_organizer_cleanup_plan import (
 )
 from app.batch.media_organizer_authority import (
     OperationAuthority, assert_operation_authorized, is_maintenance_session,
+    maintenance_session_settings,
 )
+from app.nas_compat_worker import is_nas_compat_root_worker
 from app.batch.media_organizer_manifest import (
     _checksum, load_frozen_preview_manifest,
 )
@@ -1085,8 +1087,10 @@ def finish_deferred_cleanup(
         raise CleanupExecutionBlocked(str(exc)) from exc
     if not callable(after_mutation) and after_mutation is not None:
         raise CleanupExecutionBlocked("invalid test interruption callback")
-    if os.geteuid() == 0:
-        raise CleanupExecutionBlocked("dedicated non-root Worker required for cleanup")
+    if os.geteuid() == 0 and not is_nas_compat_root_worker(maintenance_session_settings(custody)):
+        raise CleanupExecutionBlocked(
+            "cleanup requires a non-root Worker or the explicit NAS 0:10000 profile"
+        )
     chain = None
     try:
         unit = Path(manifest["unit"])
