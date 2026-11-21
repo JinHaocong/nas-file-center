@@ -17,6 +17,9 @@ API = "https://api.github.com"
 DEFAULT_MIN_AGE_DAYS = 0  # Owner-approved: merged PRs are eligible immediately.
 RESERVED = {"main", "master", "develop", "development", "staging", "production", "release"}
 RESERVED_PREFIXES = ("release/", "hotfix/", "production/", "stable/")
+# Explicitly retired, fully merged historical release branch. All normal
+# release/* refs stay reserved, even if an old PR was merged.
+RETIRED_MERGED_RELEASES = frozenset({"release/v1.4.6-media-package-report-safety"})
 
 
 def credential():
@@ -72,7 +75,8 @@ class GitHub:
 
 def eligible(branch, pulls, repo, default, cutoff, prefix):
     name = branch["name"]
-    if name == default or name in RESERVED or name.startswith(RESERVED_PREFIXES):
+    if (name == default or name in RESERVED
+            or (name.startswith(RESERVED_PREFIXES) and name not in RETIRED_MERGED_RELEASES)):
         return False, "reserved branch"
     if branch.get("protected"):
         return False, "protected branch"

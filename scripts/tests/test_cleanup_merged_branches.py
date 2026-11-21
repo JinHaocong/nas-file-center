@@ -53,6 +53,14 @@ class BranchCleanupSafety(unittest.TestCase):
         for name in ("main", "master", "develop", "release/1.0", "hotfix/urgent"):
             self.assertFalse(choice(branch(name=name), [pull(name=name)]))
 
+    def test_explicitly_retired_v146_release_remains_safely_gated(self):
+        name = "release/v1.4.6-media-package-report-safety"
+        self.assertTrue(choice(branch(name=name), [pull(name=name)]))
+        self.assertFalse(choice(branch(name=name, protected=True), [pull(name=name)]))
+        self.assertFalse(choice(branch(name=name, sha="changed"), [pull(name=name)]))
+        self.assertFalse(choice(branch(name=name), [pull(name=name, merged_at=None)]))
+        self.assertFalse(choice(branch(name="release/next"), [pull(name="release/next")]))
+
     def test_open_or_unmerged_pr_never_delete(self):
         self.assertFalse(choice(ps=[pull(state="open", merged_at=None)]))
         self.assertFalse(choice(ps=[pull(merged_at=None)]))
