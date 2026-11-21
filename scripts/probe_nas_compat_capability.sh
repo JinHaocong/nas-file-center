@@ -20,7 +20,7 @@ image="${NFC_ROOT_PROBE_IMAGE:-python:3.12-slim}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 docker pull "$image" >/dev/null
 payload="$(cat <<'PY'
-import errno, json, os
+import errno, json, os, sys
 from types import SimpleNamespace
 from nas_compat_worker import verify_worker_runtime
 status = {}
@@ -42,7 +42,7 @@ print(json.dumps({
     "no_new_privs": status["NoNewPrivs"],
     "shared_gid": os.environ.get("NFC_SHARED_CONFIG_GID"),
     "mode": os.environ.get("MEDIA_ORGANIZER_EXECUTION_MODE"),
-}, sort_keys=True), flush=True)
+}, sort_keys=True), file=sys.stderr, flush=True)
 verify_worker_runtime(settings)
 can_read = False
 read_error = None
