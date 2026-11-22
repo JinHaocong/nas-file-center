@@ -49,3 +49,35 @@ def test_candidate_requires_full_lifecycle_before_registry_push():
     assert "--nas-root-worker" in workflow
     assert "PASS_MAINTENANCE_LIFECYCLE" in workflow
     assert "release_ready" in workflow
+
+
+def test_formal_komodo_candidate_keeps_existing_api_worker_boundaries():
+    config = yaml.safe_load((ROOT / "compose.komodo.v162-nas-compat.yaml").read_text())
+    services = config["services"]
+    assert set(services) == {"nas-file-center-api", "nas-file-center-worker"}
+    api, worker = services["nas-file-center-api"], services["nas-file-center-worker"]
+    assert api["container_name"] == "nas-file-center-api"
+    assert worker["container_name"] == "nas-file-center-worker"
+    assert api["user"] == "10001:10000"
+    assert worker["user"] == "0:10000"
+    assert api["cap_drop"] == worker["cap_drop"] == ["ALL"]
+    assert not api.get("cap_add")
+    assert worker["cap_add"] == ["DAC_OVERRIDE"]
+    assert all("no-new-privileges:true" in s["security_opt"] for s in (api, worker))
+    assert all(s["read_only"] is True for s in (api, worker))
+    assert all(s["environment"]["MEDIA_ORGANIZER_EXECUTION_MODE"] == "maintenance_window"
+               for s in (api, worker))
+    assert all(s["environment"]["MEDIA_ORGANIZER_EXECUTION_ENABLED"]
+               == "${NFC_V162_ORGANIZER_ENABLED:-false}" for s in (api, worker))
+    assert api["environment"]["NFC_NAS_COMPAT_ROOT_WORKER_ENABLED"] == "false"
+    assert api["environment"]["NFC_NAS_COMPAT_API_DEFERRED_SELECTION_ENABLED"] == "true"
+    assert worker["environment"]["NFC_NAS_COMPAT_ROOT_WORKER_ENABLED"] == "true"
+    assert worker["environment"]["NFC_NAS_COMPAT_API_DEFERRED_SELECTION_ENABLED"] == "false"
+    for s, expected_read_only in ((api, True), (worker, False)):
+        data = next(m for m in s["volumes"] if isinstance(m, dict) and m["target"] == "/data")
+        assert data["read_only"] is expected_read_only
+        assert "nginx_network" in s["networks"]
+    assert config["networks"]["nginx_network"]["external"] is True
+    assert "nfc-recovery-secrets" in config["volumes"]
+    assert api["image"] == worker["image"]
+    assert "${NFC_V162_IMAGE:" in api["image"]
