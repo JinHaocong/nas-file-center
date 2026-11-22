@@ -206,6 +206,17 @@ def _maintenance_mutation_gate(session: Any) -> tuple[set[int], set[int]]:
         if kind == _EXECUTION_KIND:
             if _MAINTENANCE_MODE in (state.get("execution_mode"), checkpoint.get("execution_mode")):
                 executions[job_id] = job
+                # A failed pre-publication task can be explicitly ended by
+                # its Worker after proving the private stage is absent. Keep its
+                # manifest/audit row, but do not reserve the mutation window forever.
+                if (
+                    status == JobState.FAILED.value
+                    and _matches_fields(checkpoint, {
+                        "phase": "abandoned_before_publish", "operator_abandoned": True,
+                    })
+                    and _positive_id(checkpoint.get("abandoned_by_job_id"))
+                ):
+                    continue
                 frozen_id = checkpoint.get("frozen_job_id")
                 checksum = checkpoint.get("manifest_checksum")
                 if _positive_id(frozen_id) and type(checksum) is str and checksum:
