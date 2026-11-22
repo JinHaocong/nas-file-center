@@ -391,3 +391,103 @@ def test_queued_job_with_alternate_predecessor_is_refused(tmp_path, monkeypatch)
     assert worker(settings, jid) is False
     assert hashes(unit) == before
     assert not (settings.reports_dir / "media_organizer-executions" / str(jid)).exists()
+
+
+def _fail_after_frozen_checkpoint(settings, jid, monkeypatch):
+    save = JobContext.checkpoint
+
+    def crash_after_freeze(context, **kwargs):
+        save(context, **kwargs)
+        if kwargs.get("checkpoint_data", {}).get("phase") == "frozen":
+            raise RuntimeError("simulated failure before staging")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(JobContext, "checkpoint", crash_after_freeze)
+        assert worker(settings, jid) is False
+
+
+def test_abandon_failed_frozen_task_releases_window_and_rescans_current_files(tmp_path, monkeypatch):
+    from app.tasks.recovery import reserved_maintenance_family_ids, work_job_allowed_by_maintenance_reservation
+
+    client, settings, unit = make_case(tmp_path, monkeypatch)
+    before = hashes(unit)
+    pid = preview(client, settings, unit)
+    jid = approved(client, f"/api/media-organizer/previews/{pid}/execute",
+                   unit=str(unit), confirmation=execute.approval_token(pid, str(unit)))
+    _fail_after_frozen_checkpoint(settings, jid, monkeypatch)
+
+    folder = settings.reports_dir / "media_organizer-executions" / str(jid)
+    manifest_before = (folder / "manifest.json").read_bytes()
+    manifest = json.loads(manifest_before)["manifest"]
+    stage = unit / manifest["stage_directory"]
+    assert not stage.exists()
+
+    # Simulate files appearing after the old preview/freeze. They remain untouched.
+    (unit / "v (18).mp4").write_bytes(b"new video one")
+    (unit / "v (2).mp4").write_bytes(b"new video two")
+    current_hashes = hashes(unit)
+
+    response = client.post(f"/api/media-organizer/executions/{jid}/abandon")
+    assert response.status_code == 200, response.text
+    abandon_id = response.json()["job_id"]
+
+    with client.app.state.service.SessionLocal() as session:
+        assert reserved_maintenance_family_ids(session) == {jid}
+        abandon_job = session.get(WorkJob, abandon_id)
+        assert work_job_allowed_by_maintenance_reservation(session, abandon_job)
+
+    assert worker(settings, abandon_id)
+
+    with client.app.state.service.SessionLocal() as session:
+        original = session.get(WorkJob, jid)
+        checkpoint = json.loads(original.checkpoint_json)
+        assert original.status == "failed"
+        assert checkpoint["phase"] == "abandoned_before_publish"
+        assert checkpoint["operator_abandoned"] is True
+        assert checkpoint["abandoned_by_job_id"] == abandon_id
+        assert reserved_maintenance_family_ids(session) == set()
+
+    assert (folder / "manifest.json").read_bytes() == manifest_before
+    assert hashes(unit) == current_hashes
+    assert not stage.exists()
+
+    fresh = client.post("/api/media-organizer/previews", json={"selection": str(unit)})
+    assert fresh.status_code == 200, fresh.text
+    fresh_id = fresh.json()["job_id"]
+    assert worker(settings, fresh_id)
+    report = client.get(f"/api/media-organizer/previews/{fresh_id}").json()
+    row = next(row for row in report["units"] if row["unit"] == str(unit))
+    assert row["status"] == "ready"
+    assert row["total_files"] == 5
+    assert hashes(unit) == current_hashes
+
+
+def test_abandon_failed_frozen_task_refuses_when_stage_still_exists(tmp_path, monkeypatch):
+    from app.tasks.recovery import reserved_maintenance_family_ids
+
+    client, settings, unit = make_case(tmp_path, monkeypatch)
+    pid = preview(client, settings, unit)
+    jid = approved(client, f"/api/media-organizer/previews/{pid}/execute",
+                   unit=str(unit), confirmation=execute.approval_token(pid, str(unit)))
+    _fail_after_frozen_checkpoint(settings, jid, monkeypatch)
+
+    folder = settings.reports_dir / "media_organizer-executions" / str(jid)
+    manifest = json.loads((folder / "manifest.json").read_text())["manifest"]
+    stage = unit / manifest["stage_directory"]
+    stage.mkdir(mode=0o700)
+
+    response = client.post(f"/api/media-organizer/executions/{jid}/abandon")
+    assert response.status_code == 200, response.text
+    abandon_id = response.json()["job_id"]
+    assert worker(settings, abandon_id) is False
+
+    with client.app.state.service.SessionLocal() as session:
+        original = session.get(WorkJob, jid)
+        checkpoint = json.loads(original.checkpoint_json)
+        assert original.status == "failed"
+        assert checkpoint["phase"] == "frozen"
+        assert "operator_abandoned" not in checkpoint
+        assert reserved_maintenance_family_ids(session) == {jid}
+
+    assert stage.is_dir()
+    assert not list(stage.iterdir())
