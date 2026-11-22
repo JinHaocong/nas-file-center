@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
+import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsolePagination } from '../../components/ui/ConsolePagination';
@@ -155,6 +156,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
   const [selectedUnit, setSelectedUnit] = useState('');
   const [executionConfirmation, setExecutionConfirmation] = useState('');
   const [recoveryConfirmation, setRecoveryConfirmation] = useState('');
+  const [abandonConfirmOpen, setAbandonConfirmOpen] = useState(false);
   const [cleanupReviewOpen, setCleanupReviewOpen] = useState(false);
   const [cleanupPage, setCleanupPage] = useState(1);
   const [cleanupPageSize, setCleanupPageSize] = useState(25);
@@ -384,7 +386,6 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
   const abandonAndRescan = async () => {
     if (executionJobId === null || !executionStatus?.abandon_available || abandonExecution.isPending) return;
     const unit = executionStatus.unit;
-    if (!window.confirm(`结束失败任务 #${executionJobId}，保留原任务记录且不修改媒体文件，然后重新扫描当前目录？`)) return;
     try {
       await abandonExecution.mutateAsync(executionJobId);
       setExecutionJobId(null);
@@ -713,6 +714,16 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
         </DataPanel>
       )}
 
+      <ConsoleConfirmDialog
+        open={abandonConfirmOpen}
+        onOpenChange={next => { if (!abandonExecution.isPending) setAbandonConfirmOpen(next); }}
+        title="结束失败任务并重新扫描当前目录？"
+        description="只结束尚未发布 P/V 文件的失败任务，保留原任务记录和冻结清单，不修改媒体文件。结束后会对当前目录重新进行只读预览。"
+        confirmText="结束并重新扫描"
+        onConfirm={() => { setAbandonConfirmOpen(false); void abandonAndRescan(); }}
+        busy={abandonExecution.isPending}
+        disabled={abandonExecution.isPending}
+      />
       {executionJobId !== null && (
         <DataPanel title="安全执行与恢复状态" variant="dense"
           className="nfc-v2-batch-media-panel"
@@ -780,8 +791,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                     此任务尚未发布 P/V 文件。结束后保留原任务记录、不修改媒体文件，并重新扫描当前目录。
                   </p>
                   <ConsoleButton variant="secondary" disabled={busy}
-                    loading={abandonExecution.isPending}
-                    onClick={() => { void abandonAndRescan(); }}>
+                    onClick={() => setAbandonConfirmOpen(true)}>
                     结束失败任务并重新扫描当前目录
                   </ConsoleButton>
                 </div>
