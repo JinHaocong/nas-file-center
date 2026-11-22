@@ -181,6 +181,9 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
       executionId: number; confirmation: string; maintenanceConfirmed: boolean;
     }) => mediaOrganizerApi.recoverExecution(executionId, confirmation, maintenanceConfirmed),
   });
+  const abandonExecution = useMutation({
+    mutationFn: mediaOrganizerApi.abandonExecution,
+  });
   const startCleanup = useMutation({
     mutationFn: ({ executionId, confirmation, maintenanceConfirmed }: {
       executionId: number; confirmation: string; maintenanceConfirmed: boolean;
@@ -243,7 +246,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     retry: false,
   });
   const busy = enqueue.isPending || startExecution.isPending || recoverExecution.isPending ||
-    startCleanup.isPending || recoverCleanup.isPending || isRunning(data?.status) ||
+    abandonExecution.isPending || startCleanup.isPending || recoverCleanup.isPending || isRunning(data?.status) ||
     (executionJobId !== null && (executionStatus
       ? semanticExecutionNeedsPolling(executionStatus, expectedCleanupJobId) : !executionLoadFailed)) ||
     (jobId !== null && data == null);
@@ -277,6 +280,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     hasMaintenanceConfirmation(executionStatus, recoveryMaintenanceConfirmed) &&
     executionStatus?.status === 'failed' &&
     executionStatus.recovery_of_job_id == null &&
+    executionStatus.abandon_available !== true &&
     executionStatus.recovery_available !== false &&
     recoveryConfirmation === recoveryToken && !busy && !recoverExecution.isPending);
   const canCleanup = Boolean(!busy && !cleanupPlanFetching &&
@@ -374,6 +378,32 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
       toast.success(`恢复任务 #${response.job_id} 已提交 Worker`);
     } catch (e: unknown) {
       toast.error(getStructuredApiError(e).message || '恢复请求被拒绝');
+    }
+  };
+
+  const abandonAndRescan = async () => {
+    if (executionJobId === null || !executionStatus?.abandon_available || abandonExecution.isPending) return;
+    const unit = executionStatus.unit;
+    if (!window.confirm(`结束失败任务 #${executionJobId}，保留原任务记录且不修改媒体文件，然后重新扫描当前目录？`)) return;
+    try {
+      await abandonExecution.mutateAsync(executionJobId);
+      setExecutionJobId(null);
+      setJobId(null);
+      setSelection(unit);
+      setSelectedUnit('');
+      setExecutionConfirmation('');
+      setRecoveryConfirmation('');
+      resetCleanup();
+      setMappingSelection(null);
+      setMappingPage(1);
+      setPage(1);
+      setStatusFilter('all');
+      const preview = await enqueue.mutateAsync(unit);
+      setJobId(preview.job_id);
+      toast.success(`旧任务已结束，当前目录重新扫描任务 #${preview.job_id} 已提交`);
+    } catch (e: unknown) {
+      toast.error(getStructuredApiError(e).message ||
+        '结束或重新扫描未完成；请保留任务记录，不要手动修改媒体文件');
     }
   };
 
@@ -744,7 +774,21 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
                 </p>
               )}
               {executionStatus.status === 'failed' &&
+                executionStatus.abandon_available === true && (
+                <div className="nfc-v2-batch-form">
+                  <p className="nfc-form-note">
+                    此任务尚未发布 P/V 文件。结束后保留原任务记录、不修改媒体文件，并重新扫描当前目录。
+                  </p>
+                  <ConsoleButton variant="secondary" disabled={busy}
+                    loading={abandonExecution.isPending}
+                    onClick={() => { void abandonAndRescan(); }}>
+                    结束失败任务并重新扫描当前目录
+                  </ConsoleButton>
+                </div>
+              )}
+              {executionStatus.status === 'failed' &&
                 executionStatus.recovery_of_job_id == null &&
+                executionStatus.abandon_available !== true &&
                 executionStatus.recovery_available === false && (
                 <p className="nfc-form-note" role="status">
                   {executionStatus.recovery_unavailable_reason ||
@@ -754,6 +798,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
               {executionStatus.status === 'failed' &&
                 executionStatus.recovery_of_job_id == null &&
                 executionStatus.execution_enabled &&
+                executionStatus.abandon_available !== true &&
                 executionStatus.recovery_available !== false && (
                 <div className="nfc-v2-batch-form">
                   <div className="nfc-v2-batch-field">
