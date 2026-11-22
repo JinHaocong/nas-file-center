@@ -220,3 +220,115 @@ def test_stage_rejects_permission_relaxation_before_first_source_mutation(
     assert widened, "permission fault injection was not executed"
     assert all(Path(row["source"]).is_file() for row in manifest["moves"])
     assert all(not Path(row["target"]).exists() for row in manifest["moves"])
+
+
+def _deferred_manifest(tmp_path):
+    unit, manifest, frozen = fixture(tmp_path)
+    manifest["cleanup_policy"] = "deferred"
+    frozen.unlink()
+    save_frozen_preview_manifest(frozen, manifest)
+    return unit, manifest, frozen
+
+
+def _simulate_zfuse_directory_inode_drift(monkeypatch, staging, stage_name):
+    """Simulate path-stat inode drift while the original open FD stays stable."""
+    from types import SimpleNamespace
+
+    real_entry = staging._entry
+
+    def altered_entry(folder_fd, name):
+        info = real_entry(folder_fd, name)
+        if info is not None and name == stage_name:
+            return SimpleNamespace(
+                st_mode=info.st_mode, st_dev=info.st_dev,
+                st_ino=info.st_ino + 1000003,
+            )
+        return info
+
+    monkeypatch.setattr(staging, "_entry", altered_entry)
+
+
+def test_nas_root_stage_tolerates_unstable_named_directory_inode(tmp_path, monkeypatch):
+    """Work around ZOS inode reporting without reopening or replacing the original stage FD."""
+    from app.batch import media_organizer_stage as staging
+
+    unit, manifest, frozen = _deferred_manifest(tmp_path)
+    _simulate_zfuse_directory_inode_drift(monkeypatch, staging, manifest["stage_directory"])
+    monkeypatch.setattr(staging, "is_nas_compat_root_worker", lambda: True)
+
+    result = stage(manifest, frozen, tmp_path)
+    assert result["staged"] == len(manifest["moves"])
+    assert result["ready_to_publish"]
+    assert not (unit / "P").exists()
+    assert not (unit / "V").exists()
+    for move in manifest["moves"]:
+        src, staged = Path(move["source"]), Path(move["target"])
+        assert src.is_file() and staged.is_file()
+        assert (os.stat(src).st_dev, os.stat(src).st_ino) == (
+            os.stat(staged).st_dev, os.stat(staged).st_ino
+        )
+
+
+def test_unstable_stage_inode_without_nas_profile_still_fails_closed(tmp_path, monkeypatch):
+    from app.batch import media_organizer_stage as staging
+
+    unit, manifest, frozen = _deferred_manifest(tmp_path)
+    _simulate_zfuse_directory_inode_drift(monkeypatch, staging, manifest["stage_directory"])
+    monkeypatch.setattr(staging, "is_nas_compat_root_worker", lambda: False)
+
+    with pytest.raises(StagingConflict, match="private stage directory binding changed"):
+        stage(manifest, frozen, tmp_path)
+    assert all(Path(move["source"]).is_file() for move in manifest["moves"])
+    assert all(not Path(move["target"]).exists() for move in manifest["moves"])
+
+
+def test_nas_root_inode_drift_fallback_rejects_stage_replacement(tmp_path, monkeypatch):
+    """A copied owner witness must not allow a new name to replace the originally held FD."""
+    from app.batch import media_organizer_stage as staging
+
+    unit, manifest, frozen = _deferred_manifest(tmp_path)
+    _simulate_zfuse_directory_inode_drift(monkeypatch, staging, manifest["stage_directory"])
+    monkeypatch.setattr(staging, "is_nas_compat_root_worker", lambda: True)
+    stage_path = unit / manifest["stage_directory"]
+    detached = unit / "detached-zfuse-stage"
+    original_move = staging._move_one
+    swapped = []
+
+    def replace_before_first_file(*args, **kwargs):
+        if not swapped:
+            stage_path.rename(detached)
+            stage_path.mkdir(mode=0o700)
+            (stage_path / ".nfc-stage-authority").write_bytes(
+                (detached / ".nfc-stage-authority").read_bytes()
+            )
+            swapped.append(True)
+        return original_move(*args, **kwargs)
+
+    monkeypatch.setattr(staging, "_move_one", replace_before_first_file)
+    with pytest.raises(StagingConflict, match="private stage directory binding changed"):
+        stage(manifest, frozen, tmp_path)
+    assert swapped
+    assert all(Path(move["source"]).is_file() for move in manifest["moves"])
+    assert all(not Path(move["target"]).exists() for move in manifest["moves"])
+    assert (detached / ".nfc-stage-authority").is_file()
+    assert (stage_path / ".nfc-stage-authority").is_file()
+
+
+def test_nas_root_inode_drift_fallback_requires_working_procfs(tmp_path, monkeypatch):
+    from app.batch import media_organizer_stage as staging
+
+    unit, manifest, frozen = _deferred_manifest(tmp_path)
+    _simulate_zfuse_directory_inode_drift(monkeypatch, staging, manifest["stage_directory"])
+    monkeypatch.setattr(staging, "is_nas_compat_root_worker", lambda: True)
+    real_readlink = staging.os.readlink
+
+    def unavailable_procfs(path, *args, **kwargs):
+        if str(path).startswith("/proc/self/fd/"):
+            raise OSError("procfs unavailable")
+        return real_readlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(staging.os, "readlink", unavailable_procfs)
+    with pytest.raises(StagingConflict, match="private stage directory binding changed"):
+        stage(manifest, frozen, tmp_path)
+    assert all(Path(move["source"]).is_file() for move in manifest["moves"])
+    assert all(not Path(move["target"]).exists() for move in manifest["moves"])
