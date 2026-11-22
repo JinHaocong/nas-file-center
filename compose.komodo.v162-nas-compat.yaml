@@ -1,0 +1,117 @@
+# V1.6.2 production Komodo candidate for the EXISTING two-container stack.
+# Do not deploy until exact-digest NAS scratch acceptance and review are complete.
+# Reuses the existing Komodo container names, nginx_network and recovery volume.
+# Set NFC_V162_IMAGE to the immutable image@sha256 digest, not a mutable tag.
+# Set NFC_V162_ORGANIZER_ENABLED=true only after acceptance.
+
+x-nfc-v162-common: &nfc-v162-common
+  image: ${NFC_V162_IMAGE:?Set an accepted immutable kerwinjhc/nas-file-center@sha256 digest}
+  pull_policy: missing
+  restart: unless-stopped
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp:mode=1777"]
+
+x-nfc-v162-env: &nfc-v162-env
+  CONFIG_DIR: /config
+  DATA_MOUNT: /data
+  ALLOWED_ROOTS: /data
+  QUARANTINE_ROOT: /quarantine/.nas-file-center-trash
+  MEDIA_PACKAGE_ROOT: "[[MEDIA_PACKAGE_ROOT]]"
+  MEDIA_PACKAGE_FUSE_COMPAT_ENABLED: "[[MEDIA_PACKAGE_FUSE_COMPAT_ENABLED]]"
+  ALLOW_MUTATION: "true"
+  ALLOW_DELETE: "true"
+  PROTECT_LAST_FILE: "true"
+  MEDIA_ORGANIZER_EXECUTION_ENABLED: "${NFC_V162_ORGANIZER_ENABLED:-false}"
+  MEDIA_ORGANIZER_EXECUTION_MODE: maintenance_window
+  MEDIA_ORGANIZER_NAMESPACE_QUIESCENCE_ACK: "false"
+  NFC_SHARED_CONFIG_GID: "10000"
+  NFC_SECRET_OWNER_UID: "10001"
+  NFC_SECRET_GROUP_GID: "10000"
+  FCLONES_BINARY: /usr/local/bin/fclones
+  MTIME_REFRESH_DELAY_SECONDS: "2"
+
+services:
+  nas-file-center-api:
+    <<: *nfc-v162-common
+    container_name: nas-file-center-api
+    user: "10001:10000"
+    environment:
+      <<: *nfc-v162-env
+      NFC_NAS_COMPAT_API_DEFERRED_SELECTION_ENABLED: "true"
+      NFC_NAS_COMPAT_ROOT_WORKER_ENABLED: "false"
+      SESSION_COOKIE_SECURE: "true"
+      INITIAL_ADMIN_USERNAME: "[[INITIAL_ADMIN_USERNAME]]"
+      INITIAL_ADMIN_PASSWORD: "[[INITIAL_ADMIN_PASSWORD]]"
+    volumes:
+      - type: bind
+        source: ${HOST_CONFIG_DIR:?Set existing NAS config bind source}
+        target: /config
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${HOST_CONFIG_DIR:?Set existing NAS config bind source}/.nas-file-center-trash
+        target: /quarantine/.nas-file-center-trash
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${HOST_CONFIG_DIR:?Set existing NAS config bind source}/.nas-file-center-trash
+        target: /config/.nas-file-center-trash
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${HOST_DATA_DIR:?Set existing NAS media bind source}
+        target: /data
+        read_only: true
+        bind: {create_host_path: false}
+      - nfc-recovery-secrets:/run/nfc-recovery-secrets
+    networks: [nginx_network]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  nas-file-center-worker:
+    <<: *nfc-v162-common
+    container_name: nas-file-center-worker
+    user: "0:10000"
+    cap_add: [DAC_OVERRIDE]
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *nfc-v162-env
+      NFC_NAS_COMPAT_API_DEFERRED_SELECTION_ENABLED: "false"
+      NFC_NAS_COMPAT_ROOT_WORKER_ENABLED: "true"
+    volumes:
+      - type: bind
+        source: ${HOST_CONFIG_DIR:?Set existing NAS config bind source}
+        target: /config
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${HOST_CONFIG_DIR:?Set existing NAS config bind source}/.nas-file-center-trash
+        target: /quarantine/.nas-file-center-trash
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${HOST_DATA_DIR:?Set existing NAS media bind source}
+        target: /data
+        read_only: false
+        bind: {create_host_path: false}
+      - nfc-recovery-secrets:/run/nfc-recovery-secrets
+    networks: [nginx_network]
+    depends_on:
+      nas-file-center-api:
+        condition: service_healthy
+
+networks:
+  nginx_network:
+    external: true
+
+volumes:
+  nfc-recovery-secrets:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=1m,uid=10001,gid=10000,mode=2770,noexec,nosuid,nodev"
