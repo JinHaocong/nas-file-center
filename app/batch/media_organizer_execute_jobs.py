@@ -325,7 +325,7 @@ def get_media_organizer_execution(
             func.json_extract(WorkJob.state_json, "$.abandon_of_job_id") == job_id,
         ).order_by(WorkJob.id.desc()).limit(1))
         abandon_available = (
-            failed_original and mode == "maintenance_window"
+            execution_enabled and failed_original and mode == "maintenance_window"
             and checkpoint.get("phase") == "frozen"
             and isinstance(checkpoint.get("manifest_checksum"), str)
             and len(checkpoint["manifest_checksum"]) == 64
