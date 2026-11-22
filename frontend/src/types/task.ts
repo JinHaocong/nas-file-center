@@ -21,8 +21,10 @@ export interface TaskProgress {
   percent: number | null;
 }
 
+export type TaskId = number | string;
+
 export interface TaskItem {
-  id: number;
+  id: TaskId;
   job_type: string;
   status: TaskStatus;
   capabilities: TaskCapabilities;
@@ -33,7 +35,7 @@ export interface TaskItem {
   heartbeat_at: string | null;
   error: string | null;
   error_code: string | null;
-  retry_of: number | null;
+  retry_of: TaskId | null;
 }
 
 export interface TaskDetail extends TaskItem {
@@ -85,7 +87,7 @@ export type TerminalTaskStatus = 'completed' | 'failed' | 'cancelled';
 
 export interface DeleteTaskResponse {
   deleted: boolean;
-  id: number;
+  id: TaskId;
 }
 
 export interface ClearTaskHistoryResponse {

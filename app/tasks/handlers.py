@@ -153,3 +153,7 @@ from app.batch.media_sort_jobs import (
 # Dedicated media-package Worker handlers for preview and confirmed execution.
 from app.batch.media_package_jobs import MediaPackagePreviewHandler as MediaPackagePreviewHandler
 from app.batch.media_package_execute_jobs import MediaPackageExecuteHandler as MediaPackageExecuteHandler
+from app.batch.media_organizer_jobs import (
+    MediaOrganizerBatchHandler as MediaOrganizerBatchHandler,
+    MediaOrganizerPreviewHandler as MediaOrganizerPreviewHandler,
+)

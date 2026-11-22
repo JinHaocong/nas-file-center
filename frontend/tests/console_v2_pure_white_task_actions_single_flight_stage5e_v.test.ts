@@ -77,7 +77,7 @@ describe('Pure White Stage 5E-V Task action synchronous single-flight fence', ()
       'if (!next && !isAnyPending && !actionInFlight.current) setConfirmAction(null);',
       "getTaskActionAvailability(task, 'retry')",
       'onError: async (error: Error) =>',
-      "queryClient.invalidateQueries({ queryKey: ['taskDetail', task.id] })",
+      "queryClient.invalidateQueries({ queryKey: ['taskDetail', String(task.id)] })",
       'setCreatedRetryId(res.job.id)',
     ]) assert.ok(source.includes(token), token);
     assert.equal(source.split('onError: async (error: Error) =>').length - 1, 4);

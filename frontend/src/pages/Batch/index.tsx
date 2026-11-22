@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { plansApi } from '../../api/domain';
 import { getStructuredApiError } from '../../api/errors';
 import { useTitle } from '../../hooks/useTitle';
@@ -14,25 +14,35 @@ import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
 import { MediaSortEditor } from './MediaSortEditor';
-import { MediaPackageOrganizerEditor } from './MediaPackageOrganizerEditor';
+import { MediaOrganizerBatchEditor } from './MediaOrganizerBatchEditor';
 
-type BatchMode = BatchOperation | 'media-sort' | 'media_package-organize';
+type BatchMode = BatchOperation | 'media-sort' | 'media-organize';
 const operations: readonly { op: BatchMode; title: string; detail: string }[] = [
   { op: 'quarantine', title: '批量隔离', detail: 'Quarantine' },
   { op: 'touch', title: '更新时间戳', detail: 'Touch' },
   { op: 'move', title: '批量移动', detail: 'Move' },
   { op: 'rename', title: '批量改名', detail: 'Rename' },
   { op: 'media-sort', title: '媒体分类', detail: 'P / V' },
-  { op: 'media_package-organize', title: '媒体资源包整理', detail: '只读预览' },
+  { op: 'media-organize', title: '智能媒体整理', detail: '递归预览' },
 ];
+
+/** Open the unified organizer from new and historical links. */
+function opensMediaOrganizer(params: URLSearchParams): boolean {
+  const operation = params.get('operation');
+  return operation === 'media-organize' || operation === 'media_package-organize' ||
+    operation === 'semantic-media-organize' || params.has('execution') ||
+    params.has('preview') || params.has('batch');
+}
 
 /** Only create a Plan Draft, never Freeze/Validate/Execute a filesystem operation. */
 export const BatchPage: React.FC = () => {
   useTitle('批量处理');
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const toast = useConsoleToast();
   const [name, setName] = useState('批量处理');
-  const [operation, setOperation] = useState<BatchMode>('quarantine');
+  const [operation, setOperation] = useState<BatchMode>(() =>
+    opensMediaOrganizer(searchParams) ? 'media-organize' : 'quarantine');
   const [paths, setPaths] = useState<string[]>([]);
   const [mappingsText, setMappingsText] = useState('');
   const [planLoading, setPlanLoading] = useState(false);
@@ -40,6 +50,10 @@ export const BatchPage: React.FC = () => {
   const mountedRef = useRef(true);
   const planGuard = useRef(false);
   const planMutation = useMutation({ mutationFn: plansApi.createPlan });
+
+  useEffect(() => {
+    if (opensMediaOrganizer(searchParams)) setOperation('media-organize');
+  }, [searchParams]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -73,9 +87,23 @@ export const BatchPage: React.FC = () => {
     }
   };
 
+  /** Change tools and clear an organizer link when leaving the organizer. */
   const onOperationChange = (next: BatchMode) => {
     if (planGuard.current) return;
     setOperation(next);
+    if (next === 'media-organize' || opensMediaOrganizer(searchParams)) {
+      setSearchParams(current => {
+        const params = new URLSearchParams(current);
+        if (next === 'media-organize') params.set('operation', next);
+        else {
+          params.delete('operation');
+          params.delete('execution');
+          params.delete('preview');
+          params.delete('batch');
+        }
+        return params;
+      }, { replace: true });
+    }
     setValidationError('');
   };
   const onPathsChange = (next: string | string[]) => {
@@ -87,16 +115,16 @@ export const BatchPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-batch-page nfc-page-layout-workbench nfc-v2-batch">
       <PageHeader title="批量文件处理"
-        description="批量隔离、Touch、Move、Rename、媒体分类及 MediaPackage 专用只读检查。真正文件操作仍通过 Freeze → Validate → Execute。" />
+        description="批量隔离、更新时间戳、移动、改名、媒体分类及智能媒体整理。" />
       <DataPanel title="批量操作定义"
         description={operation === 'media-sort'
            ? '选择媒体分类后，按 P / V 规则预览当前目录内的图片和视频。'
-           : operation === 'media_package-organize'
-             ? '只读扫描 MediaPackage/年月/日期/作者/资源包，并展示固定 200 文件分组和冲突。'
+           : operation === 'media-organize'
+             ? '递归识别资源包、作者、合集、作品和版本，分开预览和整理。'
              : '选择操作类型并明确输入源路径/映射。这里创建 Plan，不会立即执行文件系统变更。'}
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
         <div className="nfc-batch-form nfc-v2-batch-form">
-          {operation !== 'media-sort' && operation !== 'media_package-organize' && <label className="nfc-v2-batch-field">
+          {operation !== 'media-sort' && operation !== 'media-organize' && <label className="nfc-v2-batch-field">
             <span>计划名称</span>
             <input value={name} required disabled={planLoading}
               placeholder="批量处理计划" aria-invalid={Boolean(validationError) && !name.trim()}
@@ -124,7 +152,7 @@ export const BatchPage: React.FC = () => {
               </label>
             </div>
           </fieldset>
-          {operation !== 'media-sort' && operation !== 'media_package-organize' && <>
+          {operation !== 'media-sort' && operation !== 'media-organize' && <>
           {operation === 'quarantine' && (
             <div className="nfc-v2-batch-notice nfc-page-alert" role="note">
               <ConsoleIcon name="shield-check" size={19} />
@@ -167,7 +195,7 @@ export const BatchPage: React.FC = () => {
         </div>
       </DataPanel>
       {operation === 'media-sort' && <MediaSortEditor />}
-      {operation === 'media_package-organize' && <MediaPackageOrganizerEditor />}
+      {operation === 'media-organize' && <MediaOrganizerBatchEditor />}
     </div>
   );
 };

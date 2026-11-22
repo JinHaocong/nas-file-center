@@ -41,8 +41,8 @@ describe('Console v2 Task Center Radix overlays', () => {
       'getTaskDeleteAvailability(task)', 'disabled={!availability.enabled || deleteMutation.isPending}',
       'if (!getTaskDeleteAvailability(task).enabled || deleteMutation.isPending || deleteInFlight.current) return',
       'tasksApi.deleteTask(task.id)', 'invalidateQueries',
-      "queryClient.removeQueries({ queryKey: ['taskDetail', task.id] })",
-      "queryClient.removeQueries({ queryKey: ['taskLogs', task.id] })",
+      "queryClient.removeQueries({ queryKey: ['taskDetail', String(task.id)] })",
+      "queryClient.removeQueries({ queryKey: ['taskLogs', String(task.id)] })",
       'onSuccess?.()', '<ConsoleConfirmDialog',
     ]) assert.ok(button.includes(token), token);
     assert.match(dialog, /onEscapeKeyDown=/);
@@ -97,7 +97,7 @@ describe('Console v2 Task Center Radix overlays', () => {
     for (const token of [
       'useResponsive', 'nfc-task-log-mobile-list', 'nfc-task-log-mobile-card',
       'nfc-v2-log-table', '<ConsoleSelect', '<ConsolePagination',
-      "queryKey: ['taskLogs', taskId, page, pageSize, level]",
+      "queryKey: ['taskLogs', String(taskId), page, pageSize, level]",
       'sanitizeContext(record.context)', 'getTaskLogs(taskId',
       'setPage(1)', 'setExpandedRowKeys([])', "aria-expanded={expanded}",
     ]) assert.ok(log.includes(token), token);

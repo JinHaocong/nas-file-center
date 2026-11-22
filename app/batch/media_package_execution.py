@@ -13,10 +13,11 @@ import json
 import os
 import stat
 from pathlib import Path
+from tempfile import mkstemp
 from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
-from app.batch.media_package_naming import allocate_names
+from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_package_organizer import (
     MAX_FILES_PER_GROUP, _input_fingerprint, _package_path, _walk_package,
     preview_media_package_package,
@@ -71,7 +72,7 @@ def prepare_media_package_manifest(package: Path, *, media_package_root: Path,
         raise MediaPackageExecutionConflict("Selected package was not ready in the preview")
     fresh = preview_media_package_package(
         source, media_package_root=media_package_root, allowed_roots=allowed_roots,
-        quarantine_root=quarantine_root, include_items=True,
+        quarantine_root=quarantine_root, include_items=True, include_mapping=True,
     )
     if (fresh.get("status") != "ready"
             or not isinstance(preview_record.get("input_fingerprint"), str)
@@ -81,15 +82,41 @@ def prepare_media_package_manifest(package: Path, *, media_package_root: Path,
             or fresh.get("operation") != preview_record.get("operation")):
         raise MediaPackageExecutionConflict(f"Package changed since preview: {source}")
 
-    items = fresh.pop("_snapshot_items")
+    return _freeze_layout(source, fresh, media_package_root=media_package_root, job_id=job_id)
+
+
+def prepare_organizer_manifest(
+    unit: Path, *, mode: str, media_package_root: Path | None, allowed_roots: list[Path],
+    quarantine_root: Path | None, preview_record: dict, job_id: int,
+) -> dict:
+    """Freeze the exact per-unit layout shown by the recursive preview."""
+    from app.batch.media_organizer_planner import preview_organizing_unit
+
+    fresh = preview_organizing_unit(
+        unit, mode=mode, allowed_roots=allowed_roots, quarantine_root=quarantine_root,
+        media_package_root=media_package_root, include_items=True, include_mapping=True,
+    )
+    if (preview_record.get("status") != "ready" or fresh.get("status") != "ready"
+            or fresh["actual_moves"] != preview_record.get("needed_moves")
+            or any(fresh.get(key) != preview_record.get(key)
+                   for key in ("unit", "input_fingerprint", "operation", "groups", "renamed_count"))):
+        raise MediaPackageExecutionConflict(f"Organizing unit changed since preview: {unit}")
+    return {
+        **_freeze_layout(unit, fresh, media_package_root=media_package_root, job_id=job_id),
+        "organizer_mode": mode, "quarantine_root": str(quarantine_root) if quarantine_root else None,
+    }
+
+
+def _freeze_layout(source: Path, fresh: dict, *, media_package_root: Path | None, job_id: int) -> dict:
+    """Use the planner's complete source-to-target mapping in the frozen engine format."""
+    items = fresh["_snapshot_items"]
     if _input_fingerprint(items, source) != fresh["input_fingerprint"]:
         raise MediaPackageExecutionConflict("Package snapshot changed during its frozen preflight")
     package_stat = os.stat(source, follow_symlinks=False)
     _check_directory(package_stat, source)
     dev = int(package_stat.st_dev)
-    for item in items:
-        if item["dev"] != dev:
-            raise MediaPackageExecutionConflict("Cross-filesystem package cannot be moved safely")
+    if any(item["dev"] != dev for item in items):
+        raise MediaPackageExecutionConflict("Cross-filesystem package cannot be moved safely")
 
     directories: dict[str, list[int]] = {}
     for item in items:
@@ -108,79 +135,45 @@ def prepare_media_package_manifest(package: Path, *, media_package_root: Path,
                 directories[key] = [int(st.st_dev), int(st.st_ino)]
             parent = parent.parent
 
-    moves = []
-    groups = []
     is_flat = fresh["operation"] == "flatten_pure_media"
     root_stage = f".nfc-media_package-stage-{job_id}-root" if is_flat else None
-    if is_flat:
-        ordered = sorted(items, key=lambda row: (
-            os.path.relpath(row["path"], source).casefold(),
-            os.path.relpath(row["path"], source),
-        ))
-        names, _ = allocate_names(ordered, kind="flat")
-        for item, target_name in zip(ordered, names):
-            # Even a root file that is already numbered must be staged:
-            # it could occupy another source file's desired final name.
-            target = source / root_stage / target_name
-            final = source / target_name
-            moves.append({
-                "source": item["path"], "target": str(target),
-                "final": str(final), "identity": [
-                    item["dev"], item["ino"], item["bytes"], item["mtime_ns"],
-                ], "group": None, "target_name": target_name,
-                "original_name": item["name"],
-                "original_relative_path": os.path.relpath(item["path"], source),
-                "final_relative_path": target_name,
-            })
-    else:
-        items.sort(key=lambda row: (
-            row["kind"], os.path.relpath(row["path"], source).casefold(),
-            os.path.relpath(row["path"], source),
-        ))
-        by_kind = {kind: [item for item in items if item["kind"] == kind]
-                   for kind in ("P", "V", "Other")}
-        offsets = {"P": 0, "V": 0, "Other": 0}
-        for idx, group in enumerate(fresh["groups"]):
-            kind = group["kind"]
-            start = offsets[kind]
-            segment = by_kind[kind][start:start + int(group["count"])]
-            offsets[kind] = start + len(segment)
-            if not segment or len(segment) != group["count"] or sum(
-                item["bytes"] for item in segment
-            ) != group["bytes"]:
-                raise MediaPackageExecutionConflict("Proposed grouping changed during freeze")
-            stage = f".nfc-media_package-stage-{job_id}-{idx}"
-            final = source / group["name"]
-            groups.append({
-                "stage": stage, "final": group["name"], "count": len(segment),
-                "bytes": group["bytes"], "kind": kind, "move_start": len(moves),
-            })
-            assigned, _ = allocate_names(segment, kind=kind)
-            for item, target_name in zip(segment, assigned):
-                target = source / stage / target_name
-                # Original files may already live under this final label.
-                # Every such source is staged before the old empty bucket
-                # can be retired, so original and output names may coincide.
-                moves.append({
-                    "source": item["path"], "target": str(target),
-                    "final": str(final / target_name),
-                    "identity": [item["dev"], item["ino"], item["bytes"], item["mtime_ns"]],
-                    "group": idx, "target_name": target_name,
-                    "original_name": item["name"],
-                    "original_relative_path": os.path.relpath(item["path"], source),
-                    "final_relative_path": os.path.relpath(final / target_name, source),
-                })
+    groups = []
+    group_indexes = {}
+    offset = 0
+    for idx, group in enumerate(fresh["groups"]):
+        group_indexes[group["destination"]] = idx
+        groups.append({
+            "stage": f".nfc-media_package-stage-{job_id}-{idx}",
+            "final": group["name"], "count": group["count"], "bytes": group["bytes"],
+            "kind": group["kind"], "move_start": offset,
+        })
+        offset += group["count"]
 
-    if len(moves) != int(fresh["needed_moves"]):
+    moves = []
+    source_items = {row["path"]: row for row in items}
+    for mapping in fresh["_mapping_items"]:
+        item = source_items[mapping["source"]]
+        final = Path(mapping["target"])
+        target_name = mapping["target_name"]
+        group_index = None if is_flat else group_indexes[str(final.parent)]
+        stage = root_stage if is_flat else groups[group_index]["stage"]
+        moves.append({
+            "source": item["path"], "target": str(source / stage / target_name), "final": str(final),
+            "identity": [item["dev"], item["ino"], item["bytes"], item["mtime_ns"]],
+            "group": group_index, "target_name": target_name, "original_name": item["name"],
+            "original_relative_path": os.path.relpath(item["path"], source),
+            "final_relative_path": os.path.relpath(final, source),
+        })
+    if len(moves) != fresh["needed_moves"]:
         raise MediaPackageExecutionConflict("Frozen move count differs from reviewed preview")
     manifest = {
-        "schema_version": MANIFEST_VERSION,
-        "job_id": job_id, "package": str(source), "media_package_root": str(media_package_root),
+        "schema_version": MANIFEST_VERSION, "job_id": job_id, "package": str(source),
+        "media_package_root": str(media_package_root) if media_package_root is not None else None,
         "package_dev": dev, "package_ino": int(package_stat.st_ino),
-        "input_fingerprint": fresh["input_fingerprint"],
-        "operation": fresh["operation"], "root_stage": root_stage,
-        "groups": groups, "moves": moves, "origin_directories": directories,
+        "input_fingerprint": fresh["input_fingerprint"], "operation": fresh["operation"],
+        "root_stage": root_stage, "groups": groups, "moves": moves, "origin_directories": directories,
     }
+    _validate_frozen_paths(manifest)
     return manifest
 
 
@@ -194,17 +187,29 @@ def save_frozen_manifest(path: Path, manifest: dict) -> None:
     if path.exists() or path.is_symlink():
         raise MediaPackageExecutionConflict("Frozen manifest path already exists")
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    staging = path.with_name(path.name + ".tmp")
-    if os.path.lexists(staging):
-        raise MediaPackageExecutionConflict("Untrusted partial manifest artifact exists")
     body = {"manifest": manifest, "checksum": _manifest_checksum(manifest)}
-    fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    if "organizer_mode" in manifest:
+        # A killed Worker may leave a partial temporary file. A fresh,
+        # exclusive temp file never adopts that content or replaces the final.
+        fd, temporary = mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        staging = Path(temporary)
+    else:
+        staging = path.with_name(path.name + ".tmp")
+        if os.path.lexists(staging):
+            raise MediaPackageExecutionConflict("Untrusted partial manifest artifact exists")
+        fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(body, stream, ensure_ascii=False, separators=(",", ":"))
             stream.flush()
             os.fsync(stream.fileno())
         os.link(staging, path, follow_symlinks=False)
+        if "organizer_mode" in manifest:
+            parent_fd = _open_folder(path.parent)
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
     finally:
         if os.path.lexists(staging):
             os.unlink(staging)
@@ -252,9 +257,36 @@ def _entry(folder: Path, name: str):
         return None
 
 
+def _retire_link(source: Path, target: Path, source_fd: int, target_fd: int,
+                 identity: list[int], fence: Callable[[], None], *, durable: bool = False) -> None:
+    if durable:
+        os.fsync(target_fd)
+    fence()
+    _check_file(os.stat(target.name, dir_fd=target_fd, follow_symlinks=False), identity, target)
+    _check_file(os.stat(source.name, dir_fd=source_fd, follow_symlinks=False), identity, source)
+    os.unlink(source.name, dir_fd=source_fd)
+
+
+def _resume_link(intent: LinkIntent, source: Path, target: Path, identity: list[int],
+                 fence: Callable[[], None]) -> bool:
+    source_fd = _open_folder(source.parent)
+    try:
+        target_fd = _open_folder(target.parent)
+        try:
+            if not intent.matches(intent.binding(source_fd, source.name, target_fd, target.name, identity)):
+                return False
+            _retire_link(source, target, source_fd, target_fd, identity, fence, durable=True)
+            return True
+        finally:
+            os.close(target_fd)
+    finally:
+        os.close(source_fd)
+
+
 def _move_one(move: dict, *, lease_fence: Callable[[], None],
               ignore_final: bool = False, compat_hardlink: bool = False,
-              source_replaced_by: list[int] | None = None) -> str:
+              source_replaced_by: list[int] | None = None,
+              link_intent: LinkIntent | None = None) -> str:
     """Reconcile crashed no-clobber moves and perform at most one filesystem move."""
     src = Path(move["source"])
     stage = Path(move["target"])
@@ -288,6 +320,9 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None],
             _check_file(src_stat, source_replaced_by, src)
             return "resumed"
         _check_file(src_stat, expected, src)
+        if (link_intent is not None and stage_stat is not None and final_stat is None
+                and _resume_link(link_intent, src, stage, expected, lease_fence)):
+            return "resumed"
         # A source and target with identical inode can be an interrupted
         # COMPAT hardlink operation, but it can also be a pre-existing alias.
         # Without an independently committed per-file publication intent,
@@ -322,14 +357,13 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None],
                 # Safe COMPAT fallback: hardlink publication with O_EXCL-like
                 # semantics, then unlink the source only after checking inode.
                 # A restart reconciles an interrupted two-name hardlink state.
+                if link_intent is not None:
+                    link_intent.save(link_intent.binding(src_fd, src.name, dst_fd, stage.name, expected))
+                    lease_fence()
+                    _check_file(os.stat(src.name, dir_fd=src_fd, follow_symlinks=False), expected, src)
                 os.link(src.name, stage.name, src_dir_fd=src_fd,
                         dst_dir_fd=dst_fd, follow_symlinks=False)
-                created = os.stat(stage.name, dir_fd=dst_fd, follow_symlinks=False)
-                _check_file(created, expected, stage)
-                _check_file(os.stat(src.name, dir_fd=src_fd, follow_symlinks=False),
-                            expected, src)
-                lease_fence()
-                os.unlink(src.name, dir_fd=src_fd)
+                _retire_link(src, stage, src_fd, dst_fd, expected, lease_fence, durable=link_intent is not None)
             _check_file(os.stat(stage.name, dir_fd=dst_fd, follow_symlinks=False),
                         expected, stage)
         finally:
@@ -1074,7 +1108,7 @@ def _mark_flat_ready(manifest: dict, stage: Path,
 
 
 def _publish_flat_file(row: dict, stage: Path, package: Path,
-                       lease_fence: Callable[[], None]) -> str:
+                       lease_fence: Callable[[], None], link_intent: LinkIntent | None = None) -> str:
     name = Path(row["target"]).name
     before = _entry(stage, name)
     published = _entry(package, name)
@@ -1083,6 +1117,9 @@ def _publish_flat_file(row: dict, stage: Path, package: Path,
         return "resumed"
     _check_file(before, row["identity"], stage / name)
     if published is not None:
+        if (link_intent is not None
+                and _resume_link(link_intent, stage / name, package / name, row["identity"], lease_fence)):
+            return "resumed"
         raise MediaPackageExecutionConflict(
             f"Root destination occupied; refuse overwrite: {package / name}"
         )
@@ -1097,15 +1134,14 @@ def _publish_flat_file(row: dict, stage: Path, package: Path,
         except OSError as exc:
             if exc.errno != errno.EOPNOTSUPP:
                 raise
-            # Atomic link publication never clobbers an existing name.
-            # A crash between link and unlink leaves two names: block and
-            # require human reconciliation rather than risking data loss.
+            if link_intent is not None:
+                link_intent.save(link_intent.binding(stage_fd, name, package_fd, name, row["identity"]))
+                lease_fence()
+                _check_file(os.stat(name, dir_fd=stage_fd, follow_symlinks=False), row["identity"], stage / name)
             os.link(name, name, src_dir_fd=stage_fd,
                     dst_dir_fd=package_fd, follow_symlinks=False)
-            _check_file(os.stat(name, dir_fd=package_fd, follow_symlinks=False),
-                        row["identity"], package / name)
-            lease_fence()
-            os.unlink(name, dir_fd=stage_fd)
+            _retire_link(stage / name, package / name, stage_fd, package_fd,
+                         row["identity"], lease_fence, durable=link_intent is not None)
         _check_file(os.stat(name, dir_fd=package_fd, follow_symlinks=False),
                     row["identity"], package / name)
     finally:
@@ -1144,11 +1180,15 @@ def _remove_flat_stage(manifest: dict, stage: Path,
 
 
 def _execute_flat_manifest(manifest: dict, lease_fence: Callable[[], None],
-                           progress: Callable[[int, int], None] | None) -> dict:
+                           progress: Callable[[int, int], None] | None,
+                           link_intent: LinkIntent | None = None) -> dict:
     package = Path(manifest["package"])
     stage = package / manifest["root_stage"]
     total = len(_flat_rows(manifest))
     if _root_finals_complete(manifest):
+        if link_intent is not None and stage.exists() and _flat_stage_inspect(manifest, stage):
+            for row in _flat_rows(manifest):
+                _publish_flat_file(row, stage, package, lease_fence, link_intent)
         _remove_flat_stage(manifest, stage, lease_fence)
         return {"files_moved": 0, "files_reconciled": total,
                 "groups_published": 0}
@@ -1167,7 +1207,7 @@ def _execute_flat_manifest(manifest: dict, lease_fence: Callable[[], None],
     recovered = 0
     if not marked:
         for i, row in enumerate(_flat_rows(manifest), 1):
-            outcome = _move_one(row, lease_fence=lease_fence, ignore_final=True)
+            outcome = _move_one(row, lease_fence=lease_fence, ignore_final=True, link_intent=link_intent)
             completed += outcome == "moved"
             recovered += outcome != "moved"
             if progress and (i % 25 == 0 or i == total):
@@ -1181,7 +1221,7 @@ def _execute_flat_manifest(manifest: dict, lease_fence: Callable[[], None],
         recovered = total
 
     for row in _flat_rows(manifest):
-        _publish_flat_file(row, stage, package, lease_fence)
+        _publish_flat_file(row, stage, package, lease_fence, link_intent)
     _remove_flat_stage(manifest, stage, lease_fence)
     return {"files_moved": completed, "files_reconciled": recovered,
             "groups_published": 0}
@@ -1300,7 +1340,8 @@ def _exact_published_snapshot(manifest: dict, live: list[dict]) -> bool:
 
 def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
                             progress: Callable[[int, int], None] | None = None,
-                            allow_fuse_compat: bool = False) -> dict:
+                            allow_fuse_compat: bool = False,
+                            link_intent: LinkIntent | None = None) -> dict:
     """Run one package idempotently; the caller owns lease checkpoints/recovery."""
     package = Path(manifest["package"])
     if manifest.get("schema_version") != MANIFEST_VERSION:
@@ -1330,7 +1371,18 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
         )
     if not recovery_artifact:
         try:
-            live = list(_walk_package(package))
+            mode = manifest.get("organizer_mode")
+            if mode is None:
+                live = list(_walk_package(package))
+            else:
+                from app.batch.media_organizer_planner import walk_organizing_unit
+
+                root = manifest.get("media_package_root")
+                quarantine = manifest.get("quarantine_root")
+                live = list(walk_organizing_unit(
+                    package, mode=mode, media_package_root=Path(root) if root else None,
+                    quarantine_root=Path(quarantine) if quarantine else None,
+                ))
         except (OSError, ValueError) as exc:
             raise MediaPackageExecutionConflict(
                 f"Unsafe package changed since frozen preview: {exc}"
@@ -1341,7 +1393,7 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
                 "Package changed since frozen preview; refusing file mutation"
             )
     if manifest.get("root_stage"):
-        result = _execute_flat_manifest(manifest, lease_fence, progress)
+        result = _execute_flat_manifest(manifest, lease_fence, progress, link_intent)
         result["empty_dirs_removed"] = _remove_empty_sources(manifest, lease_fence)
         result["total_files"] = len(manifest["moves"])
         result["package"] = str(package)
@@ -1382,6 +1434,7 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
             result = _move_one(
                 row, lease_fence=lease_fence, ignore_final=True,
                 source_replaced_by=published_identities.get(row["source"]),
+                link_intent=link_intent,
             )
             completed += result == "moved"
             recovered += result != "moved"

@@ -17,7 +17,7 @@ describe('Stage 5E-N feature-owned destructive confirmation and auth single-flig
       'await deleteMutation.mutateAsync();',
       'deleteInFlight.current = false;',
       'onError: async (err: Error) =>',
-      "queryClient.removeQueries({ queryKey: ['taskLogs', task.id] });",
+      "queryClient.removeQueries({ queryKey: ['taskLogs', String(task.id)] });",
       'onSuccess?.();',
     ]) assert.ok(source.includes(token), token);
     assert.ok(source.indexOf('deleteInFlight.current = true;') <

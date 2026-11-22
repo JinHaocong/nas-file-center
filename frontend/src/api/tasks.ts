@@ -1,6 +1,7 @@
 import { api } from './client';
 import {
   TaskItem,
+  TaskId,
   TaskDetail,
   PaginatedTasksResponse,
   PaginatedTaskEventsResponse,
@@ -43,11 +44,11 @@ export const tasksApi = {
     return api.get<PaginatedTasksResponse>(`/api/tasks${qs ? `?${qs}` : ''}`);
   },
 
-  getTaskDetail: (taskId: number): Promise<TaskDetail> => {
+  getTaskDetail: (taskId: TaskId): Promise<TaskDetail> => {
     return api.get<TaskDetail>(`/api/tasks/${taskId}`);
   },
 
-  getTaskLogs: (taskId: number, params: ListTaskLogsParams = {}): Promise<PaginatedTaskEventsResponse> => {
+  getTaskLogs: (taskId: TaskId, params: ListTaskLogsParams = {}): Promise<PaginatedTaskEventsResponse> => {
     const searchParams = new URLSearchParams();
     if (params.page !== undefined) {
       searchParams.set('page', String(params.page));
@@ -66,23 +67,23 @@ export const tasksApi = {
     return api.get<WorkerStatus>('/api/tasks/worker');
   },
 
-  pauseTask: (taskId: number): Promise<TaskItem> => {
+  pauseTask: (taskId: TaskId): Promise<TaskItem> => {
     return api.post<TaskItem>(`/api/tasks/${taskId}/pause`);
   },
 
-  resumeTask: (taskId: number): Promise<TaskItem> => {
+  resumeTask: (taskId: TaskId): Promise<TaskItem> => {
     return api.post<TaskItem>(`/api/tasks/${taskId}/resume`);
   },
 
-  cancelTask: (taskId: number): Promise<TaskItem> => {
+  cancelTask: (taskId: TaskId): Promise<TaskItem> => {
     return api.post<TaskItem>(`/api/tasks/${taskId}/cancel`);
   },
 
-  retryTask: (taskId: number): Promise<RetryTaskResponse> => {
+  retryTask: (taskId: TaskId): Promise<RetryTaskResponse> => {
     return api.post<RetryTaskResponse>(`/api/tasks/${taskId}/retry`);
   },
 
-  deleteTask: (taskId: number): Promise<DeleteTaskResponse> => {
+  deleteTask: (taskId: TaskId): Promise<DeleteTaskResponse> => {
     return api.delete<DeleteTaskResponse>(`/api/tasks/${taskId}`);
   },
 

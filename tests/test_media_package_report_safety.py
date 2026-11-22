@@ -40,6 +40,17 @@ def test_report_artifacts_reserve_deleted_work_job_ids(tmp_path):
     assert (executions / "43" / "0000000.manifest.json").read_text() == "old manifest"
 
 
+@pytest.mark.parametrize("namespace", ["organizer-v1-previews", "organizer-v1-executions"])
+def test_recursive_organizer_report_artifact_reserves_job_id(tmp_path, namespace):
+    settings = settings_for(tmp_path)
+    report = settings.reports_dir / namespace / "43"
+    report.mkdir(parents=True)
+    session = type("Session", (), {"scalar": lambda *args: 0})()
+
+    assert next_media_package_job_id(session, settings) == 44
+    assert report.is_dir()
+
+
 def test_report_namespace_symlink_is_rejected(tmp_path):
     settings = settings_for(tmp_path)
     reports = settings.reports_dir

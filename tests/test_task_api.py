@@ -116,6 +116,70 @@ def test_task_list_and_detail(test_setup):
     assert "checkpoint" in detail
 
 
+def test_organizer_batch_and_preview_task_ids_remain_exact_and_cannot_be_retried(test_setup):
+    client = test_setup["client"]
+    preview_id = 9_007_199_254_741_011
+    batch_id = preview_id + 1
+    with test_setup["SessionLocal"]() as session:
+        session.add_all([
+            WorkJob(id=preview_id, kind="media-organizer-preview", status="completed",
+                    state_json=json.dumps({"selection": "/fixture"})),
+            WorkJob(id=batch_id, kind="media-organizer-batch", status="failed",
+                    state_json=json.dumps({"preview_job_id": preview_id, "confirmation": "INTERNAL"})),
+            TaskEvent(job_id=batch_id, event_type="unit_result", message="Organized",
+                      context_json=json.dumps({"unit": "/fixture", "confirmation": "INTERNAL"})),
+            WorkJob(id=12, kind="index-root", status="completed"),
+        ])
+        session.commit()
+
+    listed = client.get("/api/tasks").json()["items"]
+    assert [job["id"] for job in listed] == [str(batch_id), str(preview_id), 12]
+    detail = client.get(f"/api/tasks/{batch_id}").json()
+    assert detail["id"] == str(batch_id)
+    assert detail["payload"] == {"preview_job_id": str(preview_id)}
+    assert detail["capabilities"]["supports_retry"] is False
+    assert client.get(f"/api/tasks/{batch_id}/logs").json()["items"][0]["context"] == {"unit": "/fixture"}
+    assert client.post(f"/api/tasks/{batch_id}/retry").status_code == 409
+
+
+@pytest.mark.parametrize("clear_history", [False, True])
+def test_history_cleanup_keeps_batch_evidence_and_old_frozen_organizer_record(test_setup, clear_history):
+    client = test_setup["client"]
+    checkpoint = {"phase": "frozen", "frozen_job_id": 35, "manifest_checksum": "a" * 64}
+    with test_setup["SessionLocal"]() as session:
+        session.add_all([
+            WorkJob(id=11, kind="media-organizer-preview", status="completed"),
+            WorkJob(id=12, kind="media-organizer-preview", status="completed"),
+            WorkJob(id=13, kind="media-organizer-batch", status="running",
+                    state_json=json.dumps({"preview_job_id": 12})),
+            WorkJob(id=14, kind="media-organizer-batch", status="completed",
+                    state_json=json.dumps({"preview_job_id": 12})),
+            WorkJob(id=35, kind="media-organizer-execute", status="failed",
+                    state_json=json.dumps({"unit": "/fixture", "confirmation": "LEGACY"}),
+                    checkpoint_json=json.dumps(checkpoint)),
+            TaskEvent(job_id=14, event_type="unit_result", message="Organized"),
+            TaskEvent(job_id=35, event_type="failed", message="Failed before publication"),
+        ])
+        session.commit()
+
+    assert client.post("/api/tasks/35/retry").status_code == 409
+    if clear_history:
+        assert client.post("/api/tasks/clear-history", json={"statuses": ["completed", "failed"]}).status_code == 200
+    else:
+        for job_id in (11, 12, 14, 35):
+            assert client.delete(f"/api/tasks/{job_id}").status_code == 200
+
+    assert client.get("/api/tasks/11").status_code == 404
+    for job_id in (12, 13, 14, 35):
+        assert client.get(f"/api/tasks/{job_id}").status_code == 200
+    assert client.get("/api/tasks/14/logs").json()["items"][0]["message"] == "Organized"
+    assert client.get("/api/tasks/35/logs").json()["items"][0]["message"] == "Failed before publication"
+    legacy_detail = client.get("/api/tasks/35").json()
+    assert legacy_detail["payload"] == {"unit": "/fixture"}
+    assert legacy_detail["checkpoint"] == {**checkpoint, "_task_queue_dismissed": True}
+    assert [job["id"] for job in client.get("/api/tasks").json()["items"]] == ["13"]
+
+
 def test_task_pause_and_resume_api(test_setup):
     client = test_setup["client"]
     SessionLocal = test_setup["SessionLocal"]

@@ -114,8 +114,8 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
         <div className="nfc-directory-picker-single">
           <div className="nfc-v2-directory-input-wrap">
             <input type="text" aria-label="目录路径" value={singleValue}
-              placeholder={placeholder} disabled={disabled}
-              onChange={event => onChange?.(event.target.value)} />
+              placeholder={placeholder} disabled={disabled} readOnly={!allowManualInput}
+              onChange={allowManualInput ? event => onChange?.(event.target.value) : undefined} />
             {singleValue && !disabled && (
               <button type="button" className="nfc-v2-directory-clear"
                 aria-label="清空目录路径" onClick={() => onChange?.('')}>

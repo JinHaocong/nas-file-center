@@ -6,13 +6,13 @@ import { resolve } from 'node:path';
 const read = (path: string) =>
   readFileSync(resolve(process.cwd(), path), 'utf8');
 
-test('Media package sorting has an isolated, confirmation-gated Batch operation', () => {
+test('historical MediaPackage links open the unified organizer while legacy API gates stay intact', () => {
   const batch = read('src/pages/Batch/index.tsx');
   const view = read('src/pages/Batch/MediaPackageOrganizerEditor.tsx');
   const api = read('src/api/media_package.ts');
 
-  assert.match(batch, /op: 'media_package-organize'/);
-  assert.match(batch, /<MediaPackageOrganizerEditor\s*\/>/);
+  assert.match(batch, /operation === 'media_package-organize'/);
+  assert.match(batch, /<MediaOrganizerBatchEditor\s*\/>/);
   assert.match(view, /DirectoryPicker/);
   assert.match(view, /media_packageApi\.startPreview/);
   assert.match(view, /media_packageApi\.getPreview/);
@@ -27,7 +27,7 @@ test('Media package sorting has an isolated, confirmation-gated Batch operation'
   assert.match(view, /canExecute/);
   assert.match(view, /blocked_count === 0/);
   assert.match(view, /executionConfirmation === confirmationToken/);
-  assert.match(view, /确认并执行 MediaPackage 资源包整理/);
+  assert.match(view, /确认并执行 媒体资源包整理/);
   assert.doesNotMatch(api, /\/plans/);
 });
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { tasksApi } from '../../api/tasks';
 import { TaskProgress } from './TaskProgress';
 import { TaskLogTable } from './TaskLogTable';
@@ -11,15 +12,16 @@ import { TaskDeleteButton } from './TaskDeleteButton';
 import { MediaPackageRecoveryPanel } from './MediaPackageRecoveryPanel';
 import { ConsoleSheet } from '../ui/ConsoleSheet';
 import { StatusBadge } from '../ui/StatusBadge';
+import type { TaskId } from '../../types/task';
 
 const LONG_ERROR_THRESHOLD = 240;
 const ERROR_PREVIEW_CHARS = 160;
 
 interface Props {
-  taskId: number | null;
+  taskId: TaskId | null;
   open: boolean;
   onClose: () => void;
-  onViewTask?: (taskId: number) => void;
+  onViewTask?: (taskId: TaskId) => void;
 }
 
 const ContextDetails: React.FC<{
@@ -37,7 +39,7 @@ const ContextDetails: React.FC<{
 
 export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onViewTask }) => {
   const { data: task, isLoading, isError, error } = useQuery({
-    queryKey: ['taskDetail', taskId],
+    queryKey: ['taskDetail', taskId === null ? null : String(taskId)],
     queryFn: () => (taskId ? tasksApi.getTaskDetail(taskId) : Promise.reject('No ID')),
     enabled: Boolean(taskId && open),
     refetchInterval: (query) => {
@@ -155,9 +157,14 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
               )}
             </header>
             <TaskActionBar key={task.id} task={task} onViewTask={onViewTask} />
+            {task.job_type === 'media-organizer-batch' && (
+              <Link to={`/batch?operation=media-organize&batch=${encodeURIComponent(task.id)}`}
+                onClick={onClose}>查看整理报告</Link>
+            )}
           </section>
 
           {task.job_type === 'media_package-package-execute' &&
+            typeof task.id === 'number' &&
             task.status === 'failed' &&
             task.error_code === 'EXECUTION_ERROR' &&
             (task.error === 'Package directory changed before publish' ||

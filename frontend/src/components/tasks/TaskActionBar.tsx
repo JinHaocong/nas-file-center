@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { tasksApi } from '../../api/tasks';
-import type { TaskDetail, TaskItem } from '../../types/task';
+import type { TaskDetail, TaskId, TaskItem } from '../../types/task';
 import { getTaskActionAvailability, type TaskAction } from './task_actions';
 import { dispatchTaskActionOnce } from './task_action_single_flight';
 import { ConsoleButton } from '../ui/ConsoleButton';
@@ -11,7 +11,7 @@ import { useConsoleToast } from '../ui/ConsoleToast';
 
 interface Props {
   task: TaskItem | TaskDetail;
-  onViewTask?: (taskId: number) => void;
+  onViewTask?: (taskId: TaskId) => void;
 }
 
 export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
@@ -20,13 +20,13 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
   const [activeAction, setActiveAction] = useState<TaskAction | null>(null);
   const actionInFlight = useRef(false);
   const [confirmAction, setConfirmAction] = useState<'cancel' | 'retry' | null>(null);
-  const [createdRetryId, setCreatedRetryId] = useState<number | null>(null);
+  const [createdRetryId, setCreatedRetryId] = useState<TaskId | null>(null);
 
   const invalidateTaskQueries = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['tasksList'] }),
-      queryClient.invalidateQueries({ queryKey: ['taskDetail', task.id] }),
-      queryClient.invalidateQueries({ queryKey: ['taskLogs', task.id] }),
+      queryClient.invalidateQueries({ queryKey: ['taskDetail', String(task.id)] }),
+      queryClient.invalidateQueries({ queryKey: ['taskLogs', String(task.id)] }),
     ]);
   };
 

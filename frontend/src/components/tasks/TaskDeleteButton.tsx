@@ -33,8 +33,8 @@ export const TaskDeleteButton: React.FC<Props> = ({
         queryClient.invalidateQueries({ queryKey: ['tasksList'] }),
         queryClient.invalidateQueries({ queryKey: ['recentTasks'] }),
       ]);
-      queryClient.removeQueries({ queryKey: ['taskDetail', task.id] });
-      queryClient.removeQueries({ queryKey: ['taskLogs', task.id] });
+      queryClient.removeQueries({ queryKey: ['taskDetail', String(task.id)] });
+      queryClient.removeQueries({ queryKey: ['taskLogs', String(task.id)] });
       setOpen(false);
       onSuccess?.();
     },

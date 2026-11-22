@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { tasksApi } from '../../api/tasks';
-import type { TaskEvent, TaskLogLevel } from '../../types/task';
+import type { TaskEvent, TaskId, TaskLogLevel } from '../../types/task';
 import { formatDateTime } from '../../utils/format';
 import { sanitizeContext } from '../../utils/sanitize';
 import { useResponsive } from '../../hooks/useResponsive';
@@ -10,7 +10,7 @@ import { ConsoleSelect } from '../ui/ConsoleSelect';
 import { ConsolePagination } from '../ui/ConsolePagination';
 import { ConsoleEmpty } from '../ui/ConsoleEmpty';
 
-interface Props { taskId: number; }
+interface Props { taskId: TaskId; }
 
 const levels = [
   { label: '全部级别', value: 'all' },
@@ -28,7 +28,7 @@ export const TaskLogTable: React.FC<Props> = ({ taskId }) => {
   const [expandedRowKeys, setExpandedRowKeys] = useState<readonly number[]>([]);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['taskLogs', taskId, page, pageSize, level],
+    queryKey: ['taskLogs', String(taskId), page, pageSize, level],
     queryFn: () => tasksApi.getTaskLogs(taskId, {
       page, pageSize, level: level === 'all' ? undefined : level,
     }),

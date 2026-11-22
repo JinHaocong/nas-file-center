@@ -1,9 +1,9 @@
-"""MediaPackage report namespace and retention safety.
+"""Media organizer report namespace and retention safety.
 
 SQLite may reuse a deleted highest INTEGER PRIMARY KEY value.  Private
 report artifacts are *not* deleted alongside task-history rows, so a new
-MediaPackage task must reserve IDs that are absent from both the database
-and either report namespace.  Call inside a BEGIN IMMEDIATE transaction.
+media organizer task must reserve IDs that are absent from both the database
+and all retained report namespaces.  Call inside a BEGIN IMMEDIATE transaction.
 """
 from __future__ import annotations
 
@@ -19,6 +19,12 @@ from app.models import WorkJob
 
 
 _REPORT_ID = re.compile(r"^([1-9][0-9]*)(?:[.]|$)")
+_REPORT_NAMESPACES = (
+    "media_package-previews",
+    "media_package-executions",
+    "organizer-v1-previews",
+    "organizer-v1-executions",
+)
 
 
 def _highest_report_id(directory: Path) -> int:
@@ -48,6 +54,6 @@ def next_media_package_job_id(session: Session, settings: Settings) -> int:
     if root.is_symlink():
         raise ValueError("Unsafe MediaPackage reports root")
     highest = int(session.scalar(select(func.max(WorkJob.id))) or 0)
-    for kind in ("media_package-previews", "media_package-executions"):
+    for kind in _REPORT_NAMESPACES:
         highest = max(highest, _highest_report_id(root / kind))
     return highest + 1

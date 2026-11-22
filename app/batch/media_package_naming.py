@@ -6,7 +6,33 @@ Non-media files retain their name unless a casefold collision needs a suffix.
 """
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
+
+
+MEDIA_BUCKET_PATTERN = re.compile(
+    r"^(?P<kind>p|v)(?:_(?P<index>[1-9]\d*))? (?P<label>\[\d+ [^/]+\])$",
+    re.IGNORECASE,
+)
+
+
+def media_source_sort_key(path: str, unit: Path) -> tuple:
+    """Sort actual bucket indices numerically and ordinary paths lexically."""
+    relative = os.path.relpath(path, unit)
+    parts = Path(relative).parts
+    folded = []
+    for part in parts[:-1]:
+        bucket = MEDIA_BUCKET_PATTERN.fullmatch(part)
+        if bucket is not None and bucket.group("index") is not None:
+            folded.append((
+                bucket.group("kind").casefold() + "_", int(bucket.group("index")),
+                bucket.group("label").casefold() + "/",
+            ))
+        else:
+            folded.append((part.casefold() + "/", -1, ""))
+    folded.append((parts[-1].casefold(), -1, ""))
+    return tuple(folded), relative
 
 
 def numbered_name(index: int, name: str) -> str:

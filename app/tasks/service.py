@@ -2,8 +2,8 @@ from datetime import datetime
 import inspect
 import json
 from typing import Any
-from sqlalchemy import Integer, delete, func, select, text
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import Integer, delete, func, or_, select, text
+from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from app.exceptions import StateConflictError
 from app.models import BatchPlan, ScanJob, TaskEvent, WorkJob, WorkerState, utcnow
@@ -31,6 +31,67 @@ RETRY_WHITELISTS: dict[str, set[str]] = {
     "batch-plan-execute": {"plan_id"},
     "media-analysis": {"root_keys"},
 }
+
+_ORGANIZER_PREVIEW = "media-organizer-preview"
+_ORGANIZER_BATCH = "media-organizer-batch"
+_LEGACY_ORGANIZER_HISTORY = ("media-organizer-execute", "media-organizer-cleanup")
+_NEW_ORGANIZER_TASKS = (_ORGANIZER_PREVIEW, _ORGANIZER_BATCH)
+_ORGANIZER_TASKS = (*_NEW_ORGANIZER_TASKS, *_LEGACY_ORGANIZER_HISTORY)
+
+
+def _task_capabilities(kind: str) -> dict[str, bool]:
+    caps = get_job_capabilities(kind)
+    if kind in _LEGACY_ORGANIZER_HISTORY:
+        return dict.fromkeys(caps, False)
+    if kind in _NEW_ORGANIZER_TASKS:
+        caps["supports_retry"] = False
+    return caps
+
+
+def _public_id(job: WorkJob) -> int | str:
+    return str(job.id) if job.kind in _NEW_ORGANIZER_TASKS else job.id
+
+
+def _task_json(raw: str | None) -> dict:
+    try:
+        data = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _organizer_context(job: WorkJob, data: dict) -> dict:
+    """Keep confirmations private and preserve exact IDs for current organizer jobs."""
+    if job.kind not in _ORGANIZER_TASKS:
+        return data
+    return {
+        key: str(value) if (job.kind in _NEW_ORGANIZER_TASKS
+                            and key.endswith("_job_id") and type(value) is int) else value
+        for key, value in data.items()
+        if key not in ("confirmation", "recovery_confirmation", "confirmation_tokens")
+    }
+
+
+def _preserved_organizer_history():
+    """Retain historical approvals and preview evidence used by a saved batch report."""
+    batch = aliased(WorkJob)
+    referenced_preview = select(batch.id).where(
+        batch.kind == _ORGANIZER_BATCH,
+        func.json_extract(batch.state_json, "$.preview_job_id") == WorkJob.id,
+    ).exists()
+    return or_(
+        WorkJob.kind.in_((*_LEGACY_ORGANIZER_HISTORY, _ORGANIZER_BATCH)),
+        (WorkJob.kind == _ORGANIZER_PREVIEW) & referenced_preview,
+    )
+
+
+def _dismiss_task(job: WorkJob) -> bool:
+    checkpoint = _task_json(job.checkpoint_json)
+    if checkpoint.get("_task_queue_dismissed") == 1:
+        return False
+    checkpoint["_task_queue_dismissed"] = True
+    job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+    return True
 
 
 def filter_retry_payload(kind: str, state_json: str | None) -> str:
@@ -62,7 +123,7 @@ def filter_retry_payload(kind: str, state_json: str | None) -> str:
 
 
 def format_task(job: WorkJob) -> dict:
-    caps = get_job_capabilities(job.kind)
+    caps = _task_capabilities(job.kind)
     curr = job.progress_current or 0
     tot = job.progress_total or 0
     percent = round((curr / tot) * 100, 1) if tot > 0 else None
@@ -70,7 +131,7 @@ def format_task(job: WorkJob) -> dict:
         percent = min(100.0, max(0.0, percent))
 
     return {
-        "id": job.id,
+        "id": _public_id(job),
         "job_type": job.kind,
         "status": job.status,
         "capabilities": caps,
@@ -86,7 +147,7 @@ def format_task(job: WorkJob) -> dict:
         "heartbeat_at": job.heartbeat_at.isoformat() if job.heartbeat_at else None,
         "error": job.error_text,
         "error_code": job.error_code,
-        "retry_of": job.retry_of,
+        "retry_of": str(job.retry_of) if job.kind in _NEW_ORGANIZER_TASKS and job.retry_of is not None else job.retry_of,
     }
 
 
@@ -168,14 +229,8 @@ class TaskService:
                 raise KeyError(task_id)
 
             data = format_task(job)
-            try:
-                data["checkpoint"] = json.loads(job.checkpoint_json or "{}")
-            except Exception:
-                data["checkpoint"] = {}
-            try:
-                data["payload"] = json.loads(job.state_json or "{}")
-            except Exception:
-                data["payload"] = {}
+            data["checkpoint"] = _organizer_context(job, _task_json(job.checkpoint_json))
+            data["payload"] = _organizer_context(job, _task_json(job.state_json))
             if job.kind == "archive-recovery":
                 # A one-time tmpfs reference is a secret capability, not task UI data.
                 data["payload"].pop("secret_token", None)
@@ -183,7 +238,7 @@ class TaskService:
 
     def pause_task(self, task_id: int) -> dict:
         def _transition(session: Session, job: WorkJob, now: datetime):
-            caps = get_job_capabilities(job.kind)
+            caps = _task_capabilities(job.kind)
             if not caps.get("supports_pause", False):
                 raise ValueError("Job type does not support pause")
 
@@ -224,7 +279,7 @@ class TaskService:
 
     def resume_task(self, task_id: int) -> dict:
         def _transition(session: Session, job: WorkJob, now: datetime):
-            caps = get_job_capabilities(job.kind)
+            caps = _task_capabilities(job.kind)
             if not caps.get("supports_resume", False):
                 raise ValueError("Job type does not support resume")
 
@@ -248,7 +303,7 @@ class TaskService:
 
     def cancel_task(self, task_id: int) -> dict:
         def _transition(session: Session, job: WorkJob, now: datetime):
-            caps = get_job_capabilities(job.kind)
+            caps = _task_capabilities(job.kind)
             if not caps.get("supports_cancel", False):
                 raise ValueError("Job type does not support cancel")
 
@@ -314,7 +369,7 @@ class TaskService:
 
     def retry_task(self, task_id: int, user_id: int | None = None) -> dict:
         def _transition(session: Session, job: WorkJob, now: datetime):
-            caps = get_job_capabilities(job.kind)
+            caps = _task_capabilities(job.kind)
             if not caps.get("supports_retry", False):
                 raise ValueError("Job type does not support retry")
 
@@ -397,22 +452,16 @@ class TaskService:
         def _transition(session: Session, job: WorkJob, *args: Any):
             if job.status not in TERMINAL_STATES:
                 raise ValueError(f"Only terminal jobs can be deleted (current status is '{job.status}')")
-            if job.kind == "media_package-package-execute" and job.status == "failed":
-                # Hide from the task queue without destroying the execution audit,
-                # frozen manifest references, checkpoints, or event history.
-                try:
-                    checkpoint = json.loads(job.checkpoint_json or "{}")
-                except (TypeError, ValueError):
-                    checkpoint = {}
-                if not isinstance(checkpoint, dict):
-                    checkpoint = {}
-                checkpoint["_task_queue_dismissed"] = True
-                job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
-                return {"deleted": True, "id": task_id}
+            if ((job.kind == "media_package-package-execute" and job.status == "failed")
+                    or (job.kind in _ORGANIZER_TASKS and session.scalar(select(WorkJob.id).where(
+                        WorkJob.id == task_id, _preserved_organizer_history(),
+                    )) is not None)):
+                _dismiss_task(job)
+                return {"deleted": True, "id": _public_id(job)}
 
             session.execute(delete(TaskEvent).where(TaskEvent.job_id == task_id))
             session.delete(job)
-            return {"deleted": True, "id": task_id}
+            return {"deleted": True, "id": _public_id(job)}
 
         return atomic_task_transition(self.SessionLocal, task_id, _transition)
 
@@ -429,15 +478,21 @@ class TaskService:
                 raise ValueError(f"Cannot clear non-terminal status '{s}'")
 
         with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            retained = session.scalars(select(WorkJob).where(
+                WorkJob.status.in_(target_statuses), _preserved_organizer_history(),
+            ))
+            dismissed = sum(_dismiss_task(job) for job in retained)
             del_stmt = delete(WorkJob).where(
-                WorkJob.status.in_(list(target_statuses)),
+                WorkJob.status.in_(target_statuses),
+                ~_preserved_organizer_history(),
                 (WorkJob.kind != "media_package-package-execute") |
                 (WorkJob.status != "failed"),
             )
             # Failed media-package execution records retain the only durable
             # link between an interrupted stage and its frozen manifest.
             result = session.execute(del_stmt)
-            count = result.rowcount
+            count = result.rowcount + dismissed
             session.commit()
             return {"deleted_count": count}
 
@@ -474,6 +529,8 @@ class TaskService:
                     ctx = json.loads(r.context_json or "{}")
                 except Exception:
                     ctx = {}
+                if job.kind in _ORGANIZER_TASKS:
+                    ctx = _organizer_context(job, ctx if isinstance(ctx, dict) else {})
                 items.append({
                     "id": r.id,
                     "timestamp": r.timestamp.isoformat() if r.timestamp else None,

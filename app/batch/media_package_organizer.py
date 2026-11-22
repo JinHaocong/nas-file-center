@@ -12,9 +12,10 @@ import os
 import re
 import stat
 from pathlib import Path
+from typing import Callable, Iterator
 
 from app.batch.file_rename import _open_directory_nofollow
-from app.batch.media_package_naming import allocate_names
+from app.batch.media_package_naming import allocate_names, media_source_sort_key
 from app.filters.media_types import get_media_type
 from app.path_safety import require_allowed_path, require_unreserved_path
 
@@ -106,10 +107,13 @@ def _validate_scope(selection: str | Path, *, media_package_root: str | Path,
     return raw, len(components)
 
 
-def _child_directories(directory: Path) -> list[str]:
+def _child_directories(
+    directory: Path, *, isolate_conflicts: bool, excluded_names: frozenset[str],
+) -> tuple[list[str], list[tuple[Path, str]]]:
     """List immediate directories without symlink traversal or file content I/O."""
     fd = _open_directory_nofollow(directory)
     names: list[str] = []
+    conflicts = []
     try:
         with os.scandir(fd) as entries:
             for count, entry in enumerate(entries, 1):
@@ -118,18 +122,24 @@ def _child_directories(directory: Path) -> list[str]:
                 # Symlinked folders may point outside the protected resource
                 # hierarchy. Never silently treat them as resource packages.
                 if entry.is_symlink():
-                    raise ValueError(f"MediaPackage scope contains a symlink: {directory / entry.name}")
-                if entry.is_dir(follow_symlinks=False):
+                    path = directory / entry.name
+                    reason = f"MediaPackage scope contains a symlink: {path}"
+                    if not isolate_conflicts:
+                        raise ValueError(reason)
+                    conflicts.append((path, reason))
+                elif entry.name.casefold() not in excluded_names and entry.is_dir(follow_symlinks=False):
                     names.append(entry.name)
     finally:
         os.close(fd)
-    return sorted(names)
+    return sorted(names), sorted(conflicts)
 
 
-def iter_media_package_packages(selection: str | Path, *,
-                         media_package_root: str | Path,
-                         allowed_roots: list[Path],
-                         quarantine_root: Path | None = None):
+def iter_media_package_scope_entries(
+    selection: str | Path, *, media_package_root: str | Path,
+    allowed_roots: list[Path], quarantine_root: Path | None = None,
+    isolate_conflicts: bool = False, excluded_names: frozenset[str] = frozenset(),
+    check_cancelled: Callable[[], None] | None = None,
+) -> Iterator[tuple[Path, str | None]]:
     """Stream package paths from MediaPackage/YYMM/YYMMDD/author/package.
 
     A MediaPackage root selection enumerates all packages; month/day selections
@@ -140,18 +150,33 @@ def iter_media_package_packages(selection: str | Path, *,
         selection, media_package_root=media_package_root,
         allowed_roots=allowed_roots, quarantine_root=quarantine_root,
     )
+    if any(part.casefold() in excluded_names for part in selected.parts):
+        return
     pending = [(selected, level)]
     discovered = 0
     while pending:
         directory, depth = pending.pop()
+        if check_cancelled is not None:
+            check_cancelled()
         if depth == 4:
             discovered += 1
             if discovered > MAX_SCOPE_DISCOVERED_PACKAGES:
                 raise ValueError("Too many MediaPackage resource packages in selected scope")
-            yield directory
+            yield directory, None
             continue
+        try:
+            names, conflicts = _child_directories(
+                directory, isolate_conflicts=isolate_conflicts,
+                excluded_names=excluded_names,
+            )
+        except (OSError, ValueError) as exc:
+            if not isolate_conflicts:
+                raise
+            yield directory, str(exc)
+            continue
+        yield from conflicts
         children = []
-        for name in _child_directories(directory):
+        for name in names:
             if depth == 0 and not _MONTH.fullmatch(name):
                 continue
             if depth == 1 and (not _DAY.fullmatch(name) or
@@ -159,6 +184,17 @@ def iter_media_package_packages(selection: str | Path, *,
                 continue
             children.append((directory / name, depth + 1))
         pending.extend(reversed(children))
+
+
+def iter_media_package_packages(selection: str | Path, *, media_package_root: str | Path,
+                                allowed_roots: list[Path],
+                                quarantine_root: Path | None = None) -> Iterator[Path]:
+    """Yield only package paths; retain the legacy scope rejection policy."""
+    for package, _ in iter_media_package_scope_entries(
+        selection, media_package_root=media_package_root,
+        allowed_roots=allowed_roots, quarantine_root=quarantine_root,
+    ):
+        yield package
 
 
 def iter_media_package_previews(selection: str | Path, *,
@@ -183,7 +219,7 @@ def _classify(filename: str) -> str:
     return "P" if media_type == "image" else "V" if media_type == "video" else "Other"
 
 
-def _walk_package(package: Path):
+def _walk_package(package: Path, *, directories: set[Path] | None = None):
     """Yield bounded file metadata without opening or reading file contents."""
     stack = [(package, 0)]
     directory_count = file_count = 0
@@ -195,6 +231,8 @@ def _walk_package(package: Path):
         fd = _open_directory_nofollow(directory)
         children = []
         try:
+            if directories is not None:
+                directories.add(directory)
             with os.scandir(fd) as it:
                 for entry in it:
                     if entry.name.casefold().startswith(".nfc-"):
@@ -245,7 +283,8 @@ def _input_fingerprint(files: list[dict], package: Path) -> str:
 def preview_media_package_package(package: str | Path, *, media_package_root: str | Path,
                            allowed_roots: list[Path],
                            quarantine_root: Path | None = None,
-                           max_rows: int = 100, include_items: bool = False) -> dict:
+                           max_rows: int = 100, include_items: bool = False,
+                           include_mapping: bool = False) -> dict:
     """Build a bounded, read-only manifest for one exact resource package.
 
     Pure image/video packages with up to 200 files are flattened into
@@ -257,6 +296,18 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
         raise ValueError("max_rows must be between 1 and 200")
     source = _package_path(package, media_package_root, allowed_roots, quarantine_root)
     items = list(_walk_package(source))
+    return plan_media_layout(
+        source, items, max_rows=max_rows, include_items=include_items,
+        include_mapping=include_mapping,
+    )
+
+
+def plan_media_layout(
+    source: Path, items: list[dict], *, max_rows: int = 100, include_items: bool = False,
+    include_mapping: bool = False, organizer_mode: bool = False,
+    legacy_bucket_conflicts: bool = True,
+) -> dict:
+    """Plan the same final media layout from a mode-specific bounded inventory."""
     input_fingerprint = _input_fingerprint(items, source)
     totals = {kind: sum(x["kind"] == kind for x in items) for kind in ("P", "V", "Other")}
     if not items:
@@ -270,6 +321,7 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
             "truncated": False,
             "read_only": True,
             **({"_snapshot_items": items} if include_items else {}),
+            **({"_mapping_items": []} if include_mapping else {}),
         }
 
     # Homogeneous packages <=200 must be flattened *and* renumbered.
@@ -290,26 +342,34 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
             key = row["name"].casefold()
             collision_count += key in seen_original
             seen_original.add(key)
-        needs_work = any(
+        actual_moves = sum(
             row["path"] != str(source / name)
             for row, name in zip(ordered, new_names)
         )
+        source_paths = {row["path"] for row in ordered}
+        conflicts = [
+            {"reason": "target_path_exists", "target": str(source / name)}
+            for name in new_names
+            if str(source / name) not in source_paths and os.path.lexists(source / name)
+        ] if organizer_mode else []
         # The execution phase must stage ALL files, including already-numbered
         # root entries that currently occupy another file's desired target.
-        planned = [
+        mapping = [
             {"source": row["path"], "target": str(source / name),
              "source_name": row["name"], "target_name": name,
              "original_relative_path": os.path.relpath(row["path"], source),
              "bytes": row["bytes"], "kind": row["kind"]}
             for row, name in zip(ordered, new_names)
-        ] if needs_work else []
+        ] if actual_moves or include_mapping else []
+        planned = mapping if actual_moves else []
         return {
             "package": str(source),
             "input_fingerprint": input_fingerprint,
-            "status": "ready" if needs_work else "skipped",
-            "reason": None if needs_work else "already_flat_numbered",
+            "status": ("blocked" if conflicts else "ready" if actual_moves
+                       else "already_organized" if organizer_mode else "skipped"),
+            "reason": None if actual_moves or organizer_mode else "already_flat_numbered",
             "total_files": len(items), "totals": totals, "groups": [],
-            "conflicts": [], "sample_moves": planned[:max_rows],
+            "conflicts": conflicts, "sample_moves": planned[:max_rows],
             "total_proposals": len(planned), "needed_moves": len(planned),
             "renamed_count": rename_count,
             "resolved_collision_count": collision_count,
@@ -317,12 +377,17 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
             "read_only": True,
             "operation": "flatten_pure_media",
             **({"_snapshot_items": items} if include_items else {}),
+            **({"_mapping_items": mapping} if include_mapping else {}),
+            **({"actual_moves": actual_moves} if organizer_mode else {}),
         }
 
     # Avoid reordering when readdir() order changes. Only metadata, never
     # data file bytes, are read. Bounded to one package, not the whole library.
-    items.sort(key=lambda x: (x["kind"], os.path.relpath(x["path"], source).casefold(),
-                              os.path.relpath(x["path"], source)))
+    if organizer_mode:
+        items.sort(key=lambda row: (row["kind"], media_source_sort_key(row["path"], source)))
+    else:
+        items.sort(key=lambda x: (x["kind"], os.path.relpath(x["path"], source).casefold(),
+                                  os.path.relpath(x["path"], source)))
     groups = []
     conflicts = []
     sample = []
@@ -349,7 +414,7 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
         original for folded, original in occupied.items()
         if re.fullmatch(r"(?:p|v)_[1-9][0-9]*", folded)
         and folded not in source_directory_names
-    )
+    ) if legacy_bucket_conflicts else []
     if legacy_numbered:
         conflicts.append({
             "reason": "legacy_numbered_bucket_requires_review",
@@ -380,7 +445,7 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
                 )
                 and key != folder.casefold()
                 and key not in source_directory_names
-            ]
+            ] if legacy_bucket_conflicts else []
             if competing:
                 conflicts.append({"directory": str(dest),
                                   "existing": sorted(competing),
@@ -404,7 +469,7 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
                     resolved_collision_count += folded in seen_original
                     seen_original.add(folded)
                 renamed_count += row["name"] != candidate
-                if len(sample) < max_rows:
+                if include_mapping or len(sample) < max_rows:
                     sample.append({
                         "source": row["path"], "target": str(dest / candidate),
                         "source_name": row["name"], "target_name": candidate,
@@ -422,17 +487,19 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
         "status": "blocked" if conflicts else "ready" if needed_moves else "already_organized",
         "reason": None, "total_files": len(items), "totals": totals,
         "groups": groups, "conflicts": conflicts,
-        "sample_moves": sample,
+        "sample_moves": sample[:max_rows],
         "total_proposals": planned,
         # Group publishing requires staging each file, even an already-numbered
         # source in one bucket, to guarantee a no-clobber final publication.
         "needed_moves": planned if needed_moves else 0,
         "renamed_count": renamed_count,
         "resolved_collision_count": resolved_collision_count,
-        "truncated": len(sample) < planned,
+        "truncated": planned > max_rows,
         "read_only": True,
         "operation": ("bucket_pure_media" if totals["Other"] == 0
                       and (totals["P"] == 0 or totals["V"] == 0)
                       else "sort_mixed_media"),
         **({"_snapshot_items": items} if include_items else {}),
+        **({"_mapping_items": sample} if include_mapping else {}),
+        **({"actual_moves": needed_moves} if organizer_mode else {}),
     }

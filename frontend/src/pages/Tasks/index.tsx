@@ -5,7 +5,7 @@ import dayjs from 'dayjs';
 import { tasksApi } from '../../api/tasks';
 import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime, formatElapsed } from '../../utils/format';
-import type { TaskItem } from '../../types/task';
+import type { TaskId, TaskItem } from '../../types/task';
 import { WorkerStatusCard } from '../../components/tasks/WorkerStatusCard';
 import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { TaskDetailDrawer } from '../../components/tasks/TaskDetailDrawer';
@@ -35,6 +35,7 @@ const STATUS_OPTIONS = [
 
 const JOB_TYPE_OPTIONS = [
   { label: '全部类型', value: 'all' },
+  { label: '媒体整理', value: 'media-organizer-batch' },
   { label: 'fclones-scan', value: 'fclones-scan' },
   { label: 'index-root', value: 'index-root' },
   { label: 'workflow-scheduled', value: 'workflow-scheduled' },
@@ -51,16 +52,12 @@ export const TasksPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [jobTypeFilter, setJobTypeFilter] = useState('all');
   const [searchParams, setSearchParams] = useSearchParams();
-  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<TaskId | null>(null);
   const [currentTime, setCurrentTime] = useState<dayjs.Dayjs>(() => dayjs());
 
   useEffect(() => {
     const raw = searchParams.get('task');
-    if (!raw) return;
-    const taskId = Number(raw);
-    if (Number.isInteger(taskId) && taskId > 0) {
-      setSelectedTaskId(taskId);
-    }
+    if (raw && /^[1-9]\d*$/.test(raw)) setSelectedTaskId(raw);
   }, [searchParams]);
 
   const closeTaskDetail = () => {
@@ -118,11 +115,11 @@ export const TasksPage: React.FC = () => {
     }
   };
 
-  const handleDeleted = (taskId: number) => {
+  const handleDeleted = (taskId: TaskId) => {
     if (page > 1 && data?.items?.length === 1) {
       setPage((prev) => Math.max(1, prev - 1));
     }
-    if (selectedTaskId === taskId) {
+    if (selectedTaskId !== null && String(selectedTaskId) === String(taskId)) {
       closeTaskDetail();
     }
   };
