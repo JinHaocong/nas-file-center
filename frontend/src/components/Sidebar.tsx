@@ -87,7 +87,7 @@ export const Sidebar: React.FC<Props> = ({
       <div className="nfc-v2-sidebar-footer">
         <span className="nfc-v2-sidebar-footer-icon"><ConsoleIcon name="shield-check" size={17} /></span>
         {!compact && (
-          <span><strong>安全操作优先</strong><small>Preview → Plan → Execute</small><small className="nfc-v2-release-version">v1.4.7</small></span>
+          <span><strong>安全操作优先</strong><small>Preview → Plan → Execute</small><small className="nfc-v2-release-version">v1.7.0</small></span>
         )}
       </div>
       {!embedded && (
