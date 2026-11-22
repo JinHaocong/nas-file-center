@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: v162-candidate-publish-\${{ github.ref }}
+  group: v162-candidate-publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -37,7 +37,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@v4
         with:
-          ref: \${{ github.sha }}
+          ref: ${{ github.sha }}
 
       - name: Verify exact commit and isolated candidate tag
         id: identity
@@ -48,14 +48,14 @@ jobs:
           test "$GITHUB_REF" = "refs/heads/feat/v1.6.2-nas-compat-feasibility"
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          SHORT="\${GITHUB_SHA:0:12}"
+          SHORT="${GITHUB_SHA:0:12}"
           echo "tag=kerwinjhc/nas-file-center:v1.6.2-nas-compat-$SHORT" >> "$GITHUB_OUTPUT"
           echo "candidate_sha=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Require the existing authorized Docker Hub token
         shell: bash
         env:
-          DOCKERHUB_TOKEN: \${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -Eeuo pipefail
           if [[ -z "$DOCKERHUB_TOKEN" ]]; then
@@ -106,17 +106,17 @@ jobs:
           platforms: linux/amd64
           load: true
           push: false
-          tags: \${{ steps.identity.outputs.tag }}
+          tags: ${{ steps.identity.outputs.tag }}
           labels: |
             org.opencontainers.image.source=https://github.com/JinHaocong/nas-file-center
-            org.opencontainers.image.revision=\${{ github.sha }}
+            org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=v1.6.2-nas-compat-candidate
           cache-from: type=gha,scope=v162-nas-candidate
           cache-to: type=gha,scope=v162-nas-candidate,mode=max
 
       - name: Verify image identity and fclones binary
         env:
-          CANDIDATE_IMAGE: \${{ steps.identity.outputs.tag }}
+          CANDIDATE_IMAGE: ${{ steps.identity.outputs.tag }}
         run: |
           set -Eeuo pipefail
           test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$CANDIDATE_IMAGE")" = "linux/amd64"
@@ -128,7 +128,7 @@ jobs:
 
       - name: Full Root Worker lifecycle on disposable GitHub runner filesystem
         env:
-          CANDIDATE_IMAGE: \${{ steps.identity.outputs.tag }}
+          CANDIDATE_IMAGE: ${{ steps.identity.outputs.tag }}
         shell: bash
         timeout-minutes: 20
         run: |
@@ -161,12 +161,12 @@ jobs:
         uses: docker/login-action@v4
         with:
           username: kerwinjhc
-          password: \${{ secrets.DOCKERHUB_TOKEN }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Push only the unique candidate tag and resolve immutable digest
         id: push
         env:
-          CANDIDATE_IMAGE: \${{ steps.identity.outputs.tag }}
+          CANDIDATE_IMAGE: ${{ steps.identity.outputs.tag }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -191,7 +191,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: v162-nas-candidate-\${{ github.sha }}
+          name: v162-nas-candidate-${{ github.sha }}
           retention-days: 30
           if-no-files-found: ignore
           path: |
