@@ -364,7 +364,7 @@ def test_direct_group_refuses_root_worker_before_any_public_mutation(
 
     with pytest.raises(
         publishing.PublishingConflict,
-        match="dedicated non-root Worker",
+        match="non-root Worker or the explicit NAS 0:10000 profile",
     ):
         publishing._create_public_group_direct(
             unit, manifest["groups"][0]["name"], manifest,

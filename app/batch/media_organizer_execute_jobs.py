@@ -132,17 +132,18 @@ def _require_mutation_slot(session, *, family_id: int | None = None) -> None:
         raise ValueError("another V1.6 mutation WorkJob is active")
 
 
-def _require_nonroot_mutation_worker() -> None:
-    """V1.6 destructive work must run as a dedicated non-root Worker.
+def _require_mutation_worker_identity(settings: Settings) -> None:
+    """Require the ordinary non-root Worker or the explicit 0:10000 NAS profile."""
+    from app.nas_compat_worker import is_nas_compat_root_worker
 
-    Strict mode additionally requires external namespace custody. Maintenance
-    mode relies on a separately confirmed operator pause of all other writers;
-    that weaker assurance is never reported as strict custody.
-    """
-    if not hasattr(os, "geteuid") or os.geteuid() == 0:
+    if not hasattr(os, "geteuid"):
+        raise PermissionError("V1.6 requires a POSIX Worker identity")
+    if os.geteuid() == 0 and not is_nas_compat_root_worker(settings):
         raise PermissionError(
-            "V1.6 requires a dedicated non-root Worker; UID 0 cannot mutate media"
+            "UID 0 is disabled; enable the explicit NAS compatibility Root Worker profile"
         )
+    if os.geteuid() != 0 and getattr(settings, "nas_compat_root_worker_enabled", False):
+        raise PermissionError("NAS compatibility Root Worker profile requires UID 0")
 
 
 def _literal_unit(value: str, settings: Settings) -> Path:
@@ -795,7 +796,7 @@ class MediaOrganizerExecuteHandler(TaskHandler):
         _require_enabled(settings)
         if not context.worker_id:
             raise PermissionError("exclusive Worker lease required for media mutation")
-        _require_nonroot_mutation_worker()
+        _require_mutation_worker_identity(settings)
         state = json.loads(job.state_json or "{}")
         if not isinstance(state, dict):
             raise ValueError("invalid execution WorkJob approval")

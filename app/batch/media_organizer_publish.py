@@ -32,8 +32,9 @@ from app.batch.media_organizer_path_roles import classify_path_roles, uses_path_
 from app.batch.media_organizer_planner import _check_scope
 from app.fs_ops import rename_noreplace_at
 from app.batch.media_organizer_authority import (
-    assert_operation_authorized, is_maintenance_session, publication_fence,
+    assert_operation_authorized, is_maintenance_session, maintenance_session_settings, publication_fence,
 )
+from app.nas_compat_worker import is_nas_compat_root_worker
 from app.batch.media_organizer_fd_link import link_pinned_inode_noreplace
 
 _PUBLIC_OWNER = ".nfc-publish-owner"
@@ -482,9 +483,9 @@ def _create_public_group_direct(
     mode the operator must exclude these writers. No error branch deletes
     an entry.
     """
-    if os.geteuid() == 0:
+    if os.geteuid() == 0 and not is_nas_compat_root_worker(maintenance_session_settings(namespace_custody)):
         raise PublishingConflict(
-            "grouped publication requires a dedicated non-root Worker UID"
+            "grouped publication requires a non-root Worker or the explicit NAS 0:10000 profile"
         )
     names = [row["name"] for row in manifest.get("groups", [])]
     if name not in names or Path(name).name != name or name in (".", ".."):

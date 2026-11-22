@@ -23,7 +23,7 @@ def shared_config_gid() -> int | None:
         raise PermissionError(f"{_ERROR}: invalid numeric group ID")
     gid = int(raw)
     if gid <= 0 or gid != os.getegid():
-        raise PermissionError(f"{_ERROR}: configured group must match non-root effective GID")
+        raise PermissionError(f"{_ERROR}: configured group must match effective GID")
     return gid
 
 

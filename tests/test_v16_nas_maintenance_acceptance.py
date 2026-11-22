@@ -688,3 +688,83 @@ def test_config_file_creation_probe_covers_root_and_shared_subdirectories(tmp_pa
     assert all(item["created_fsynced_removed"] for item in result.values())
     assert sorted(path.name for path in config.iterdir()) == sorted(nas.CONFIG_DIRECTORIES)
     assert all(not list((config / name).iterdir()) for name in nas.CONFIG_DIRECTORIES)
+
+
+@pytest.mark.parametrize("role", ["api", "worker"])
+def test_opt_in_root_worker_flags_are_isolated_to_worker(role, tmp_path):
+    fixture = tmp_path / (nas.PREFIX + "synthetic")
+    args = nas.container_command(DIGEST, fixture, role, nas_root_worker=True)
+    uid = nas.API if role == "api" else 0
+    assert args[args.index("--user") + 1] == f"{uid}:{nas.GROUP}"
+    assert "--read-only" in args and "--cap-drop" in args
+    assert "--security-opt" in args and "no-new-privileges" in args
+    env = [args[i + 1] for i, item in enumerate(args[:-1]) if item == "--env"]
+    if role == "api":
+        assert "--cap-add" not in args
+        assert "NFC_NAS_COMPAT_ROOT_WORKER_ENABLED=false" in env
+        assert "type=bind,src=" + str(fixture) + "/data,dst=/data,readonly" in args
+    else:
+        assert args[args.index("--cap-add") + 1] == "DAC_OVERRIDE"
+        assert "NFC_NAS_COMPAT_ROOT_WORKER_ENABLED=true" in env
+        assert "type=bind,src=" + str(fixture) + "/data,dst=/data" in args
+    assert "privileged" not in " ".join(args)
+    assert "/var/run/docker.sock" not in " ".join(args)
+
+
+def test_inspected_root_worker_rejects_extra_caps_and_wrong_identity(tmp_path):
+    from copy import deepcopy
+    fixture = tmp_path / (nas.PREFIX + "synthetic")
+    cid = "a" * 64
+    info = {
+        "id": cid, "image": DIGEST, "label": fixture.name,
+        "name": f"/{fixture.name}-worker", "user": "0:10000",
+        "host": {
+            "ReadonlyRootfs": True, "NetworkMode": "none",
+            "Privileged": False, "CapDrop": ["ALL"], "CapAdd": ["CAP_DAC_OVERRIDE"],
+            "PortBindings": {}, "GroupAdd": [], "SecurityOpt": ["no-new-privileges"],
+            "Tmpfs": {"/tmp": "nosuid,nodev,noexec"},
+        },
+        "mounts": [
+            {"Type": "bind", "Destination": "/config",
+             "Source": str(fixture / "config"), "RW": True},
+            {"Type": "bind", "Destination": "/data",
+             "Source": str(fixture / "data"), "RW": True},
+        ],
+    }
+    assert nas.verify_container(info, cid, DIGEST, fixture, "worker", nas_root_worker=True)["id"] == cid
+    for change in (
+        {"CapAdd": ["CAP_DAC_OVERRIDE", "CHOWN"]},
+        {"CapAdd": ["SYS_ADMIN"]},
+        {"CapAdd": []},
+        {"Privileged": True},
+        {"SecurityOpt": []},
+        {"GroupAdd": ["0"]},
+    ):
+        mutated = deepcopy(info)
+        mutated["host"].update(change)
+        with pytest.raises(nas.Failure):
+            nas.verify_container(mutated, cid, DIGEST, fixture, "worker", nas_root_worker=True)
+    for bad_user in ("0:0", "10002:10000", "10001:10000"):
+        mutated = deepcopy(info)
+        mutated["user"] = bad_user
+        with pytest.raises(nas.Failure):
+            nas.verify_container(mutated, cid, DIGEST, fixture, "worker", nas_root_worker=True)
+
+
+def test_root_worker_mode_does_not_change_default_legacy_behavior(tmp_path):
+    fixture = tmp_path / (nas.PREFIX + "synthetic")
+    for role in ("api", "worker"):
+        args = nas.container_command(DIGEST, fixture, role)
+        assert "--cap-add" not in args
+        assert args[args.index("--user") + 1] == f"{nas.API if role == 'api' else nas.WORKER}:10000"
+
+
+def test_wrong_image_revision_fails_before_root_worker_fixture_created(tmp_path, capsys):
+    media = tmp_path / "media-original.jpg"
+    media.write_bytes(b"unchanged")
+    assert nas.main(["--data-root", str(tmp_path), "--image", DIGEST,
+                     "--candidate-sha", "bad", "--nas-root-worker"]) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["nas_root_worker"] is True
+    assert report["status"] == nas.FAIL
+    assert list(tmp_path.iterdir()) == [media] and media.read_bytes() == b"unchanged"

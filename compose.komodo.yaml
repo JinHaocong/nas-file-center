@@ -5,7 +5,7 @@
 # Config and media sources must be disjoint, including resolved host aliases.
 services:
   nas-file-center-api:
-    image: kerwinjhc/nas-file-center:1.6.1
+    image: kerwinjhc/nas-file-center:1.6.2
     user: "${NFC_API_UID:-10001}:${NFC_SHARED_GID:-10000}"
     read_only: true
     cap_drop:
@@ -74,7 +74,7 @@ services:
     restart: unless-stopped
 
   nas-file-center-worker:
-    image: kerwinjhc/nas-file-center:1.6.1
+    image: kerwinjhc/nas-file-center:1.6.2
     user: "${NFC_WORKER_UID:-10002}:${NFC_SHARED_GID:-10000}"
     read_only: true
     cap_drop:
