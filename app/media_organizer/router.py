@@ -213,6 +213,25 @@ def recover_media_organizer_execution(request: Request, job_id: int,
         raise HTTPException(409, str(exc)) from exc
 
 
+@router.post('/executions/{job_id}/abandon')
+def abandon_media_organizer_execution(
+    request: Request, job_id: int,
+    _admin=Depends(require_admin_user),
+):
+    """End a failed frozen task before publication; the Worker verifies no stage remains."""
+    from app.batch.media_organizer_execute_jobs import enqueue_media_organizer_abandon
+    try:
+        return enqueue_media_organizer_abandon(
+            request.app.state.service.SessionLocal,
+            request.app.state.settings,
+            failed_job_id=job_id,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, 'Original execution not found') from exc
+    except (ValueError, PermissionError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.post('/cleanups/{job_id}/recover')
 def recover_media_organizer_cleanup(
     request: Request, job_id: int, payload: MediaOrganizerCleanupRequest,
