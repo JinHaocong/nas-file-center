@@ -11,7 +11,7 @@ RUN npm run build
 FROM python:3.12-slim-bookworm AS fclones-builder
 ARG FCLONES_VERSION=0.35.0
 ARG TARGETARCH
-RUN FCLONES_VERSION="\${FCLONES_VERSION}" TARGETARCH="\${TARGETARCH}" python - <<'PY'
+RUN FCLONES_VERSION="${FCLONES_VERSION}" TARGETARCH="${TARGETARCH}" python - <<'PY'
 import hashlib
 import io
 import os
