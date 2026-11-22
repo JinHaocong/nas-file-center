@@ -66,7 +66,11 @@ git -C "$WORK" -c advice.detachedHead=false checkout -q FETCH_HEAD
 
 TAG="nfc-v162-disposable-test:$(printf %.12s "$SHA")"
 echo "Building independent test image $TAG; production containers remain untouched."
-docker build --label "org.opencontainers.image.revision=$SHA" --tag "$TAG" "$WORK"
+# Build RUN steps on the NAS host network: ZOS Docker bridge DNS may not resolve external hosts.
+# This affects build-time downloads only; test containers still run with --network none.
+docker build --network=host \
+  --label "org.opencontainers.image.revision=$SHA" \
+  --tag "$TAG" "$WORK"
 IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$TAG")"
 LABEL_SHA="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$TAG")"
 [[ "$LABEL_SHA" == "$SHA" && "$IMAGE_ID" == sha256:* ]] || {
