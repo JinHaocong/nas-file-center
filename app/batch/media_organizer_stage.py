@@ -25,6 +25,7 @@ from app.batch.media_organizer_manifest import (
     _checksum, load_frozen_preview_manifest, FrozenPreviewError,
 )
 from app.batch.media_organizer_planner import _check_scope
+from app.nas_compat_worker import is_nas_compat_root_worker
 
 _OWNER = ".nfc-stage-authority"
 _COMPLETE = ".nfc-stage-complete"
@@ -44,6 +45,28 @@ def _entry(folder_fd: int, name: str):
         return os.stat(name, dir_fd=folder_fd, follow_symlinks=False)
     except FileNotFoundError:
         return None
+
+
+def _pinned_stage_fd_is_named(stage_fd: int, unit_fd: int, name: str) -> bool:
+    """Verify a lifetime-pinned stage dentry still has its approved name.
+
+    ZOS/zfuse may report a different directory inode through fstat/openat/stat.
+    Linux procfs resolves an already-held directory FD to its current VFS
+    dentry pathname, including after a rename or unlink. Use this only as a
+    fail-closed fallback in the explicit NAS maintenance compatibility profile,
+    with the ORIGINAL stage FD pinned throughout the staging operation.
+    """
+    try:
+        stage_path = os.readlink(f"/proc/self/fd/{stage_fd}")
+        unit_path = os.readlink(f"/proc/self/fd/{unit_fd}")
+    except OSError:
+        return False
+    return (
+        stage_path.startswith("/") and unit_path.startswith("/")
+        and not stage_path.endswith(" (deleted)")
+        and not unit_path.endswith(" (deleted)")
+        and stage_path == os.path.join(unit_path, name)
+    )
 
 
 def _check_identity(info, identity: list[int], path: Path) -> None:
@@ -98,7 +121,8 @@ def _read_marker(stage_fd: int, name: str, expected: bytes) -> bool:
 
 def _move_one(move: dict, *, lease_fence: Callable[[], None],
               ignore_final: bool, stage_binding: tuple[int, int],
-              stage_witness: bytes, preserve_source: bool = False) -> str:
+              stage_witness: bytes, preserve_source: bool = False,
+              pinned_stage_fd: int | None = None) -> str:
     """Use a PINNED verified private directory FD for the actual mutation.
 
     The existing generic file mover reopens its destination pathname inside
@@ -113,17 +137,34 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None],
     identity = move["identity"]
     src_fd = _open_directory_nofollow(src.parent)
     try:
-        stage_fd = _open_directory_nofollow(target.parent)
+        # Dup the original stage descriptor; never reopen a replacement name.
+        stage_fd = (os.dup(pinned_stage_fd) if pinned_stage_fd is not None
+                    else _open_directory_nofollow(target.parent))
         try:
             unit_fd = _open_directory_nofollow(target.parent.parent)
             try:
                 def check_stage_binding() -> None:
                     live = _assert_private_stage_fd(stage_fd)
                     binding = _entry(unit_fd, target.parent.name)
-                    if (binding is None or not stat.S_ISDIR(binding.st_mode)
-                            or (int(live.st_dev), int(live.st_ino)) != stage_binding
-                            or (int(binding.st_dev), int(binding.st_ino)) != stage_binding):
+                    if binding is None or not stat.S_ISDIR(binding.st_mode):
                         raise StagingConflict("private stage directory binding changed")
+                    fd_identity = (int(live.st_dev), int(live.st_ino))
+                    named_identity = (int(binding.st_dev), int(binding.st_ino))
+                    if (fd_identity != stage_binding or named_identity != stage_binding):
+                        # Never turn off FD protection. Only the explicit NAS
+                        # root/maintenance profile may tolerate unstable zfuse
+                        # inode reports, and only while the ORIGINAL stage FD
+                        # remains pinned and its VFS dentry still has this name.
+                        if not (
+                            pinned_stage_fd is not None
+                            and is_nas_compat_root_worker()
+                            and fd_identity[0] == named_identity[0] == stage_binding[0]
+                            and _pinned_stage_fd_is_named(stage_fd, unit_fd, target.parent.name)
+                        ):
+                            raise StagingConflict(
+                                "private stage directory binding changed "
+                                f"(initial={stage_binding}, fd={fd_identity}, named={named_identity})"
+                            )
                     if not _read_marker(stage_fd, _OWNER, stage_witness):
                         raise StagingConflict("private staging owner witness is missing")
 
@@ -343,54 +384,59 @@ def stage_frozen_sources(
                 _write_marker(stage_fd, _OWNER, expected)
             owned_stat = os.fstat(stage_fd)
             stage_binding = (int(owned_stat.st_dev), int(owned_stat.st_ino))
-        finally:
-            os.close(stage_fd)
+            def guard() -> None:
+                fd = _open_directory_nofollow(unit)
+                try:
+                    st = os.fstat(fd)
+                    if ([int(st.st_dev), int(st.st_ino)] !=
+                            [manifest["unit_dev"], manifest["unit_ino"]]):
+                        raise StagingConflict("organizing unit changed during staging")
+                finally:
+                    os.close(fd)
+                lease_fence()
 
-        def guard() -> None:
-            fd = _open_directory_nofollow(unit)
-            try:
-                st = os.fstat(fd)
-                if ([int(st.st_dev), int(st.st_ino)] !=
-                        [manifest["unit_dev"], manifest["unit_ino"]]):
-                    raise StagingConflict("organizing unit changed during staging")
-            finally:
-                os.close(fd)
-            lease_fence()
-
-        preserve_source = manifest.get("cleanup_policy") == "deferred"
-        staged = reconciled = 0
-        for row in moves:
-            guard()
-            source = Path(row["source"])
-            target = Path(row["target"])
-            stage_stat = os.lstat(target) if os.path.lexists(target) else None
-            source_stat = os.lstat(source) if os.path.lexists(source) else None
-            if stage_stat is not None:
-                _check_identity(stage_stat, row["identity"], target)
-                if preserve_source:
-                    # V1.6 preserves the original on purpose. Both names MUST
-                    # still refer to the frozen inode, not two arbitrary files.
+            preserve_source = manifest.get("cleanup_policy") == "deferred"
+            staged = reconciled = 0
+            for row in moves:
+                guard()
+                source = Path(row["source"])
+                target = Path(row["target"])
+                stage_stat = os.lstat(target) if os.path.lexists(target) else None
+                source_stat = os.lstat(source) if os.path.lexists(source) else None
+                if stage_stat is not None:
+                    _check_identity(stage_stat, row["identity"], target)
+                    if preserve_source:
+                        # V1.6 preserves the original on purpose. Both names MUST
+                        # still refer to the frozen inode, not two arbitrary files.
+                        _check_identity(source_stat, row["identity"], source)
+                        if (int(source_stat.st_dev), int(source_stat.st_ino)) != (
+                                int(stage_stat.st_dev), int(stage_stat.st_ino)):
+                            raise StagingConflict("retained source and stage inode differ")
+                    elif source_stat is not None:
+                        # Historical rename-fallback duplicates need manual review.
+                        raise StagingConflict("source and staged file both exist; manual review")
+                    reconciled += 1
+                else:
                     _check_identity(source_stat, row["identity"], source)
-                    if (int(source_stat.st_dev), int(source_stat.st_ino)) != (
-                            int(stage_stat.st_dev), int(stage_stat.st_ino)):
-                        raise StagingConflict("retained source and stage inode differ")
-                elif source_stat is not None:
-                    # Historical rename-fallback duplicates need manual review.
-                    raise StagingConflict("source and staged file both exist; manual review")
-                reconciled += 1
-            else:
-                _check_identity(source_stat, row["identity"], source)
-                outcome = _move_one(
-                    row, lease_fence=guard, ignore_final=True,
-                    stage_binding=stage_binding, stage_witness=expected,
-                    preserve_source=preserve_source,
-                )
-                if outcome != ("linked" if preserve_source else "moved"):
-                    raise StagingConflict("unexpected staging reconciliation state")
-                staged += 1
+                    outcome = _move_one(
+                        row, lease_fence=guard, ignore_final=True,
+                        stage_binding=stage_binding, stage_witness=expected,
+                        preserve_source=preserve_source,
+                        pinned_stage_fd=stage_fd,
+                    )
+                    if outcome != ("linked" if preserve_source else "moved"):
+                        raise StagingConflict("unexpected staging reconciliation state")
+                    staged += 1
 
-        stage_fd = _open_directory_nofollow(stage)
-        try:
+            # The pinned stage must still be reachable through its originally
+            # approved parent, even when a FUSE inode number is unstable.
+            if is_nas_compat_root_worker():
+                unit_fd = _open_directory_nofollow(unit)
+                try:
+                    if not _pinned_stage_fd_is_named(stage_fd, unit_fd, stage.name):
+                        raise StagingConflict("private stage directory binding changed (detached FD)")
+                finally:
+                    os.close(unit_fd)
             _assert_private_stage_fd(stage_fd)
             complete = _inspect_stage(stage_fd, stage, moves, expected,
                                       groups=manifest.get("groups", []))
