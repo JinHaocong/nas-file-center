@@ -96,6 +96,8 @@ export interface SemanticExecutionStatus extends SemanticExecutionAssurance {
   /** Server-proven frozen-checkpoint eligibility; false blocks any recovery form. */
   recovery_available?: boolean;
   recovery_unavailable_reason?: string | null;
+  /** Failed frozen work can be ended before publication when its stage is absent. */
+  abandon_available?: boolean;
   manual_cleanup_required: boolean;
   finalized: boolean;
   publication_complete: boolean;
@@ -284,6 +286,10 @@ export const mediaOrganizerApi = {
     api.post<{ job_id: number; status: SemanticPreviewStatus; recovery_of_job_id: number }>(
       `/api/media-organizer/executions/${jobId}/recover`,
       { confirmation, ...maintenanceConfirmationBody(maintenanceWindowConfirmed) },
+    ),
+  abandonExecution: (jobId: number) =>
+    api.post<{ job_id: number; status: SemanticPreviewStatus; abandon_of_job_id: number }>(
+      `/api/media-organizer/executions/${jobId}/abandon`, {},
     ),
   startPreview: (selection: string) =>
     api.post<{ job_id: number; status: SemanticPreviewStatus }>(
