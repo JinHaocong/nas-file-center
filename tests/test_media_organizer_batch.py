@@ -122,6 +122,81 @@ def _batch(client, preview):
     return response.json()["job_id"]
 
 
+def test_batch_preserves_ambiguous_loose_files_and_organizes_confirmed_units(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    selection = settings.data_mount / "Else album"
+    author = selection / "2602" / "260216" / "作者A"
+    named_work = author / "NO.001"
+    work = selection / "作品B"
+    mixed_wrapper = work / "P"
+    nested_work = mixed_wrapper / "NO.002"
+    volumes = selection / "两卷合集"
+
+    kept = {
+        author / "随手拍.mp4": b"author level media",
+        mixed_wrapper / "散图.jpg": b"unassigned picture",
+    }
+    moved = {
+        named_work / "封面.jpg": (named_work / "001.jpg", b"named work cover"),
+        nested_work / "封面.webp": (nested_work / "001.webp", b"nested work cover"),
+        work / "videos" / "片段.mp4": (work / "001.mp4", b"work clip"),
+        volumes / "01" / "a.jpg": (volumes / "01" / "001.jpg", b"first cover"),
+        volumes / "01" / "b.PNG": (volumes / "01" / "002.PNG", b"first page"),
+        volumes / "02" / "a.jpg": (volumes / "02" / "001.jpg", b"second cover"),
+    }
+    inputs = kept | {source: content for source, (_, content) in moved.items()}
+    for path, content in inputs.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    expected_ready = {named_work, nested_work, work, volumes / "01", volumes / "02"}
+    expected_blocked = {author, mixed_wrapper}
+    preview = _preview(client, settings, selection)
+    assert {Path(row["unit"]) for row in preview["units"] if row["status"] == "ready"} == expected_ready
+    assert {Path(row["unit"]) for row in preview["units"] if row["status"] == "blocked"} == expected_blocked
+
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert {Path(item["unit"]) for item in result["items"] if item["status"] == "success"} == expected_ready
+    assert {Path(item["unit"]) for item in result["items"] if item["status"] == "conflict"} == expected_blocked
+    assert result["summary"]["failed_count"] == 0
+    for path, content in kept.items():
+        assert path.read_bytes() == content
+    for source, (destination, content) in moved.items():
+        assert destination.read_bytes() == content
+        assert not source.exists()
+    assert not (work / "videos").exists()
+
+    rescan = _preview(client, settings, selection)
+    assert (rescan["summary"]["needed_moves"], rescan["summary"]["renamed_count"]) == (0, 0)
+    assert {Path(row["unit"]) for row in rescan["units"] if row["status"] == "already_organized"} == expected_ready
+    assert {Path(row["unit"]) for row in rescan["units"] if row["status"] == "blocked"} == expected_blocked
+
+
+def test_batch_rechecks_author_loose_files_when_a_work_appears_after_preview(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    selection = settings.data_mount / "Else album"
+    author = selection / "2602" / "260216" / "作者A"
+    author.mkdir(parents=True)
+    loose_video = author / "随手拍.mp4"
+    loose_video.write_bytes(b"author level media")
+
+    preview = _preview(client, settings, selection)
+    assert [(row["unit"], row["status"]) for row in preview["units"]] == [(str(author), "ready")]
+
+    work_cover = author / "NO.001" / "封面.jpg"
+    work_cover.parent.mkdir()
+    work_cover.write_bytes(b"new work cover")
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert [(item["unit"], item["status"]) for item in result["items"]] == [(str(author), "conflict")]
+    assert loose_video.read_bytes() == b"author level media"
+    assert work_cover.read_bytes() == b"new work cover"
+    assert not (author / "001.mp4").exists()
+
+
 def test_preview_conflict_and_stale_unit_leave_unrelated_unit_executable(tmp_path):
     client, settings, _ = _fixture(tmp_path)
     selection = settings.data_mount / "Else album"

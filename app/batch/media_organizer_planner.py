@@ -22,7 +22,19 @@ _CALENDAR_DIRECTORY = re.compile(
     r"[-_.]?(?:0[1-9]|1[0-2])(?:[-_.]?(?:0[1-9]|[12]\d|3[01]))?"
     r"|年(?:0?[1-9]|1[0-2])月(?:(?:0?[1-9]|[12]\d|3[01])日)?)"
 )
+_CALENDAR_DAY = re.compile(
+    r"(?:\d{2}|\d{4})(?:[-_.]?(?:0[1-9]|1[0-2])[-_.]?(?:0[1-9]|[12]\d|3[01])"
+    r"|年(?:0?[1-9]|1[0-2])月(?:0?[1-9]|[12]\d|3[01])日)"
+)
 _AMBIGUOUS = re.compile(r"(?:\d{1,3}|新建文件夹(?:\s*\(\d+\))?)", re.I)
+_NUMBERED_LEAF = re.compile(r"[0-9]{1,3}")
+_COLLECTION_CONTEXT = re.compile(
+    r"合集|全集|图包|作品|\b(?:collection|album)\b|\bno[.\s_-]*\d+\b|\b[a-z]+\d+-\d+\b",
+    re.I,
+)
+_VERSION_NAMES = frozenset({"4k", "pt", "原图无水印", "精华版", "修复版"})
+_MIXED_WRAPPER_REASON = "分类包装里的散文件归属待确认"
+_AMBIGUOUS_DIRECTORY_REASON = "Ambiguous directory role"
 _ALIASES = frozenset({
     "图片", "图", "照片", "photo", "photos", "image", "images", "picture", "pictures", "pic",
     "视频", "video", "videos",
@@ -76,6 +88,49 @@ def _protected(path: Path, protected_roots: tuple[Path, ...]) -> bool:
     return any(path.is_relative_to(root) for root in protected_roots)
 
 
+def _author_layer(unit: Path) -> bool:
+    """Recognize the author level without mistaking a named work or version for an author."""
+    return bool(_CALENDAR_DAY.fullmatch(unit.parent.name)
+                and not _COLLECTION_CONTEXT.search(unit.name)
+                and unit.name.casefold() not in _VERSION_NAMES)
+
+
+def _pure_wrapper(folder: Path, device: int, protected_roots: tuple[Path, ...],
+                  check_cancelled: Callable[[], None] | None = None) -> bool:
+    """Only merge a classification branch whose descendants have no other directory role."""
+    pending = [(folder, 1)]
+    visited = 0
+    while pending:
+        current, depth = pending.pop()
+        if check_cancelled is not None:
+            check_cancelled()
+        visited += 1
+        if depth > MAX_DEPTH or visited > MAX_PACKAGE_DIRECTORIES:
+            return False
+        try:
+            fd = _open_directory_nofollow(current)
+            try:
+                if os.fstat(fd).st_dev != device:
+                    return False
+                # Shape detection can use entry types; the inventory still reads every file identity.
+                with os.scandir(fd) as entries:
+                    for index, entry in enumerate(entries):
+                        if index >= MAX_SCOPE_ENTRIES_PER_DIRECTORY or entry.name.casefold().startswith(".nfc-"):
+                            return False
+                        if entry.is_dir(follow_symlinks=False):
+                            child = current / entry.name
+                            if _protected(child, protected_roots) or not _is_wrapper(current, entry.name):
+                                return False
+                            pending.append((child, depth + 1))
+                        elif not entry.is_file(follow_symlinks=False):
+                            return False
+            finally:
+                os.close(fd)
+        except (OSError, ValueError):
+            return False
+    return True
+
+
 def _semantic_inventory(
     unit: Path, protected_roots: tuple[Path, ...],
     directories: set[Path] | None = None,
@@ -101,7 +156,8 @@ def _semantic_inventory(
                     if depth:
                         raise ValueError("Classification wrapper contains a protected directory")
                 elif _is_wrapper(folder, name):
-                    children.append((path, depth + 1))
+                    if depth or _pure_wrapper(path, device, protected_roots):
+                        children.append((path, depth + 1))
                 elif depth:
                     raise ValueError("Classification wrapper may contain independent works")
                 continue
@@ -144,6 +200,58 @@ def _blocked(unit: Path, mode: str, reason: str) -> dict:
     }
 
 
+def _held_files(unit: Path, entries: list[tuple[str, os.stat_result]], reason: str) -> dict:
+    """Report the local unassigned files while leaving descendants to discovery."""
+    record = _blocked(unit, "semantic", reason)
+    for name, info in entries:
+        if stat.S_ISREG(info.st_mode) and not is_reserved_workspace(unit / name):
+            record["totals"][_classify(name)] += 1
+            record["total_files"] += 1
+            record["total_bytes"] += info.st_size
+    return record
+
+
+def _author_loose_record(unit: Path, items: list[dict], included: set[Path],
+                         protected_roots: tuple[Path, ...]) -> dict | None:
+    """Recheck ownership of author-level loose files before freezing a changing layout."""
+    if not _author_layer(unit) or not any(Path(row["path"]).parent == unit for row in items):
+        return None
+    device = items[0]["dev"]
+    entries = _entries(unit, device)
+    for name, info in entries:
+        child = unit / name
+        if (stat.S_ISDIR(info.st_mode) and info.st_dev == device
+                and child not in included and not _protected(child, protected_roots)):
+            return _held_files(unit, entries, "作者层散文件待确认")
+    return None
+
+
+def _numbered_media_leaf(path: Path, device: int) -> bool:
+    """Require a numbered candidate to contain direct media under one verified directory."""
+    try:
+        entries = _entries(path, device)
+    except (OSError, ValueError):
+        return False
+    return all(
+        stat.S_ISREG(info.st_mode) and info.st_dev == device and not name.casefold().startswith(".nfc-")
+        for name, info in entries
+    ) and any(_classify(name) in ("P", "V") for name, _ in entries)
+
+
+def _numbered_siblings(unit: Path, entries: list[tuple[str, os.stat_result]],
+                       device: int, protected_roots: tuple[Path, ...]) -> set[str]:
+    """Recognize a complete series of independent numbered packages within a named collection."""
+    if not _COLLECTION_CONTEXT.search(unit.name):
+        return set()
+    names = [name for name, info in entries if stat.S_ISDIR(info.st_mode)]
+    ordinals = {name.lstrip("0") for name in names}
+    if len(names) < 2 or "" in ordinals or len(names) != len(ordinals):
+        return set()
+    if not all(_NUMBERED_LEAF.fullmatch(name) and not _protected(unit / name, protected_roots) for name in names):
+        return set()
+    return set(names) if all(_numbered_media_leaf(unit / name, device) for name in names) else set()
+
+
 def preview_organizing_unit(
     unit: Path, *, mode: str, allowed_roots: list[Path],
     quarantine_root: Path | None = None, media_package_root: Path | None = None,
@@ -172,6 +280,11 @@ def preview_organizing_unit(
         include_items=include_items, include_mapping=include_mapping, organizer_mode=True,
         legacy_bucket_conflicts=not (mode == "semantic" and _CALENDAR_DIRECTORY.fullmatch(unit.name)),
     )
+    if mode == "semantic" and plan["status"] == "ready":
+        protected = tuple(Path(root) for root in (media_package_root, quarantine_root) if root is not None)
+        held = _author_loose_record(unit, items, directories, protected)
+        if held is not None:
+            return held
     final_dirs = {Path(group["destination"]) for group in plan["groups"]}
     # A pre-existing empty branch is not an input. Retain its ancestors even
     # when another branch in the same wrapper supplied files.
@@ -195,10 +308,10 @@ def _semantic_previews(
     check_cancelled: Callable[[], None] | None,
 ) -> Iterator[dict]:
     device = os.lstat(selection).st_dev
-    pending = [(selection, 0, False)]
+    pending: list[tuple[Path, int, str | None]] = [(selection, 0, None)]
     visited = 0
     while pending:
-        unit, depth, probe_wrapper = pending.pop()
+        unit, depth, hold_reason = pending.pop()
         if check_cancelled is not None:
             check_cancelled()
         visited += 1
@@ -210,7 +323,9 @@ def _semantic_previews(
         except (OSError, ValueError) as exc:
             yield _blocked(unit, "semantic", str(exc))
             continue
-        children, wrappers = [], []
+        children: list[tuple[Path, int, str | None]] = []
+        numbered = _numbered_siblings(unit, entries, device, protected_roots)
+        has_pure_wrappers = False
         has_input = False
         for name, info in entries:
             child = unit / name
@@ -220,21 +335,23 @@ def _semantic_previews(
                 yield _blocked(child, "semantic", "Reserved or cross-device entry")
             elif stat.S_ISDIR(info.st_mode):
                 if _is_wrapper(unit, name):
-                    wrappers.append((child, depth + 1, True))
-                elif _AMBIGUOUS.fullmatch(name):
-                    yield _blocked(child, "semantic", "Ambiguous directory role")
+                    if _pure_wrapper(child, device, protected_roots, check_cancelled):
+                        has_pure_wrappers = True
+                    else:
+                        children.append((child, depth + 1, _MIXED_WRAPPER_REASON))
+                elif _AMBIGUOUS.fullmatch(name) and name not in numbered:
+                    children.append((child, depth + 1, _AMBIGUOUS_DIRECTORY_REASON))
                 else:
-                    children.append((child, depth + 1, False))
+                    children.append((child, depth + 1, None))
             elif stat.S_ISREG(info.st_mode):
                 has_input = True
             else:
                 yield _blocked(child, "semantic", "Symlink or special entry")
-        if not probe_wrapper and (has_input or wrappers):
-            record = preview(unit, "semantic")
-            yield record
-            probe_wrapper = record["status"] == "blocked"
-        if probe_wrapper:
-            children.extend(wrappers)
+        if hold_reason is not None:
+            if hold_reason != _MIXED_WRAPPER_REASON or has_input or has_pure_wrappers:
+                yield _held_files(unit, entries, hold_reason)
+        elif has_input or has_pure_wrappers:
+            yield preview(unit, "semantic")
         children.sort(key=lambda entry: (str(entry[0]).casefold(), str(entry[0])), reverse=True)
         pending.extend(children)
 
