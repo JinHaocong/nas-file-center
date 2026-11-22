@@ -19,6 +19,7 @@ on:
       - "app/config.py"
       - "app/config_sharing.py"
       - "app/worker.py"
+      - "Dockerfile"
       - "compose.v162-nas-compat-scratch.yaml"
       - "scripts/test_v162_scratch_compose.sh"
       - "tests/test_nas_compat_root_worker.py"
