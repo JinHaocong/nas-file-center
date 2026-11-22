@@ -46,6 +46,7 @@ from app.batch.media_organizer_cleanup_plan import (
 )
 from app.models import WorkJob
 from app.tasks.context import JobContext
+from app.tasks.logging import log_task_event
 from app.tasks.handlers_base import TaskHandler, register_handler
 
 EXECUTE_KIND = "media-organizer-execute"
@@ -319,6 +320,17 @@ def get_media_organizer_execution(
             WorkJob.kind == CLEANUP_KIND,
             func.json_extract(WorkJob.state_json, "$.execution_job_id") == job_id,
         ).order_by(WorkJob.id.desc()).limit(1))
+        abandon_job = session.scalar(select(WorkJob).where(
+            WorkJob.kind == EXECUTE_KIND,
+            func.json_extract(WorkJob.state_json, "$.abandon_of_job_id") == job_id,
+        ).order_by(WorkJob.id.desc()).limit(1))
+        abandon_available = (
+            failed_original and mode == "maintenance_window"
+            and checkpoint.get("phase") == "frozen"
+            and isinstance(checkpoint.get("manifest_checksum"), str)
+            and len(checkpoint["manifest_checksum"]) == 64
+            and abandon_job is None
+        )
         cleanup_status = None
         if cleanup is not None:
             cleanup_state = json.loads(cleanup.state_json or "{}")
@@ -345,6 +357,7 @@ def get_media_organizer_execution(
             "unit": state.get("unit"),
             "recovery_of_job_id": state.get("recovery_of_job_id"),
             "recovery_available": recovery_available,
+            "abandon_available": abandon_available,
             "recovery_unavailable_reason": (
                 "未形成可验证的冻结检查点，不能自动恢复。请保留现有文件与证据，核查后重新只读扫描。"
                 if failed_original and not recovery_available else None
@@ -619,6 +632,136 @@ def _recovery_job_binding(recovery: WorkJob, original: WorkJob,
         raise ValueError("recovery WorkJob differs from its original frozen approval")
 
 
+def enqueue_media_organizer_abandon(
+    session_factory, settings: Settings, *, failed_job_id: int,
+) -> dict:
+    """Queue a Worker-only closeout for a failed, pre-publication frozen job."""
+    _require_enabled(settings)
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        original = session.get(WorkJob, failed_job_id)
+        if original is None or original.kind != EXECUTE_KIND:
+            raise KeyError(failed_job_id)
+        original_state, checkpoint, unit, bound = _original_recovery_authority(original, settings)
+        if execution_mode(settings) != "maintenance_window" or checkpoint.get("phase") != "frozen":
+            raise ValueError("only a failed frozen task before publication can be ended")
+        if not bound:
+            raise ValueError("original frozen approval is not bound for closeout")
+        manifest_path = _manifest_file(settings, failed_job_id)
+        manifest = load_frozen_preview_manifest(
+            manifest_path, job_id=failed_job_id, unit=unit,
+        )
+        digest = _recovery_manifest_authority(
+            manifest, checkpoint, frozen_id=failed_job_id,
+            preview_id=original_state["preview_job_id"], unit=unit,
+            phases=("frozen",),
+        )
+        existing = session.scalar(select(WorkJob).where(
+            WorkJob.kind == EXECUTE_KIND,
+            func.json_extract(WorkJob.state_json, "$.abandon_of_job_id") == failed_job_id,
+        ).order_by(WorkJob.id.desc()).limit(1))
+        if existing is not None:
+            if existing.status in (*ACTIVE, "completed"):
+                return {"job_id": int(existing.id), "status": existing.status,
+                        "abandon_of_job_id": failed_job_id}
+            raise ValueError("previous closeout task failed; inspect its error before retry")
+        _require_mutation_slot(session, family_id=failed_job_id)
+        approved_id = next_media_package_job_id(session, settings)
+        job = WorkJob(
+            id=approved_id,
+            kind=EXECUTE_KIND, status="queued", progress_current=0,
+            progress_total=1,
+            progress_message="等待 Worker 确认暂存目录已不存在并结束失败任务",
+            state_json=json.dumps({
+                **_approval_fields(settings, True),
+                "approved_job_id": approved_id,
+                "confirmation": recovery_token(failed_job_id),
+                "preview_job_id": original_state["preview_job_id"],
+                "unit": str(unit),
+                "selection": original_state.get("selection"),
+                "recovery_of_job_id": failed_job_id,
+                "recovery_manifest_checksum": digest,
+                "recovery_phase": "frozen",
+                "abandon_frozen_before_publish": True,
+                "abandon_of_job_id": failed_job_id,
+            }, ensure_ascii=False),
+            retry_of=failed_job_id,
+        )
+        session.add(job)
+        session.commit()
+        return {"job_id": int(job.id), "status": job.status,
+                "abandon_of_job_id": failed_job_id}
+
+
+def _abandon_frozen_before_publish(
+    job: WorkJob, context: JobContext, settings: Settings, state: dict,
+) -> None:
+    """End a failed frozen job only when its stage and report residue are absent."""
+    original_id = state.get("abandon_of_job_id")
+    if type(original_id) is not int or original_id <= 0:
+        raise ValueError("invalid failed execution closeout identity")
+    with context.SessionLocal() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        original = session.get(WorkJob, original_id)
+        if original is None or original.kind != EXECUTE_KIND or original.status != "failed":
+            raise ValueError("original execution is no longer a failed task")
+        original_state = json.loads(original.state_json or "{}")
+        checkpoint = json.loads(original.checkpoint_json or "{}")
+        if (not isinstance(original_state, dict) or not isinstance(checkpoint, dict)
+                or checkpoint.get("phase") != "frozen"
+                or checkpoint.get("execution_mode") != "maintenance_window"):
+            raise ValueError("original task is no longer in the pre-publication frozen phase")
+        manifest_path = _manifest_file(settings, original_id)
+        manifest = load_frozen_preview_manifest(
+            manifest_path, job_id=original_id, unit=Path(original_state["unit"]),
+        )
+        digest = _recovery_manifest_authority(
+            manifest, checkpoint, frozen_id=original_id,
+            preview_id=original_state["preview_job_id"],
+            unit=Path(original_state["unit"]), phases=("frozen",),
+        )
+        _recovery_job_binding(job, original, original_state, checkpoint, digest)
+        if state.get("recovery_manifest_checksum") != digest:
+            raise ValueError("closeout approval differs from the original frozen manifest")
+        unit_fd = _open_directory_nofollow(Path(manifest["unit"]))
+        try:
+            try:
+                os.stat(manifest["stage_directory"], dir_fd=unit_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise ValueError("staging directory still exists; the failed task cannot be ended yet")
+        finally:
+            os.close(unit_fd)
+        report_fd = _open_directory_nofollow(manifest_path.parent)
+        try:
+            with os.scandir(report_fd) as entries:
+                names = {entry.name for entry in entries}
+            if names != {manifest_path.name}:
+                raise ValueError("unexpected frozen-task report residue; preserve it for review")
+        finally:
+            os.close(report_fd)
+        checkpoint["phase"] = "abandoned_before_publish"
+        checkpoint["operator_abandoned"] = True
+        checkpoint["abandoned_by_job_id"] = int(job.id)
+        original.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False, separators=(",", ":"))
+        log_task_event(
+            session, job_id=original_id,
+            event_type="abandoned_before_publish",
+            message="管理员结束了发布前失败的整理任务；没有修改媒体文件。",
+            context={"abandon_job_id": int(job.id), "stage_absent": True},
+        )
+        session.commit()
+    context.checkpoint(
+        progress_current=1, progress_total=1,
+        progress_message="失败任务已结束；媒体文件未修改",
+        checkpoint_data={
+            "schema_version": 1, "phase": "completed",
+            "abandoned_job_id": original_id,
+        },
+    )
+
+
 def _validate_private_recovery_stage(manifest: dict, manifest_path: Path, phase: str) -> None:
     """Worker live check, also retained by the no-shared-GID legacy API."""
     stage = Path(manifest["unit"]) / manifest["stage_directory"]
@@ -801,6 +944,9 @@ class MediaOrganizerExecuteHandler(TaskHandler):
         if not isinstance(state, dict):
             raise ValueError("invalid execution WorkJob approval")
         _validate_job_approval(settings, job, state)
+        if state.get("abandon_frozen_before_publish") is True:
+            _abandon_frozen_before_publish(job, context, settings, state)
+            return
         mode = execution_mode(settings)
         original_id = state.get("recovery_of_job_id")
         preview_id = state.get("preview_job_id")
