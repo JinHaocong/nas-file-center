@@ -228,6 +228,7 @@ def _preview_row(record: dict, report: Path) -> dict:
     return {
         "unit": record["unit"], "status": record["status"], "reason": record.get("reason"),
         "operation": record.get("operation"), "organizer_mode": record.get("organizer_mode"),
+        **({"local_media_kinds": record["local_media_kinds"]} if record.get("local_media_kinds") else {}),
         "totals": totals, "total_files": sum(totals.values()),
         "total_bytes": record.get("total_bytes", 0), "groups": record.get("groups", []),
         "needed_moves": record.get("actual_moves", 0),
@@ -324,6 +325,7 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence)
         return "skipped", unit["reason"]
     try:
         chosen = _selection(unit["unit"], settings)
+        local_media_kinds = tuple(unit.get("local_media_kinds", ()))
         options = {
             "mode": unit["organizer_mode"], "allowed_roots": settings.allowed_roots,
             "media_package_root": settings.media_package_root, "quarantine_root": settings.quarantine_root,
@@ -332,6 +334,7 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence)
             manifest = load_frozen_manifest(path, job_id=job_id, package=chosen)
             package_root = settings.media_package_root
             if (manifest.get("organizer_mode") != options["mode"]
+                    or tuple(manifest.get("local_media_kinds", ())) != local_media_kinds
                     or manifest.get("input_fingerprint") != unit["input_fingerprint"]
                     or manifest.get("media_package_root") != (str(package_root) if package_root else None)
                     or manifest.get("quarantine_root") != (str(settings.quarantine_root)
@@ -345,7 +348,9 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence)
             manifest, lease_fence=fence, allow_fuse_compat=settings.media_package_fuse_compat_enabled,
             link_intent=LinkIntent(path.with_suffix(".link.json")),
         )
-        fresh = preview_organizing_unit(chosen, include_items=True, **options)
+        fresh = preview_organizing_unit(
+            chosen, include_items=True, local_media_kinds=local_media_kinds, **options,
+        )
         if fresh["status"] != "already_organized":
             raise MediaPackageExecutionConflict("整理后重新扫描时仍发现变更")
         expected = {row["final"]: row["identity"] for row in manifest["moves"]}

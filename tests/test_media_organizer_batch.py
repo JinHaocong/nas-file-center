@@ -134,6 +134,7 @@ def test_batch_preserves_ambiguous_loose_files_and_organizes_confirmed_units(tmp
 
     kept = {
         author / "随手拍.mp4": b"author level media",
+        author / "归属不明.jpg": b"an unrelated author level picture",
         mixed_wrapper / "散图.jpg": b"unassigned picture",
     }
     moved = {
@@ -174,6 +175,63 @@ def test_batch_preserves_ambiguous_loose_files_and_organizes_confirmed_units(tmp
     assert {Path(row["unit"]) for row in rescan["units"] if row["status"] == "blocked"} == expected_blocked
 
 
+def test_batch_organizes_numbered_siblings_and_local_media_without_crossing_boundaries(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    selection = settings.data_mount / "Else album"
+    download = selection / "下载目录"
+    author = selection / "2602" / "260216" / "作者A"
+    titled_work = author / "NO.001"
+    photo_container = selection / "时间难考证" / "照片"
+    titled_photos = photo_container / "今日份自拍"
+    unknown = selection / "新建文件夹"
+
+    kept = {
+        author / "videos" / "001.mp4": b"separate old wrapper",
+        unknown / "散图.jpg": b"unknown scope",
+    }
+    moved = {
+        download / "recap.mp4": (download / "001.mp4", b"parent video"),
+        download / "1" / "clip.mp4": (download / "1" / "001.mp4", b"first package"),
+        download / "2" / "clip.mp4": (download / "2" / "001.mp4", b"second package"),
+        titled_work / "封面.jpg": (titled_work / "001.jpg", b"titled work"),
+        photo_container / "a.jpg": (photo_container / "001.jpg", b"local picture one"),
+        photo_container / "b.PNG": (photo_container / "002.PNG", b"local picture two"),
+        titled_photos / "a.jpg": (titled_photos / "001.jpg", b"titled subgroup"),
+    }
+    for path, content in (kept | {source: data for source, (_, data) in moved.items()}).items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    for position in range(201):
+        (author / f"clip-{position:03d}.mp4").write_bytes(b"x")
+
+    expected_ready = {download, download / "1", download / "2", author,
+                      titled_work, photo_container, titled_photos}
+    preview = _preview(client, settings, selection)
+    assert {Path(row["unit"]) for row in preview["units"] if row["status"] == "ready"} == expected_ready
+    author_preview = next(row for row in preview["units"] if row["unit"] == str(author))
+    assert author_preview["totals"] == {"P": 0, "V": 201, "Other": 0}
+    assert [group["count"] for group in author_preview["groups"]] == [200, 1]
+
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert {Path(item["unit"]) for item in result["items"] if item["status"] == "success"} == expected_ready
+    assert result["summary"]["failed_count"] == 0
+    for path, content in kept.items():
+        assert path.read_bytes() == content
+    for source, (destination, content) in moved.items():
+        assert destination.read_bytes() == content
+        assert not source.exists()
+    assert len(list((author / "V [200 200B]").iterdir())) == 200
+    assert (author / "V_1 [1 1B]" / "001.mp4").read_bytes() == b"x"
+
+    rescan = _preview(client, settings, selection)
+    assert (rescan["summary"]["needed_moves"], rescan["summary"]["renamed_count"]) == (0, 0)
+    assert expected_ready <= {Path(row["unit"]) for row in rescan["units"]
+                              if row["status"] == "already_organized"}
+    assert any(row["unit"] == str(unknown) and row["status"] == "blocked" for row in rescan["units"])
+
+
 def test_batch_rechecks_author_loose_files_when_a_work_appears_after_preview(tmp_path):
     client, settings, _ = _fixture(tmp_path)
     selection = settings.data_mount / "Else album"
@@ -181,6 +239,8 @@ def test_batch_rechecks_author_loose_files_when_a_work_appears_after_preview(tmp
     author.mkdir(parents=True)
     loose_video = author / "随手拍.mp4"
     loose_video.write_bytes(b"author level media")
+    loose_picture = author / "散图.jpg"
+    loose_picture.write_bytes(b"unassigned picture")
 
     preview = _preview(client, settings, selection)
     assert [(row["unit"], row["status"]) for row in preview["units"]] == [(str(author), "ready")]
@@ -193,6 +253,7 @@ def test_batch_rechecks_author_loose_files_when_a_work_appears_after_preview(tmp
     result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
     assert [(item["unit"], item["status"]) for item in result["items"]] == [(str(author), "conflict")]
     assert loose_video.read_bytes() == b"author level media"
+    assert loose_picture.read_bytes() == b"unassigned picture"
     assert work_cover.read_bytes() == b"new work cover"
     assert not (author / "001.mp4").exists()
 

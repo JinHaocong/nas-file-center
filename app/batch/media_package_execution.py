@@ -92,9 +92,11 @@ def prepare_organizer_manifest(
     """Freeze the exact per-unit layout shown by the recursive preview."""
     from app.batch.media_organizer_planner import preview_organizing_unit
 
+    local_media_kinds = tuple(preview_record.get("local_media_kinds", ()))
     fresh = preview_organizing_unit(
         unit, mode=mode, allowed_roots=allowed_roots, quarantine_root=quarantine_root,
         media_package_root=media_package_root, include_items=True, include_mapping=True,
+        local_media_kinds=local_media_kinds,
     )
     if (preview_record.get("status") != "ready" or fresh.get("status") != "ready"
             or fresh["actual_moves"] != preview_record.get("needed_moves")
@@ -104,6 +106,7 @@ def prepare_organizer_manifest(
     return {
         **_freeze_layout(unit, fresh, media_package_root=media_package_root, job_id=job_id),
         "organizer_mode": mode, "quarantine_root": str(quarantine_root) if quarantine_root else None,
+        **({"local_media_kinds": list(local_media_kinds)} if local_media_kinds else {}),
     }
 
 
@@ -1382,6 +1385,7 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
                 live = list(walk_organizing_unit(
                     package, mode=mode, media_package_root=Path(root) if root else None,
                     quarantine_root=Path(quarantine) if quarantine else None,
+                    local_media_kinds=tuple(manifest.get("local_media_kinds", ())),
                 ))
         except (OSError, ValueError) as exc:
             raise MediaPackageExecutionConflict(

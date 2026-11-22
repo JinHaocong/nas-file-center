@@ -38,6 +38,7 @@ def test_author_loose_files_are_reported_separately_from_named_works(tmp_path):
     author = tmp_path / "2611" / "261122" / "作者A"
     photo_only_author = author.with_name("作者B")
     put(author / "随手拍.mp4")
+    put(author / "散图.png")
     put(author / "NO.001" / "封面.jpg")
     put(photo_only_author / "P1" / "封面.jpg")
 
@@ -47,9 +48,55 @@ def test_author_loose_files_are_reported_separately_from_named_works(tmp_path):
 
     assert rows[str(author)]["status"] == "blocked"
     assert rows[str(author)]["reason"] == "作者层散文件待确认"
-    assert rows[str(author)]["totals"] == {"P": 0, "V": 1, "Other": 0}
+    assert rows[str(author)]["totals"] == {"P": 1, "V": 1, "Other": 0}
     assert rows[str(author / "NO.001")]["sample_moves"][0]["target"] == str(author / "NO.001/001.jpg")
     assert rows[str(photo_only_author)]["sample_moves"][0]["target"] == str(photo_only_author / "001.jpg")
+
+
+def test_pure_author_layer_groups_only_its_direct_media(tmp_path):
+    author = tmp_path / "2611" / "261122" / "作者A"
+    for index in range(201):
+        put(author / f"原视频-{index:03d}.mp4")
+    put(author / "videos" / "旧素材.mp4")
+    put(author / "NO.001" / "封面.jpg")
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(
+        author.parent, allowed_roots=[tmp_path], include_mapping=True,
+    )}
+
+    assert rows[str(author)]["status"] == "ready"
+    assert [group["name"] for group in rows[str(author)]["groups"]] == ["V [200 800B]", "V_1 [1 4B]"]
+    assert all(Path(move["source"]).parent == author for move in rows[str(author)]["_mapping_items"])
+    assert rows[str(author / "NO.001")]["sample_moves"][0]["target"] == str(author / "NO.001/001.jpg")
+
+
+def test_author_rescan_keeps_an_existing_canonical_photo_and_other_layout(tmp_path):
+    author = tmp_path / "2611" / "261122" / "作者A"
+    put(author / "P [1 4B]/001.jpg")
+    put(author / "Other [1 4B]/notes.txt")
+    put(author / "NO.001/001.jpg")
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(author.parent, allowed_roots=[tmp_path])}
+
+    assert rows[str(author)]["status"] == "already_organized"
+    assert rows[str(author)]["totals"] == {"P": 1, "V": 0, "Other": 1}
+    assert rows[str(author)]["actual_moves"] == 0
+
+
+def test_grouped_author_rescan_keeps_other_and_excludes_unrelated_legacy_wrappers(tmp_path):
+    author = tmp_path / "2611" / "261122" / "作者A"
+    for index in range(1, 201):
+        put(author / "V [200 800B]" / f"{index:03d}.mp4")
+    put(author / "V_1 [1 4B]/001.mp4")
+    put(author / "Other [1 4B]/notes.txt")
+    put(author / "videos/旧素材.mp4")
+    put(author / "NO.001/001.jpg")
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(author.parent, allowed_roots=[tmp_path])}
+
+    assert rows[str(author)]["status"] == "already_organized"
+    assert rows[str(author)]["totals"] == {"P": 0, "V": 201, "Other": 1}
+    assert rows[str(author)]["actual_moves"] == 0
 
 
 def test_named_work_directly_under_a_date_can_organize_its_own_files(tmp_path):
@@ -243,6 +290,20 @@ def test_mixed_wrapper_preserves_its_loose_files_and_allows_pure_sibling(tmp_pat
     assert rows[str(child)]["sample_moves"][0]["target"] == str(child / "001.webp")
 
 
+def test_photo_container_organizes_direct_images_and_preserves_its_named_child(tmp_path):
+    work = tmp_path / "时间难考证"
+    photos = work / "照片"
+    child = photos / "今日份自拍"
+    put(photos / "本层散图.jpg")
+    put(child / "子组封面.webp")
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(work, allowed_roots=[tmp_path])}
+
+    assert rows[str(photos)]["status"] == "ready"
+    assert [move["target"] for move in rows[str(photos)]["sample_moves"]] == [str(photos / "001.jpg")]
+    assert rows[str(child)]["sample_moves"][0]["target"] == str(child / "001.webp")
+
+
 @pytest.mark.parametrize("date", ["261001", "2026-10-01", "2026年10月1日"])
 def test_date_keeps_author_names_that_look_like_classification_wrappers(tmp_path, date):
     day = tmp_path / date
@@ -289,6 +350,37 @@ def test_numbered_leaf_siblings_of_an_explicit_collection_are_independent(tmp_pa
         "001.jpg", "002.png",
     ]
     assert rows[str(collection / "02")]["sample_moves"][0]["target"] == str(collection / "02/001.jpg")
+
+
+def test_contiguous_numbered_media_leaves_are_independent_under_a_generic_parent(tmp_path):
+    parent = tmp_path / "旧下载"
+    put(parent / "parent.mp4")
+    put(parent / "1/part.mp4")
+    put(parent / "02/part.mp4")
+    put(parent / "02/second.mp4")
+    put(parent / "3/part.mp4")
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(parent, allowed_roots=[tmp_path])}
+
+    assert rows[str(parent)]["totals"] == {"P": 0, "V": 1, "Other": 0}
+    assert {
+        Path(row["unit"]).relative_to(parent).as_posix(): [Path(move["target"]).name for move in row["sample_moves"]]
+        for row in rows.values() if row["status"] == "ready"
+    } == {".": ["001.mp4"], "1": ["001.mp4"], "02": ["001.mp4", "002.mp4"], "3": ["001.mp4"]}
+
+
+def test_numbered_packages_keep_their_role_after_parent_and_package_bucketing(tmp_path):
+    parent = tmp_path / "旧下载"
+    for unit in (parent, parent / "1"):
+        for index in range(1, 201):
+            put(unit / "V [200 800B]" / f"{index:03d}.mp4")
+        put(unit / "V_1 [1 4B]" / "001.mp4")
+    put(parent / "2/001.mp4")
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(parent, allowed_roots=[tmp_path])}
+
+    assert set(rows) == {str(parent), str(parent / "1"), str(parent / "2")}
+    assert all(row["status"] == "already_organized" and row["actual_moves"] == 0 for row in rows.values())
 
 
 def test_numbered_container_with_named_work_preserves_ambiguous_direct_files(tmp_path):
