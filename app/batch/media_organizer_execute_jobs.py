@@ -705,9 +705,8 @@ def _abandon_frozen_before_publish(
         original = session.get(WorkJob, original_id)
         if original is None or original.kind != EXECUTE_KIND or original.status != "failed":
             raise ValueError("original execution is no longer a failed task")
-        original_state = json.loads(original.state_json or "{}")
-        checkpoint = json.loads(original.checkpoint_json or "{}")
-        if (not isinstance(original_state, dict) or not isinstance(checkpoint, dict)
+        original_state, checkpoint, original_unit, bound = _original_recovery_authority(original, settings)
+        if (not bound or original_unit != Path(state.get("unit", ""))
                 or checkpoint.get("phase") != "frozen"
                 or checkpoint.get("execution_mode") != "maintenance_window"):
             raise ValueError("original task is no longer in the pre-publication frozen phase")
