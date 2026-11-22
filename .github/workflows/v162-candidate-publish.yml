@@ -1,0 +1,201 @@
+name: Publish V1.6.2 NAS compatibility candidate
+
+on:
+  push:
+    branches:
+      - feat/v1.6.2-nas-compat-feasibility
+    paths:
+      - ".github/workflows/v162-candidate-publish.yml"
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "app/**"
+      - "frontend/**"
+      - "scripts/v16_nas_maintenance_acceptance.py"
+      - "scripts/v162_run_disposable_nas_acceptance.sh"
+      - "tests/**"
+      - "docs/v162-nas-compat-feasibility.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v162-candidate-publish-\${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    name: Build, verify and publish immutable V1.6.2 NAS candidate
+    if: >-
+      github.repository == 'JinHaocong/nas-file-center' &&
+      github.ref == 'refs/heads/feat/v1.6.2-nas-compat-feasibility' &&
+      contains(github.event.head_commit.message, '[publish-v162-candidate]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: \${{ github.sha }}
+
+      - name: Verify exact commit and isolated candidate tag
+        id: identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REPOSITORY" = "JinHaocong/nas-file-center"
+          test "$GITHUB_REF" = "refs/heads/feat/v1.6.2-nas-compat-feasibility"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          SHORT="\${GITHUB_SHA:0:12}"
+          echo "tag=kerwinjhc/nas-file-center:v1.6.2-nas-compat-$SHORT" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Require the existing authorized Docker Hub token
+        shell: bash
+        env:
+          DOCKERHUB_TOKEN: \${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "$DOCKERHUB_TOKEN" ]]; then
+            echo "::error::Missing DOCKERHUB_TOKEN; no image will be published."
+            exit 1
+          fi
+
+      - name: Install backend test dependencies
+        run: python -m pip install -e ".[test]" PyYAML
+
+      - name: Run full backend regression and candidate delivery contracts
+        env:
+          PYTHONPATH: .
+          CONFIG_DIR: /tmp/nfc-config
+          DATA_MOUNT: /tmp/nfc-data
+          ALLOWED_ROOTS: /tmp/nfc-data
+          QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+        run: |
+          set -Eeuo pipefail
+          pytest --disable-warnings -q
+          bash -n scripts/v162_run_disposable_nas_acceptance.sh
+          python -m pytest -q tests/test_v162_candidate_delivery.py
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Run frontend tests, typecheck and production build
+        working-directory: frontend
+        run: |
+          set -Eeuo pipefail
+          npm ci
+          npm test
+          npm run typecheck
+          npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build exact linux/amd64 candidate image (do not push yet)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: \${{ steps.identity.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/JinHaocong/nas-file-center
+            org.opencontainers.image.revision=\${{ github.sha }}
+            org.opencontainers.image.version=v1.6.2-nas-compat-candidate
+          cache-from: type=gha,scope=v162-nas-candidate
+          cache-to: type=gha,scope=v162-nas-candidate,mode=max
+
+      - name: Verify image identity and fclones binary
+        env:
+          CANDIDATE_IMAGE: \${{ steps.identity.outputs.tag }}
+        run: |
+          set -Eeuo pipefail
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$CANDIDATE_IMAGE")" = "linux/amd64"
+          test "$(docker image inspect --format '{{.Config.User}}' "$CANDIDATE_IMAGE")" = "10001:10000"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$CANDIDATE_IMAGE")" = "$GITHUB_SHA"
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --entrypoint /usr/local/bin/fclones \
+            "$CANDIDATE_IMAGE" --version | grep -Fx "fclones 0.35.0"
+
+      - name: Full Root Worker lifecycle on disposable GitHub runner filesystem
+        env:
+          CANDIDATE_IMAGE: \${{ steps.identity.outputs.tag }}
+        shell: bash
+        timeout-minutes: 20
+        run: |
+          set -Eeuo pipefail
+          SCRATCH_PARENT="$(sudo mktemp -d /tmp/nfc-v162-root-publish-ci.XXXXXXXX)"
+          sudo chmod 0755 "$SCRATCH_PARENT"
+          IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$CANDIDATE_IMAGE")"
+          sudo python3 scripts/v16_nas_maintenance_acceptance.py \
+            --data-root "$SCRATCH_PARENT" \
+            --image "$IMAGE_ID" \
+            --candidate-sha "$GITHUB_SHA" \
+            --nas-root-worker | tee v162-candidate-lifecycle.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("v162-candidate-lifecycle.json").read_text())
+          assert report["status"] == "PASS_MAINTENANCE_LIFECYCLE"
+          assert report["candidate_sha"] == __import__("os").environ["GITHUB_SHA"]
+          assert report["nas_root_worker"] is True
+          assert report["release_ready"] is False
+          for case in ("mixed", "boundary", "historical"):
+              assert report["cases"][case]["complete"] is True
+              assert report["cases"][case]["second_scan"] == {
+                  "needed_moves": 0, "renamed_count": 0
+              }
+          print("V1.6.2_ROOT_WORKER_CANDIDATE_LIFECYCLE=PASS_CI_HOST_ONLY")
+          PY
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: kerwinjhc
+          password: \${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push only the unique candidate tag and resolve immutable digest
+        id: push
+        env:
+          CANDIDATE_IMAGE: \${{ steps.identity.outputs.tag }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker push "$CANDIDATE_IMAGE" | tee candidate-push.log
+          DIGEST="$(sed -n 's/.*digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' candidate-push.log | tail -1)"
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          IMAGE_REF="kerwinjhc/nas-file-center@$DIGEST"
+          docker buildx imagetools inspect "$IMAGE_REF" > candidate-registry-manifest.txt
+          echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+          echo "$IMAGE_REF" | tee candidate-image-digest.txt
+          {
+            echo "## V1.6.2 NAS compatibility candidate"
+            echo
+            echo "- Source SHA: \`$GITHUB_SHA\`"
+            echo "- Immutable image: \`$IMAGE_REF\`"
+            echo "- Candidate tag: \`$CANDIDATE_IMAGE\`"
+            echo
+            echo "This is a pre-release candidate only. ZOS/zfuse acceptance and independent review remain required."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload candidate image and lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v162-nas-candidate-\${{ github.sha }}
+          retention-days: 30
+          if-no-files-found: ignore
+          path: |
+            candidate-push.log
+            candidate-image-digest.txt
+            candidate-registry-manifest.txt
+            v162-candidate-lifecycle.json
