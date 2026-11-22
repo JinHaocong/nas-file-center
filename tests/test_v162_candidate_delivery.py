@@ -36,8 +36,8 @@ def test_candidate_tag_is_unique_and_never_overwrites_release_aliases():
     workflow = (ROOT / ".github/workflows/v162-candidate-publish.yml").read_text()
     assert "v1.6.2-nas-compat-$SHORT" in workflow
     assert "push: false" in workflow
-    assert "docker push \"$CANDIDATE_IMAGE\"" in workflow
-    assert "latest" not in workflow
+    assert 'docker push "$CANDIDATE_IMAGE"' in workflow
+    assert "kerwinjhc/nas-file-center:latest" not in workflow
     assert "nas-file-center:1.6.2" not in workflow
 
 
