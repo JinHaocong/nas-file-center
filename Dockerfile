@@ -10,7 +10,7 @@ RUN npm run build
 # Avoid compiling Rust and reaching crates.io during NAS image builds.
 FROM python:3.12-slim-bookworm AS fclones-builder
 ARG FCLONES_VERSION=0.35.0
-ARG TARGETARCH
+ARG TARGETARCH=amd64
 RUN FCLONES_VERSION="${FCLONES_VERSION}" TARGETARCH="${TARGETARCH}" python - <<'PY'
 import hashlib
 import io
@@ -30,6 +30,7 @@ if arch != "amd64":
     raise SystemExit(f"Official pinned fclones binary is currently configured for linux/amd64, got {arch}")
 
 expected_size = 1_965_008
+expected_sha256 = "24631bca99e4c20707d12f24676e83a5f1169bd350924dd9852157b243246dff"
 url = (
     f"https://github.com/pkolaczk/fclones/releases/download/v{version}/"
     f"fclones-{version}-linux-glibc-x86_64.tar.gz"
@@ -49,6 +50,9 @@ for attempt in range(5):
 if archive_bytes is None or len(archive_bytes) != expected_size:
     actual = None if archive_bytes is None else len(archive_bytes)
     raise SystemExit(f"fclones release archive size mismatch: expected {expected_size}, got {actual}")
+actual_sha256 = hashlib.sha256(archive_bytes).hexdigest()
+if actual_sha256 != expected_sha256:
+    raise SystemExit(f"fclones release SHA256 mismatch: expected {expected_sha256}, got {actual_sha256}")
 
 with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:gz") as archive:
     candidates = [
@@ -70,7 +74,7 @@ reported = subprocess.check_output([str(target), "--version"], text=True).strip(
 if reported != f"fclones {version}":
     raise SystemExit(f"fclones version mismatch: expected {version}, got {reported}")
 print(f"Verified official fclones {version}: {len(archive_bytes)}-byte archive; binary={reported}")
-print(f"fclones archive SHA256 (for release pin review): {hashlib.sha256(archive_bytes).hexdigest()}")
+print(f"Verified fclones release SHA256: {actual_sha256}")
 PY
 
 # Stage 3: Python Runtime
