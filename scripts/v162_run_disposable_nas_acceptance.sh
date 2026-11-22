@@ -1,30 +1,37 @@
 #!/usr/bin/env bash
-# Run only on the owner's NAS after approval for a new random SATA scratch.
-# Does not install/update Komodo, touch media or change any existing ACL.
+# Pull-only NAS acceptance. The candidate image is built and published by GitHub Actions.
+# This script never builds images, installs a Komodo stack, changes ACLs or scans existing media.
 set -Eeuo pipefail
 umask 077
 
 usage() {
   cat <<'HELP'
-One-time NAS V1.6.2 acceptance:
+One-time NAS V1.6.2 acceptance (no image build on the NAS):
   sudo bash scripts/v162_run_disposable_nas_acceptance.sh \
     --data-root "/absolute/host/SATA/data" \
-    --candidate-sha "<exact-40-character-PR-head-SHA>"
-Fetches exactly the commit, builds an isolated candidate Docker image, then
-runs real API/Worker execution, recovery and cleanup ONLY in a new random
-scratch child. Existing media is never scanned or changed.
+    --candidate-sha "<exact-40-character-PR-head-SHA>" \
+    --image-ref "kerwinjhc/nas-file-center@sha256:<64-character-digest>"
+
+Pulls the immutable candidate image published by GitHub Actions, verifies its
+source SHA and linux/amd64 identity, then runs real API/Worker execution,
+recovery and cleanup ONLY in a new random scratch child. Existing media,
+Komodo and ACLs are untouched. The synthetic fixture and evidence are retained.
 HELP
 }
 if [[ "$#" -eq 1 && "$1" == "--help" ]]; then usage; exit 0; fi
-if [[ "$#" -ne 4 || "$1" != "--data-root" || "$3" != "--candidate-sha" ]]; then
+if [[ "$#" -ne 6 || "$1" != "--data-root" || "$3" != "--candidate-sha" || "$5" != "--image-ref" ]]; then
   usage >&2; exit 2
 fi
-DATA_ROOT="$2"; SHA="$4"
+DATA_ROOT="$2"; SHA="$4"; IMAGE_REF="$6"
 if [[ "$EUID" -ne 0 ]]; then
   echo "Use sudo (only for the disposable scratch test)." >&2; exit 2
 fi
 if [[ ! "$SHA" =~ ^[a-f0-9]{40}$ ]]; then
   echo "Invalid exact candidate SHA." >&2; exit 2
+fi
+if [[ ! "$IMAGE_REF" =~ ^kerwinjhc/nas-file-center@sha256:[a-f0-9]{64}$ ]]; then
+  echo "Image must be the immutable kerwinjhc/nas-file-center@sha256 digest from the candidate workflow." >&2
+  exit 2
 fi
 if [[ "$DATA_ROOT" != /* || "$DATA_ROOT" == "/" || "$DATA_ROOT" == *"/../"* ||
       "$DATA_ROOT" == *"//"* || "$DATA_ROOT" == */ || "$DATA_ROOT" == *","* ||
@@ -55,7 +62,7 @@ cleanup_work() {
 }
 trap cleanup_work EXIT
 
-echo "Fetching exact PR candidate $SHA (no Komodo changes)."
+echo "Fetching exact PR acceptance driver $SHA (no Komodo changes)."
 git -C "$WORK" init -q
 git -C "$WORK" remote add origin https://github.com/JinHaocong/nas-file-center.git
 git -C "$WORK" -c protocol.version=2 fetch -q --depth=1 origin "$SHA"
@@ -64,17 +71,13 @@ git -C "$WORK" -c advice.detachedHead=false checkout -q FETCH_HEAD
   echo "Git revision mismatch. Stopping." >&2; exit 2;
 }
 
-TAG="nfc-v162-disposable-test:$(printf %.12s "$SHA")"
-echo "Building independent test image $TAG; production containers remain untouched."
-# Build RUN steps on the NAS host network: ZOS Docker bridge DNS may not resolve external hosts.
-# This affects build-time downloads only; test containers still run with --network none.
-docker build --network=host \
-  --label "org.opencontainers.image.revision=$SHA" \
-  --tag "$TAG" "$WORK"
-IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$TAG")"
-LABEL_SHA="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$TAG")"
-[[ "$LABEL_SHA" == "$SHA" && "$IMAGE_ID" == sha256:* ]] || {
-  echo "Candidate image provenance check failed." >&2; exit 2;
+echo "Pulling immutable GitHub-built candidate image: $IMAGE_REF"
+docker pull "$IMAGE_REF"
+IMAGE_ID="$(docker image inspect --format '{{.Id}}' "$IMAGE_REF")"
+LABEL_SHA="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE_REF")"
+PLATFORM="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE_REF")"
+[[ "$LABEL_SHA" == "$SHA" && "$IMAGE_ID" == sha256:* && "$PLATFORM" == "linux/amd64" ]] || {
+  echo "Candidate image provenance/platform check failed." >&2; exit 2;
 }
 
 echo "Starting full lifecycle ONLY within a new random SATA scratch folder."
@@ -82,7 +85,7 @@ RESULT="$WORK/acceptance-result.json"
 rc=0
 python3 "$WORK/scripts/v16_nas_maintenance_acceptance.py" \
   --data-root "$DATA_ROOT" \
-  --image "$IMAGE_ID" \
+  --image "$IMAGE_REF" \
   --candidate-sha "$SHA" \
   --nas-root-worker > "$RESULT" || rc=$?
 
@@ -98,6 +101,7 @@ except (OSError, ValueError) as exc:
 print("=" * 55)
 print("RESULT:", report.get("status", "UNKNOWN"))
 print("Candidate:", report.get("candidate_sha"))
+print("Image:", report.get("requested_image"))
 print("Root Worker:", report.get("nas_root_worker"))
 print("Fixture:", report.get("fixture", report.get("requested_fixture", "not created")))
 for case, result in (report.get("cases") or {}).items():
