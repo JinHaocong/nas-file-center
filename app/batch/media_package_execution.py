@@ -20,7 +20,8 @@ from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_package_organizer import (
     APPEND_SINGLE_VIDEO, APPEND_VIDEO_OPERATIONS, MAX_FILES_PER_GROUP,
-    PROMOTE_NUMBERED_PHOTO_GROUPS, _input_fingerprint, _package_path, _walk_package,
+    PROMOTE_NUMBERED_PHOTO_GROUPS, _classify, _input_fingerprint, _open_luolcy_author,
+    _package_path, _size_label, _walk_package,
     preview_media_package_package,
 )
 from app.fs_ops import rename_directory_noreplace_compat, rename_noreplace_at
@@ -32,6 +33,10 @@ class MediaPackageExecutionConflict(ValueError):
 
 MANIFEST_VERSION = 2
 _FLAT_OPERATIONS = APPEND_VIDEO_OPERATIONS | {"flatten_pure_media"}
+
+
+def _is_luolcy_author(manifest: dict) -> bool:
+    return manifest.get("organizer_mode") == "luolcy" and manifest.get("whole_author") is True
 
 
 def _identity(st) -> list[int]:
@@ -100,7 +105,8 @@ def prepare_organizer_manifest(
     fresh = preview_organizing_unit(
         unit, mode=mode, allowed_roots=allowed_roots, quarantine_root=quarantine_root,
         media_package_root=media_package_root, include_items=True, include_mapping=True,
-        local_media_kinds=local_media_kinds, whole_author=None if whole_author else False,
+        local_media_kinds=local_media_kinds,
+        whole_author=None if mode == "semantic" and whole_author else whole_author,
     )
     if (preview_record.get("status") != "ready" or fresh.get("status") != "ready"
             or fresh.get("whole_author", False) != whole_author
@@ -392,22 +398,26 @@ def _group_files(manifest: dict, group_index: int) -> list[dict]:
 
 def _verify_group_contents(manifest: dict, group_index: int, directory: Path) -> None:
     group = manifest["groups"][group_index]
-    expected = {Path(row["final"]).name.casefold(): row["identity"]
-                for row in _group_files(manifest, group_index)}
+    exact = _is_luolcy_author(manifest)
+    expected = {
+        row["target_name"] if exact else row["target_name"].casefold(): row["identity"]
+        for row in _group_files(manifest, group_index)
+    }
     if len(expected) != group["count"]:
         raise MediaPackageExecutionConflict("Group filename collision in frozen manifest")
     fd = _open_folder(directory)
     try:
+        _check_directory(os.fstat(fd), directory, manifest["package_dev"])
         seen = set()
         size = 0
         with os.scandir(fd) as entries:
             for entry in entries:
-                folded = entry.name.casefold()
-                if folded in seen or folded not in expected:
+                key = entry.name if exact else entry.name.casefold()
+                if key in seen or key not in expected:
                     raise MediaPackageExecutionConflict("Unrecognized file inside MediaPackage stage/group")
-                seen.add(folded)
+                seen.add(key)
                 st = entry.stat(follow_symlinks=False)
-                _check_file(st, expected[folded], directory / entry.name)
+                _check_file(st, expected[key], directory / entry.name)
                 size += int(st.st_size)
         if len(seen) != group["count"] or size != group["bytes"]:
             raise MediaPackageExecutionConflict("Group count/size is incomplete")
@@ -598,6 +608,8 @@ def _compat_inspect_group(manifest: dict, group_index: int) -> dict | None:
         return None
     dst_fd = _open_folder(final)
     data = _compat_marker_bytes(manifest, group_index)
+    rows = _group_files(manifest, group_index)
+    exact = {row["target_name"] for row in rows} if _is_luolcy_author(manifest) else None
     try:
         _check_directory(os.fstat(dst_fd), final, manifest["package_dev"])
         if not _compat_marker_matches(dst_fd, _COMPAT_OWNER_MARKER, data):
@@ -605,9 +617,9 @@ def _compat_inspect_group(manifest: dict, group_index: int) -> dict | None:
         done = _compat_marker_matches(dst_fd, _COMPAT_COMPLETE_MARKER, data)
         expected = {
             Path(row["final"]).name.casefold(): row["identity"]
-            for row in _group_files(manifest, group_index)
+            for row in rows
         }
-        if len(expected) != len(_group_files(manifest, group_index)):
+        if len(expected) != len(rows):
             raise MediaPackageExecutionConflict("Frozen publication duplicate names")
         public_names: set[str] = set()
         with os.scandir(dst_fd) as entries:
@@ -615,7 +627,7 @@ def _compat_inspect_group(manifest: dict, group_index: int) -> dict | None:
                 if entry.name in (_COMPAT_OWNER_MARKER, _COMPAT_COMPLETE_MARKER):
                     continue
                 key = entry.name.casefold()
-                if key not in expected or key in public_names:
+                if key not in expected or key in public_names or (exact is not None and entry.name not in exact):
                     raise MediaPackageExecutionConflict("Foreign entry in owned publication")
                 public_names.add(key)
                 _check_file(entry.stat(follow_symlinks=False),
@@ -632,7 +644,7 @@ def _compat_inspect_group(manifest: dict, group_index: int) -> dict | None:
             with os.scandir(src_fd) as entries:
                 for entry in entries:
                     key = entry.name.casefold()
-                    if key not in expected or key in stage_names:
+                    if key not in expected or key in stage_names or (exact is not None and entry.name not in exact):
                         raise MediaPackageExecutionConflict("Foreign entry in owned staging")
                     stage_names.add(key)
                     _check_file(entry.stat(follow_symlinks=False),
@@ -1334,6 +1346,8 @@ def _execute_flat_manifest(manifest: dict, lease_fence: Callable[[], None],
 
     _verify_append_scope(manifest, package)
     _verify_append_file_bindings(manifest, publishing=True)
+    if _is_luolcy_author(manifest):
+        _verify_luolcy_author_scope(manifest, package)
     for row in _flat_rows(manifest):
         _publish_flat_file(row, stage, package, lease_fence, link_intent)
     _remove_flat_stage(manifest, stage, lease_fence)
@@ -1351,6 +1365,13 @@ def _validate_frozen_paths(manifest: dict) -> None:
     if not isinstance(dev, int) or dev <= 0:
         raise MediaPackageExecutionConflict("Invalid frozen filesystem identity")
     root_stage = manifest.get("root_stage")
+    luolcy_author = _is_luolcy_author(manifest)
+    if luolcy_author and (
+        not manifest.get("media_package_root") or manifest.get("origin_directories")
+        or manifest.get("local_media_kinds")
+        or manifest.get("operation") not in {"flatten_pure_media", "bucket_pure_media", "sort_mixed_media"}
+    ):
+        raise MediaPackageExecutionConflict("Invalid frozen Luolcy author scope")
     if root_stage is not None:
         if (manifest.get("operation") not in _FLAT_OPERATIONS
                 or root_stage != f".nfc-media_package-stage-{manifest['job_id']}-root"
@@ -1358,6 +1379,7 @@ def _validate_frozen_paths(manifest: dict) -> None:
             raise MediaPackageExecutionConflict("Invalid frozen flat staging scope")
     elif manifest.get("operation") in _FLAT_OPERATIONS:
         raise MediaPackageExecutionConflict("Missing flat staging authority")
+    kind_indexes = {"P": 0, "V": 0}
     for index, group in enumerate(manifest.get("groups", [])):
         stage = f".nfc-media_package-stage-{manifest['job_id']}-{index}"
         if group.get("stage") != stage:
@@ -1372,6 +1394,14 @@ def _validate_frozen_paths(manifest: dict) -> None:
             raise MediaPackageExecutionConflict("Invalid frozen MediaPackage group metadata")
         if group["kind"] in ("P", "V") and group["count"] > MAX_FILES_PER_GROUP:
             raise MediaPackageExecutionConflict("200-file MediaPackage capacity exceeded")
+        if luolcy_author:
+            ordinal = kind_indexes.get(group["kind"])
+            if ordinal is None or not isinstance(group.get("bytes"), int) or group["bytes"] < 0:
+                raise MediaPackageExecutionConflict("Invalid frozen Luolcy author group")
+            stem = group["kind"] if ordinal == 0 else f"{group['kind']}_{ordinal}"
+            if group["final"] != f"{stem} [{group['count']} {_size_label(group['bytes'])}]":
+                raise MediaPackageExecutionConflict("Invalid frozen Luolcy author bucket name")
+            kind_indexes[group["kind"]] += 1
 
     rows = manifest.get("moves")
     if not isinstance(rows, list):
@@ -1396,6 +1426,9 @@ def _validate_frozen_paths(manifest: dict) -> None:
                 or row.get("final_relative_path") != os.path.relpath(final, package)):
             raise MediaPackageExecutionConflict("Invalid frozen source-to-target filename mapping")
         group_index = row.get("group")
+        if luolcy_author and (src.parent != package or _classify(src.name) not in {"P", "V"}
+                              or src.name.casefold().startswith(".nfc-")):
+            raise MediaPackageExecutionConflict("Frozen Luolcy input must be a direct media file")
         if group_index is None:
             if root_stage is None:
                 raise MediaPackageExecutionConflict("Flat target without frozen staging")
@@ -1500,31 +1533,70 @@ def _verify_recovery_protection(manifest: dict, package: Path) -> None:
         Path(media_root) if media_root else None, Path(quarantine) if quarantine else None,
     )
     for root in roots:
-        if package.is_relative_to(root) or (root.is_relative_to(package) and any(
-            Path(row[key]).is_relative_to(root)
-            for row in manifest["moves"]
-            for key in ("source", "target", "final")
-        )):
+        protected_inside = root.is_relative_to(package) and (
+            _is_luolcy_author(manifest) or any(
+                Path(row[key]).is_relative_to(root) for row in manifest["moves"]
+                for key in ("source", "target", "final")
+            )
+        )
+        if package.is_relative_to(root) or protected_inside:
             raise MediaPackageExecutionConflict(f"Protected organizer scope changed since preview: {root}")
 
 
-def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
-                            progress: Callable[[int, int], None] | None = None,
-                            allow_fuse_compat: bool = False,
-                            link_intent: LinkIntent | None = None) -> dict:
-    """Run one package idempotently; the caller owns lease checkpoints/recovery."""
-    package = Path(manifest["package"])
-    if manifest.get("schema_version") != MANIFEST_VERSION:
-        raise MediaPackageExecutionConflict("Unsupported frozen manifest version")
-    _validate_frozen_paths(manifest)
-    if not allow_fuse_compat:
-        for index in range(len(manifest["groups"])):
-            if _compat_inspect_group(manifest, index) is not None:
-                raise MediaPackageExecutionConflict(
-                    "FUSE compatibility recovery requires explicit operator opt-in"
-                )
-    fd = _open_verified_package(manifest)
-    os.close(fd)
+def _verify_luolcy_author_scope(manifest: dict, package: Path, *, completed: bool = False) -> None:
+    """Accept only frozen direct files, staging and verified publication in the author root."""
+    _verify_recovery_protection(manifest, package)
+    sources = {Path(row["source"]).name: row["identity"] for row in manifest["moves"]}
+    finals = {row["target_name"]: row["identity"] for row in manifest["moves"]
+              if row["group"] is None}
+    groups = {group["final"]: index for index, group in enumerate(manifest["groups"])}
+    stages = {group["stage"] for group in manifest["groups"]}
+    if manifest["root_stage"] is not None:
+        stages.add(manifest["root_stage"])
+
+    live_files = {}
+    live_groups = set()
+    live_stages = set()
+    fd = _open_luolcy_author(package, Path(manifest["media_package_root"]))
+    try:
+        _check_directory(os.fstat(fd), package, manifest["package_dev"])
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                name = entry.name
+                info = entry.stat(follow_symlinks=False)
+                if name in groups or name in stages:
+                    _check_directory(info, package / name, manifest["package_dev"])
+                    (live_groups if name in groups else live_stages).add(name)
+                    continue
+                identity = _identity(info)
+                if not stat.S_ISREG(info.st_mode) or identity not in (sources.get(name), finals.get(name)):
+                    raise MediaPackageExecutionConflict(f"Unreviewed entry in Luolcy author root: {package / name}")
+                live_files[name] = identity
+    finally:
+        os.close(fd)
+
+    compatible_publication = False
+    for name in live_groups:
+        index = groups[name]
+        if not completed and _compat_inspect_group(manifest, index) is not None:
+            compatible_publication = True
+            continue
+        if manifest["groups"][index]["stage"] in live_stages:
+            raise MediaPackageExecutionConflict("Frozen stage and independent Luolcy bucket both exist")
+        _verify_group_contents(manifest, index, package / name)
+
+    # Once a stage is gone, only a complete and exact publication can stand
+    # in for the original inventory. A matching folder label alone proves nothing.
+    published = (not live_stages and not compatible_publication
+                 and live_groups == groups.keys() and live_files == finals)
+    if completed and not published:
+        raise MediaPackageExecutionConflict("Luolcy author result differs from the frozen layout")
+    if not (published or live_stages or compatible_publication) and (live_groups or live_files != sources):
+        raise MediaPackageExecutionConflict("Luolcy author inputs changed since the frozen preview")
+
+
+def _verify_package_snapshot(manifest: dict, package: Path) -> None:
+    """Verify the original file inventory or existing recovery evidence."""
     # An old P/V directory is not recovery evidence merely because its
     # pathname equals a proposed final. Trust only owned stage names, verified
     # compatible-publication witnesses, or an exact complete final snapshot.
@@ -1541,23 +1613,51 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
         )
     if recovery_artifact:
         _verify_recovery_protection(manifest, package)
-    else:
+        return
+    try:
+        mode = manifest.get("organizer_mode")
+        live = (list(_walk_package(package)) if mode is None
+                else _live_organizer_snapshot(manifest, package, mode))
+    except (OSError, ValueError) as exc:
+        raise MediaPackageExecutionConflict(
+            f"Unsafe package changed since frozen preview: {exc}"
+        ) from exc
+    if (_input_fingerprint(live, package) != manifest["input_fingerprint"]
+            and not _exact_published_snapshot(manifest, live)):
+        raise MediaPackageExecutionConflict(
+            "Package changed since frozen preview; refusing file mutation"
+        )
+
+
+def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
+                            progress: Callable[[int, int], None] | None = None,
+                            allow_fuse_compat: bool = False,
+                            link_intent: LinkIntent | None = None) -> dict:
+    """Run one package idempotently; the caller owns lease checkpoints/recovery."""
+    package = Path(manifest["package"])
+    if manifest.get("schema_version") != MANIFEST_VERSION:
+        raise MediaPackageExecutionConflict("Unsupported frozen manifest version")
+    _validate_frozen_paths(manifest)
+    luolcy_author = _is_luolcy_author(manifest)
+    if luolcy_author:
         try:
-            mode = manifest.get("organizer_mode")
-            live = (list(_walk_package(package)) if mode is None
-                    else _live_organizer_snapshot(manifest, package, mode))
-        except (OSError, ValueError) as exc:
-            raise MediaPackageExecutionConflict(
-                f"Unsafe package changed since frozen preview: {exc}"
-            ) from exc
-        if (_input_fingerprint(live, package) != manifest["input_fingerprint"]
-                and not _exact_published_snapshot(manifest, live)):
-            raise MediaPackageExecutionConflict(
-                "Package changed since frozen preview; refusing file mutation"
-            )
+            _verify_luolcy_author_scope(manifest, package)
+        except OSError as exc:
+            raise MediaPackageExecutionConflict(f"Unsafe Luolcy author directory: {exc}") from exc
+    if not allow_fuse_compat:
+        for index in range(len(manifest["groups"])):
+            if _compat_inspect_group(manifest, index) is not None:
+                raise MediaPackageExecutionConflict(
+                    "FUSE compatibility recovery requires explicit operator opt-in"
+                )
+    os.close(_open_verified_package(manifest))
+    if not luolcy_author:
+        _verify_package_snapshot(manifest, package)
     if manifest.get("root_stage"):
         result = _execute_flat_manifest(manifest, lease_fence, progress, link_intent)
         result["empty_dirs_removed"] = _remove_empty_sources(manifest, lease_fence)
+        if luolcy_author:
+            _verify_luolcy_author_scope(manifest, package, completed=True)
         result["total_files"] = len(manifest["moves"])
         result["package"] = str(package)
         return result
@@ -1606,6 +1706,8 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
     retired = _retire_staged_destination_sources(
         manifest, group_modes, lease_fence,
     )
+    if luolcy_author:
+        _verify_luolcy_author_scope(manifest, package)
     published = 0
     for i in range(len(manifest["groups"])):
         if allow_fuse_compat:
@@ -1617,6 +1719,8 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
         if result == "published":
             published += 1
     cleaned = _remove_empty_sources(manifest, lease_fence, skip_finals=True)
+    if luolcy_author:
+        _verify_luolcy_author_scope(manifest, package, completed=True)
     return {
         "files_moved": completed, "files_reconciled": recovered,
         "groups_published": published, "empty_dirs_removed": retired + cleaned,

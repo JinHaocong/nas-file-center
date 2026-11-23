@@ -87,6 +87,7 @@ class MediaPackageScopeEntry:
     loose_files: list[dict] | None = None
     packages: dict[str, list[int]] | None = None
     author_identity: list[int] | None = None
+    all_direct_media: bool = False
 
 
 def _validate_scope(selection: str | Path, *, media_package_root: str | Path,
@@ -121,6 +122,28 @@ def _validate_scope(selection: str | Path, *, media_package_root: str | Path,
     return raw, len(components)
 
 
+def _open_luolcy_author(author: Path, root: Path) -> int:
+    """Open the exact author level without following links or crossing a device."""
+    _, depth = _validate_scope(
+        author, media_package_root=root, allowed_roots=[root], quarantine_root=None,
+    )
+    if depth != 3:
+        raise ValueError("Expected MediaPackage/YYMM/YYMMDD/author")
+    fd = _open_directory_nofollow(root)
+    try:
+        device = os.fstat(fd).st_dev
+        for part in author.relative_to(root).parts:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+            if os.fstat(fd).st_dev != device:
+                raise ValueError(f"Cross-device Luolcy author directory: {author}")
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def _child_directories(
     directory: Path, *, isolate_conflicts: bool, excluded_names: frozenset[str],
     include_loose_files: bool = False, check_cancelled: Callable[[], None] | None = None,
@@ -131,6 +154,7 @@ def _child_directories(
     conflicts = []
     files = []
     packages = {}
+    count = 0
     try:
         author_stat = os.fstat(fd) if include_loose_files else None
         with os.scandir(fd) as entries:
@@ -177,6 +201,7 @@ def _child_directories(
             directory, loose_files=sorted(files, key=lambda row: row["source"]),
             packages={name: packages[name] for name in sorted(packages)},
             author_identity=[author_stat.st_dev, author_stat.st_ino],
+            all_direct_media=count == len(files) and all(row["kind"] in {"P", "V"} for row in files),
         )
     return sorted(names), sorted(conflicts, key=lambda entry: entry.path), author
 
@@ -284,6 +309,33 @@ def _classify(filename: str) -> str:
     return "P" if media_type == "image" else "V" if media_type == "video" else "Other"
 
 
+def _walk_luolcy_author(
+    author: Path, root: Path, *, check_cancelled: Callable[[], None] | None = None,
+) -> Iterator[dict]:
+    """Inventory a file-only author directory for a new in-place plan."""
+    fd = _open_luolcy_author(author, root)
+    try:
+        device = os.fstat(fd).st_dev
+        with os.scandir(fd) as entries:
+            for count, entry in enumerate(entries, 1):
+                if count > MAX_SCOPE_ENTRIES_PER_DIRECTORY:
+                    raise ValueError("Too many Luolcy author entries")
+                if check_cancelled is not None and count % 256 == 0:
+                    check_cancelled()
+                path = author / entry.name
+                info = entry.stat(follow_symlinks=False)
+                kind = _classify(entry.name)
+                if (kind not in {"P", "V"} or info.st_dev != device
+                        or not stat.S_ISREG(info.st_mode) or entry.name.casefold().startswith(".nfc-")):
+                    raise ValueError(f"Luolcy author contains an unreviewed entry: {path}")
+                yield {
+                    "path": str(path), "name": entry.name, "kind": kind, "bytes": info.st_size,
+                    "dev": info.st_dev, "ino": info.st_ino, "mtime_ns": info.st_mtime_ns,
+                }
+    finally:
+        os.close(fd)
+
+
 def _walk_package(package: Path, *, directories: set[Path] | None = None):
     """Yield bounded file metadata without opening or reading file contents."""
     stack = [(package, 0)]
@@ -332,13 +384,10 @@ def _walk_package(package: Path, *, directories: set[Path] | None = None):
 def _input_fingerprint(files: list[dict], package: Path) -> str:
     """Stable digest of the entire package file snapshot, not a sampled page."""
     digest = hashlib.sha256(b"media_package-snapshot-v2\\n")
-    for item in sorted(files, key=lambda row: (
-        os.path.relpath(row["path"], package).casefold(),
-        os.path.relpath(row["path"], package),
-    )):
+    relative_items = ((os.path.relpath(item["path"], package), item) for item in files)
+    for relative, item in sorted(relative_items, key=lambda pair: (pair[0].casefold(), pair[0])):
         record = [
-            os.path.relpath(item["path"], package), item["kind"],
-            item["bytes"], item["dev"], item["ino"], item["mtime_ns"],
+            relative, item["kind"], item["bytes"], item["dev"], item["ino"], item["mtime_ns"],
         ]
         digest.update(json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
         digest.update(b"\\n")
@@ -395,11 +444,11 @@ def plan_media_layout(
     # every file before publishing any numbered basename.
     if (not numbered_photo_groups and len(items) <= MAX_FILES_PER_GROUP and totals["Other"] == 0
             and (totals["P"] == 0 or totals["V"] == 0)):
-        ordered = sorted(items, key=lambda row: (
-            append_videos and Path(row["path"]).parent != source,
-            os.path.relpath(row["path"], source).casefold(),
-            os.path.relpath(row["path"], source),
+        relative_items = ((os.path.relpath(row["path"], source), row) for row in items)
+        mapping_order = sorted(relative_items, key=lambda pair: (
+            append_videos and Path(pair[1]["path"]).parent != source, pair[0].casefold(), pair[0],
         ))
+        ordered = [row for _, row in mapping_order]
         new_names, _ = allocate_names(ordered, kind="flat")
         rename_count = sum(row["name"] != name
                            for row, name in zip(ordered, new_names))
@@ -409,24 +458,21 @@ def plan_media_layout(
             key = row["name"].casefold()
             collision_count += key in seen_original
             seen_original.add(key)
-        actual_moves = sum(
-            row["path"] != str(source / name)
-            for row, name in zip(ordered, new_names)
-        )
+        targets = [str(source / name) for name in new_names]
+        actual_moves = sum(row["path"] != target for row, target in zip(ordered, targets))
         source_paths = {row["path"] for row in ordered}
         conflicts = [
-            {"reason": "target_path_exists", "target": str(source / name)}
-            for name in new_names
-            if str(source / name) not in source_paths and os.path.lexists(source / name)
+            {"reason": "target_path_exists", "target": target}
+            for target in targets if target not in source_paths and os.path.lexists(target)
         ] if organizer_mode else []
         # Retain the complete final map for freezing and result verification.
         # The append operation needs only the changed row in its preview.
         mapping = [
-            {"source": row["path"], "target": str(source / name),
+            {"source": row["path"], "target": target,
              "source_name": row["name"], "target_name": name,
-             "original_relative_path": os.path.relpath(row["path"], source),
+             "original_relative_path": relative,
              "bytes": row["bytes"], "kind": row["kind"]}
-            for row, name in zip(ordered, new_names)
+            for (relative, row), target, name in zip(mapping_order, targets, new_names)
         ] if actual_moves or include_mapping else []
         planned = [
             row for row in mapping if not append_videos or row["source"] != row["target"]
@@ -475,11 +521,8 @@ def plan_media_layout(
     # Every existing directory containing a scanned file is an input, even
     # when it is named like a former P/V bucket. Only a *non-input* occupant
     # may block a future final name; never decide this from its label alone.
-    source_directory_names = {
-        Path(item["path"]).relative_to(source).parts[0].casefold()
-        for item in items
-        if len(Path(item["path"]).relative_to(source).parts) > 1
-    }
+    relative_parts = (Path(item["path"]).relative_to(source).parts for item in items)
+    source_directory_names = {parts[0].casefold() for parts in relative_parts if len(parts) > 1}
     with os.scandir(source) as entries:
         occupied = {entry.name.casefold(): entry.name for entry in entries}
     legacy_numbered = sorted(

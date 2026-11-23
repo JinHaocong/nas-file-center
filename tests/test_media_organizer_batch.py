@@ -2,9 +2,11 @@
 import errno
 import json
 import os
+from itertools import accumulate
 from pathlib import Path
 
 import pytest
+from sqlalchemy import event
 
 from app.db import create_engine_and_session
 from app.models import WorkJob
@@ -13,8 +15,10 @@ from app.worker import process_work_job
 from tests.test_media_package_execute_jobs import _fixture
 
 
-def _run_next(settings, expected_id):
+def _run_next(settings, expected_id, *, trace_sql=None):
     engine, sessions = create_engine_and_session(settings.database_path)
+    if trace_sql is not None:
+        event.listen(engine, "connect", lambda conn, _: conn.set_trace_callback(trace_sql))
     worker = "organizer-test-worker"
     try:
         assert acquire_worker_ownership(engine, sessions, worker)
@@ -769,34 +773,134 @@ def test_preview_conflict_and_stale_unit_leave_unrelated_unit_executable(tmp_pat
     assert (second / "001.JPG").read_bytes() == b"photo"
 
 
-def test_interrupted_worker_resumes_only_the_current_unit(tmp_path, monkeypatch):
+def test_batch_groups_consecutive_skip_transactions_and_keeps_result_order(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    selection = settings.data_mount / "Else album"
+    units = [selection / f"NO.{index:03d}" for index in range(1, 114)]
+    ready = {units[104], units[109]}
+    for unit in units:
+        unit.mkdir(parents=True)
+        (unit / ("cover.JPG" if unit in ready else "001.JPG")).write_bytes(b"photo")
+
+    preview = _preview(client, settings, selection)
+    assert preview["summary"]["already_organized_count"] == 111
+    assert preview["summary"]["ready_count"] == 2
+    batch_id = _batch(client, preview)
+    statements = []
+    assert _run_next(settings, batch_id, trace_sql=statements.append)
+
+    result_transactions = []
+    results_in_transaction = 0
+    for statement in statements:
+        if statement.startswith("INSERT INTO task_events ") and "'media_organizer_unit_result'" in statement:
+            results_in_transaction += 1
+        elif statement == "COMMIT" and results_in_transaction:
+            result_transactions.append(results_in_transaction)
+            results_in_transaction = 0
+    assert sum(result_transactions) == 113
+    assert len(result_transactions) < 15
+    assert max(result_transactions) <= 100
+    assert {104, 105, 109, 110}.issubset(accumulate(result_transactions))
+
+    route = f"/api/media-organizer/batches/{batch_id}"
+    first_page = client.get(route, params={"page": 1, "page_size": 100}).json()
+    last_page = client.get(route, params={"page": 2, "page_size": 100}).json()
+    assert last_page["status"] == "completed"
+    assert last_page["filtered_total"] == last_page["progress"]["current"] == last_page["progress"]["total"] == 113
+    assert last_page["summary"] == {"success_count": 2, "skipped_count": 111, "conflict_count": 0, "failed_count": 0}
+    assert [(row["unit"], row["status"]) for row in first_page["items"] + last_page["items"]] == [
+        (str(unit), "success" if unit in ready else "skipped") for unit in units
+    ]
+    manifests = settings.reports_dir / "organizer-v1-executions" / batch_id
+    assert {path.name for path in manifests.glob("*.json")} == {"104.json", "109.json"}
+
+
+def test_resumed_batch_rejects_a_truncated_report_even_after_the_final_result(tmp_path, monkeypatch):
+    from app.batch import media_organizer_jobs as jobs
+
+    client, settings, _ = _fixture(tmp_path)
+    unit = settings.data_mount / "NO.001"
+    unit.mkdir()
+    (unit / "cover.JPG").write_bytes(b"photo")
+    preview = _preview(client, settings, unit)
+    batch_id = _batch(client, preview)
+    report_file = settings.reports_dir / "organizer-v1-previews" / preview["job_id"] / "units.jsonl"
+    read_rows = jobs._rows
+
+    def stop_at_eof(path):
+        yield from read_rows(path)
+        if path == report_file:
+            raise SystemExit("Worker stopped before marking the batch complete")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(jobs, "_rows", stop_at_eof)
+        with pytest.raises(SystemExit):
+            _run_next(settings, batch_id)
+    route = f"/api/media-organizer/batches/{batch_id}"
+    assert client.get(route).json()["progress"]["current"] == 1
+    report_file.write_text("", encoding="utf-8")
+
+    db, sessions = create_engine_and_session(settings.database_path)
+    try:
+        assert recover_interrupted_jobs(db, sessions, worker_id="organizer-test-worker")["recovered_requeued"] == 1
+    finally:
+        db.dispose()
+    assert not _run_next(settings, batch_id)
+    result = client.get(route).json()
+    assert result["status"] == "failed"
+    assert result["error"] == "目录预览报告不完整"
+    assert result["summary"]["success_count"] == 1
+    assert (unit / "001.JPG").read_bytes() == b"photo"
+
+
+@pytest.mark.parametrize("phase", ["staging", "applied"])
+def test_interrupted_worker_resumes_only_the_current_unit(tmp_path, monkeypatch, phase):
     from app.batch import media_package_execution as engine
 
     client, settings, _ = _fixture(tmp_path)
     selection = settings.data_mount / "Else album"
-    first, second = selection / "NO.001", selection / "NO.002"
+    first, skipped, second = selection / "NO.001", selection / "NO.002", selection / "NO.003"
     first.mkdir(parents=True)
+    skipped.mkdir()
     second.mkdir()
     (first / "cover.webp").write_bytes(b"cover")
+    (skipped / "001.JPG").write_bytes(b"photo")
     (second / "trailer.mp4").write_bytes(b"trailer")
     (second / "extra.mp4").write_bytes(b"extra")
     preview = _preview(client, settings, selection)
     batch_id = _batch(client, preview)
     move = engine._move_one
+    execute = engine.execute_frozen_manifest
 
-    def interrupted(*args, **kwargs):
+    def stop_while_staging(*args, **kwargs):
         result = move(*args, **kwargs)
         if args[0]["source"].startswith(str(second)):
             raise SystemExit("Worker stopped while staging")
         return result
 
+    def stop_after_applying(manifest, **kwargs):
+        result = execute(manifest, **kwargs)
+        if manifest["package"] == str(second):
+            raise SystemExit("Worker stopped before recording the result")
+        return result
+
     with monkeypatch.context() as patch:
-        patch.setattr(engine, "_move_one", interrupted)
+        if phase == "staging":
+            patch.setattr(engine, "_move_one", stop_while_staging)
+        else:
+            patch.setattr(engine, "execute_frozen_manifest", stop_after_applying)
         with pytest.raises(SystemExit):
             _run_next(settings, batch_id)
     result_path = f"/api/media-organizer/batches/{batch_id}"
-    assert client.get(result_path).json()["summary"]["success_count"] == 1
+    interrupted_result = client.get(result_path).json()
+    assert interrupted_result["summary"]["success_count"] == 1
+    assert interrupted_result["summary"]["skipped_count"] == 1
+    assert interrupted_result["progress"]["current"] == 2
     inode = (first / "001.webp").stat().st_ino
+    published_inodes = (
+        {name: (second / name).stat().st_ino for name in ("001.mp4", "002.mp4")}
+        if phase == "applied" else {}
+    )
     db, sessions = create_engine_and_session(settings.database_path)
     try:
         recovered = recover_interrupted_jobs(db, sessions, worker_id="organizer-test-worker")
@@ -807,10 +911,13 @@ def test_interrupted_worker_resumes_only_the_current_unit(tmp_path, monkeypatch)
     result = client.get(result_path).json()
     assert result["status"] == "completed"
     assert result["summary"]["success_count"] == 2
-    assert len(result["items"]) == 2
+    assert [(row["unit"], row["status"]) for row in result["items"]] == [
+        (str(first), "success"), (str(skipped), "skipped"), (str(second), "success"),
+    ]
     assert (first / "001.webp").stat().st_ino == inode
     assert (second / "001.mp4").read_bytes() == b"extra"
     assert (second / "002.mp4").read_bytes() == b"trailer"
+    assert all((second / name).stat().st_ino == inode for name, inode in published_inodes.items())
 
 
 def test_fixed_luolcy_and_semantic_versions_are_separate_in_one_batch(tmp_path):

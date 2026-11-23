@@ -34,6 +34,8 @@ RESULT_EVENT = "media_organizer_unit_result"
 ACTIVE = ("queued", "running", "paused", "cancel_requested")
 PREVIEW_STATUSES = ("ready", "blocked", "already_organized", "skipped", "needs_assignment")
 RESULT_STATUSES = ("success", "skipped", "conflict", "failed")
+RESULT_COMMIT_SIZE = 100
+RESULT_COMMIT_INTERVAL = 0.8
 
 
 def _selection(value: str, settings: Settings) -> Path:
@@ -462,21 +464,25 @@ class MediaOrganizerPreviewHandler(TaskHandler):
                            progress_message="目录预览完成")
 
 
-def _record_result(context: JobContext, ordinal: int, total: int, result: dict) -> None:
+def _record_results(context: JobContext, ordinal: int, total: int, results: list[dict]) -> None:
+    """Commit a contiguous run of results and advance its durable resume position."""
     from app.tasks.recovery import assert_active_worker_lease
 
+    end = ordinal + len(results)
     with context.SessionLocal() as session:
         session.execute(text("BEGIN IMMEDIATE"))
         now = utcnow()
         assert_active_worker_lease(session, context.worker_id, now=now)
         job = session.get(WorkJob, context.job_id)
-        if job.status != "running" or job.progress_current != ordinal:
+        if (job is None or job.status != "running" or job.progress_current != ordinal
+                or job.progress_total != total or end > total):
             raise ValueError("批量整理进度已经变化")
-        job.progress_current = ordinal + 1
-        job.progress_message = f"已处理 {ordinal + 1}/{total} 个整理单元"
+        job.progress_current = end
+        job.progress_message = f"已处理 {end}/{total} 个整理单元"
         job.heartbeat_at = now
-        log_task_event(session, job_id=job.id, event_type=RESULT_EVENT, message=job.progress_message,
-                       context=result, timestamp=now)
+        for index, result in enumerate(results, start=ordinal + 1):
+            log_task_event(session, job_id=job.id, event_type=RESULT_EVENT,
+                           message=f"已处理 {index}/{total} 个整理单元", context=result, timestamp=now)
         session.commit()
 
 
@@ -518,6 +524,9 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence)
             manifest, lease_fence=fence, allow_fuse_compat=settings.media_package_fuse_compat_enabled,
             link_intent=LinkIntent(path.with_suffix(".link.json")),
         )
+        if options["mode"] == "luolcy" and whole_author:
+            # The executor verified the exact frozen files and buckets at the author root.
+            return "success", None
         fresh = preview_organizing_unit(
             chosen, include_items=True, local_media_kinds=local_media_kinds, whole_author=whole_author, **options,
         )
@@ -557,22 +566,45 @@ class MediaOrganizerBatchHandler(TaskHandler):
                 raise ValueError("目录预览与批量整理范围不一致")
         report = _report_dir(settings, state["preview_job_id"])
         folder = settings.reports_dir / "organizer-v1-executions" / str(job.id)
+        total = job.progress_total
+        next_ordinal = job.progress_current
+        if not 0 <= next_ordinal <= total:
+            raise ValueError("批量整理进度已经变化")
+        pending: list[dict] = []
+        last_commit = time.monotonic()
 
         def fence() -> None:
             renew_and_assert_worker_lease(context.SessionLocal, context.worker_id)
 
-        for ordinal, unit in enumerate(_rows(report / "units.jsonl")):
-            if ordinal < job.progress_current:
-                continue
-            if ordinal >= job.progress_total or not Path(unit["unit"]).is_relative_to(selection):
-                raise ValueError("预览单元超出原确认范围")
-            status, reason = _finish_unit(
-                unit, settings, folder / f"{ordinal}.json", job.id, fence,
-            )
-            _record_result(context, ordinal, job.progress_total, {
-                "unit": unit["unit"], "status": status, "reason": reason,
-            })
+        def commit_pending() -> None:
+            nonlocal next_ordinal, last_commit
+            if pending:
+                _record_results(context, next_ordinal, total, pending)
+                next_ordinal += len(pending)
+                pending.clear()
+                last_commit = time.monotonic()
+
+        count = 0
+        with closing(_rows(report / "units.jsonl")) as units:
+            for count, unit in enumerate(units, start=1):
+                ordinal = count - 1
+                if ordinal < next_ordinal:
+                    continue
+                if ordinal >= total or not Path(unit["unit"]).is_relative_to(selection):
+                    commit_pending()
+                    raise ValueError("预览单元超出原确认范围")
+                ready = unit["status"] == "ready"
+                if ready:
+                    # Checkpoint the prefix before starting a frozen filesystem operation.
+                    commit_pending()
+                status, reason = _finish_unit(unit, settings, folder / f"{ordinal}.json", job.id, fence)
+                pending.append({"unit": unit["unit"], "status": status, "reason": reason})
+                if (ready or len(pending) >= RESULT_COMMIT_SIZE
+                        or time.monotonic() - last_commit >= RESULT_COMMIT_INTERVAL):
+                    commit_pending()
+        commit_pending()
         # A truncated/unpublished report must never look like a complete batch.
         with context.SessionLocal() as session:
-            if session.get(WorkJob, job.id).progress_current != job.progress_total:
+            saved = session.get(WorkJob, job.id)
+            if count != total or saved is None or saved.progress_current != total or saved.progress_total != total:
                 raise ValueError("目录预览报告不完整")

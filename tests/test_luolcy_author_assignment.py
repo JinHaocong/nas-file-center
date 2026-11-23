@@ -2,6 +2,7 @@ import errno
 import json
 import os
 import stat
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +11,7 @@ from app.exceptions import StateConflictError
 from app.tasks.recovery import recover_interrupted_jobs
 from tests.test_media_organizer_batch import _batch, _preview, _run_next
 from tests.test_media_package_execute_jobs import _fixture
+from tests.test_media_package_zfuse_publish import force_zos_no_directory_rename
 
 
 def _library(tmp_path):
@@ -37,10 +39,10 @@ def _loose_route(preview, author):
 def test_luolcy_scan_pages_real_loose_files_and_keeps_package_analysis(tmp_path):
     client, settings, root, author, empty_author, package = _library(tmp_path)
     preview = _preview(client, settings, root)
-    assert preview["summary"]["needs_assignment_count"] == 2
+    assert preview["summary"]["needs_assignment_count"] == 1
     assert preview["summary"]["file_count"] == 5
     assert {row["unit"]: row["status"] for row in preview["units"]} == {
-        str(author): "needs_assignment", str(empty_author): "needs_assignment", str(package): "ready",
+        str(author): "needs_assignment", str(empty_author): "ready", str(package): "ready",
     }
     route = _loose_route(preview, author)
     first = client.get(route, params={"page_size": 2}).json()
@@ -53,16 +55,217 @@ def test_luolcy_scan_pages_real_loose_files_and_keeps_package_analysis(tmp_path)
     assert client.get(route, params={"page": 2, "page_size": 2}).json()["files"] == [
         {"source": str(author / "c.txt"), "kind": "Other", "bytes": 7},
     ]
-    assert client.get(_loose_route(preview, empty_author)).json()["packages"] == []
     filtered = client.get(f"/api/media-organizer/previews/{preview['job_id']}",
                           params={"status_filter": "needs_assignment"}).json()
-    assert filtered["filtered_total"] == 2
+    assert filtered["filtered_total"] == 1
 
     batch_id = _batch(client, preview)
     assert _run_next(settings, batch_id)
     assert (author / "a.jpg").read_bytes() == b"image"
-    assert (empty_author / "独立图片.jpg").read_bytes() == b"solo"
+    assert (empty_author / "001.jpg").read_bytes() == b"solo"
     assert (package / "001.jpg").read_bytes() == b"original"
+
+
+@pytest.mark.parametrize(("image_count", "video_count", "groups"), [
+    (1, 0, {}),
+    (1, 1, {"P [1 1B]": 1, "V [1 1B]": 1}),
+    (350, 0, {"P [200 200B]": 200, "P_1 [150 150B]": 150}),
+])
+def test_luolcy_direct_author_media_organizes_in_place(tmp_path, image_count, video_count, groups):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251115/DDchunbild"
+    author.mkdir(parents=True)
+    sources = {f"photo-{i:03d}.jpg": b"p" for i in range(image_count)}
+    sources.update({f"clip-{i:03d}.mp4": b"v" for i in range(video_count)})
+    for name, payload in sources.items():
+        (author / name).write_bytes(payload)
+
+    preview = _preview(client, settings, author.parent)
+    unit, = preview["units"]
+    assert (unit["unit"], unit["status"], unit["needed_moves"]) == (str(author), "ready", len(sources))
+    assert {group["name"]: group["count"] for group in unit["groups"]} == groups
+    assert {path.name for path in author.iterdir()} == sources.keys()
+
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert [(item["unit"], item["status"]) for item in report["items"]] == [(str(author), "success")]
+    if groups:
+        assert {path.name for path in author.iterdir()} == groups.keys()
+        for name, count in groups.items():
+            extension, payload = (".jpg", b"p") if name.startswith("P") else (".mp4", b"v")
+            assert {path.name: path.read_bytes() for path in (author / name).iterdir()} == {
+                f"{i:03d}{extension}": payload for i in range(1, count + 1)
+            }
+    else:
+        assert {path.name: path.read_bytes() for path in author.iterdir()} == {"001.jpg": b"p"}
+    again = _preview(client, settings, author)
+    assert again["summary"]["needed_moves"] == 0
+    assert again["summary"]["already_organized_count"] == (len(groups) or 1)
+
+
+@pytest.mark.parametrize("entry", ["existing_package", "target_bucket", "symlink", "nonmedia", "fifo"])
+def test_luolcy_author_with_unreviewed_entries_keeps_manual_assignment(tmp_path, entry):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251115/作者"
+    author.mkdir(parents=True)
+    (author / "cover.jpg").write_bytes(b"p")
+    if entry in {"existing_package", "target_bucket"}:
+        name = "独立包" if entry == "existing_package" else "P [1 1B]"
+        (author / name).mkdir()
+        (author / name / "001.jpg").write_bytes(b"x")
+    elif entry == "symlink":
+        (author / "link.jpg").symlink_to(author / "cover.jpg")
+    elif entry == "nonmedia":
+        (author / "notes.txt").write_bytes(b"notes")
+    else:
+        os.mkfifo(author / "cover-old.jpg")
+    preview = _preview(client, settings, author)
+    files = client.get(_loose_route(preview, author)).json()["files"]
+    assert {row["source"] for row in files} == (
+        {str(author / "cover.jpg"), str(author / "notes.txt")} if entry == "nonmedia"
+        else {str(author / "cover.jpg")}
+    )
+
+
+@pytest.mark.parametrize("after_freeze", [False, True])
+def test_luolcy_author_batch_stops_if_an_independent_directory_appears(tmp_path, monkeypatch, after_freeze):
+    from app.batch import media_package_execution
+
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251115/作者"
+    author.mkdir(parents=True)
+    source = author / "cover.jpg"
+    source.write_bytes(b"p")
+    preview = _preview(client, settings, author)
+    assert preview["summary"]["ready_count"] == 1
+
+    if after_freeze:
+        save = media_package_execution.save_frozen_manifest
+
+        def add_package_at_freeze(path, manifest):
+            save(path, manifest)
+            (author / "独立包").mkdir()
+
+        monkeypatch.setattr(media_package_execution, "save_frozen_manifest", add_package_at_freeze)
+    else:
+        (author / "独立包").mkdir()
+
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert report["summary"]["conflict_count"] == 1
+    assert {path.name for path in author.iterdir()} == {"cover.jpg", "独立包"}
+    assert source.read_bytes() == b"p"
+
+
+def test_luolcy_direct_author_cannot_cross_a_mounted_calendar_directory(tmp_path, monkeypatch):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251115/作者"
+    author.mkdir(parents=True)
+    source = author / "cover.jpg"
+    source.write_bytes(b"p")
+    mounted = author.parent.stat()
+    real_fstat = os.fstat
+
+    def fstat_with_mounted_day(fd):
+        info = real_fstat(fd)
+        if (info.st_dev, info.st_ino) == (mounted.st_dev, mounted.st_ino):
+            return SimpleNamespace(st_dev=mounted.st_dev + 1)
+        return info
+
+    monkeypatch.setattr(os, "fstat", fstat_with_mounted_day)
+    preview = _preview(client, settings, root)
+    unit, = preview["units"]
+    assert (unit["unit"], unit["status"]) == (str(author), "blocked")
+    assert "Cross-device" in unit["reason"]
+    assert source.read_bytes() == b"p"
+
+
+@pytest.mark.parametrize("phase", [
+    "one_bucket", "all_buckets", "fuse_partial", "foreign_directory", "foreign_bucket", "protected_bucket",
+])
+def test_luolcy_author_recovery_validates_exact_published_buckets(tmp_path, monkeypatch, phase):
+    from app.batch import media_package_execution
+
+    client, settings, root = _fixture(tmp_path, fuse_compat=phase == "fuse_partial")
+    author = root / "2511/251115/作者"
+    author.mkdir(parents=True)
+    (author / "cover.jpg").write_bytes(b"p")
+    (author / "clip.mp4").write_bytes(b"v")
+    quarantine = settings.data_mount / "quarantine-link"
+    if phase == "fuse_partial":
+        (author / "z.jpg").write_bytes(b"z")
+        force_zos_no_directory_rename(monkeypatch)
+    if phase == "protected_bucket":
+        isolated = settings.data_mount / "isolated"
+        isolated.mkdir()
+        quarantine.symlink_to(isolated, target_is_directory=True)
+        settings.quarantine_root = quarantine
+    preview = _preview(client, settings, author)
+    assert preview["summary"]["ready_count"] == 1
+    batch_id = _batch(client, preview)
+    publish = media_package_execution._publish_group
+    link = os.link
+
+    def stop_after_publication(manifest, group_index, *args, **kwargs):
+        result = publish(manifest, group_index, *args, **kwargs)
+        if group_index == (1 if phase == "all_buckets" else 0):
+            raise SystemExit("Worker interrupted after a bucket was published")
+        return result
+
+    def stop_after_first_link(source, target, *args, **kwargs):
+        link(source, target, *args, **kwargs)
+        if source == "001.jpg" and kwargs.get("dst_dir_fd") is not None:
+            raise SystemExit("Worker interrupted while publishing FUSE hardlinks")
+
+    with monkeypatch.context() as patch:
+        if phase == "fuse_partial":
+            patch.setattr(os, "link", stop_after_first_link)
+        else:
+            patch.setattr(media_package_execution, "_publish_group", stop_after_publication)
+        with pytest.raises(SystemExit):
+            _run_next(settings, batch_id)
+    photo = author / ("P [2 2B]" if phase == "fuse_partial" else "P [1 1B]") / "001.jpg"
+    video = author / "V [1 1B]" / "001.mp4"
+    before = photo.stat().st_ino
+    if phase == "foreign_directory":
+        (author / "独立包").mkdir()
+    elif phase == "foreign_bucket":
+        video.parent.mkdir()
+        video.write_bytes(b"x")
+    elif phase == "protected_bucket":
+        quarantine.unlink()
+        quarantine.symlink_to(video.parent, target_is_directory=True)
+    elif phase == "fuse_partial":
+        assert not photo.with_name("002.jpg").exists()
+
+    engine, sessions = create_engine_and_session(settings.database_path)
+    try:
+        assert recover_interrupted_jobs(
+            engine, sessions, worker_id="organizer-test-worker",
+        )["recovered_requeued"] == 1
+    finally:
+        engine.dispose()
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert photo.read_bytes() == b"p"
+    assert photo.stat().st_ino == before
+    if phase in {"foreign_directory", "foreign_bucket", "protected_bucket"}:
+        assert report["summary"]["conflict_count"] == 1
+        assert len(list(author.glob(".nfc-*/001.mp4"))) == 1
+        if phase == "foreign_bucket":
+            assert video.read_bytes() == b"x"
+        elif phase == "foreign_directory":
+            assert (author / "独立包").is_dir() and not video.exists()
+        else:
+            assert not video.parent.exists()
+    else:
+        assert report["summary"]["success_count"] == 1
+        assert video.read_bytes() == b"v"
+        assert not list(author.rglob(".nfc-*"))
+        if phase == "fuse_partial":
+            assert photo.with_name("002.jpg").read_bytes() == b"z"
 
 
 @pytest.mark.parametrize("new", [False, True])

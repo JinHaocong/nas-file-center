@@ -4,7 +4,8 @@ from __future__ import annotations
 import os
 import re
 import stat
-from collections import Counter
+from collections import Counter, OrderedDict
+from contextvars import ContextVar
 from itertools import islice
 from pathlib import Path
 from typing import Callable, Iterator
@@ -15,7 +16,8 @@ from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, numbered_name
 from app.batch.media_package_organizer import (
     MAX_DEPTH, MAX_FILES_PER_GROUP, MAX_PACKAGE_DIRECTORIES, MAX_PACKAGE_FILES, MAX_SCOPE_ENTRIES_PER_DIRECTORY,
     PROMOTE_NUMBERED_PHOTO_GROUPS,
-    _classify, _package_path, _size_label, _walk_package, iter_media_package_discovery, plan_media_layout,
+    _classify, _package_path, _size_label, _walk_luolcy_author, _walk_package,
+    iter_media_package_discovery, plan_media_layout,
 )
 from app.path_safety import require_allowed_path, require_unreserved_path
 
@@ -72,6 +74,8 @@ _JPEG_EXTENSIONS = frozenset({".jpg", ".jpeg"})
 _TYPED_WRAPPER_KINDS = {"movie": "V", "img": "P", "gif": "P", "selfies": "P", "jpg": "P", "jpeg": "P"}
 _FANTIA_COLLECTION = re.compile(r"(?<![a-z0-9])fantia(?![a-z0-9])", re.I | re.ASCII)
 _FANTIA_TIER = re.compile(r"\$(?P<amount>[0-9]+)_.*")
+_PREVIEW_CACHE_DIRECTORIES = 128
+_PREVIEW_CACHE_ENTRIES = 16_384
 
 
 def _fantia_collection(path: Path) -> bool:
@@ -129,18 +133,65 @@ def _checked_scope(unit: Path, allowed_roots: list[Path], quarantine_root: Path 
     return unit
 
 
-def _entries(folder: Path, device: int) -> list[tuple[str, os.stat_result]]:
+_DirectoryEntries = list[tuple[str, os.stat_result]]
+
+
+def _directory_binding(info: os.stat_result) -> tuple[int, ...]:
+    return info.st_dev, info.st_ino, info.st_mode, info.st_mtime_ns, info.st_ctime_ns
+
+
+def _read_entries(fd: int) -> _DirectoryEntries:
+    entries = []
+    with os.scandir(fd) as stream:
+        for entry in stream:
+            if len(entries) >= MAX_SCOPE_ENTRIES_PER_DIRECTORY:
+                raise ValueError("Media directory entry limit exceeded")
+            entries.append((entry.name, entry.stat(follow_symlinks=False)))
+    return sorted(entries, key=lambda entry: (entry[0].casefold(), entry[0]))
+
+
+class _PreviewDirectoryInventory:
+    """Keep a bounded cache of directory listings for a single recursive preview."""
+
+    def __init__(self) -> None:
+        self._directories: OrderedDict[Path, tuple[tuple[int, ...], _DirectoryEntries]] = OrderedDict()
+        self._entry_count = 0
+
+    def read(self, folder: Path, fd: int, info: os.stat_result) -> _DirectoryEntries:
+        current = _directory_binding(info)
+        previous = self._directories.get(folder)
+        if previous is not None:
+            binding, entries = previous
+            # Entry additions, renames and directory replacement invalidate the listing.
+            if current == binding:
+                self._directories.move_to_end(folder)
+                return entries
+            del self._directories[folder]
+            self._entry_count -= len(entries)
+        entries = _read_entries(fd)
+        if len(entries) <= _PREVIEW_CACHE_ENTRIES:
+            while (len(self._directories) >= _PREVIEW_CACHE_DIRECTORIES
+                   or self._entry_count + len(entries) > _PREVIEW_CACHE_ENTRIES):
+                _, (_, evicted) = self._directories.popitem(last=False)
+                self._entry_count -= len(evicted)
+            self._directories[folder] = (current, entries)
+            self._entry_count += len(entries)
+        return entries
+
+
+_preview_inventory: ContextVar[_PreviewDirectoryInventory | None] = ContextVar(
+    "media_organizer_preview_inventory", default=None,
+)
+
+
+def _entries(folder: Path, device: int) -> _DirectoryEntries:
     fd = _open_directory_nofollow(folder)
     try:
-        if os.fstat(fd).st_dev != device:
+        info = os.fstat(fd)
+        if info.st_dev != device:
             raise ValueError("Cross-device directory")
-        entries = []
-        with os.scandir(fd) as stream:
-            for entry in stream:
-                if len(entries) >= MAX_SCOPE_ENTRIES_PER_DIRECTORY:
-                    raise ValueError("Media directory entry limit exceeded")
-                entries.append((entry.name, entry.stat(follow_symlinks=False)))
-        return sorted(entries, key=lambda entry: (entry[0].casefold(), entry[0]))
+        inventory = _preview_inventory.get()
+        return inventory.read(folder, fd, info) if inventory is not None else _read_entries(fd)
     finally:
         os.close(fd)
 
@@ -366,16 +417,22 @@ def walk_organizing_unit(
     unit: Path, *, mode: str, media_package_root: Path | None = None,
     quarantine_root: Path | None = None, directories: set[Path] | None = None,
     local_media_kinds: tuple[str, ...] = (), whole_author: bool = False,
+    check_cancelled: Callable[[], None] | None = None,
 ) -> Iterator[dict]:
     """Return the raw inventory required to revalidate a previously checked unit."""
     unit = Path(unit)
-    if whole_author and (mode != "semantic" or local_media_kinds):
+    if whole_author and (mode not in {"semantic", "luolcy"} or local_media_kinds):
         raise ValueError("Invalid whole-author media scope")
     if local_media_kinds and (mode != "semantic" or not {"P", "V"}.intersection(local_media_kinds)
                               or any(kind not in ("P", "V", "Other") for kind in local_media_kinds)):
         raise ValueError("Invalid local media scope")
     if mode == "luolcy" and media_package_root is not None:
-        yield from _walk_package(unit, directories=directories)
+        if whole_author:
+            if directories is not None:
+                directories.add(unit)
+            yield from _walk_luolcy_author(unit, media_package_root, check_cancelled=check_cancelled)
+        else:
+            yield from _walk_package(unit, directories=directories)
     elif mode == "semantic":
         protected_roots = _resolved_protected_roots(media_package_root, quarantine_root)
         yield from _semantic_inventory(
@@ -887,7 +944,11 @@ def preview_organizing_unit(
     unit = _checked_scope(unit, allowed_roots, quarantine_root)
     protected = _resolved_protected_roots(media_package_root, quarantine_root)
     if mode == "luolcy" and media_package_root is not None:
-        unit = _package_path(unit, media_package_root, allowed_roots, quarantine_root)
+        if whole_author:
+            if any(root.is_relative_to(unit) for root in _resolved_protected_roots(quarantine_root)):
+                raise ValueError(f"Protected path inside Luolcy author directory: {unit}")
+        else:
+            unit = _package_path(unit, media_package_root, allowed_roots, quarantine_root)
     elif mode != "semantic" or _protected(unit, protected):
         raise ValueError("Invalid unit or mode")
     photo_groups = None
@@ -918,13 +979,14 @@ def preview_organizing_unit(
         items = list(walk_organizing_unit(
             unit, mode=mode, media_package_root=media_package_root, quarantine_root=quarantine_root,
             directories=directories, local_media_kinds=local_media_kinds or (), whole_author=bool(whole_author),
+            check_cancelled=check_cancelled,
         ))
     origin_dirs = set()
     for row in items:
-        for parent in Path(row["path"]).parents:
-            if parent == unit:
-                break
+        parent = Path(row["path"]).parent
+        while parent != unit and parent not in origin_dirs:
             origin_dirs.add(parent)
+            parent = parent.parent
     plan = plan_media_layout(
         unit, items, max_rows=max_rows,
         include_items=include_items, include_mapping=include_mapping, organizer_mode=True,
@@ -1067,7 +1129,19 @@ def iter_organizing_previews(
             return _blocked(path, mode, str(exc))
 
     if package_root is None or not selection.is_relative_to(package_root):
-        yield from _semantic_previews(selection, protected, preview, check_cancelled)
+        inventory = _PreviewDirectoryInventory()
+        semantic = _semantic_previews(selection, protected, preview, check_cancelled)
+        while True:
+            token = _preview_inventory.set(inventory)
+            try:
+                row = next(semantic, None)
+            finally:
+                # Standalone and execution checks always read live entries.
+                _preview_inventory.reset(token)
+            if row is None:
+                break
+            yield row
+        del inventory
     if package_root is not None and (
         selection.is_relative_to(package_root) or package_root.is_relative_to(selection)
     ):
@@ -1083,6 +1157,9 @@ def iter_organizing_previews(
                     yield _blocked(unit, "luolcy", entry.reason)
                 elif entry.loose_files:
                     if is_reserved_workspace(unit) or (quarantine_root and unit.is_relative_to(quarantine_root)):
+                        continue
+                    if entry.all_direct_media:
+                        yield preview(unit, "luolcy", True)
                         continue
                     counts = Counter(row["kind"] for row in entry.loose_files)
                     yield {

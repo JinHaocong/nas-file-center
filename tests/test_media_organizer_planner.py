@@ -1,4 +1,6 @@
 """V1.6 media rules tested through the read-only preview boundary."""
+import os
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,57 @@ from app.batch.media_organizer_planner import iter_organizing_previews, preview_
 def put(path: Path, content: bytes = b"data") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
+
+
+def test_recursive_preview_reuses_directory_read_and_keeps_independent_checks_fresh(tmp_path, monkeypatch):
+    work = tmp_path / "Portrait session"
+    photo = work / "cover.jpg"
+    put(photo, b"cover")
+    entry = work.stat()
+    identity = (entry.st_dev, entry.st_ino)
+    real_scandir = os.scandir
+    reads = 0
+
+    def count_work_reads(path):
+        nonlocal reads
+        if isinstance(path, int):
+            opened = os.fstat(path)
+            reads += (opened.st_dev, opened.st_ino) == identity
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", count_work_reads)
+    with closing(iter_organizing_previews(tmp_path, allowed_roots=[tmp_path])) as previews:
+        row = next(previews)
+        move, = row["sample_moves"]
+        assert (row["status"], move["source"], move["target"]) == (
+            "ready", str(photo), str(work / "001.jpg"),
+        )
+        assert reads == 1
+
+        # A standalone check must observe edits even while the iterator is open.
+        photo.write_bytes(b"new cover")
+        fresh = preview_organizing_unit(work, mode="semantic", allowed_roots=[tmp_path])
+        assert fresh["total_bytes"] == len(b"new cover")
+        assert fresh["input_fingerprint"] != row["input_fingerprint"]
+
+
+def test_recursive_preview_reads_new_children_of_a_previously_inspected_volume(tmp_path):
+    collection = tmp_path / "Two volumes"
+    put(collection / "01/first.jpg")
+    old = collection / "02/old.jpg"
+    put(old)
+
+    with closing(iter_organizing_previews(collection, allowed_roots=[tmp_path])) as previews:
+        assert next(previews)["unit"] == str(collection / "01")
+        new = old.with_name("new.png")
+        old.rename(new)
+
+        row = next(previews)
+        move, = row["sample_moves"]
+        assert (row["unit"], move["source"], move["target"]) == (
+            str(new.parent), str(new), str(new.parent / "001.png"),
+        )
+        assert list(previews) == []
 
 
 @pytest.mark.parametrize(("root_name", "child", "paths"), [
