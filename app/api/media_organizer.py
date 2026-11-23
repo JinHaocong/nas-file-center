@@ -1,5 +1,5 @@
 """Admin API for the recursive media organizer."""
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,6 +21,13 @@ class PreviewRequest(BaseModel):
 
 class BatchConfirmation(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class AssignmentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sources: list[Annotated[str, Field(min_length=1, max_length=4096)]] = Field(min_length=1, max_length=5000)
+    package_name: str = Field(min_length=1, max_length=255)
+    new_package: bool
 
 
 @router.post("/previews")
@@ -56,6 +63,32 @@ def read_mapping(request: Request, job_id: int, mapping_id: str,
         )
     except KeyError as exc:
         raise HTTPException(404, "找不到此路径映射") from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/previews/{job_id}/loose-files/{loose_id}")
+def read_loose_files(request: Request, job_id: int, loose_id: str,
+                     page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=100)):
+    try:
+        return jobs.get_loose_files(
+            request.app.state.service.SessionLocal, request.app.state.settings, job_id, loose_id,
+            page=page, page_size=page_size,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "找不到此待归属清单") from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/previews/{job_id}/loose-files/{loose_id}/assignments")
+def create_assignment(request: Request, job_id: int, loose_id: str, payload: AssignmentRequest):
+    try:
+        return jobs.create_assignment_draft(
+            request.app.state.service, job_id, loose_id, **payload.model_dump(),
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "找不到此待归属清单") from exc
     except (ValueError, OSError) as exc:
         raise HTTPException(409, str(exc)) from exc
 

@@ -1,9 +1,10 @@
 import { api } from './client';
 import type { TaskProgress, TaskStatus } from '../types/task';
+import { isSqliteId } from '../utils/sqliteId';
 
 export type OrganizerJobId = string;
 type MediaKind = 'P' | 'V' | 'Other';
-type MediaUnitStatus = 'ready' | 'blocked' | 'already_organized' | 'skipped';
+type MediaUnitStatus = 'ready' | 'blocked' | 'already_organized' | 'skipped' | 'needs_assignment';
 export type MediaPreviewFilter = MediaUnitStatus | 'all';
 export type MediaBatchOutcome = 'success' | 'skipped' | 'conflict' | 'failed';
 
@@ -46,6 +47,7 @@ export interface MediaBatchPreviewUnit {
   wrapper_cleanup_count?: number;
   total_proposals: number;
   mapping_id: string | null;
+  loose_id?: string;
   conflicts: MediaPreviewConflict[];
 }
 
@@ -59,6 +61,7 @@ export interface MediaBatchPreview extends OrganizerJob, OrganizerReportPage {
     blocked_count: number;
     already_organized_count: number;
     skipped_count: number;
+    needs_assignment_count?: number;
     file_count: number;
     totals?: Record<MediaKind, number>;
     total_bytes?: number;
@@ -71,6 +74,28 @@ export interface MediaBatchPreview extends OrganizerJob, OrganizerReportPage {
 interface MediaMappingPage extends Page {
   total_moves: number;
   moves: Array<{ source: string; target: string; kind: MediaKind; bytes: number }>;
+}
+
+interface MediaLooseFilesPage extends Page {
+  job_id: OrganizerJobId;
+  loose_id: string;
+  author: string;
+  total_files: number;
+  packages: string[];
+  files: Array<{ source: string; kind: MediaKind; bytes: number }>;
+  read_only: true;
+}
+
+interface MediaLooseAssignmentRequest {
+  sources: string[];
+  package_name: string;
+  new_package: boolean;
+}
+
+interface MediaLooseAssignmentDraft {
+  plan_id: string;
+  status: 'draft';
+  expected_changes: number;
 }
 
 export interface MediaBatchResult extends OrganizerJob, OrganizerReportPage {
@@ -86,8 +111,7 @@ export function organizerJobId(params: URLSearchParams, key: string): OrganizerJ
   const values = params.getAll(key);
   if (values.length !== 1) return null;
   const [id] = values;
-  const maxId = '9223372036854775807';
-  return /^[1-9]\d{0,18}$/.test(id) && (id.length < maxId.length || id <= maxId) ? id : null;
+  return isSqliteId(id) ? id : null;
 }
 
 /** Keep pagination parameters consistent across preview, mapping, and result reads. */
@@ -109,6 +133,16 @@ export const mediaOrganizerBatchApi = {
   getMapping: (id: OrganizerJobId, mappingId: string, page: number, pageSize: number) =>
     api.get<MediaMappingPage>(
       `${base}/previews/${id}/mappings/${encodeURIComponent(mappingId)}?${pagination(page, pageSize)}`,
+    ),
+  /** Read the files directly inside one author directory and its existing package choices. */
+  getLooseFiles: (id: OrganizerJobId, looseId: string, page: number, pageSize: number) =>
+    api.get<MediaLooseFilesPage>(
+      `${base}/previews/${id}/loose-files/${encodeURIComponent(looseId)}?${pagination(page, pageSize)}`,
+    ),
+  /** Create a plan draft for exactly the selected sources and one same-author package. */
+  createAssignmentDraft: (id: OrganizerJobId, looseId: string, payload: MediaLooseAssignmentRequest) =>
+    api.post<MediaLooseAssignmentDraft>(
+      `${base}/previews/${id}/loose-files/${encodeURIComponent(looseId)}/assignments`, payload,
     ),
   /** Confirm all ready units bound to the reviewed preview. */
   startBatch: (previewId: OrganizerJobId) =>

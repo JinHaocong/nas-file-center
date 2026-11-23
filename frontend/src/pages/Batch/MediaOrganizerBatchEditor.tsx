@@ -10,6 +10,7 @@ import { DataPanel } from '../../components/ui/DataPanel';
 import {
   MediaOrganizerMappingReport, MediaOrganizerPreviewReport, MediaOrganizerResultReport,
 } from './MediaOrganizerBatchReports';
+import { MediaOrganizerLooseFilesReport } from './MediaOrganizerLooseFilesReport';
 
 import { getStructuredApiError } from '../../api/errors';
 import {
@@ -37,8 +38,11 @@ export function MediaOrganizerBatchEditor() {
   const [previewPage, setPreviewPage] = useState({ page: 1, size: 25 });
   const [filter, setFilter] = useState<MediaPreviewFilter>('all');
   const [resultPage, setResultPage] = useState({ page: 1, size: 25 });
-  const [mapping, setMapping] = useState<{ unit: string; id: string } | null>(null);
+  const [details, setDetails] = useState<{
+    previewId: OrganizerJobId; unit: string; id: string; kind: 'mapping' | 'loose';
+  } | null>(null);
   const inFlight = useRef<AbortController | null>(null);
+  const detailOpener = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => () => { inFlight.current?.abort(); }, []);
 
@@ -116,7 +120,7 @@ export function MediaOrganizerBatchEditor() {
     if (signal.aborted) return;
     setPreviewPage({ page: 1, size: 25 });
     setFilter('all');
-    setMapping(null);
+    setDetails(null);
     setResultPage({ page: 1, size: 25 });
     setSelectedPath(null);
     showJobs(receipt.job_id);
@@ -128,7 +132,7 @@ export function MediaOrganizerBatchEditor() {
     const path = (Array.isArray(value) ? value[0] ?? '' : value).trim();
     if (!path) {
       setSelectedPath('');
-      setMapping(null);
+      setDetails(null);
       setProblem('');
       showJobs(null);
       return;
@@ -155,9 +159,21 @@ export function MediaOrganizerBatchEditor() {
   const canConfirm = currentPreview?.status === 'completed' &&
     currentPreview.execution_enabled && Boolean(currentPreview.summary?.ready_count) &&
     batchId === null && !existingBatchId;
-  /** Open the full mapping for one preview row. */
-  function openMapping(row: MediaBatchPreviewUnit) {
-    if (row.mapping_id) setMapping({ unit: row.unit, id: row.mapping_id });
+  const currentDetails = details?.previewId === previewId ? details : null;
+
+  /** Open the paginated report attached to one preview row. */
+  function openDetails(row: MediaBatchPreviewUnit, opener: HTMLButtonElement) {
+    if (!previewId) return;
+    const id = row.loose_id ?? row.mapping_id;
+    if (!id) return;
+    detailOpener.current = opener;
+    setDetails({ previewId, unit: row.unit, id, kind: row.loose_id ? 'loose' : 'mapping' });
+  }
+
+  /** Return keyboard focus to the row that opened the report. */
+  function closeDetails() {
+    setDetails(null);
+    detailOpener.current?.focus();
   }
 
   return (
@@ -210,7 +226,7 @@ export function MediaOrganizerBatchEditor() {
       )}
 
       {currentPreview?.status === 'completed' && currentPreview.summary && (
-        <MediaOrganizerPreviewReport preview={currentPreview} onMapping={openMapping}
+        <MediaOrganizerPreviewReport preview={currentPreview} onDetails={openDetails}
           action={canConfirm && (
             <ConsoleButton variant="primary" disabled={busy} loading={action === 'confirm'}
               onClick={confirmBatch}>确认整理全部</ConsoleButton>
@@ -220,6 +236,9 @@ export function MediaOrganizerBatchEditor() {
             onChange={(page, size) => setPreviewPage({ page, size })} />}>
           {!currentPreview.execution_enabled && <p className="nfc-form-note">当前仅可预览。</p>}
           {currentPreview.summary.ready_count === 0 && <p className="nfc-form-note">没有可整理的单元。</p>}
+          {!!currentPreview.summary.needs_assignment_count && (
+            <p className="nfc-form-note">批量整理会跳过待确认归属的散件。可逐个作者选择文件和目标资源包。</p>
+          )}
           {canConfirm && currentPreview.summary.blocked_count > 0 && (
             <p className="nfc-form-note">有冲突的单元会列在结果中，其余可整理的单元会继续处理。</p>
           )}
@@ -234,14 +253,23 @@ export function MediaOrganizerBatchEditor() {
               <option value="blocked">冲突</option>
               <option value="already_organized">已整理</option>
               <option value="skipped">跳过</option>
+              {!!currentPreview.summary.needs_assignment_count && (
+                <option value="needs_assignment">待确认归属</option>
+              )}
             </select>
           </div>
+          {currentDetails?.kind === 'loose' && (
+            <MediaOrganizerLooseFilesReport key={`${currentDetails.previewId}:${currentDetails.id}`}
+              previewId={currentDetails.previewId} looseId={currentDetails.id} author={currentDetails.unit}
+              disabled={busy} onClose={closeDetails} />
+          )}
         </MediaOrganizerPreviewReport>
       )}
 
-      {previewId && mapping && currentPreview?.status === 'completed' && (
-        <MediaOrganizerMappingReport key={mapping.id} previewId={previewId}
-          mappingId={mapping.id} unit={mapping.unit} onClose={() => setMapping(null)} />
+      {currentDetails?.kind === 'mapping' && currentPreview?.status === 'completed' && (
+        <MediaOrganizerMappingReport key={`${currentDetails.previewId}:${currentDetails.id}`}
+          previewId={currentDetails.previewId} mappingId={currentDetails.id} unit={currentDetails.unit}
+          onClose={closeDetails} />
       )}
     </>
   );

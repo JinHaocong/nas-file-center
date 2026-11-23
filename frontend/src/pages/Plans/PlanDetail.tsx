@@ -15,6 +15,7 @@ import type { PlanItem } from '../../types';
 import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
 import { invalidatePlanDeleteFailure, getPlanDetailRenderState, getPlanDetailView } from '../../components/plans/plan_cleanup';
 import { canPlanLifecycleAction, planConfirmationSnapshot, samePlanConfirmation, type PlanConfirmationSnapshot } from '../../utils/planDetailActions';
+import { isSqliteId } from '../../utils/sqliteId';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
@@ -45,8 +46,8 @@ const getLifecycleIndex = (status: string) => {
 };
 
 export const PlanDetailPage: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
-  const planId = Number(id);
+  const { id: planId = '' } = useParams<{ id: string }>();
+  const validPlanId = isSqliteId(planId);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
@@ -75,7 +76,7 @@ export const PlanDetailPage: React.FC = () => {
   } = useQuery({
     queryKey: ['planDetail', planId, page, pageSize],
     queryFn: () => plansApi.getPlanDetail(planId, page, pageSize),
-    enabled: Number.isSafeInteger(planId) && planId > 0,
+    enabled: validPlanId,
     refetchInterval: (query) => query.state.data?.active_work_job_id ? 1600 : false,
   });
 
@@ -87,7 +88,7 @@ export const PlanDetailPage: React.FC = () => {
   } = useQuery({
     queryKey: ['planOperationJournalSummary', planId],
     queryFn: () => plansApi.getOperationJournal(planId, 1, 1),
-    enabled: Number.isSafeInteger(planId) && planId > 0,
+    enabled: validPlanId,
   });
 
   const isMediaSortPlan = plan?.kind === 'media-sort';
@@ -261,7 +262,9 @@ export const PlanDetailPage: React.FC = () => {
     freezeStageMutation.isPending || validateStageMutation.isPending || stageActive ||
     executeMutation.isPending || undoPlanMutation.isPending || deleteMutation.isPending;
   const actionContext = {
-    plan, allowMutation: !isSafeMode, journalTotal,
+    // The route preserves the exact ID even when a legacy response serializes it as a JSON number.
+    plan: { id: planId, status: plan.status, active_work_job_id: plan.active_work_job_id },
+    allowMutation: !isSafeMode, journalTotal,
     journalReady: !isJournalLoading && !isJournalError,
     pending: pendingAction || actionInFlight.current,
   };
@@ -328,7 +331,7 @@ export const PlanDetailPage: React.FC = () => {
   </div>;
 
   const summaryItems = [
-    { label: '计划 ID', value: <span className="nfc-mono">#{plan.id}</span> },
+    { label: '计划 ID', value: <span className="nfc-mono">#{planId}</span> },
     {
       label: '计划类型',
       value: (
@@ -407,7 +410,7 @@ export const PlanDetailPage: React.FC = () => {
     <div className="nfc-operations-page nfc-plan-detail-page nfc-page-layout-detail">
       <PageHeader title={plan.name}
         description={<div className="nfc-plan-header-meta">
-          <span className="nfc-mono">Plan #{plan.id}</span>
+          <span className="nfc-mono">Plan #{planId}</span>
           <span className="nfc-kind-badge">{plan.kind}</span>
           <StatusBadge status={plan.status} />
         </div>}
@@ -538,7 +541,7 @@ export const PlanDetailPage: React.FC = () => {
               返回关联工作流
             </ConsoleButton>
           )}
-          <PlanDeleteButton plan={plan}
+          <PlanDeleteButton plan={{ ...plan, id: planId }}
             onDelete={() => deleteMutation.mutateAsync()}
             loading={deleteMutation.isPending}
             type="default" size="middle" />

@@ -19,7 +19,8 @@ from typing import Callable
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_package_organizer import (
-    APPEND_SINGLE_VIDEO, MAX_FILES_PER_GROUP, _input_fingerprint, _package_path, _walk_package,
+    APPEND_SINGLE_VIDEO, APPEND_VIDEO_OPERATIONS, MAX_FILES_PER_GROUP,
+    PROMOTE_NUMBERED_PHOTO_GROUPS, _input_fingerprint, _package_path, _walk_package,
     preview_media_package_package,
 )
 from app.fs_ops import rename_directory_noreplace_compat, rename_noreplace_at
@@ -30,7 +31,7 @@ class MediaPackageExecutionConflict(ValueError):
 
 
 MANIFEST_VERSION = 2
-_FLAT_OPERATIONS = frozenset({"flatten_pure_media", APPEND_SINGLE_VIDEO})
+_FLAT_OPERATIONS = APPEND_VIDEO_OPERATIONS | {"flatten_pure_media"}
 
 
 def _identity(st) -> list[int]:
@@ -182,7 +183,7 @@ def _freeze_layout(source: Path, fresh: dict, *, media_package_root: Path | None
     _validate_frozen_paths(manifest)
     if (len(_flat_rows(manifest)) if is_flat else len(moves)) != fresh["needed_moves"]:
         raise MediaPackageExecutionConflict("Frozen move count differs from reviewed preview")
-    if fresh["operation"] == APPEND_SINGLE_VIDEO and len(moves) != len(items):
+    if fresh["operation"] in APPEND_VIDEO_OPERATIONS and len(moves) != len(items):
         raise MediaPackageExecutionConflict("Frozen append is missing numbered inputs")
     return manifest
 
@@ -1043,7 +1044,7 @@ _ROOT_READY_MARKER = ".nfc-publish-ready"
 
 
 def _flat_rows(manifest: dict) -> list[dict]:
-    if manifest["operation"] == APPEND_SINGLE_VIDEO:
+    if manifest["operation"] in APPEND_VIDEO_OPERATIONS:
         return [row for row in manifest["moves"] if row["source"] != row["final"]]
     return manifest["moves"]
 
@@ -1239,13 +1240,14 @@ def _remove_flat_stage(manifest: dict, stage: Path,
 
 
 def _verify_append_scope(manifest: dict, package: Path) -> None:
-    """Check the approved one-video layout before staging or resuming publication."""
-    if manifest["operation"] != APPEND_SINGLE_VIDEO:
+    """Check the approved author layout before staging or resuming publication."""
+    if manifest["operation"] not in APPEND_VIDEO_OPERATIONS:
         return
-    move, = _flat_rows(manifest)
-    source = Path(move["source"])
+    incoming = _flat_rows(manifest)
+    source_folder = Path(incoming[0]["source"]).parent
+    source_files = {Path(row["source"]).name: row["identity"] for row in incoming}
     expected = {row["target_name"]: row for row in manifest["moves"]}
-    allowed = {*expected, source.parent.name, manifest["root_stage"]}
+    allowed = {*expected, source_folder.name, manifest["root_stage"]}
     package_fd = _open_verified_package(manifest)
     try:
         with os.scandir(package_fd) as entries:
@@ -1253,24 +1255,38 @@ def _verify_append_scope(manifest: dict, package: Path) -> None:
     finally:
         os.close(package_fd)
     if live.keys() - allowed:
-        raise MediaPackageExecutionConflict("Single-video append has unreviewed entries in the author root")
+        raise MediaPackageExecutionConflict("Video append has unreviewed entries in the author root")
     for name, row in expected.items():
         if row["source"] == row["final"] or name in live:
             _check_file(live.get(name), row["identity"], package / name)
-    if source.parent.name not in live:
+    if source_folder.name not in live:
         return
-    fd = _open_folder(source.parent)
+    fd = _open_folder(source_folder)
     try:
         info = os.fstat(fd)
-        if [info.st_dev, info.st_ino] != manifest["origin_directories"].get(str(source.parent)):
-            raise MediaPackageExecutionConflict("Single-video source folder changed")
+        if [info.st_dev, info.st_ino] != manifest["origin_directories"].get(str(source_folder)):
+            raise MediaPackageExecutionConflict("Video append source folder changed")
         with os.scandir(fd) as entries:
             for entry in entries:
-                if entry.name != source.name:
-                    raise MediaPackageExecutionConflict("Single-video source folder has unreviewed entries")
-                _check_file(entry.stat(follow_symlinks=False), move["identity"], source)
+                if entry.name not in source_files:
+                    raise MediaPackageExecutionConflict("Video append source folder has unreviewed entries")
+                _check_file(entry.stat(follow_symlinks=False), source_files[entry.name], source_folder / entry.name)
     finally:
         os.close(fd)
+
+
+def _verify_append_file_bindings(manifest: dict, *, publishing: bool) -> None:
+    """Check every incoming video before proceeding with the current phase."""
+    if manifest["operation"] not in APPEND_VIDEO_OPERATIONS:
+        return
+    for row in _flat_rows(manifest):
+        staged = Path(row["target"])
+        staged_info = _entry(staged.parent, staged.name)
+        if staged_info is not None:
+            _check_file(staged_info, row["identity"], staged)
+        else:
+            other = Path(row["final"] if publishing else row["source"])
+            _check_file(_entry(other.parent, other.name), row["identity"], other)
 
 
 def _execute_flat_manifest(manifest: dict, lease_fence: Callable[[], None],
@@ -1301,6 +1317,7 @@ def _execute_flat_manifest(manifest: dict, lease_fence: Callable[[], None],
     completed = 0
     recovered = 0
     if not marked:
+        _verify_append_file_bindings(manifest, publishing=False)
         for i, row in enumerate(_flat_rows(manifest), 1):
             outcome = _move_one(row, lease_fence=lease_fence, ignore_final=True, link_intent=link_intent)
             completed += outcome == "moved"
@@ -1316,6 +1333,7 @@ def _execute_flat_manifest(manifest: dict, lease_fence: Callable[[], None],
         recovered = total
 
     _verify_append_scope(manifest, package)
+    _verify_append_file_bindings(manifest, publishing=True)
     for row in _flat_rows(manifest):
         _publish_flat_file(row, stage, package, lease_fence, link_intent)
     _remove_flat_stage(manifest, stage, lease_fence)
@@ -1401,10 +1419,14 @@ def _validate_frozen_paths(manifest: dict) -> None:
         if (len(rows) > MAX_FILES_PER_GROUP or any(row["group"] is not None for row in rows)
                 or len({row["target_name"].casefold() for row in rows}) != len(rows)):
             raise MediaPackageExecutionConflict("Flat frozen numbering is inconsistent")
-        if manifest["operation"] == APPEND_SINGLE_VIDEO:
+        if manifest["operation"] in APPEND_VIDEO_OPERATIONS:
             moving = _flat_rows(manifest)
-            if len(rows) < 2 or len(moving) != 1 or Path(moving[0]["source"]).parent.parent != package:
-                raise MediaPackageExecutionConflict("Invalid frozen single-video append")
+            source_folders = {Path(row["source"]).parent for row in moving}
+            single = manifest["operation"] == APPEND_SINGLE_VIDEO
+            if (not moving or len(moving) == len(rows) or len(source_folders) != 1
+                    or any(folder.parent != package for folder in source_folders)
+                    or single != (len(moving) == 1)):
+                raise MediaPackageExecutionConflict("Invalid frozen author video append")
     else:
         covered = sum(group["count"] for group in manifest["groups"])
         if covered != len(rows):
@@ -1449,15 +1471,19 @@ def _live_organizer_snapshot(manifest: dict, package: Path, mode: str) -> list[d
         "local_media_kinds": tuple(manifest.get("local_media_kinds", ())),
     }
     whole_author = manifest.get("whole_author", False)
-    if whole_author:
+    numbered_photos = manifest.get("operation") == PROMOTE_NUMBERED_PHOTO_GROUPS
+    if whole_author or numbered_photos:
         preview = preview_organizing_unit(package, allowed_roots=[package], include_items=True, **options)
-        if (preview.get("whole_author") and preview["status"] == "ready"
-                and preview.get("operation") == manifest.get("operation")):
+        same_operation = preview.get("operation") == manifest.get("operation")
+        if same_operation and (
+            (whole_author and preview.get("whole_author") and preview["status"] == "ready")
+            or (numbered_photos and preview["status"] in {"ready", "already_organized"})
+        ):
             return preview["_snapshot_items"]
-    live = list(walk_organizing_unit(package, whole_author=whole_author, **options))
+    live = list(walk_organizing_unit(package, whole_author=whole_author or numbered_photos, **options))
     # A grouped plan can have published every output before its final cleanup ran.
-    if whole_author and not _exact_published_snapshot(manifest, live):
-        raise MediaPackageExecutionConflict("Whole-author scope or destination changed since preview")
+    if (whole_author or numbered_photos) and not _exact_published_snapshot(manifest, live):
+        raise MediaPackageExecutionConflict("Organizing scope or destination changed since preview")
     return live
 
 

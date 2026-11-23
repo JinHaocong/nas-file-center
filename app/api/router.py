@@ -16,6 +16,7 @@ from app.batch.filename_audit import audit_immediate_filenames
 from app.batch.media_sort import preview_media_sort
 from app.batch.directory_compare import compare_directories, verify_directory_pair
 from app.exceptions import PlanStaleError
+from app.execution.luolcy_assignment import LUOLCY_ASSIGNMENT_KIND
 from app.filters.schema import FilterPreviewRequest, FilterPreviewResponse
 from app.filters.validation import FilterValidationError
 from app.resource_control import ResourcePolicyValidationError
@@ -84,7 +85,7 @@ _ADMIN_ONLY_PLAN_OPERATIONS = frozenset({
 def _plan_requires_admin(plan: BatchPlan | None, session=None) -> bool:
     if plan is None:
         return False
-    if plan.kind == "media-corrupt-delete":
+    if plan.kind in {"media-corrupt-delete", LUOLCY_ASSIGNMENT_KIND}:
         return True
     try:
         metadata = json.loads(plan.metadata_json or "{}")

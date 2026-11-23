@@ -26,6 +26,7 @@ from app.batch.stats import collect_tree_stats
 from app.config import Settings
 from app.db import create_engine_and_session, init_db
 from app.execution.executor import execute_item
+from app.execution.luolcy_assignment import LUOLCY_ASSIGNMENT_KIND
 from app.execution.verifier import verify_duplicate_pair
 from app.indexing.indexer import IndexedEntry, iter_root
 from app.indexing.matcher import match_entries
@@ -3199,6 +3200,8 @@ class FileCenterService:
                     "recursive directory balance execution requires the Worker live preflight; "
                     "synchronous execute_plan is not an authorized mutation path"
                 )
+            if plan.kind == LUOLCY_ASSIGNMENT_KIND:
+                raise StateConflictError("Luolcy 散件归属需要由 Worker 校验作者及资源包范围后执行")
             if plan.kind == "media-corrupt-delete":
                 raise StateConflictError(
                     "corrupt-media permanent deletion requires the Worker durable unlink authority; "

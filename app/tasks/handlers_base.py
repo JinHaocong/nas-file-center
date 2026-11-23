@@ -1904,7 +1904,10 @@ class BatchPlanExecuteHandler(TaskHandler):
     supports_resume = True
 
     def run(self, job: WorkJob, context: JobContext, settings: Settings) -> None:
-        from app.tasks.recovery import assert_active_worker_lease
+        from app.execution.luolcy_assignment import (
+            LUOLCY_ASSIGNMENT_KIND, execute_luolcy_assignment, has_replayable_luolcy_link,
+        )
+        from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
 
         state = json.loads(job.state_json or "{}")
         plan_id = int(state.get("plan_id", 0))
@@ -1941,6 +1944,7 @@ class BatchPlanExecuteHandler(TaskHandler):
         precomputed_evidence: dict[int, ReconcileEvidence] = {}
         tx_entries_to_reconcile: list[int] = []
         gate6a_authority_loss: dict[int, tuple[int | None, str | None, str | None, str]] = {}
+        luolcy_link_replays: set[int] = set()
         with context.SessionLocal() as session:
             recovery_plan = session.get(BatchPlan, plan_id)
             is_gate6a_restore_recovery = bool(
@@ -1951,7 +1955,14 @@ class BatchPlanExecuteHandler(TaskHandler):
                 .where(BatchPlanItem.plan_id == plan_id, BatchPlanItem.state == "executing")
                 .order_by(BatchPlanItem.sequence)
             ))
+            luolcy_recovery_authority = (
+                json.loads(recovery_plan.metadata_json or "{}").get("luolcy_assignment")
+                if recovery_plan and recovery_plan.kind == LUOLCY_ASSIGNMENT_KIND else None
+            )
             for it in exec_items:
+                if luolcy_recovery_authority and has_replayable_luolcy_link(it, luolcy_recovery_authority, settings):
+                    luolcy_link_replays.add(it.id)
+                    continue
                 if it.operation == "quarantine":
                     meta = json.loads(it.metadata_json or "{}")
                     qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
@@ -2133,8 +2144,10 @@ class BatchPlanExecuteHandler(TaskHandler):
                 raise KeyError(f"Plan #{plan_id} not found")
             is_gate6a_bulk_restore = plan.kind == "quarantine-bulk-restore"
             is_media_sort_plan = plan.kind == "media-sort"
+            is_luolcy_assignment = plan.kind == LUOLCY_ASSIGNMENT_KIND
             plan.status = "executing"
             plan_meta = json.loads(plan.metadata_json or "{}")
+            luolcy_authority = plan_meta.get("luolcy_assignment")
             is_organizer = plan_meta.get("is_organizer", False)
             mtime_delay = float(plan_meta.get("mtime_delay_seconds", 0) or 0)
 
@@ -2144,6 +2157,8 @@ class BatchPlanExecuteHandler(TaskHandler):
                 .order_by(BatchPlanItem.sequence)
             ))
             for it in executing_items:
+                if it.id in luolcy_link_replays:
+                    continue
                 authority_loss = gate6a_authority_loss.get(int(it.id))
                 if is_gate6a_bulk_restore and it.operation == "restore" and authority_loss is not None:
                     qentry_id, frozen_source, frozen_target, fallback_reason = authority_loss
@@ -2213,6 +2228,20 @@ class BatchPlanExecuteHandler(TaskHandler):
                 if it.state == "failed":
                     reconciled_failed_item_ids.add(it.id)
             session.commit()
+
+        def remember_luolcy_package(identity: list[int]) -> None:
+            """Keep the exclusively created package identity across MOVE items and worker restarts."""
+            with context.SessionLocal() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                assert_active_worker_lease(session, context.worker_id, now=utcnow())
+                plan = session.get(BatchPlan, plan_id)
+                metadata = json.loads(plan.metadata_json or "{}")
+                if metadata.get("luolcy_assignment") != luolcy_authority:
+                    raise ValueError("散件归属记录已经变化")
+                metadata["luolcy_assignment"]["created_package_identity"] = identity
+                plan.metadata_json = json.dumps(metadata, ensure_ascii=False)
+                session.commit()
+            luolcy_authority["created_package_identity"] = identity
 
         def _add_gate6a_bulk_restore_audit(
             session,
@@ -2626,7 +2655,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             # MOVE and is finalized under a live descriptor held across that MOVE.
             # Do not reject it here using a frozen directory inode that may drift
             # on zfuse after namespace mutation.
-            if _is_utility_single_child_cleanup(it):
+            if _is_utility_single_child_cleanup(it) or it.id in luolcy_link_replays:
                 continue
             is_fresh, stale_detail = verify_item_freshness(
                 item_id=it.id,
@@ -2731,6 +2760,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             if (
                 item_meta.operation not in {"restore", "quarantine_purge"}
                 and not _is_utility_single_child_cleanup(item_meta)
+                and item_meta.id not in luolcy_link_replays
             ):
                 if defer_duplicate_hash_to_execute:
                     is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
@@ -3321,6 +3351,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             elif (
                 item_meta.operation != "quarantine_purge"
                 and not _is_utility_single_child_cleanup(item_meta)
+                and item_meta.id not in luolcy_link_replays
             ):
                 if defer_duplicate_hash_to_execute:
                     final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
@@ -3498,7 +3529,14 @@ class BatchPlanExecuteHandler(TaskHandler):
                 else None
             )
             try:
-                if utility_pair_meta is not None:
+                if is_luolcy_assignment:
+                    result = execute_luolcy_assignment(
+                        item_op, luolcy_authority, settings,
+                        lease_fence=lambda: renew_and_assert_worker_lease(context.SessionLocal, context.worker_id),
+                        remember_package=remember_luolcy_package,
+                        replay_link=item_meta.id in luolcy_link_replays,
+                    )
+                elif utility_pair_meta is not None:
                     with open_utility_wrapper_live_guard(
                         wrapper_path=utility_pair_meta["wrapper_path"],
                         child_path=utility_pair_meta["child_path"],

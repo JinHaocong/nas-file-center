@@ -6,6 +6,7 @@ import {
   IndexRoot,
   PaginatedResponse,
   Plan,
+  PlanId,
   PlanHistoryStatus,
   DeletePlanResponse,
   ClearPlanHistoryResponse,
@@ -163,7 +164,7 @@ export const indexesApi = {
 export const plansApi = {
   listPlans: (page = 1, pageSize = 20) =>
     api.get<PaginatedResponse<Plan>>(`/api/plans?page=${page}&page_size=${pageSize}`),
-  getPlanDetail: (id: number, page = 1, pageSize = 50) =>
+  getPlanDetail: (id: PlanId, page = 1, pageSize = 50) =>
     api.get<Plan>(`/api/plans/${id}?page=${page}&page_size=${pageSize}`),
   getPlanItems: (id: number, page = 1, pageSize = 50) =>
     api.get<PaginatedResponse<PlanItem>>(`/api/plans/${id}/items?page=${page}&page_size=${pageSize}`),
@@ -179,17 +180,17 @@ export const plansApi = {
       expected_hash?: string | null;
     }>;
   }) => api.post<{ id: number; status: string; expected_changes: number }>('/api/plans', payload),
-  freezePlan: (id: number) => api.post<{ id: number; status: string }>(`/api/plans/${id}/freeze`),
-  validatePlan: (id: number) => api.post<Plan>(`/api/plans/${id}/validate`),
-  executePlan: (id: number) =>
+  freezePlan: (id: PlanId) => api.post<{ id: number; status: string }>(`/api/plans/${id}/freeze`),
+  validatePlan: (id: PlanId) => api.post<Plan>(`/api/plans/${id}/validate`),
+  executePlan: (id: PlanId) =>
     api.post<{ plan_id: number; work_job_id: number; status: string }>(`/api/plans/${id}/execute`),
-  deletePlan: (id: number) => api.delete<DeletePlanResponse>(`/api/plans/${id}`),
+  deletePlan: (id: PlanId) => api.delete<DeletePlanResponse>(`/api/plans/${id}`),
   clearHistory: (statuses: PlanHistoryStatus[]) =>
     api.post<ClearPlanHistoryResponse>('/api/plans/clear-history', { statuses }),
   getLegacySummary: () => api.get<LegacyPlanSummary>('/api/plans/legacy/summary'),
   clearLegacyPlans: () => api.post<ClearLegacyPlansResponse>('/api/plans/legacy/clear'),
-  createUndoPlan: (id: number) => api.post<UndoPlanResponse>(`/api/plans/${id}/undo-plan`),
-  getOperationJournal: (id: number, page = 1, pageSize = 50) =>
+  createUndoPlan: (id: PlanId) => api.post<UndoPlanResponse>(`/api/plans/${id}/undo-plan`),
+  getOperationJournal: (id: PlanId, page = 1, pageSize = 50) =>
     api.get<OperationJournalListResponse>(`/api/plans/${id}/operation-journal?page=${page}&page_size=${pageSize}`),
 };
 

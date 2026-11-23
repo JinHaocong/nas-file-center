@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { PlanId } from '../types';
 
 export interface MediaSortRow {
   source: string;
@@ -104,8 +105,8 @@ export const mediaSortApi = {
       { skip_conflicts: skipConflicts }),
   getPlanJob: (jobId: number) =>
     api.get<MediaSortJobResult>(`/api/media-sort/plan-jobs/${jobId}`),
-  startPlanStage: (planId: number, stage: 'freeze' | 'validate') =>
+  startPlanStage: (planId: PlanId, stage: 'freeze' | 'validate') =>
     api.post<MediaSortJobResult>(`/api/plans/${planId}/stage-tasks/${stage}`),
-  getPlanStage: (planId: number) =>
+  getPlanStage: (planId: PlanId) =>
     api.get<{ job: MediaSortJobResult | null }>(`/api/plans/${planId}/stage-task`),
 };

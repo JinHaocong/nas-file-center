@@ -115,6 +115,7 @@ export type PlanStatus =
   | 'stale';
 
 export type PlanHistoryStatus = 'completed' | 'failed';
+export type PlanId = string | number;
 
 export interface DeletePlanResponse {
   deleted: boolean;

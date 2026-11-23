@@ -11,6 +11,7 @@ import json
 import os
 import re
 import stat
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator
 
@@ -24,6 +25,9 @@ MAX_PACKAGE_FILES = 300_000
 MAX_PACKAGE_DIRECTORIES = 100_000
 MAX_DEPTH = 64
 APPEND_SINGLE_VIDEO = "append_single_video"
+APPEND_AUTHOR_VIDEOS = "append_author_videos"
+APPEND_VIDEO_OPERATIONS = frozenset({APPEND_SINGLE_VIDEO, APPEND_AUTHOR_VIDEOS})
+PROMOTE_NUMBERED_PHOTO_GROUPS = "promote_numbered_photo_groups"
 _MONTH = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])$")
 _DAY = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])$")
 
@@ -76,6 +80,15 @@ MAX_SCOPE_DISCOVERED_PACKAGES = 60_000
 MAX_SCOPE_ENTRIES_PER_DIRECTORY = 100_000
 
 
+@dataclass(frozen=True)
+class MediaPackageScopeEntry:
+    path: Path
+    reason: str | None = None
+    loose_files: list[dict] | None = None
+    packages: dict[str, list[int]] | None = None
+    author_identity: list[int] | None = None
+
+
 def _validate_scope(selection: str | Path, *, media_package_root: str | Path,
                     allowed_roots: list[Path],
                     quarantine_root: Path | None) -> tuple[Path, int]:
@@ -110,16 +123,22 @@ def _validate_scope(selection: str | Path, *, media_package_root: str | Path,
 
 def _child_directories(
     directory: Path, *, isolate_conflicts: bool, excluded_names: frozenset[str],
-) -> tuple[list[str], list[tuple[Path, str]]]:
-    """List immediate directories without symlink traversal or file content I/O."""
+    include_loose_files: bool = False, check_cancelled: Callable[[], None] | None = None,
+) -> tuple[list[str], list[MediaPackageScopeEntry], MediaPackageScopeEntry | None]:
+    """List immediate directories and optionally collect the same-device author files."""
     fd = _open_directory_nofollow(directory)
     names: list[str] = []
     conflicts = []
+    files = []
+    packages = {}
     try:
+        author_stat = os.fstat(fd) if include_loose_files else None
         with os.scandir(fd) as entries:
             for count, entry in enumerate(entries, 1):
                 if count > MAX_SCOPE_ENTRIES_PER_DIRECTORY:
                     raise ValueError("Too many MediaPackage discovery entries in one directory")
+                if check_cancelled is not None and count % 256 == 0:
+                    check_cancelled()
                 # Symlinked folders may point outside the protected resource
                 # hierarchy. Never silently treat them as resource packages.
                 if entry.is_symlink():
@@ -127,12 +146,39 @@ def _child_directories(
                     reason = f"MediaPackage scope contains a symlink: {path}"
                     if not isolate_conflicts:
                         raise ValueError(reason)
-                    conflicts.append((path, reason))
-                elif entry.name.casefold() not in excluded_names and entry.is_dir(follow_symlinks=False):
+                    conflicts.append(MediaPackageScopeEntry(path, reason))
+                    continue
+                if entry.name.casefold() in excluded_names:
+                    continue
+                is_directory = entry.is_dir(follow_symlinks=False)
+                if is_directory:
                     names.append(entry.name)
+                if author_stat is None or entry.name.casefold().startswith(".nfc-"):
+                    continue
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                if info.st_dev != author_stat.st_dev:
+                    continue
+                if is_directory and stat.S_ISDIR(info.st_mode):
+                    packages[entry.name] = [info.st_dev, info.st_ino]
+                elif stat.S_ISREG(info.st_mode):
+                    files.append({
+                        "source": str(directory / entry.name), "kind": _classify(entry.name),
+                        "bytes": info.st_size, "device": info.st_dev, "inode": info.st_ino,
+                        "mtime_ns": info.st_mtime_ns, "ctime_ns": info.st_ctime_ns,
+                    })
     finally:
         os.close(fd)
-    return sorted(names), sorted(conflicts)
+    author = None
+    if files and author_stat is not None:
+        author = MediaPackageScopeEntry(
+            directory, loose_files=sorted(files, key=lambda row: row["source"]),
+            packages={name: packages[name] for name in sorted(packages)},
+            author_identity=[author_stat.st_dev, author_stat.st_ino],
+        )
+    return sorted(names), sorted(conflicts, key=lambda entry: entry.path), author
 
 
 def iter_media_package_scope_entries(
@@ -141,7 +187,22 @@ def iter_media_package_scope_entries(
     isolate_conflicts: bool = False, excluded_names: frozenset[str] = frozenset(),
     check_cancelled: Callable[[], None] | None = None,
 ) -> Iterator[tuple[Path, str | None]]:
-    """Stream package paths from MediaPackage/YYMM/YYMMDD/author/package.
+    """Stream legacy package paths and isolated conflicts from the fixed hierarchy."""
+    for entry in iter_media_package_discovery(
+        selection, media_package_root=media_package_root, allowed_roots=allowed_roots,
+        quarantine_root=quarantine_root, isolate_conflicts=isolate_conflicts,
+        excluded_names=excluded_names, check_cancelled=check_cancelled,
+    ):
+        yield entry.path, entry.reason
+
+
+def iter_media_package_discovery(
+    selection: str | Path, *, media_package_root: str | Path,
+    allowed_roots: list[Path], quarantine_root: Path | None = None,
+    isolate_conflicts: bool = False, excluded_names: frozenset[str] = frozenset(),
+    check_cancelled: Callable[[], None] | None = None, include_author_files: bool = False,
+) -> Iterator[MediaPackageScopeEntry]:
+    """Stream package paths and optional author inventories from the fixed hierarchy.
 
     A MediaPackage root selection enumerates all packages; month/day selections
     enumerate only matching descendants. No unrelated directory is modified.
@@ -163,18 +224,21 @@ def iter_media_package_scope_entries(
             discovered += 1
             if discovered > MAX_SCOPE_DISCOVERED_PACKAGES:
                 raise ValueError("Too many MediaPackage resource packages in selected scope")
-            yield directory, None
+            yield MediaPackageScopeEntry(directory)
             continue
         try:
-            names, conflicts = _child_directories(
+            names, conflicts, author = _child_directories(
                 directory, isolate_conflicts=isolate_conflicts,
-                excluded_names=excluded_names,
+                excluded_names=excluded_names, check_cancelled=check_cancelled,
+                include_loose_files=include_author_files and depth == 3,
             )
         except (OSError, ValueError) as exc:
             if not isolate_conflicts:
                 raise
-            yield directory, str(exc)
+            yield MediaPackageScopeEntry(directory, str(exc))
             continue
+        if author is not None:
+            yield author
         yield from conflicts
         children = []
         for name in names:
@@ -306,7 +370,8 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
 def plan_media_layout(
     source: Path, items: list[dict], *, max_rows: int = 100, include_items: bool = False,
     include_mapping: bool = False, organizer_mode: bool = False,
-    legacy_bucket_conflicts: bool = True, append_single_video: bool = False,
+    legacy_bucket_conflicts: bool = True, append_videos: bool = False,
+    numbered_photo_groups: bool = False,
 ) -> dict:
     """Plan the same final media layout from a mode-specific bounded inventory."""
     input_fingerprint = _input_fingerprint(items, source)
@@ -328,10 +393,10 @@ def plan_media_layout(
     # Homogeneous packages <=200 must be flattened *and* renumbered.
     # To avoid a root-level 001/002 rename cycle, the frozen executor stages
     # every file before publishing any numbered basename.
-    if (len(items) <= MAX_FILES_PER_GROUP and totals["Other"] == 0
+    if (not numbered_photo_groups and len(items) <= MAX_FILES_PER_GROUP and totals["Other"] == 0
             and (totals["P"] == 0 or totals["V"] == 0)):
         ordered = sorted(items, key=lambda row: (
-            append_single_video and Path(row["path"]).parent != source,
+            append_videos and Path(row["path"]).parent != source,
             os.path.relpath(row["path"], source).casefold(),
             os.path.relpath(row["path"], source),
         ))
@@ -364,8 +429,11 @@ def plan_media_layout(
             for row, name in zip(ordered, new_names)
         ] if actual_moves or include_mapping else []
         planned = [
-            row for row in mapping if not append_single_video or row["source"] != row["target"]
+            row for row in mapping if not append_videos or row["source"] != row["target"]
         ] if actual_moves else []
+        operation = "flatten_pure_media"
+        if append_videos:
+            operation = APPEND_SINGLE_VIDEO if actual_moves == 1 else APPEND_AUTHOR_VIDEOS
         return {
             "package": str(source),
             "input_fingerprint": input_fingerprint,
@@ -379,7 +447,7 @@ def plan_media_layout(
             "resolved_collision_count": collision_count,
             "truncated": len(planned) > max_rows,
             "read_only": True,
-            "operation": APPEND_SINGLE_VIDEO if append_single_video else "flatten_pure_media",
+            "operation": operation,
             **({"_snapshot_items": items} if include_items else {}),
             **({"_mapping_items": mapping} if include_mapping else {}),
             **({"actual_moves": actual_moves} if organizer_mode else {}),
@@ -428,11 +496,19 @@ def plan_media_layout(
         files = observed.get(kind, [])
         if not files:
             continue
-        groups_of_kind = [files[i:i + MAX_FILES_PER_GROUP] for i in range(0, len(files), MAX_FILES_PER_GROUP)] if kind != "Other" else [files]
-        for index, chunk in enumerate(groups_of_kind):
+        if numbered_photo_groups:
+            by_number: dict[str, list[dict]] = {}
+            for row in files:
+                by_number.setdefault(Path(row["path"]).parent.name, []).append(row)
+            groups_of_kind = sorted(by_number.items(), key=lambda item: (len(item[0].lstrip("0")), item[0].lstrip("0")))
+        else:
+            chunks = ([files[i:i + MAX_FILES_PER_GROUP] for i in range(0, len(files), MAX_FILES_PER_GROUP)]
+                      if kind != "Other" else [files])
+            groups_of_kind = [(None, chunk) for chunk in chunks]
+        for index, (existing_label, chunk) in enumerate(groups_of_kind):
             stem = kind if index == 0 else f"{kind}_{index}"
             size = sum(row["bytes"] for row in chunk)
-            folder = f"{stem} [{len(chunk)} {_size_label(size)}]"
+            folder = existing_label or f"{stem} [{len(chunk)} {_size_label(size)}]"
             dest = source / folder
             assigned, automatic_other = allocate_names(chunk, kind=kind)
             existing = occupied.get(folder.casefold())
@@ -485,6 +561,8 @@ def plan_media_layout(
                     needed_moves += 1
             groups.append({"name": folder, "kind": kind, "count": len(chunk),
                            "bytes": size, "destination": str(dest)})
+    operation = ("bucket_pure_media" if totals["Other"] == 0 and (totals["P"] == 0 or totals["V"] == 0)
+                 else "sort_mixed_media")
     return {
         "package": str(source),
         "input_fingerprint": input_fingerprint,
@@ -500,9 +578,7 @@ def plan_media_layout(
         "resolved_collision_count": resolved_collision_count,
         "truncated": planned > max_rows,
         "read_only": True,
-        "operation": ("bucket_pure_media" if totals["Other"] == 0
-                      and (totals["P"] == 0 or totals["V"] == 0)
-                      else "sort_mixed_media"),
+        "operation": PROMOTE_NUMBERED_PHOTO_GROUPS if numbered_photo_groups else operation,
         **({"_snapshot_items": items} if include_items else {}),
         **({"_mapping_items": sample} if include_mapping else {}),
         **({"actual_moves": needed_moves} if organizer_mode else {}),

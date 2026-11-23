@@ -4,19 +4,25 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import time
-from contextlib import closing
+from contextlib import closing, nullcontext
 from itertools import islice
 from pathlib import Path
+from unicodedata import normalize
+from uuid import uuid4
 
 from sqlalchemy import func, select, text
 
+from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_organizer_planner import is_reserved_workspace
-from app.batch.media_package_organizer import APPEND_SINGLE_VIDEO
+from app.batch.media_package_organizer import APPEND_VIDEO_OPERATIONS, _validate_scope
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.config import Settings
+from app.execution.luolcy_assignment import LUOLCY_ASSIGNMENT_KIND
 from app.models import TaskEvent, WorkJob, utcnow
+from app.path_safety import validate_mutation_destination
 from app.tasks.context import JobContext
 from app.tasks.handlers_base import TaskHandler, register_handler
 from app.tasks.logging import log_task_event
@@ -26,7 +32,7 @@ BATCH_KIND = "media-organizer-batch"
 FLOW = "recursive-batch-v1"
 RESULT_EVENT = "media_organizer_unit_result"
 ACTIVE = ("queued", "running", "paused", "cancel_requested")
-PREVIEW_STATUSES = ("ready", "blocked", "already_organized", "skipped")
+PREVIEW_STATUSES = ("ready", "blocked", "already_organized", "skipped", "needs_assignment")
 RESULT_STATUSES = ("success", "skipped", "conflict", "failed")
 
 
@@ -180,6 +186,155 @@ def get_mapping(session_factory, settings: Settings, job_id: int, mapping_id: st
     }
 
 
+def _loose_report(session_factory, settings: Settings, job_id: int, loose_id: str) -> tuple[dict, Path, Path]:
+    """Bind a loose-file report ID to a completed preview and its original selection."""
+    if len(loose_id) != 64 or any(c not in "0123456789abcdef" for c in loose_id):
+        raise KeyError(loose_id)
+    with session_factory() as session:
+        job, state = _job(session, PREVIEW_KIND, job_id)
+        if job.status != "completed":
+            raise ValueError("预览尚未完成")
+    report = _report_dir(settings, job_id)
+    with closing(_rows(report / "units.jsonl")) as rows:
+        unit = next((row for row in rows if row.get("loose_id") == loose_id), None)
+    if unit is None or unit["status"] != "needs_assignment":
+        raise KeyError(loose_id)
+    return unit, report / f"loose-{loose_id}.jsonl", Path(state["selection"])
+
+
+def get_loose_files(session_factory, settings: Settings, job_id: int, loose_id: str, *,
+                    page: int, page_size: int) -> dict:
+    """Read one page of real sources without exposing the filesystem identity fields."""
+    unit, path, _ = _loose_report(session_factory, settings, job_id, loose_id)
+    start = (page - 1) * page_size
+    with closing(_rows(path)) as rows:
+        header = next(rows, None)
+        if not isinstance(header, dict):
+            raise ValueError("散件预览报告不完整")
+        files = []
+        if start < unit["total_files"]:
+            files = [{key: row[key] for key in ("source", "kind", "bytes")}
+                     for row in islice(rows, start, start + page_size)]
+    return {
+        "job_id": str(job_id), "loose_id": loose_id, "author": unit["unit"],
+        "page": page, "page_size": page_size, "total_files": unit["total_files"],
+        "packages": list(header["packages"]), "files": files, "read_only": True,
+    }
+
+
+def _name_key(name: str) -> str:
+    return normalize("NFC", name).casefold()
+
+
+def _assignment_package(author: Path, author_fd: int, header: dict, name: str, *,
+                        new_package: bool, settings: Settings) -> tuple[Path, list[int] | None]:
+    if (not name or name in {".", ".."} or "/" in name or "\0" in name
+            or (new_package and (name != name.strip() or "\\" in name or any(ord(char) < 32 for char in name)))):
+        raise ValueError("请输入合法的资源包目录名")
+    package = _selection(str(author / name), settings)
+    target = validate_mutation_destination(package, settings.allowed_roots, settings.quarantine_root)
+    if target != package:
+        raise ValueError("目标资源包超出作者目录")
+    if new_package:
+        with os.scandir(author_fd) as entries:
+            if any(_name_key(entry.name) == _name_key(name) for entry in entries):
+                raise ValueError("新资源包名称已存在，请更换名称或选择现有资源包")
+        return package, None
+    expected = header["packages"].get(name)
+    if expected is None:
+        raise ValueError("请选择扫描时存在的同作者资源包")
+    info = os.stat(name, dir_fd=author_fd, follow_symlinks=False)
+    if not stat.S_ISDIR(info.st_mode) or [info.st_dev, info.st_ino] != expected:
+        raise ValueError("目标资源包已经变化，请重新扫描")
+    return package, expected
+
+
+def _assignment_moves(author: Path, author_fd: int, package: Path, package_fd: int | None,
+                      rows: dict[str, dict], settings: Settings) -> list[dict]:
+    """Recheck source identity and build only same-name, no-overwrite MOVE items."""
+    with os.scandir(package_fd) if package_fd is not None else nullcontext(()) as entries:
+        occupied = {_name_key(entry.name) for entry in entries}
+    moves = []
+    for path, snapshot in rows.items():
+        source = _selection(path, settings)
+        if source.parent != author:
+            raise ValueError("只可归属作者目录的直属文件")
+        info = os.stat(source.name, dir_fd=author_fd, follow_symlinks=False)
+        identity = [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+        if (not stat.S_ISREG(info.st_mode) or identity !=
+                [snapshot[key] for key in ("device", "inode", "bytes", "mtime_ns", "ctime_ns")]):
+            raise ValueError(f"源文件已经变化，请重新扫描：{source.name}")
+        if _name_key(source.name) in occupied:
+            raise ValueError(f"目标已存在同名文件：{source.name}")
+        occupied.add(_name_key(source.name))
+        target = _selection(str(package / source.name), settings)
+        if target != validate_mutation_destination(target, settings.allowed_roots, settings.quarantine_root):
+            raise ValueError("目标文件超出资源包目录")
+        moves.append({
+            "operation": "move", "source": path, "target": str(target),
+            "expected_device": info.st_dev, "expected_inode": info.st_ino,
+            "expected_size": info.st_size, "expected_mtime_ns": info.st_mtime_ns,
+        })
+    return moves
+
+
+def create_assignment_draft(service, job_id: int, loose_id: str, *, sources: list[str],
+                            package_name: str, new_package: bool) -> dict:
+    """Create a MOVE draft from explicitly selected files in one Luolcy author report."""
+    settings = service.settings
+    unit, report, selection = _loose_report(service.SessionLocal, settings, job_id, loose_id)
+    media_package_root = settings.media_package_root
+    author = _selection(unit["unit"], settings)
+    if media_package_root is None or not author.is_relative_to(selection):
+        raise ValueError("作者目录超出原扫描范围")
+    _, depth = _validate_scope(author, media_package_root=media_package_root,
+                               allowed_roots=settings.allowed_roots, quarantine_root=settings.quarantine_root)
+    if depth != 3:
+        raise ValueError("只能从 Luolcy 的作者层生成归属草稿")
+    selected = set(sources)
+    if not selected or len(selected) != len(sources):
+        raise ValueError("请选择不同的待归属文件")
+    with closing(_rows(report)) as rows:
+        header = next(rows, None)
+        if not isinstance(header, dict):
+            raise ValueError("散件预览报告不完整")
+        matching = {row["source"]: row for row in rows if row["source"] in selected}
+    if matching.keys() != selected:
+        raise ValueError("所选文件不在此预览的待归属清单中")
+    author_fd = _open_directory_nofollow(author)
+    try:
+        info = os.fstat(author_fd)
+        if [info.st_dev, info.st_ino] != header["author_identity"]:
+            raise ValueError("作者目录已经变化，请重新扫描")
+        package, package_identity = _assignment_package(
+            author, author_fd, header, package_name, new_package=new_package, settings=settings,
+        )
+        package_fd = None
+        try:
+            if package_identity is not None:
+                package_fd = os.open(package.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=author_fd)
+                info = os.fstat(package_fd)
+                if [info.st_dev, info.st_ino] != package_identity:
+                    raise ValueError("目标资源包已经变化，请重新扫描")
+            moves = _assignment_moves(author, author_fd, package, package_fd, matching, settings)
+        finally:
+            if package_fd is not None:
+                os.close(package_fd)
+    finally:
+        os.close(author_fd)
+    plan = service.create_plan(
+        name=f"散件归属 · {author.name} / {package.name}", kind=LUOLCY_ASSIGNMENT_KIND, items=moves,
+        metadata={"luolcy_assignment": {
+            "assignment_id": uuid4().hex, "preview_job_id": str(job_id),
+            "author": str(author), "package": str(package),
+            "author_identity": header["author_identity"], "package_identity": package_identity,
+            "sources": [[row["source"], [row[key] for key in ("expected_device", "expected_inode",
+                                                               "expected_size", "expected_mtime_ns")]] for row in moves],
+        }},
+    )
+    return {"plan_id": str(plan.id), "status": plan.status, "expected_changes": plan.expected_changes}
+
+
 def enqueue_batch(session_factory, settings: Settings, preview_id: int) -> dict:
     if not (settings.allow_mutation and settings.allow_delete):
         raise PermissionError("当前环境未开启整理权限")
@@ -219,13 +374,21 @@ def get_batch(session_factory, job_id: int, *, page: int, page_size: int) -> dic
 
 def _preview_row(record: dict, report: Path) -> dict:
     mapping = record.get("_mapping_items", []) if record["status"] == "ready" else []
-    if record.get("operation") == APPEND_SINGLE_VIDEO:
+    if record.get("operation") in APPEND_VIDEO_OPERATIONS:
         mapping = [move for move in mapping if move["source"] != move["target"]]
     mapping_id = hashlib.sha256(record["unit"].encode()).hexdigest() if mapping else None
     if mapping_id is not None:
         with _report_file(report / f"{mapping_id}.jsonl") as stream:
             for move in mapping:
                 _write_json(stream, {key: move[key] for key in ("source", "target", "target_name", "kind", "bytes")})
+            _persist(stream)
+    loose_files = record.get("_loose_files", [])
+    loose_id = hashlib.sha256(record["unit"].encode()).hexdigest() if loose_files else None
+    if loose_id is not None:
+        with _report_file(report / f"loose-{loose_id}.jsonl") as stream:
+            _write_json(stream, {"packages": record["_packages"], "author_identity": record["_author_identity"]})
+            for loose_file in loose_files:
+                _write_json(stream, loose_file)
             _persist(stream)
     totals = record.get("totals", {})
     return {
@@ -239,6 +402,7 @@ def _preview_row(record: dict, report: Path) -> dict:
         "renamed_count": record.get("renamed_count", 0),
         "wrapper_cleanup_count": len(record.get("wrapper_cleanup", [])),
         "total_proposals": len(mapping), "mapping_id": mapping_id,
+        **({"loose_id": loose_id} if loose_id is not None else {}),
         "sample_moves": mapping[:10], "truncated": len(mapping) > 10,
         "input_fingerprint": record.get("input_fingerprint"),
         "conflicts": record.get("conflicts", []), "read_only": True,

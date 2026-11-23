@@ -20,6 +20,7 @@ import { formatBytes } from '../../utils/format';
 const panelClass = 'nfc-v2-batch-media-panel';
 const previewLabels = {
   ready: '待整理', blocked: '冲突', skipped: '无需处理', already_organized: '已整理',
+  needs_assignment: '待确认归属',
 };
 const conflictLabels: Readonly<Record<string, string>> = {
   target_path_exists: '目标路径已存在',
@@ -36,9 +37,9 @@ const outcomes = {
 const resultStatuses: readonly MediaBatchOutcome[] = ['success', 'skipped', 'conflict', 'failed'];
 
 /** Display a preview's aggregated totals and the current page of independent units. */
-export function MediaOrganizerPreviewReport({ preview, onMapping, action, children, footer }: {
+export function MediaOrganizerPreviewReport({ preview, onDetails, action, children, footer }: {
   preview: MediaBatchPreview;
-  onMapping: (row: MediaBatchPreviewUnit) => void;
+  onDetails: (row: MediaBatchPreviewUnit, opener: HTMLButtonElement) => void;
   action: React.ReactNode;
   children: React.ReactNode;
   footer: React.ReactNode;
@@ -53,6 +54,9 @@ export function MediaOrganizerPreviewReport({ preview, onMapping, action, childr
         <span>已整理 <strong>{summary.already_organized_count.toLocaleString()}</strong></span>
         <span>跳过 <strong>{summary.skipped_count.toLocaleString()}</strong></span>
         <span>冲突 <strong>{summary.blocked_count.toLocaleString()}</strong></span>
+        {!!summary.needs_assignment_count && (
+          <span>待归属作者 <strong>{summary.needs_assignment_count.toLocaleString()}</strong></span>
+        )}
         <span>文件 <strong>{summary.file_count.toLocaleString()}</strong></span>
         {summary.totals && (
           <span>图片 <strong>{summary.totals.P.toLocaleString()}</strong> · 视频 <strong>{summary.totals.V.toLocaleString()}</strong> · 其他 <strong>{summary.totals.Other.toLocaleString()}</strong></span>
@@ -97,9 +101,14 @@ export function MediaOrganizerPreviewReport({ preview, onMapping, action, childr
                         {conflict.existing?.length ? <> · {conflict.existing.join('、')}</> : null}
                       </p>
                     );
-                  }) : row.reason && row.status === 'blocked' && <p>{row.reason}</p>}
+                  }) : row.reason && (row.status === 'blocked' || row.status === 'needs_assignment') && <p>{row.reason}</p>}
+                  {row.loose_id && (
+                    <ConsoleButton size="sm" variant="secondary" onClick={event => onDetails(row, event.currentTarget)}>
+                      查看散件并选择归属
+                    </ConsoleButton>
+                  )}
                   {row.mapping_id && (
-                    <ConsoleButton size="sm" variant="secondary" onClick={() => onMapping(row)}>
+                    <ConsoleButton size="sm" variant="secondary" onClick={event => onDetails(row, event.currentTarget)}>
                       查看完整映射（{row.total_proposals.toLocaleString()}）
                     </ConsoleButton>
                   )}

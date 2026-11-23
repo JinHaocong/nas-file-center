@@ -59,6 +59,25 @@ def test_single_video_append_does_not_treat_collection_or_date_names_as_authors(
     }
 
 
+@pytest.mark.parametrize(("folder", "extra"), [
+    ("xkatz", "002.mp4"),
+    ("xkatt", "cover.jpg"),
+    ("xkatt", "2026-01-01/002.mp4"),
+])
+def test_multi_video_append_requires_matching_initials_and_a_pure_leaf(tmp_path, folder, extra):
+    author = tmp_path / "2611/261120/小可爱甜甜"
+    child = author / folder
+    put(author / "001.mp4")
+    put(child / "001.mp4")
+    put(child / extra)
+
+    rows = list(iter_organizing_previews(author, allowed_roots=[tmp_path], include_mapping=True))
+
+    assert all(row.get("operation") != "append_author_videos" for row in rows)
+    assert all(Path(move["source"]).is_relative_to(child) == Path(move["target"]).is_relative_to(child)
+               for row in rows for move in row.get("_mapping_items", []))
+
+
 @pytest.mark.parametrize("exception_path", ["1/作品/cover.jpg", "02/clip.mp4", "1/作品/notes.txt"])
 def test_whole_author_rule_keeps_separate_units_when_its_narrow_shape_changes(tmp_path, exception_path):
     author = tmp_path / "2611/261123/作者A"
@@ -313,6 +332,77 @@ def test_typed_leaf_does_not_absorb_a_symlinked_quarantine_root(tmp_path):
     ]
 
 
+@pytest.mark.parametrize(("label", "child_name", "extra"), [
+    ("作品 [2P1V]", "sp", None),
+    ("作品 [1P1V] [2V]", "sp", None),
+    ("作品 [1P1V] [3图]", "sp", None),
+    ("作品 [1P1V] [3张]", "sp", None),
+    ("作品 [3-1P1V]", "sp", None),
+    ("作品 [3~1P1V]", "sp", None),
+    ("作品 [1P1V]", "视频压缩版", None),
+    ("作品 [1P1V]", "无修版", None),
+    ("作品 [1P1V]", "导演剪辑版", None),
+    ("作品 [1P1V]", "X-046-R16", None),
+    ("作品 [1P1V]", "NO.002", None),
+    ("作品 [1P1V]", "独立短片 1V", None),
+    ("作品 [1P1V]", "短片Vol.02", None),
+    ("作品 [1P1V]", "sp", "其他作品/cover.jpg"),
+    ("作品 [1P1V]", "视图", "视图/4K/clip.mp4"),
+])
+def test_work_media_rules_preserve_unverified_counts_and_independent_boundaries(
+    tmp_path, label, child_name, extra,
+):
+    work = tmp_path / label
+    child = work / child_name
+    put(work / "cover.jpg")
+    put(child / "clip.mp4")
+    if extra is not None:
+        put(work / extra)
+
+    rows = list(iter_organizing_previews(work, allowed_roots=[tmp_path], include_mapping=True))
+
+    assert all(Path(move["target"]).is_relative_to(child)
+               for row in rows for move in row.get("_mapping_items", [])
+               if Path(move["source"]).is_relative_to(child))
+    assert {row["unit"] for row in rows} >= {str(work), str(child)}
+
+
+def test_view_wrapper_does_not_adopt_a_mislabeled_bucket(tmp_path):
+    work = tmp_path / "作品 [1P1V]"
+    view = work / "视图"
+    put(work / "cover.jpg")
+    put(view / "V [99 假标签]/clip.mp4")
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(work, allowed_roots=[tmp_path])}
+
+    assert rows[str(work)]["totals"] == {"P": 1, "V": 0, "Other": 0}
+    assert rows[str(view)]["totals"] == {"P": 0, "V": 1, "Other": 0}
+
+
+def test_work_media_rule_preserves_the_date_and_recognizes_a_confirmed_work(tmp_path):
+    date = tmp_path / "261123"
+    work = date / "独立短片 [1P1V]"
+    put(work / "cover.jpg")
+    put(work / "sp/clip.mp4")
+
+    rows = list(iter_organizing_previews(date, allowed_roots=[tmp_path]))
+
+    assert [(row["unit"], row["totals"]) for row in rows] == [
+        (str(work), {"P": 1, "V": 1, "Other": 0}),
+    ]
+
+
+def test_face_stays_separate_when_the_work_has_no_other_photos(tmp_path):
+    work = tmp_path / "作品 [1P1V]"
+    put(work / "clip.mp4")
+    put(work / "face/cover.jpg")
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(work, allowed_roots=[tmp_path])}
+
+    assert rows[str(work)]["totals"] == {"P": 0, "V": 1, "Other": 0}
+    assert rows[str(work / "face")]["sample_moves"][0]["target"] == str(work / "face/001.jpg")
+
+
 def test_author_dated_batch_absorbs_categories_but_outer_calendar_keeps_author_names(tmp_path):
     day = tmp_path / "261103"
     batch = day / "作者A" / "261103"
@@ -328,7 +418,7 @@ def test_author_dated_batch_absorbs_categories_but_outer_calendar_keeps_author_n
     assert rows[str(batch.with_name("260321"))]["totals"] == {"P": 0, "V": 1, "Other": 0}
 
 
-def test_same_name_work_promotes_only_canonical_buckets(tmp_path):
+def test_same_name_work_promotes_typed_buckets_even_when_files_need_numbering(tmp_path):
     work = tmp_path / "作品A"
     inner = work / work.name
     put(inner / "P [1 4B]/001.jpg")
@@ -344,10 +434,14 @@ def test_same_name_work_promotes_only_canonical_buckets(tmp_path):
     assert {move["target"] for move in rows[str(work)]["sample_moves"]} == {
         str(work / "P [1 4B]/001.jpg"), str(work / "V [1 4B]/001.MP4"),
     }
-    assert str(unorganized) in rows and str(unorganized.parent) not in rows
+    assert str(unorganized) not in rows
+    assert {move["target"] for move in rows[str(unorganized.parent)]["sample_moves"]} == {
+        str(unorganized.parent / "P [1 4B]/001.jpg"),
+        str(unorganized.parent / "V [1 4B]/001.mp4"),
+    }
 
 
-@pytest.mark.parametrize("boundary", ["261103", "4K"])
+@pytest.mark.parametrize("boundary", ["261103", "11.06", "4K", "完整版"])
 def test_same_name_work_does_not_collapse_calendar_or_version_layers(tmp_path, boundary):
     outer = tmp_path / "作品A" / boundary
     inner = outer / boundary
@@ -621,7 +715,7 @@ def test_blocked_wrappers_keep_nested_independent_works_and_versions(tmp_path):
     }
 
 
-def test_mixed_wrapper_preserves_its_loose_files_and_allows_pure_sibling(tmp_path):
+def test_mixed_photo_wrapper_organizes_its_loose_files_and_allows_pure_sibling(tmp_path):
     work = tmp_path / "作品A"
     mixed = work / "P"
     child = mixed / "NO.002"
@@ -633,9 +727,24 @@ def test_mixed_wrapper_preserves_its_loose_files_and_allows_pure_sibling(tmp_pat
 
     assert rows[str(work)]["status"] == "ready"
     assert [item["target"] for item in rows[str(work)]["sample_moves"]] == [str(work / "001.mp4")]
-    assert rows[str(mixed)]["status"] == "blocked"
+    assert rows[str(mixed)]["status"] == "ready"
     assert rows[str(mixed)]["totals"] == {"P": 1, "V": 0, "Other": 0}
+    assert rows[str(mixed)]["sample_moves"][0]["target"] == str(mixed / "001.jpg")
     assert rows[str(child)]["sample_moves"][0]["target"] == str(child / "001.webp")
+
+
+def test_mixed_video_wrapper_organizes_only_its_direct_videos(tmp_path):
+    work = tmp_path / "作品A"
+    wrapper = work / "V"
+    child = wrapper / "NO.002"
+    put(wrapper / "散视频.avi")
+    put(child / "封面.jpg")
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(work, allowed_roots=[tmp_path])}
+
+    assert rows[str(wrapper)]["status"] == "ready"
+    assert [move["target"] for move in rows[str(wrapper)]["sample_moves"]] == [str(wrapper / "001.avi")]
+    assert rows[str(child)]["sample_moves"][0]["target"] == str(child / "001.jpg")
 
 
 def test_photo_container_organizes_direct_images_and_preserves_its_named_child(tmp_path):
@@ -758,6 +867,63 @@ def test_numbered_packages_keep_their_role_after_parent_and_package_bucketing(tm
     assert all(row["status"] == "already_organized" and row["actual_moves"] == 0 for row in rows.values())
 
 
+@pytest.mark.parametrize("boundary", ["gap", "loose-file", "unmarked-work", "photo-wrapper", "protected-work"])
+def test_numbered_volume_still_needs_an_unambiguous_directory_shape(tmp_path, boundary):
+    series = tmp_path / "网盘"
+    first = series / "1"
+    second = series / ("3" if boundary == "gap" else "2")
+    name = {"unmarked-work": "临时目录", "photo-wrapper": "图包"}.get(boundary, "作品 VOL.01")
+    work = first / name
+    put(work / "cover.jpg")
+    put(second / "作品 VOL.02/cover.jpg")
+    if boundary == "loose-file":
+        put(first / "loose.mp4")
+    quarantine_root = work if boundary == "protected-work" else None
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(
+        series, allowed_roots=[tmp_path], quarantine_root=quarantine_root, include_mapping=True,
+    )}
+
+    assert rows[str(first)]["status"] == "blocked"
+    assert rows[str(first)]["reason"] == "Ambiguous directory role"
+    assert not rows[str(first)].get("_mapping_items")
+
+
+@pytest.mark.parametrize("boundary", [
+    "count-mismatch", "mixed-media", "extra-folder", "protected-group",
+    "mixed-label", "duplicate-count", "another-video-label", "another-photo-label",
+])
+def test_promoting_photo_groups_requires_an_exact_isolated_photo_work(tmp_path, boundary):
+    label = {
+        "count-mismatch": "[3P 4B]",
+        "mixed-label": "[2P 1视频]",
+        "duplicate-count": "[2P 1P]",
+        "another-video-label": "[2P 4B] [1V]",
+        "another-photo-label": "[2P 4B] [3P]",
+    }.get(boundary, "[2P 4B]")
+    work = tmp_path / f"系列 {label}"
+    first = work / "图片/3"
+    put(first / "cover.jpg")
+    put(work / ("图片/9/clip.mp4" if boundary == "mixed-media" else "图片/9/cover.jpg"))
+    if boundary == "extra-folder":
+        (work / "历史批次").mkdir()
+    quarantine_root = first if boundary == "protected-group" else None
+
+    rows = list(iter_organizing_previews(work, allowed_roots=[tmp_path], quarantine_root=quarantine_root))
+
+    assert all(row.get("operation") != "promote_numbered_photo_groups" for row in rows)
+
+
+def test_existing_numbered_photo_groups_do_not_trigger_a_lift_without_a_wrapper(tmp_path):
+    work = tmp_path / "旧下载 [2P 8B]"
+    put(work / "3/a.jpg")
+    put(work / "9/b.jpg")
+
+    rows = list(iter_organizing_previews(work, allowed_roots=[tmp_path]))
+
+    assert all(row.get("operation") != "promote_numbered_photo_groups" for row in rows)
+
+
 def test_numbered_container_with_named_work_preserves_ambiguous_direct_files(tmp_path):
     collection = tmp_path / "两卷合集"
     put(collection / "01" / "散图.jpg")
@@ -768,7 +934,9 @@ def test_numbered_container_with_named_work_preserves_ambiguous_direct_files(tmp
         collection, allowed_roots=[tmp_path],
     )}
 
-    assert rows[str(collection / "01")]["status"] == rows[str(collection / "02")]["status"] == "blocked"
+    assert rows[str(collection / "01")]["status"] == "blocked"
+    assert rows[str(collection / "02")]["status"] == "ready"
+    assert rows[str(collection / "02")]["sample_moves"][0]["target"] == str(collection / "02/001.jpg")
     assert rows[str(collection / "01/NO.003")]["sample_moves"][0]["target"] == str(collection / "01/NO.003/001.jpg")
 
 

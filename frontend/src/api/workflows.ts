@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { PlanId } from '../types';
 import {
   WorkflowListItem,
   WorkflowResponse,
@@ -85,14 +86,14 @@ export const workflowApi = {
   },
 
   rebuildPlanPreview: async (
-    planId: number,
+    planId: PlanId,
     data: PlanRebuildPreviewRequest = {}
   ): Promise<PlanRebuildPreviewResponse> => {
     return api.post<PlanRebuildPreviewResponse>(`/api/plans/${planId}/rebuild-preview`, data);
   },
 
   rebuildPlan: async (
-    planId: number,
+    planId: PlanId,
     data: PlanRebuildRequest
   ): Promise<PlanRebuildResponse> => {
     return api.post<PlanRebuildResponse>(`/api/plans/${planId}/rebuild`, data);

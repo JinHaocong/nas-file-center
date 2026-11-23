@@ -4,15 +4,18 @@ from __future__ import annotations
 import os
 import re
 import stat
+from collections import Counter
 from itertools import islice
 from pathlib import Path
 from typing import Callable, Iterator
+from unicodedata import name as unicode_name
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, numbered_name
 from app.batch.media_package_organizer import (
     MAX_DEPTH, MAX_FILES_PER_GROUP, MAX_PACKAGE_DIRECTORIES, MAX_PACKAGE_FILES, MAX_SCOPE_ENTRIES_PER_DIRECTORY,
-    _classify, _package_path, _walk_package, iter_media_package_scope_entries, plan_media_layout,
+    PROMOTE_NUMBERED_PHOTO_GROUPS,
+    _classify, _package_path, _size_label, _walk_package, iter_media_package_discovery, plan_media_layout,
 )
 from app.path_safety import require_allowed_path, require_unreserved_path
 
@@ -40,17 +43,35 @@ _COLLECTION_CONTEXT = re.compile(
     r"合集|全集|图包|作品|\b(?:collection|album)\b|\bno[.\s_-]*\d+\b|\b[a-z]+\d+-\d+\b",
     re.I,
 )
+_WORK_FOLDER_MARKER = re.compile(
+    r"\b(?:ex)?vol[.\s_-]*[0-9]+|[\[【][^\]】]*[0-9]+\s*(?:p|v|张|图|视频)", re.I,
+)
+_BRACKETED_LABEL = re.compile(r"[\[【]([^\]】]*)[\]】]")
+_MEDIA_COUNT_LABEL = re.compile(r"[0-9]+\s*(?:p|v|张|图|视频)", re.I)
+_PHOTO_PACK_TOTAL = re.compile(
+    r"\s*([0-9]+)\s*p(?:[\s/\-／]+[0-9]+(?:\.[0-9]+)?\s*(?:[kmgt]i?b|b|[kmgt]))?\s*", re.I,
+)
+_MIXED_WORK_TOTAL = re.compile(r"(?<![0-9a-z])([0-9]+)\s*p\s*(?:[+／/\-]\s*)?([0-9]+)\s*v(?![0-9a-z])", re.I)
+_ADDITIONAL_WORK_COUNT = re.compile(r"[0-9]+\s*(?:[pv](?![0-9a-z])|张(?:图)?|图|个视频|视频)", re.I)
+_WORK_SEQUENCE_LABEL = re.compile(r"(?<![0-9a-z])(?:exvol|vol|no)[.\s_-]*[0-9]+", re.I)
+_WORK_VARIANT_LABEL = re.compile(
+    r"原版|原档|压缩|水印|无修|無修|未修|修复版|精华版|完整版|加长版|短版|长版"
+    r"|版(?:本)?(?=$|[\s\]】）)_-])"
+    r"|(?:^|[^0-9a-z])(?:r[0-9]+|[248]k|[0-9]{3,4}p)(?![0-9a-z])", re.I,
+)
 _VERSION_NAMES = frozenset({"4k", "pt", "原图无水印", "精华版", "修复版"})
 _MIXED_WRAPPER_REASON = "分类包装里的散文件归属待确认"
 _AMBIGUOUS_DIRECTORY_REASON = "Ambiguous directory role"
+_NUMBERED_WORK_CONTAINER_CANDIDATE = "Numbered work container candidate"
 _PHOTO_ALIASES = frozenset({
     "图片", "图", "照片", "photo", "photos", "image", "images", "picture", "pictures", "pic",
 })
 _ALIASES = _PHOTO_ALIASES | {"视频", "video", "videos"}
-_TYPED_WRAPPER_KINDS = {"movie": "V", "img": "P", "gif": "P", "selfies": "P"}
+_JPEG_LABELS = frozenset({"jpg", "jpeg"})
+_JPEG_EXTENSIONS = frozenset({".jpg", ".jpeg"})
+_TYPED_WRAPPER_KINDS = {"movie": "V", "img": "P", "gif": "P", "selfies": "P", "jpg": "P", "jpeg": "P"}
 _FANTIA_COLLECTION = re.compile(r"(?<![a-z0-9])fantia(?![a-z0-9])", re.I | re.ASCII)
-_FANTIA_TIER = re.compile(r"\$[0-9]+_.*")
-_FANTIA_BASE_TIER = re.compile(r"\$[0-9]+_")
+_FANTIA_TIER = re.compile(r"\$(?P<amount>[0-9]+)_.*")
 
 
 def _fantia_collection(path: Path) -> bool:
@@ -147,8 +168,12 @@ def _labelled_bucket_kind(name: str) -> str | None:
     return "Other" if _OTHER_BUCKET.fullmatch(name) else None
 
 
-def _photo_wrapper(unit: Path) -> bool:
-    return unit.name.casefold() in _PHOTO_ALIASES and _is_wrapper(unit.parent, unit.name)
+def _local_wrapper_media_kind(unit: Path) -> str | None:
+    """Read the media type of a classification directory that can keep local files."""
+    label = unit.name.casefold()
+    if (label in _PHOTO_ALIASES or label in {"p", "v"}) and _is_wrapper(unit.parent, unit.name):
+        return "V" if label == "v" else "P"
+    return None
 
 
 def _pure_wrapper(folder: Path, device: int, protected_roots: tuple[Path, ...],
@@ -193,8 +218,8 @@ def _layer_media_kinds(unit: Path, entries: list[tuple[str, os.stat_result]], de
                        protected_roots: tuple[Path, ...]) -> tuple[str, ...]:
     """Identify pure local media beside separate works or dated subgroups."""
     author = _author_layer(unit)
-    photos = _photo_wrapper(unit)
-    if not author and not photos:
+    wrapper_kind = _local_wrapper_media_kind(unit)
+    if not author and wrapper_kind is None:
         return ()
     direct = {_classify(name) for name, info in entries if stat.S_ISREG(info.st_mode)}
     if direct and (len(direct) != 1 or "Other" in direct):
@@ -212,7 +237,13 @@ def _layer_media_kinds(unit: Path, entries: list[tuple[str, os.stat_result]], de
         if None in kinds:
             return ()
     media_kinds = kinds - {"Other"}
-    if not media_kinds or (photos and not author and media_kinds != {"P"}):
+    if not media_kinds or (wrapper_kind is not None and media_kinds != {wrapper_kind}):
+        return ()
+    if wrapper_kind is not None and unit.name.casefold() in {"p", "v"} and any(
+        _is_wrapper(unit, child.name, device=device, protected_roots=protected_roots)
+        and _verified_bucket_kind(child, device) not in kinds
+        for child in children
+    ):
         return ()
     if any(
         not _is_wrapper(unit, child.name, device=device, protected_roots=protected_roots)
@@ -225,33 +256,38 @@ def _layer_media_kinds(unit: Path, entries: list[tuple[str, os.stat_result]], de
 
 def _repeated_work_wrapper(unit: Path, entries: list[tuple[str, os.stat_result]],
                            device: int, protected_roots: tuple[Path, ...]) -> Path | None:
-    """Collapse a single exact-name wrapper around a canonical, bucketed work."""
-    if (len(entries) != 1 or _CALENDAR_DIRECTORY.fullmatch(unit.name)
+    """Find the media leaf at the end of a chain of exact-name wrappers."""
+    if (len(entries) != 1 or _append_calendar_boundary(unit.name)
             or _fantia_collection(unit)
-            or unit.name.casefold() in _VERSION_NAMES or _author_layer(unit)
+            or unit.name.casefold() in _VERSION_NAMES or _WORK_VARIANT_LABEL.search(unit.name)
+            or _author_layer(unit)
             or _AMBIGUOUS.fullmatch(unit.name) or _is_wrapper(unit.parent, unit.name)
             or unit.name == "图包"):
         return None
-    name, info = entries[0]
-    if name != unit.name or info.st_dev != device or not stat.S_ISDIR(info.st_mode):
-        return None
-    inner = unit / name
-    if _protected(inner, protected_roots):
-        return None
+    inner = unit
     try:
-        buckets = _entries(inner, device)
-        if not buckets or not all(
-            stat.S_ISDIR(bucket_info.st_mode)
-            and not _protected(inner / bucket, protected_roots)
-            and _verified_bucket_kind(inner / bucket, device)
-            for bucket, bucket_info in buckets
+        for _ in range(MAX_DEPTH):
+            if len(entries) != 1:
+                break
+            name, info = entries[0]
+            if name != unit.name or not stat.S_ISDIR(info.st_mode):
+                break
+            child = inner / name
+            if info.st_dev != device or _protected(child, protected_roots):
+                return None
+            inner = child
+            entries = _entries(inner, device)
+        if inner != unit and entries and all(
+            info.st_dev == device and not name.casefold().startswith(".nfc-")
+            and not _protected(inner / name, protected_roots)
+            and ((stat.S_ISREG(info.st_mode) and _classify(name) in {"P", "V"})
+                 or (stat.S_ISDIR(info.st_mode) and _verified_bucket_kind(inner / name, device)))
+            for name, info in entries
         ):
-            return None
-        items = list(_semantic_inventory(inner, protected_roots))
-        plan = plan_media_layout(inner, items, organizer_mode=True)
+            return inner
     except (OSError, ValueError):
         return None
-    return inner if plan["status"] == "already_organized" else None
+    return None
 
 
 def _semantic_inventory(
@@ -266,6 +302,7 @@ def _semantic_inventory(
     folders = [(unit, 0)]
     device = os.lstat(unit).st_dev
     files = directory_count = 0
+    repeated = None
     while folders:
         if check_cancelled is not None:
             check_cancelled()
@@ -277,8 +314,10 @@ def _semantic_inventory(
             directories.add(folder)
         children = []
         entries = _entries(folder, device)
-        repeated = (_repeated_work_wrapper(unit, entries, device, protected_roots)
-                    if not depth and not (whole_author or local_media_kinds) else None)
+        if not depth and not (whole_author or local_media_kinds):
+            repeated = _repeated_work_wrapper(unit, entries, device, protected_roots)
+        work_component = (_work_media_component(unit, entries, device, protected_roots)
+                          if not depth and not (whole_author or local_media_kinds) else None)
         for name, info in entries:
             path = folder / name
             if name.casefold().startswith(".nfc-"):
@@ -299,7 +338,7 @@ def _semantic_inventory(
                 elif not depth and local_media_kinds:
                     if _labelled_bucket_kind(name) in local_media_kinds and _verified_bucket_kind(path, device):
                         children.append((path, depth + 1))
-                elif path == repeated:
+                elif (repeated is not None and repeated.is_relative_to(path)) or name == work_component:
                     children.append((path, depth + 1))
                 elif _is_wrapper(folder, name, device=device, protected_roots=protected_roots):
                     if depth or _pure_wrapper(path, device, protected_roots):
@@ -401,6 +440,89 @@ def _direct_leaf_kinds(path: Path, device: int) -> set[str]:
     return {_classify(filename) for filename, _ in _regular_media_entries(path, device)}
 
 
+def _work_media_counts(
+    folder: Path, entries: list[tuple[str, os.stat_result]], device: int, protected_roots: tuple[Path, ...], *,
+    exclude: str | None = None, allow_buckets: bool = False,
+) -> Counter[str] | None:
+    """Count direct media and, when allowed, verified P/V output buckets."""
+    counts: Counter[str] = Counter()
+    for name, info in entries:
+        path = folder / name
+        if (info.st_dev != device or _protected(path, protected_roots)
+                or name.casefold().startswith(".nfc-")):
+            return None
+        if name == exclude:
+            continue
+        if stat.S_ISREG(info.st_mode):
+            kind = _classify(name)
+            if kind not in {"P", "V"}:
+                return None
+            counts[kind] += 1
+        elif allow_buckets and stat.S_ISDIR(info.st_mode):
+            bucket = MEDIA_BUCKET_PATTERN.fullmatch(name)
+            if bucket is None:
+                return None
+            kind = bucket["kind"].upper()
+            files = _regular_media_entries(path, device)
+            if not files or any(_classify(filename) != kind or _protected(path / filename, protected_roots)
+                                for filename, _ in files):
+                return None
+            size = sum(file_info.st_size for _, file_info in files)
+            if bucket["label"] != f"[{len(files)} {_size_label(size)}]":
+                return None
+            counts[kind] += len(files)
+        else:
+            return None
+    return counts
+
+
+def _work_media_component(
+    parent: Path, entries: list[tuple[str, os.stat_result]], device: int, protected_roots: tuple[Path, ...],
+) -> str | None:
+    """Identify one part of a titled work without scanning its siblings repeatedly."""
+    totals = _MIXED_WORK_TOTAL.search(parent.name)
+    if totals is None or _append_calendar_boundary(parent.name) or _is_wrapper(parent.parent, parent.name):
+        return None
+    before, after = parent.name[:totals.start()], parent.name[totals.end():]
+    if (re.search(r"[0-9]\s*[-－–—~～／]\s*$", before)
+            or any(_ADDITIONAL_WORK_COUNT.search(part) for part in (before, after))):
+        return None
+
+    candidates = list(islice((
+        name for name, info in entries if stat.S_ISDIR(info.st_mode) and not MEDIA_BUCKET_PATTERN.fullmatch(name)
+    ), 2))
+    if len(candidates) != 1:
+        return None
+    name, = candidates
+    label = name.casefold()
+    if (_protected(parent / name, protected_roots) or _is_wrapper(parent, name)
+            or label in _TYPED_WRAPPER_KINDS or name == "图包" or _FANTIA_TIER.fullmatch(name)
+            or _AMBIGUOUS.fullmatch(name) or _append_calendar_boundary(name)
+            or label in _VERSION_NAMES or _WORK_VARIANT_LABEL.search(name)
+            or _COLLECTION_CONTEXT.search(name) or _WORK_SEQUENCE_LABEL.search(name)
+            or _ADDITIONAL_WORK_COUNT.search(name)):
+        return None
+
+    primary = _work_media_counts(parent, entries, device, protected_roots, exclude=name, allow_buckets=True)
+    if not primary:
+        return None
+    try:
+        branch = _entries(parent / name, device)
+    except (OSError, ValueError):
+        return None
+    supplemental = _work_media_counts(parent / name, branch, device, protected_roots, allow_buckets=label == "视图")
+    if not supplemental:
+        return None
+    total = primary + supplemental
+    if total["P"] != int(totals[1]) or total["V"] != int(totals[2]) or len(total) != 2:
+        return None
+    if label == "视图":
+        return name
+    if label == "face":
+        return name if primary["P"] > 0 and set(supplemental) == {"P"} else None
+    return name if len(primary) == len(supplemental) == 1 else None
+
+
 def _has_photo_bucket(parent: Path, device: int, protected_roots: tuple[Path, ...]) -> bool:
     """Verify that Selfies has an existing photo bucket in the same work."""
     try:
@@ -417,6 +539,33 @@ def _has_photo_bucket(parent: Path, device: int, protected_roots: tuple[Path, ..
     )
 
 
+def _jpeg_wrapper_contents(folder: Path, device: int, protected_roots: tuple[Path, ...]) -> bool:
+    """Verify JPEG files and photo buckets directly inside a JPEG wrapper."""
+    if _protected(folder, protected_roots):
+        return False
+    try:
+        entries = _entries(folder, device)
+    except (OSError, ValueError):
+        return False
+    for name, info in entries:
+        path = folder / name
+        if info.st_dev != device or _protected(path, protected_roots) or is_reserved_workspace(path):
+            return False
+        if stat.S_ISREG(info.st_mode) and path.suffix.casefold() in _JPEG_EXTENSIONS:
+            continue
+        bucket = MEDIA_BUCKET_PATTERN.fullmatch(name) if stat.S_ISDIR(info.st_mode) else None
+        if bucket is None or bucket["kind"].upper() != "P":
+            return False
+        files = _regular_media_entries(path, device)
+        if not files or any(Path(filename).suffix.casefold() not in _JPEG_EXTENSIONS
+                            or _protected(path / filename, protected_roots) for filename, _ in files):
+            return False
+        size = sum(file_info.st_size for _, file_info in files)
+        if bucket["label"] != f"[{len(files)} {_size_label(size)}]":
+            return False
+    return bool(entries)
+
+
 def _typed_leaf_wrapper(
     parent: Path, name: str, device: int, protected_roots: tuple[Path, ...],
 ) -> bool:
@@ -425,6 +574,14 @@ def _typed_leaf_wrapper(
             or _is_wrapper(parent.parent, parent.name)):
         return False
     label = name.casefold()
+    if label in _JPEG_LABELS:
+        # The photo count in a title such as [456P] looks like a resolution label.
+        declared_work = (_declared_photo_total(parent) is not None
+                         or _MIXED_WORK_TOTAL.search(parent.name) is not None)
+        if (_append_calendar_boundary(parent.name) or parent.name.casefold() in _VERSION_NAMES
+                or (not declared_work and _WORK_VARIANT_LABEL.search(parent.name))):
+            return False
+        return _jpeg_wrapper_contents(parent / name, device, protected_roots)
     entries = _regular_media_entries(parent / name, device)
     kind = _TYPED_WRAPPER_KINDS[label]
     if not entries or any(
@@ -454,13 +611,16 @@ def _fantia_tier_wrapper(post: Path, name: str, device: int, protected_roots: tu
         return False
     if names == {name}:
         return _direct_leaf_kinds(post / name, device) in ({"P"}, {"V"})
-    base = name.removesuffix("🎬")
-    movie = base + "🎬"
-    return bool(
-        _FANTIA_BASE_TIER.fullmatch(base) and names == {base, movie}
-        and _direct_leaf_kinds(post / base, device) == {"P"}
-        and _direct_leaf_kinds(post / movie, device) == {"V"}
-    )
+    if len(names) != 2:
+        return False
+    first, second = sorted(names)
+    first_tier = _FANTIA_TIER.fullmatch(first)
+    second_tier = _FANTIA_TIER.fullmatch(second)
+    if not first_tier or not second_tier or first_tier["amount"] != second_tier["amount"]:
+        return False
+    # Media type comes from the files. A title or emoji suffix carries no type guarantee.
+    kinds = [_direct_leaf_kinds(post / sibling, device) for sibling in (first, second)]
+    return {"P"} in kinds and {"V"} in kinds
 
 
 def _verified_bucket_kind(path: Path, device: int) -> str | None:
@@ -472,7 +632,8 @@ def _verified_bucket_kind(path: Path, device: int) -> str | None:
     return None
 
 
-def _media_leaf_kinds(path: Path, device: int) -> set[str]:
+def _media_leaf_kinds(path: Path, device: int, protected_roots: tuple[Path, ...] = (), *,
+                      allow_partial_bucketing: bool = True) -> set[str]:
     """Read media types from a leaf or its verified output buckets."""
     try:
         entries = _entries(path, device)
@@ -480,7 +641,8 @@ def _media_leaf_kinds(path: Path, device: int) -> set[str]:
         return set()
     kinds = set()
     for name, info in entries:
-        if info.st_dev != device or name.casefold().startswith(".nfc-"):
+        if (info.st_dev != device or name.casefold().startswith(".nfc-")
+                or _protected(path / name, protected_roots)):
             return set()
         if stat.S_ISREG(info.st_mode):
             kind = _classify(name)
@@ -491,13 +653,18 @@ def _media_leaf_kinds(path: Path, device: int) -> set[str]:
         else:
             return set()
         kinds.add(kind)
+    if (not allow_partial_bucketing and kinds == {"P", "V"}
+            and any(stat.S_ISREG(info.st_mode) for _, info in entries)
+            and any(stat.S_ISDIR(info.st_mode) for _, info in entries)):
+        return set()
     return kinds
 
 
-def _default_folder_is_media_unit(path: Path, device: int) -> bool:
-    """Confirm a generic folder only when its contents form one pure media unit."""
+def _default_folder_is_media_unit(path: Path, device: int, protected_roots: tuple[Path, ...] = ()) -> bool:
+    """Confirm a default-named media leaf or its existing output buckets."""
     return (_DEFAULT_FOLDER.fullmatch(path.name) is not None
-            and _media_leaf_kinds(path, device) in ({"P"}, {"V"}))
+            and _media_leaf_kinds(path, device, protected_roots, allow_partial_bucketing=False)
+            in ({"P"}, {"V"}, {"P", "V"}))
 
 
 def _numbered_siblings(unit: Path, entries: list[tuple[str, os.stat_result]],
@@ -513,9 +680,40 @@ def _numbered_siblings(unit: Path, entries: list[tuple[str, os.stat_result]],
         return set()
     if not all(_NUMBERED_LEAF.fullmatch(name) and not _protected(unit / name, protected_roots) for name in names):
         return set()
-    if not _COLLECTION_CONTEXT.search(unit.name) and ordinals != {str(index) for index in range(1, len(names) + 1)}:
+    if ordinals == {str(index) for index in range(1, len(names) + 1)}:
+        return {name for name in names if _media_leaf_kinds(unit / name, device, protected_roots)
+                in ({"P"}, {"V"}, {"P", "V"})}
+    if not _COLLECTION_CONTEXT.search(unit.name):
         return set()
     return set(names) if all(_media_leaf_kinds(unit / name, device) & {"P", "V"} for name in names) else set()
+
+
+def _continuous_numbered_directories(
+    unit: Path, entries: list[tuple[str, os.stat_result]], device: int, protected_roots: tuple[Path, ...],
+) -> set[str]:
+    """Identify a complete sibling directory series starting at 1."""
+    directories = [(name, info) for name, info in entries if stat.S_ISDIR(info.st_mode)]
+    if len(directories) < 2 or not all(
+        _NUMBERED_LEAF.fullmatch(name) and info.st_dev == device and not _protected(unit / name, protected_roots)
+        for name, info in directories
+    ):
+        return set()
+    names = {name for name, _ in directories}
+    ordinals = {name.lstrip("0") for name in names}
+    return names if ordinals == {str(index) for index in range(1, len(names) + 1)} else set()
+
+
+def _contains_only_named_works(
+    unit: Path, entries: list[tuple[str, os.stat_result]], device: int, protected_roots: tuple[Path, ...],
+) -> bool:
+    """Confirm a numbered layer contains independent work directories and no files."""
+    return bool(entries) and all(
+        stat.S_ISDIR(info.st_mode) and info.st_dev == device and not _protected(unit / name, protected_roots)
+        and not name.casefold().startswith(".nfc-")
+        and (_COLLECTION_CONTEXT.search(name) or _WORK_FOLDER_MARKER.search(name))
+        and not _is_wrapper(unit, name, device=device, protected_roots=protected_roots)
+        for name, info in entries
+    )
 
 
 def _numbered_author_wrapper(entries: list[tuple[str, os.stat_result]]) -> str | None:
@@ -527,7 +725,7 @@ def _numbered_author_wrapper(entries: list[tuple[str, os.stat_result]]) -> str |
     return names[0] if len(names) == 1 else None
 
 
-def _single_video_author_child(entries: list[tuple[str, os.stat_result]]) -> str | None:
+def _author_numbered_video_child(entries: list[tuple[str, os.stat_result]]) -> str | None:
     """Find one child beside a complete sequence of already numbered videos."""
     if not 2 <= len(entries) <= MAX_FILES_PER_GROUP:
         return None
@@ -547,6 +745,16 @@ def _append_calendar_boundary(name: str) -> bool:
     return bool(_CALENDAR_DIRECTORY.fullmatch(compact) or _SHORT_CALENDAR_LABEL.fullmatch(compact))
 
 
+def _author_initials_match(author: str, folder: str) -> bool:
+    """Identify a Latin folder abbreviation computed from a Chinese author's name."""
+    if (len(author) != len(folder) or len(folder) < 2 or not (folder.isascii() and folder.isalpha())
+            or not all(unicode_name(char, "").startswith("CJK UNIFIED IDEOGRAPH-") for char in author)):
+        return False
+    from pypinyin import Style, lazy_pinyin
+
+    return folder.casefold() == "".join(lazy_pinyin(author, style=Style.FIRST_LETTER))
+
+
 def _whole_author_inventory(
     unit: Path, entries: list[tuple[str, os.stat_result]], device: int,
     protected_roots: tuple[Path, ...], check_cancelled: Callable[[], None] | None,
@@ -556,9 +764,9 @@ def _whole_author_inventory(
             or not _CALENDAR_MONTH.fullmatch(unit.parent.parent.name)):
         return None
     name = _numbered_author_wrapper(entries)
-    append_single_video = name is None
-    if append_single_video:
-        name = _single_video_author_child(entries)
+    append_videos = name is None
+    if append_videos:
+        name = _author_numbered_video_child(entries)
         if name is None:
             return None
         label = name.strip().casefold()
@@ -576,12 +784,14 @@ def _whole_author_inventory(
     try:
         if _protected(child, protected_roots):
             return None
-        if append_single_video:
+        if append_videos:
             if _is_wrapper(unit, name, device=device, protected_roots=protected_roots):
                 return None
             inner = _regular_media_entries(child, device)
-            if (len(inner) != 1 or _classify(inner[0][0]) != "V"
-                    or _protected(child / inner[0][0], protected_roots)):
+            if (not inner or len(entries) - 1 + len(inner) > MAX_FILES_PER_GROUP
+                    or any(_classify(filename) != "V" or _protected(child / filename, protected_roots)
+                           for filename, _ in inner)
+                    or (len(inner) > 1 and not _author_initials_match(unit.name, name))):
                 return None
         else:
             inner = _entries(child, device)
@@ -594,12 +804,76 @@ def _whole_author_inventory(
         ))
     except (OSError, ValueError):
         return None
-    if append_single_video:
+    if append_videos:
         expected = {str(unit / filename) for filename, info in entries if stat.S_ISREG(info.st_mode)}
-        expected.add(str(child / inner[0][0]))
+        expected.update(str(child / filename) for filename, _ in inner)
         if directories != {unit, child} or {row["path"] for row in items} != expected:
             return None
-    return (items, directories, append_single_video) if {row["kind"] for row in items} == kinds else None
+    return (items, directories, append_videos) if {row["kind"] for row in items} == kinds else None
+
+
+def _declared_photo_total(unit: Path) -> int | None:
+    """Read a photo-only count from a work label such as [123P 396.2MB]."""
+    labels = [label for label in _BRACKETED_LABEL.findall(unit.name) if _MEDIA_COUNT_LABEL.search(label)]
+    if len(labels) != 1:
+        return None
+    match = _PHOTO_PACK_TOTAL.fullmatch(labels[0])
+    return int(match.group(1)) if match else None
+
+
+def _numbered_photo_groups_root(unit: Path, entries: list[tuple[str, os.stat_result]]) -> Path | None:
+    """Locate the sole photo wrapper or the already-lifted numeric groups."""
+    if len(entries) == 1:
+        name, info = entries[0]
+        if stat.S_ISDIR(info.st_mode) and name.casefold() in _PHOTO_ALIASES:
+            return unit / name
+    if len(entries) >= 2 and all(
+        stat.S_ISDIR(info.st_mode) and _NUMBERED_LEAF.fullmatch(name) for name, info in entries
+    ):
+        return unit
+    return None
+
+
+def _numbered_photo_inventory(
+    unit: Path, declared_count: int, device: int, protected_roots: tuple[Path, ...],
+    check_cancelled: Callable[[], None] | None,
+) -> tuple[list[dict], set[Path]] | None:
+    """Verify numbered photo leaves and match the work's declared image count."""
+    try:
+        entries = _entries(unit, device)
+        wrapper = _numbered_photo_groups_root(unit, entries)
+        if wrapper is None or _protected(wrapper, protected_roots):
+            return None
+        groups = entries if wrapper == unit else _entries(wrapper, device)
+        ordinals = {name.lstrip("0") for name, _ in groups}
+        if (len(groups) < 2 or "" in ordinals or len(ordinals) != len(groups) or not all(
+            stat.S_ISDIR(info.st_mode) and info.st_dev == device and _NUMBERED_LEAF.fullmatch(name)
+            and not _protected(wrapper / name, protected_roots)
+            for name, info in groups
+        )):
+            return None
+        source_groups = {wrapper / name for name, _ in groups}
+        directories: set[Path] = set()
+        items = list(_semantic_inventory(
+            unit, protected_roots, directories, whole_author=True, check_cancelled=check_cancelled,
+        ))
+    except (OSError, ValueError):
+        return None
+    files_by_group: dict[Path, list[str]] = {}
+    for row in items:
+        files_by_group.setdefault(Path(row["path"]).parent, []).append(row["name"])
+    if (directories != {unit, wrapper, *source_groups} or files_by_group.keys() != source_groups
+            or len(items) != declared_count or any(row["kind"] != "P" for row in items)
+            or any(len(names) > MAX_FILES_PER_GROUP for names in files_by_group.values())):
+        return None
+    # Directly nested groups are only recognized as the completed output layout.
+    if wrapper == unit and any(
+        name != numbered_name(index, name)
+        for names in files_by_group.values()
+        for index, name in enumerate(sorted(names), 1)
+    ):
+        return None
+    return items, directories
 
 
 def preview_organizing_unit(
@@ -616,19 +890,28 @@ def preview_organizing_unit(
         unit = _package_path(unit, media_package_root, allowed_roots, quarantine_root)
     elif mode != "semantic" or _protected(unit, protected):
         raise ValueError("Invalid unit or mode")
+    photo_groups = None
+    declared_count = _declared_photo_total(unit)
+    if mode == "semantic" and not whole_author and not local_media_kinds and declared_count is not None:
+        photo_groups = _numbered_photo_inventory(
+            unit, declared_count, os.lstat(unit).st_dev, protected, check_cancelled,
+        )
     author_inventory = None
-    if mode == "semantic" and not whole_author and not local_media_kinds:
+    if photo_groups is None and mode == "semantic" and not whole_author and not local_media_kinds:
         needs_layer_scope = local_media_kinds is None
-        if (whole_author is None or needs_layer_scope) and (_author_layer(unit) or _photo_wrapper(unit)):
+        if (whole_author is None or needs_layer_scope) and (_author_layer(unit) or _local_wrapper_media_kind(unit)):
             device = os.lstat(unit).st_dev
             entries = _entries(unit, device)
             if whole_author is None:
                 author_inventory = _whole_author_inventory(unit, entries, device, protected, check_cancelled)
-            if author_inventory is None and needs_layer_scope:
+            if (author_inventory is None and needs_layer_scope
+                    and _work_media_component(unit, entries, device, protected) is None):
                 local_media_kinds = _layer_media_kinds(unit, entries, device, protected)
-    append_single_video = False
-    if author_inventory is not None:
-        items, directories, append_single_video = author_inventory
+    append_videos = False
+    if photo_groups is not None:
+        items, directories = photo_groups
+    elif author_inventory is not None:
+        items, directories, append_videos = author_inventory
         whole_author = True
     else:
         directories = set()
@@ -646,8 +929,10 @@ def preview_organizing_unit(
         unit, items, max_rows=max_rows,
         include_items=include_items, include_mapping=include_mapping, organizer_mode=True,
         legacy_bucket_conflicts=not (mode == "semantic"
-                                     and (local_media_kinds or _CALENDAR_DIRECTORY.fullmatch(unit.name))),
-        append_single_video=append_single_video,
+                                     and (photo_groups is not None or local_media_kinds
+                                          or _CALENDAR_DIRECTORY.fullmatch(unit.name))),
+        append_videos=append_videos,
+        numbered_photo_groups=photo_groups is not None,
     )
     if mode == "semantic" and plan["status"] == "ready" and not (local_media_kinds or whole_author):
         held = _author_loose_record(unit, items, directories, protected)
@@ -694,9 +979,15 @@ def _semantic_previews(
         except (OSError, ValueError) as exc:
             yield _blocked(unit, "semantic", str(exc))
             continue
+        if hold_reason == _NUMBERED_WORK_CONTAINER_CANDIDATE:
+            if _contains_only_named_works(unit, entries, device, protected_roots):
+                # Keep the volume itself outside the plan. Its works get separate previews.
+                pending.extend((unit / name, depth + 1, None) for name, _ in reversed(entries))
+                continue
+            hold_reason = _AMBIGUOUS_DIRECTORY_REASON
         author_preview = None
         if (hold_reason is None and _author_layer(unit)
-                and (_numbered_author_wrapper(entries) is not None or _single_video_author_child(entries) is not None)):
+                and (_numbered_author_wrapper(entries) is not None or _author_numbered_video_child(entries) is not None)):
             author_preview = preview(unit, "semantic", None)
             if author_preview.get("whole_author"):
                 # The whole author owns these files, so descendants cannot also become units.
@@ -704,7 +995,16 @@ def _semantic_previews(
                 continue
         children: list[tuple[Path, int, str | None]] = []
         numbered = _numbered_siblings(unit, entries, device, protected_roots)
+        if (hold_reason is None and not numbered and _declared_photo_total(unit) is not None
+                and _numbered_photo_groups_root(unit, entries) is not None):
+            photo_preview = preview(unit, "semantic", False)
+            if photo_preview.get("operation") == PROMOTE_NUMBERED_PHOTO_GROUPS:
+                yield photo_preview
+                continue
+        numbered_containers = _continuous_numbered_directories(unit, entries, device, protected_roots) - numbered
         repeated = _repeated_work_wrapper(unit, entries, device, protected_roots) if hold_reason is None else None
+        work_component = (_work_media_component(unit, entries, device, protected_roots)
+                          if hold_reason is None else None)
         has_pure_wrappers = False
         has_input = False
         for name, info in entries:
@@ -714,7 +1014,7 @@ def _semantic_previews(
             if name.casefold().startswith(".nfc-") or info.st_dev != device:
                 yield _blocked(child, "semantic", "Reserved or cross-device entry")
             elif stat.S_ISDIR(info.st_mode):
-                if child == repeated:
+                if (repeated is not None and repeated.is_relative_to(child)) or name == work_component:
                     has_pure_wrappers = True
                 elif _is_wrapper(unit, name, device=device, protected_roots=protected_roots):
                     if _pure_wrapper(child, device, protected_roots, check_cancelled):
@@ -722,15 +1022,17 @@ def _semantic_previews(
                     else:
                         children.append((child, depth + 1, _MIXED_WRAPPER_REASON))
                 elif (_AMBIGUOUS.fullmatch(name) and name not in numbered and not _fantia_collection(unit)
-                      and not _default_folder_is_media_unit(child, device)):
-                    children.append((child, depth + 1, _AMBIGUOUS_DIRECTORY_REASON))
+                      and not _default_folder_is_media_unit(child, device, protected_roots)):
+                    reason = (_NUMBERED_WORK_CONTAINER_CANDIDATE if name in numbered_containers
+                              else _AMBIGUOUS_DIRECTORY_REASON)
+                    children.append((child, depth + 1, reason))
                 else:
                     children.append((child, depth + 1, None))
             elif stat.S_ISREG(info.st_mode):
                 has_input = True
             else:
                 yield _blocked(child, "semantic", "Symlink or special entry")
-        if (hold_reason == _MIXED_WRAPPER_REASON and _photo_wrapper(unit)
+        if (hold_reason == _MIXED_WRAPPER_REASON and _local_wrapper_media_kind(unit)
                 and _layer_media_kinds(unit, entries, device, protected_roots)):
             yield preview(unit, "semantic", False)
         elif hold_reason is not None:
@@ -771,11 +1073,30 @@ def iter_organizing_previews(
     ):
         package_selection = selection if selection.is_relative_to(package_root) else package_root
         try:
-            for unit, reason in iter_media_package_scope_entries(
+            for entry in iter_media_package_discovery(
                 package_selection, media_package_root=package_root,
                 allowed_roots=allowed_roots, quarantine_root=quarantine_root,
-                isolate_conflicts=True, check_cancelled=check_cancelled,
+                isolate_conflicts=True, check_cancelled=check_cancelled, include_author_files=True,
             ):
-                yield _blocked(unit, "luolcy", reason) if reason else preview(unit, "luolcy")
+                unit = entry.path
+                if entry.reason:
+                    yield _blocked(unit, "luolcy", entry.reason)
+                elif entry.loose_files:
+                    if is_reserved_workspace(unit) or (quarantine_root and unit.is_relative_to(quarantine_root)):
+                        continue
+                    counts = Counter(row["kind"] for row in entry.loose_files)
+                    yield {
+                        **_blocked(unit, "luolcy", "作者层散件待确认归属"),
+                        "status": "needs_assignment", "conflicts": [],
+                        "totals": {kind: counts[kind] for kind in ("P", "V", "Other")},
+                        "total_files": len(entry.loose_files),
+                        "total_bytes": sum(row["bytes"] for row in entry.loose_files),
+                        "_loose_files": entry.loose_files if include_mapping else [],
+                        "_packages": {name: identity for name, identity in (entry.packages or {}).items()
+                                      if not quarantine_root or not (unit / name).is_relative_to(quarantine_root)},
+                        "_author_identity": entry.author_identity,
+                    }
+                else:
+                    yield preview(unit, "luolcy")
         except (OSError, ValueError) as exc:
             yield _blocked(package_selection, "luolcy", str(exc))

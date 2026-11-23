@@ -122,6 +122,153 @@ def _batch(client, preview):
     return response.json()["job_id"]
 
 
+def test_batch_organizes_exact_same_name_wrappers_at_the_outer_work_in_one_pass(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    selection = settings.data_mount / "Else/合集"
+    repeated_video = selection / "三层视频"
+    works = {
+        selection / "纯视频": {"clip.MP4": ("001.MP4", b"vids")},
+        repeated_video: {"clip.MP4": ("001.MP4", b"deep")},
+        selection / "图视频作品": {
+            "cover.JPG": ("P [1 4B]/001.JPG", b"phot"),
+            "clip.mp4": ("V [1 4B]/001.mp4", b"clip"),
+        },
+    }
+    for work, files in works.items():
+        inner = work / work.name
+        if work == repeated_video:
+            inner /= work.name
+        inner.mkdir(parents=True)
+        for source, (_, content) in files.items():
+            (inner / source).write_bytes(content)
+
+    preview = _preview(client, settings, selection)
+    assert {(row["unit"], row["status"]) for row in preview["units"]} == {
+        (str(work), "ready") for work in works
+    }
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert report["summary"]["success_count"] == len(works), report
+    for work, files in works.items():
+        assert not (work / work.name).exists()
+        assert all((work / target).read_bytes() == content for target, content in files.values())
+    assert _preview(client, settings, selection)["summary"]["already_organized_count"] == len(works)
+
+
+def test_batch_scans_named_works_inside_numbered_volumes_in_place(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    selection = settings.data_mount / "Else/作品合集/网盘"
+    works = [selection / "1/作品 EXVOL.01", selection / "2/春节特别期 [2P-6B]"]
+    for work in works:
+        work.mkdir(parents=True)
+        (work / "cover.jpg").write_bytes(b"cover")
+
+    preview = _preview(client, settings, selection)
+    assert [(row["unit"], row["status"]) for row in preview["units"]] == [
+        (str(work), "ready") for work in works
+    ]
+    assert preview["summary"]["blocked_count"] == 0
+
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert report["summary"] == {"success_count": 2, "skipped_count": 0, "conflict_count": 0, "failed_count": 0}
+    for work in works:
+        assert (work / "001.jpg").read_bytes() == b"cover"
+        assert list(work.parent.iterdir()) == [work]
+    assert sorted(path.name for path in selection.iterdir()) == ["1", "2"]
+    again = _preview(client, settings, selection)
+    assert [(row["unit"], row["status"]) for row in again["units"]] == [
+        (str(work), "already_organized") for work in works
+    ]
+
+
+def test_batch_promotes_numbered_photo_groups_and_numbers_each_group_independently(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    selection = settings.data_mount / "Else/下载目录"
+    work = selection / "系列 [4P 4B]"
+    files = {
+        "图片/3/a.jpg": ("3/001.jpg", b"a"),
+        "图片/3/b.JPG": ("3/002.JPG", b"b"),
+        "图片/9/a.jpg": ("9/001.jpg", b"c"),
+        "图片/12/a.jpg": ("12/001.jpg", b"d"),
+    }
+    for relative, (_, content) in files.items():
+        path = work / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    preview = _preview(client, settings, selection)
+    assert [(row["unit"], row["status"], row["needed_moves"]) for row in preview["units"]] == [
+        (str(work), "ready", 4),
+    ]
+    assert [group["name"] for group in preview["units"][0]["groups"]] == ["3", "9", "12"]
+    assert {(move["source"], move["target"]) for move in preview["units"][0]["sample_moves"]} == {
+        (str(work / before), str(work / after)) for before, (after, _) in files.items()
+    }
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert result["summary"]["success_count"] == 1, result
+    assert sorted(entry.name for entry in work.iterdir()) == ["12", "3", "9"]
+    assert all((work / after).read_bytes() == content for after, content in files.values())
+    again = _preview(client, settings, selection)
+    assert again["summary"]["ready_count"] == 0
+    assert again["summary"]["blocked_count"] == 0
+
+
+@pytest.mark.parametrize("boundary", ["occupied-target", "interrupted-cleanup"])
+def test_numbered_photo_group_worker_respects_frozen_destinations(tmp_path, monkeypatch, boundary):
+    from app.batch import media_package_execution as engine
+
+    client, settings, _ = _fixture(tmp_path)
+    work = settings.data_mount / "Else/下载目录/系列 [2P 4B]"
+    before = [work / "图片/3/cover.jpg", work / "图片/9/cover.jpg"]
+    for path in before:
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"ok")
+    batch_id = _batch(client, _preview(client, settings, work))
+
+    if boundary == "occupied-target":
+        save_manifest = engine.save_frozen_manifest
+
+        def occupy_target(path, manifest):
+            save_manifest(path, manifest)
+            (work / "3").mkdir()
+            (work / "3/foreign.jpg").write_bytes(b"foreign")
+
+        monkeypatch.setattr(engine, "save_frozen_manifest", occupy_target)
+        assert _run_next(settings, batch_id)
+        report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+        assert report["summary"]["conflict_count"] == 1, report
+        assert (work / "3/foreign.jpg").read_bytes() == b"foreign"
+        assert all(path.read_bytes() == b"ok" for path in before)
+        assert not list(work.glob(".nfc-*"))
+        return
+
+    def stop_before_final_cleanup(*args, **kwargs):
+        if not kwargs.get("only_under"):
+            raise SystemExit("Worker stopped after publication before cleanup")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine, "_remove_empty_sources", stop_before_final_cleanup)
+        with pytest.raises(SystemExit):
+            _run_next(settings, batch_id)
+    assert (work / "图片").is_dir() and (work / "3/001.jpg").read_bytes() == b"ok"
+
+    db, sessions = create_engine_and_session(settings.database_path)
+    try:
+        recovered = recover_interrupted_jobs(db, sessions, worker_id="organizer-test-worker")
+        assert recovered["recovered_requeued"] == 1
+    finally:
+        db.dispose()
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert report["summary"]["success_count"] == 1, report
+    assert sorted(path.name for path in work.iterdir()) == ["3", "9"]
+
+
 def test_batch_appends_an_only_child_video_without_moving_numbered_root_videos(tmp_path, monkeypatch):
     from app.batch import media_package_execution
 
@@ -163,6 +310,133 @@ def test_batch_appends_an_only_child_video_without_moving_numbered_root_videos(t
     assert [(row["unit"], row["status"]) for row in again["units"]] == [
         (str(author), "already_organized"),
     ]
+
+
+@pytest.mark.parametrize("interrupted", [None, "staging", "publication"])
+def test_batch_appends_an_author_initials_wrapper_and_preserves_named_video_groups(
+    tmp_path, monkeypatch, interrupted,
+):
+    from app.batch import media_package_execution as engine
+
+    client, settings, _ = _fixture(tmp_path)
+    month = settings.data_mount / "Else/2611"
+    author = month / "261120/小可爱甜甜"
+    wrapper = author / "xkatt"
+    wrapper.mkdir(parents=True)
+    kept = author / "001.mp4"
+    kept.write_bytes(b"existing")
+    sources = [wrapper / f"{index:03d}.mp4" for index in range(1, 6)]
+    for index, path in enumerate(sources, 1):
+        path.write_bytes(bytes([index]))
+
+    other = month / "261103/小意"
+    child = other / "小意裸舞"
+    child.mkdir(parents=True)
+    (other / "001.mp4").write_bytes(b"loose")
+    for index in range(1, 3):
+        (child / f"{index:03d}.mp4").write_bytes(b"named group")
+
+    preview = _preview(client, settings, month)
+    assert [(row["unit"], row["needed_moves"]) for row in preview["units"] if row["status"] == "ready"] == [
+        (str(author), 5),
+    ]
+    staged = []
+    move_one = engine._move_one
+
+    def record_move(row, **kwargs):
+        result = move_one(row, **kwargs)
+        if result == "moved":
+            staged.append(row["source"])
+            if interrupted == "staging" and len(staged) == 1:
+                raise SystemExit("Worker stopped after staging the first video")
+        return result
+
+    monkeypatch.setattr(engine, "_move_one", record_move)
+    if interrupted == "publication":
+        publish = engine._publish_flat_file
+
+        def stop_after_first_publication(row, *args, **kwargs):
+            result = publish(row, *args, **kwargs)
+            if result == "published" and row["target_name"] == "002.mp4":
+                raise SystemExit("Worker stopped after publishing the first video")
+            return result
+
+        monkeypatch.setattr(engine, "_publish_flat_file", stop_after_first_publication)
+    batch_id = _batch(client, preview)
+    if interrupted:
+        with pytest.raises(SystemExit):
+            _run_next(settings, batch_id)
+        assert kept.read_bytes() == b"existing"
+        db, sessions = create_engine_and_session(settings.database_path)
+        try:
+            recovered = recover_interrupted_jobs(db, sessions, worker_id="organizer-test-worker")
+            assert recovered["recovered_requeued"] == 1
+        finally:
+            db.dispose()
+    assert _run_next(settings, batch_id)
+    summary = client.get(f"/api/media-organizer/batches/{batch_id}").json()["summary"]
+    assert summary == {"success_count": 1, "skipped_count": 2, "conflict_count": 0, "failed_count": 0}
+    assert staged == [str(path) for path in sources]
+    assert kept.read_bytes() == b"existing"
+    assert [(author / f"{index:03d}.mp4").read_bytes() for index in range(2, 7)] == [
+        bytes([index]) for index in range(1, 6)
+    ]
+    assert not wrapper.exists()
+    assert sorted(path.name for path in child.iterdir()) == ["001.mp4", "002.mp4"]
+    assert _preview(client, settings, month)["summary"]["already_organized_count"] == 3
+
+
+@pytest.mark.parametrize("phase", ["staging", "publication"])
+def test_author_initials_resume_checks_all_videos_before_moving_more(tmp_path, monkeypatch, phase):
+    from app.batch import media_package_execution as engine
+
+    client, settings, _ = _fixture(tmp_path)
+    author = settings.data_mount / "Else/2611/261120/小可爱甜甜"
+    wrapper = author / "xkatt"
+    wrapper.mkdir(parents=True)
+    (author / "001.mp4").write_bytes(b"keep")
+    (wrapper / "001.mp4").write_bytes(b"first")
+    (wrapper / "002.mp4").write_bytes(b"second")
+    (wrapper / "003.mp4").write_bytes(b"third")
+    batch_id = _batch(client, _preview(client, settings, author))
+    real_move = engine._move_one
+
+    def stop_after_first_staged_video(row, **kwargs):
+        real_move(row, **kwargs)
+        raise SystemExit("Worker stopped during staging")
+
+    def stop_before_publication(*args, **kwargs):
+        raise SystemExit("Worker stopped after marking the stage ready")
+
+    with monkeypatch.context() as patch:
+        if phase == "staging":
+            patch.setattr(engine, "_move_one", stop_after_first_staged_video)
+        else:
+            patch.setattr(engine, "_publish_flat_file", stop_before_publication)
+        with pytest.raises(SystemExit):
+            _run_next(settings, batch_id)
+    if phase == "staging":
+        missing = wrapper / "003.mp4"
+        second = wrapper / "002.mp4"
+    else:
+        missing, = author.glob(".nfc-*/004.mp4")
+        second, = author.glob(".nfc-*/003.mp4")
+    missing.unlink()
+
+    db, sessions = create_engine_and_session(settings.database_path)
+    try:
+        recovered = recover_interrupted_jobs(db, sessions, worker_id="organizer-test-worker")
+        assert recovered["recovered_requeued"] == 1
+    finally:
+        db.dispose()
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert report["summary"]["conflict_count"] == 1, report
+    assert not (author / "002.mp4").exists()
+    staged, = author.glob(".nfc-*/002.mp4")
+    assert staged.read_bytes() == b"first"
+    assert second.read_bytes() == b"second"
+    assert (author / "001.mp4").read_bytes() == b"keep"
 
 
 @pytest.mark.parametrize("foreign_path", [None, "003.mp4", "002.mp4", "#AKS 标题/new.mp4"])
@@ -317,10 +591,10 @@ def test_batch_preserves_ambiguous_loose_files_and_organizes_confirmed_units(tmp
     kept = {
         author / "随手拍.mp4": b"author level media",
         author / "归属不明.jpg": b"an unrelated author level picture",
-        mixed_wrapper / "散图.jpg": b"unassigned picture",
     }
     moved = {
         named_work / "封面.jpg": (named_work / "001.jpg", b"named work cover"),
+        mixed_wrapper / "散图.jpg": (mixed_wrapper / "001.jpg", b"local picture"),
         nested_work / "封面.webp": (nested_work / "001.webp", b"nested work cover"),
         work / "videos" / "片段.mp4": (work / "001.mp4", b"work clip"),
         volumes / "01" / "a.jpg": (volumes / "01" / "001.jpg", b"first cover"),
@@ -332,8 +606,8 @@ def test_batch_preserves_ambiguous_loose_files_and_organizes_confirmed_units(tmp
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
 
-    expected_ready = {named_work, nested_work, work, volumes / "01", volumes / "02"}
-    expected_blocked = {author, mixed_wrapper}
+    expected_ready = {named_work, mixed_wrapper, nested_work, work, volumes / "01", volumes / "02"}
+    expected_blocked = {author}
     preview = _preview(client, settings, selection)
     assert {Path(row["unit"]) for row in preview["units"] if row["status"] == "ready"} == expected_ready
     assert {Path(row["unit"]) for row in preview["units"] if row["status"] == "blocked"} == expected_blocked
@@ -369,10 +643,10 @@ def test_batch_organizes_numbered_siblings_and_local_media_without_crossing_boun
 
     kept = {
         author / "videos" / "001.mp4": b"separate old wrapper",
-        unknown / "散图.jpg": b"unknown scope",
-        unknown / "片段.mp4": b"another media type in the unknown scope",
     }
     moved = {
+        unknown / "散图.jpg": (unknown / "P [1 5B]/001.jpg", b"photo"),
+        unknown / "片段.mp4": (unknown / "V [1 4B]/001.mp4", b"clip"),
         download / "recap.mp4": (download / "001.mp4", b"parent video"),
         download / "1" / "clip.mp4": (download / "1" / "001.mp4", b"first package"),
         download / "2" / "clip.mp4": (download / "2" / "001.mp4", b"second package"),
@@ -387,7 +661,7 @@ def test_batch_organizes_numbered_siblings_and_local_media_without_crossing_boun
     for position in range(201):
         (author / f"clip-{position:03d}.mp4").write_bytes(b"x")
 
-    expected_ready = {download, download / "1", download / "2", author,
+    expected_ready = {download, download / "1", download / "2", author, unknown,
                       titled_work, photo_container, titled_photos}
     preview = _preview(client, settings, selection)
     assert {Path(row["unit"]) for row in preview["units"] if row["status"] == "ready"} == expected_ready
@@ -412,7 +686,7 @@ def test_batch_organizes_numbered_siblings_and_local_media_without_crossing_boun
     assert (rescan["summary"]["needed_moves"], rescan["summary"]["renamed_count"]) == (0, 0)
     assert expected_ready <= {Path(row["unit"]) for row in rescan["units"]
                               if row["status"] == "already_organized"}
-    assert any(row["unit"] == str(unknown) and row["status"] == "blocked" for row in rescan["units"])
+    assert rescan["summary"]["blocked_count"] == 0
 
 
 def test_batch_organizes_default_named_photo_set_in_place_from_parent(tmp_path):
@@ -554,9 +828,11 @@ def test_fixed_luolcy_and_semantic_versions_are_separate_in_one_batch(tmp_path):
         (work / version / "movie.mp4").write_bytes(version.encode())
 
     preview = _preview(client, settings, root.parent)
-    assert preview["summary"]["totals"] == {"P": 1, "V": 2, "Other": 0}
+    assert preview["summary"]["totals"] == {"P": 2, "V": 2, "Other": 0}
+    assert preview["summary"]["needs_assignment_count"] == 1
     assert {unit["unit"]: unit["organizer_mode"] for unit in preview["units"]} == {
-        str(package): "luolcy", str(work / "4K"): "semantic", str(work / "PT"): "semantic",
+        str(package): "luolcy", str(package.parent): "luolcy",
+        str(work / "4K"): "semantic", str(work / "PT"): "semantic",
     }
     package_unit = next(unit for unit in preview["units"] if unit["unit"] == str(package))
     mapping = client.get(f"/api/media-organizer/previews/{preview['job_id']}/mappings/{package_unit['mapping_id']}")
@@ -565,6 +841,7 @@ def test_fixed_luolcy_and_semantic_versions_are_separate_in_one_batch(tmp_path):
     assert _run_next(settings, batch_id)
     result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
     assert result["summary"]["success_count"] == 3, result
+    assert result["summary"]["skipped_count"] == 1, result
     assert (package / "001.JPG").read_bytes() == b"photo"
     assert (package.parent / "作者封面.webp").read_bytes() == b"author"
     assert empty.is_dir()
@@ -690,6 +967,14 @@ def test_batch_groups_leaf_photo_packs_and_author_date_categories(tmp_path):
         "$1800_/cover.jpg": ("P [1 4B]/001.jpg", b"phot"),
         "$1800_🎬/clip.mp4": ("V [1 4B]/001.mp4", b"clip"),
     }),
+    ("No.105 2024年09月 Fantia/27_1813_帖子", {
+        "$1800_/cover.jpg": ("P [1 4B]/001.jpg", b"phot"),
+        "$1800_🖤/clip.mp4": ("V [1 4B]/001.mp4", b"clip"),
+    }),
+    ("Fantia 合集/帖子标题", {
+        "$2500_静止画/cover.JPG": ("P [1 4B]/001.JPG", b"phot"),
+        "$2500_動画/clip.MP4": ("V [1 4B]/001.MP4", b"clip"),
+    }),
     ("NO.180 千夏", {
         "GIF/motion.GiF": ("P [2 8B]/001.GiF", b"anim"),
         "P [1 4B]/001.jpg": ("P [2 8B]/002.jpg", b"phot"),
@@ -698,6 +983,25 @@ def test_batch_groups_leaf_photo_packs_and_author_date_categories(tmp_path):
     ("PoppaChan NO.032", {
         "P [1 4B]/001.jpg": ("P [2 8B]/001.jpg", b"phot"),
         "Selfies/cover.JPG": ("P [2 8B]/002.JPG", b"self"),
+        "V [1 4B]/001.mp4": ("V [1 4B]/001.mp4", b"clip"),
+    }),
+    ("实体本补充 [1P 1V 8B]", {
+        "cover.jpg": ("P [1 4B]/001.jpg", b"phot"),
+        "sp/clip.MTS": ("V [1 4B]/001.MTS", b"clip"),
+    }),
+    ("作品 原版4K画质 [1P+2V／12B]", {
+        "main.mp4": ("V [2 8B]/001.mp4", b"main"),
+        "视图/cover.JPG": ("P [1 4B]/001.JPG", b"phot"),
+        "视图/trailer.mp4": ("V [2 8B]/002.mp4", b"clip"),
+    }),
+    ("百度网盘/图片视频 [1P+2V 12B]", {
+        "main.mp4": ("V [2 8B]/001.mp4", b"main"),
+        "视图/P [1 4B]/001.JPG": ("P [1 4B]/001.JPG", b"phot"),
+        "视图/V [1 4B]/001.mp4": ("V [2 8B]/002.mp4", b"clip"),
+    }),
+    ("作品 NO.059 [2P1V-12B]", {
+        "P [1 4B]/001.jpg": ("P [2 8B]/002.jpg", b"phot"),
+        "face/cover.JPG": ("P [2 8B]/001.JPG", b"face"),
         "V [1 4B]/001.mp4": ("V [1 4B]/001.mp4", b"clip"),
     }),
 ])

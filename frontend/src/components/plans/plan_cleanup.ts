@@ -1,3 +1,5 @@
+import type { PlanId } from '../../types';
+
 export interface PlanDeleteAvailability {
   canDelete: boolean;
   reason?: string;
@@ -83,7 +85,7 @@ export interface PlanDeleteConfirmationContent {
 }
 
 export function getPlanDeleteConfirmationContent(plan: {
-  id: number;
+  id: PlanId;
   status?: string;
   name?: string;
   active_work_job_id?: number | null;
@@ -114,11 +116,11 @@ export function getPlanDeleteConfirmationContent(plan: {
 
 export function invalidatePlanDeleteFailure(
   queryClient: { invalidateQueries: (filters: { queryKey: any[] }) => any },
-  planId?: number
+  planId?: PlanId
 ) {
   queryClient.invalidateQueries({ queryKey: ['plansList'] });
   if (planId !== undefined) {
-    queryClient.invalidateQueries({ queryKey: ['planDetail', planId] });
+    queryClient.invalidateQueries({ queryKey: ['planDetail', String(planId)] });
   }
   queryClient.invalidateQueries({ queryKey: ['planDetail'] });
 }

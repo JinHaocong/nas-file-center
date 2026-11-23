@@ -250,14 +250,15 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
         (key) => Array.isArray(key) && key[0] === 'plansList'
       );
       const hasPlanDetailWithId = invalidatedKeys.some(
-        (key) => Array.isArray(key) && key[0] === 'planDetail' && key[1] === 88
+        (key) => Array.isArray(key) && key[0] === 'planDetail' && key[1] === '88'
       );
       const hasPlanDetailPrefix = invalidatedKeys.some(
-        (key) => Array.isArray(key) && key[0] === 'planDetail'
+        (key) => Array.isArray(key) && key.length === 1 && key[0] === 'planDetail'
       );
 
       assert.ok(hasPlansList, 'Must invalidate plansList query key');
-      assert.ok(hasPlanDetailWithId || hasPlanDetailPrefix, 'Must invalidate planDetail query key');
+      assert.ok(hasPlanDetailWithId, 'Must invalidate the same string ID key as the detail route');
+      assert.ok(hasPlanDetailPrefix, 'Must refresh other cached detail pages');
     });
   });
 

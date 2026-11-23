@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { plansApi } from '../../api/domain';
-import type { OperationJournalEntry } from '../../types';
+import type { OperationJournalEntry, PlanId } from '../../types';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import { ConsoleSheet } from '../../components/ui/ConsoleSheet';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
@@ -13,7 +13,7 @@ import { CodePath } from '../../components/ui/CodePath';
 import { getStructuredApiError } from '../../api/errors';
 
 interface Props {
-  planId: number;
+  planId: PlanId;
   open: boolean;
   onClose: () => void;
 }

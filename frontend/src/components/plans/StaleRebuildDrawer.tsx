@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { workflowApi } from '../../api/workflows';
 import { formatDedupeErrorMessage, getStructuredApiError } from '../../api/errors';
+import type { PlanId } from '../../types';
 import type { WorkflowPreviewItem } from '../../types/workflow';
 import { computeRebuildReadiness } from '../../utils/rebuildReadiness';
 import { useResponsive } from '../../hooks/useResponsive';
@@ -15,7 +16,7 @@ import { useConsoleToast } from '../ui/ConsoleToast';
 
 interface StaleRebuildDrawerProps {
   open: boolean;
-  planId: number;
+  planId: PlanId;
   onClose: () => void;
   onRebuildSuccess: (newPlanId: number) => void;
 }

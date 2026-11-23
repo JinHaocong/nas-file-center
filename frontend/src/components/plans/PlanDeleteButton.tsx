@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
 import { ConsoleConfirmDialog } from '../ui/ConsoleConfirmDialog';
+import type { PlanId } from '../../types';
 import {
   getPlanDeleteAvailability, getPlanDeleteConfirmationContent,
   invalidatePlanDeleteFailure,
@@ -10,7 +11,7 @@ import {
 
 export interface PlanDeleteButtonProps {
   plan: {
-    id: number;
+    id: PlanId;
     status: string;
     name?: string;
     active_work_job_id?: number | null;
