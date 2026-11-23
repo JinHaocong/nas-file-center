@@ -188,6 +188,7 @@ def test_batch_organizes_numbered_siblings_and_local_media_without_crossing_boun
     kept = {
         author / "videos" / "001.mp4": b"separate old wrapper",
         unknown / "散图.jpg": b"unknown scope",
+        unknown / "片段.mp4": b"another media type in the unknown scope",
     }
     moved = {
         download / "recap.mp4": (download / "001.mp4", b"parent video"),
@@ -230,6 +231,32 @@ def test_batch_organizes_numbered_siblings_and_local_media_without_crossing_boun
     assert expected_ready <= {Path(row["unit"]) for row in rescan["units"]
                               if row["status"] == "already_organized"}
     assert any(row["unit"] == str(unknown) and row["status"] == "blocked" for row in rescan["units"])
+
+
+def test_batch_organizes_default_named_photo_set_in_place_from_parent(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    selection = settings.data_mount / "2611" / "261104" / "作者A" / "260930"
+    folder = selection / "新建文件夹"
+    folder.mkdir(parents=True)
+    for position in range(1, 16):
+        (folder / f"原照片-{position:02d}.JPG").write_bytes(f"image-{position}".encode())
+
+    preview = _preview(client, settings, selection)
+    assert [(row["unit"], row["status"], row["total_files"]) for row in preview["units"]] == [
+        (str(folder), "ready", 15),
+    ]
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    assert list(selection.iterdir()) == [folder]
+    assert sorted(path.name for path in folder.iterdir()) == [f"{position:03d}.JPG" for position in range(1, 16)]
+    assert [(folder / f"{position:03d}.JPG").read_bytes() for position in range(1, 16)] == [
+        f"image-{position}".encode() for position in range(1, 16)
+    ]
+
+    rescan = _preview(client, settings, selection)
+    assert rescan["summary"]["blocked_count"] == 0
+    assert rescan["summary"]["already_organized_count"] == 1
+    assert rescan["summary"]["needed_moves"] == rescan["summary"]["renamed_count"] == 0
 
 
 def test_batch_rechecks_author_loose_files_when_a_work_appears_after_preview(tmp_path):
@@ -402,6 +429,66 @@ def test_restart_finishes_its_own_interrupted_fuse_hardlink(tmp_path, monkeypatc
     report = client.get(f"/api/media-organizer/batches/{job}").json()
     assert report["summary"]["success_count"] == 1, report
     assert [(path.name, path.read_bytes()) for path in unit.iterdir()] == [("001.JPG", b"media")]
+
+
+def test_batch_promotes_same_name_work_buckets_without_rebuilding_them(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    selection = settings.data_mount / "作品"
+    inner = selection / selection.name
+    buckets = {"P [1 4B]": ("001.JPG", b"phot"), "V [1 4B]": ("001.MP4", b"clip")}
+    for name, (filename, data) in buckets.items():
+        bucket = inner / name
+        bucket.mkdir(parents=True)
+        (bucket / filename).write_bytes(data)
+    original_ids = {name: (inner / name).stat().st_ino for name in buckets}
+
+    preview = _preview(client, settings, selection)
+    assert [(row["unit"], row["status"], row["renamed_count"]) for row in preview["units"]] == [
+        (str(selection), "ready", 0),
+    ]
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert result["summary"]["success_count"] == 1
+    assert not inner.exists()
+    for name, (filename, data) in buckets.items():
+        assert (selection / name).stat().st_ino == original_ids[name]
+        assert (selection / name / filename).read_bytes() == data
+    assert _preview(client, settings, selection)["summary"]["already_organized_count"] == 1
+
+
+def test_batch_groups_leaf_photo_packs_and_author_date_categories(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    day = settings.data_mount / "261103"
+    work = day / "圣诞雪饼带视频"
+    author = day / "作者A"
+    dated = author / "261103"
+    kept = author / "260321/001.mp4"
+    moved = {
+        work / "图包/cover.JPG": (work / "P [1 4B]/001.JPG", b"phot"),
+        work / "clip.mp4": (work / "V [1 4B]/001.mp4", b"clip"),
+        dated / "图片/cover.jpg": (dated / "P [1 4B]/001.jpg", b"date"),
+        dated / "视频/clip.MP4": (dated / "V [1 4B]/001.MP4", b"vids"),
+    }
+    for path, content in ({source: data for source, (_, data) in moved.items()}
+                          | {kept: b"original batch"}).items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    preview = _preview(client, settings, day)
+    assert {row["unit"] for row in preview["units"] if row["status"] == "ready"} == {str(work), str(dated)}
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert result["summary"] == {"success_count": 2, "skipped_count": 1, "conflict_count": 0, "failed_count": 0}
+    for source, (destination, content) in moved.items():
+        assert destination.read_bytes() == content
+        assert not source.exists()
+    assert not (work / "图包").exists()
+    assert not (dated / "图片").exists()
+    assert not (dated / "视频").exists()
+    assert kept.read_bytes() == b"original batch"
+    assert _preview(client, settings, day)["summary"]["already_organized_count"] == 3
 
 
 def test_grouped_batch_uses_sized_buckets_and_then_skips(tmp_path):

@@ -424,6 +424,50 @@ def _frozen_original_directory(manifest: dict, path: Path) -> bool:
     return True
 
 
+def _stage_repeated_work_bucket(manifest: dict, group_index: int,
+                                lease_fence: Callable[[], None]) -> bool:
+    """Stage an unchanged bucket as a directory, using the normal recovery path."""
+    if manifest.get("organizer_mode") != "semantic":
+        return False
+    package = Path(manifest["package"])
+    wrapper = package / package.name
+    group = manifest["groups"][group_index]
+    source = wrapper / group["final"]
+    origins = manifest["origin_directories"]
+    if str(source) not in origins or str(wrapper) not in origins or not all(
+        Path(row["source"]) == source / row["target_name"]
+        for row in _group_files(manifest, group_index)
+    ):
+        return False
+
+    package_fd = _open_verified_package(manifest)
+    try:
+        wrapper_fd = _open_folder(wrapper)
+        try:
+            _verify_group_contents(manifest, group_index, source)
+            lease_fence()
+            opened = os.fstat(wrapper_fd)
+            current = os.stat(wrapper.name, dir_fd=package_fd, follow_symlinks=False)
+            bucket = os.stat(source.name, dir_fd=wrapper_fd, follow_symlinks=False)
+            if ([opened.st_dev, opened.st_ino] != origins[str(wrapper)]
+                    or [current.st_dev, current.st_ino] != origins[str(wrapper)]
+                    or not stat.S_ISDIR(bucket.st_mode)
+                    or [bucket.st_dev, bucket.st_ino] != origins[str(source)]):
+                raise MediaPackageExecutionConflict("Original repeated work changed before staging")
+            try:
+                rename_noreplace_at(wrapper_fd, source.name, package_fd, group["stage"])
+            except OSError as exc:
+                if exc.errno != errno.EOPNOTSUPP:
+                    raise
+                # Use the existing file-by-file engine on mounts without directory rename.
+                return False
+        finally:
+            os.close(wrapper_fd)
+    finally:
+        os.close(package_fd)
+    return True
+
+
 def _ensure_staging(manifest: dict, group_index: int,
                     lease_fence: Callable[[], None]) -> str:
     """Distinguish an old scanned bucket from an already-published output."""
@@ -466,6 +510,8 @@ def _ensure_staging(manifest: dict, group_index: int,
                                 stage / entry.name)
         finally:
             os.close(fd)
+        return "staging"
+    if _stage_repeated_work_bucket(manifest, group_index, lease_fence):
         return "staging"
     lease_fence()
     fd = _open_folder(package)
