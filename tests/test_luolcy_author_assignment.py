@@ -2,6 +2,7 @@ import errno
 import json
 import os
 import stat
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -104,17 +105,211 @@ def test_luolcy_direct_author_media_organizes_in_place(tmp_path, image_count, vi
     assert again["summary"]["already_organized_count"] == (len(groups) or 1)
 
 
-@pytest.mark.parametrize("entry", ["existing_package", "target_bucket", "symlink", "nonmedia", "fifo"])
+def test_luolcy_author_rebuild_combines_classification_contents_and_keeps_named_work(tmp_path):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251104/作者"
+    sources = {
+        "photo.jpg": b"a", "P/001.jpg": b"b", "V/001.mp4": b"c", "V2/001.mp4": b"d",
+        "命名作品/001.jpg": b"e",
+    }
+    for relative, content in sources.items():
+        path = author / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    preview = _preview(client, settings, author)
+    assert [(row["unit"], row["status"]) for row in preview["units"]] == [
+        (str(author), "ready"), (str(author / "命名作品"), "already_organized"),
+    ]
+    author_row = preview["units"][0]
+    assert author_row["totals"] == {"P": 2, "V": 2, "Other": 0}
+    assert {move["source"] for move in author_row["sample_moves"]} == {
+        str(author / path) for path in sources if not path.startswith("命名作品/")
+    }
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert result["summary"] == {"success_count": 1, "skipped_count": 1, "conflict_count": 0, "failed_count": 0}, result
+    assert {
+        path.relative_to(author).as_posix(): path.read_bytes()
+        for path in author.glob("*/*") if path.is_file()
+    } == {
+        "P [2 2B]/001.jpg": b"b", "P [2 2B]/002.jpg": b"a",
+        "V [2 2B]/001.mp4": b"c", "V [2 2B]/002.mp4": b"d",
+        "命名作品/001.jpg": b"e",
+    }
+    assert {path.name for path in author.iterdir()} == {"P [2 2B]", "V [2 2B]", "命名作品"}
+    assert _preview(client, settings, author)["summary"]["needed_moves"] == 0
+
+
+def test_luolcy_author_rebuild_accepts_pv_classifications_and_preserves_uncertain_wrappers(tmp_path):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251104/作者"
+    for name, data in {
+        "pv/P [1 1B]/001.jpg": b"p",
+        "pv/V [1 1B]/001.mp4": b"v",
+        "V2/001.jpg": b"x",
+        "图片/001.jpg": b"y",
+    }.items():
+        path = author / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    preview = _preview(client, settings, author)
+    assert [(row["unit"], row["status"]) for row in preview["units"]] == [
+        (str(author), "ready"), (str(author / "V2"), "already_organized"),
+    ]
+    row = preview["units"][0]
+    assert row["totals"] == {"P": 2, "V": 1, "Other": 0}
+    assert {Path(move["source"]).relative_to(author).as_posix() for move in row["sample_moves"]} == {
+        "pv/P [1 1B]/001.jpg", "pv/V [1 1B]/001.mp4", "图片/001.jpg",
+    }
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert result["summary"]["success_count"] == 1, result
+    assert not (author / "pv").exists()
+    assert not (author / "图片").exists()
+    assert (author / "V2/001.jpg").read_bytes() == b"x"
+    assert _preview(client, settings, author)["summary"]["needed_moves"] == 0
+
+
+@pytest.mark.parametrize(("direct", "children", "totals"), [
+    ("cover.jpg", {"门槛/01.mp4": b"v"}, {"P": 1, "V": 1, "Other": 0}),
+    ("clip.mp4", {"独立标题/01.jpg": b"p"}, {"P": 1, "V": 1, "Other": 0}),
+    ("cover.jpg", {"新建文件夹/01.mp4": b"v", "片段合集/01.mp4": b"x"}, {"P": 1, "V": 2, "Other": 0}),
+    ("cover.jpg", {"短名1v/01.mp4": b"v", "片段合集/01.mp4": b"x"}, {"P": 1, "V": 2, "Other": 0}),
+])
+def test_luolcy_promotes_a_few_unstructured_media_leaves(tmp_path, direct, children, totals):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251104/作者"
+    for relative, content in {direct: b"root", **children}.items():
+        path = author / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    preview = _preview(client, settings, author)
+    row, = preview["units"]
+    assert (row["unit"], row["status"], row["totals"]) == (str(author), "ready", totals)
+    assert {Path(move["source"]).relative_to(author).as_posix() for move in row["sample_moves"]} == {
+        direct, *children,
+    }
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert result["summary"]["success_count"] == 1, result
+    assert {path.read_bytes() for path in author.glob("*/*")} == {b"root", *children.values()}
+    assert not any((author / name.split("/")[0]).exists() for name in children)
+    assert _preview(client, settings, author)["summary"]["needed_moves"] == 0
+
+
+@pytest.mark.parametrize("children", [
+    ["主题一/001.mp4", "主题二/001.mp4"],
+    ["只有图的作品/001.jpg"],
+    ["含子目录/原版/001.mp4"],
+    ["新建文件夹/001.mp4", "主题一/001.mp4", "主题二/001.mp4"],
+    ["新建文件夹/001.mp4", "说明也在包内/readme.txt"],
+    ["2026-11-12/001.mp4"],
+])
+def test_luolcy_keeps_media_outside_the_small_leaf_rule_independent(tmp_path, children):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251104/作者"
+    for relative in ["cover.jpg", *children]:
+        path = author / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"file")
+
+    preview = _preview(client, settings, author)
+    rows = {row["unit"]: row for row in preview["units"]}
+    assert rows[str(author)]["totals"] == {"P": 1, "V": 0, "Other": 0}
+    assert all(Path(move["source"]).parent == author for move in rows[str(author)]["sample_moves"])
+    assert sorted(key for key in rows if key != str(author)) == sorted(
+        str(author / name.split("/")[0]) for name in children
+    )
+
+
+@pytest.mark.parametrize(("label", "extension", "count"), [
+    ("268MB", "mp4", 2),
+    ("New 20分钟 1.37G", "jpg", 4),
+    ("251104", "jpg", 4),
+    ("2025-11", "jpg", 1),
+    ("11.19", "jpg", 1),
+])
+def test_luolcy_with_labelled_batches_organizes_only_direct_media(tmp_path, label, extension, count):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251115/作者"
+    protected = [author / label / "001.jpg", author / "V2/001.mp4"]
+    for path in protected:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"package")
+    for index in range(1, count + 1):
+        (author / f"source ({index}).{extension}").write_bytes(bytes([index]))
+
+    preview = _preview(client, settings, author)
+    assert preview["summary"]["needs_assignment_count"] == 0
+    rows = {row["unit"]: row for row in preview["units"]}
+    row = rows[str(author)]
+    assert (row["status"], row["needed_moves"]) == ("ready", count)
+    assert all(Path(move["source"]).parent == Path(move["target"]).parent == author
+               for move in row["sample_moves"])
+    assert {key for key in rows if key != str(author)} == {str(path.parent) for path in protected}
+    identity = [path.stat().st_ino for path in protected]
+
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert report["summary"] == {"success_count": 1, "skipped_count": 2, "conflict_count": 0, "failed_count": 0}, report
+    assert {path.name: path.read_bytes() for path in author.iterdir() if path.is_file()} == {
+        f"{index:03d}.{extension}": bytes([index]) for index in range(1, count + 1)
+    }
+    assert [path.stat().st_ino for path in protected] == identity
+    assert all(path.read_bytes() == b"package" for path in protected)
+    assert _preview(client, settings, author)["summary"]["already_organized_count"] == 3
+
+
+def test_luolcy_labelled_batches_without_direct_media_have_no_author_root_plan(tmp_path):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251115/作者"
+    for relative in ("268MB/001.mp4", "P/001.jpg"):
+        file = author / relative
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(b"package")
+
+    preview = _preview(client, settings, author)
+    assert {row["unit"] for row in preview["units"]} == {str(author / "268MB"), str(author / "P")}
+    assert preview["summary"]["already_organized_count"] == 2
+
+
+def test_luolcy_new_labelled_batch_invalidates_a_preview_that_would_merge_children(tmp_path):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251115/作者"
+    (author / "V").mkdir(parents=True)
+    (author / "V/001.mp4").write_bytes(b"video")
+    (author / "cover.jpg").write_bytes(b"cover")
+    preview = _preview(client, settings, author)
+    row, = preview["units"]
+    assert row["status"] == "ready"
+    assert {move["source"] for move in row["sample_moves"]} == {
+        str(author / "V/001.mp4"), str(author / "cover.jpg"),
+    }
+
+    (author / "268MB").mkdir()
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert report["summary"]["conflict_count"] == 1, report
+    assert (author / "V/001.mp4").read_bytes() == b"video"
+    assert (author / "cover.jpg").read_bytes() == b"cover"
+    assert set(author.iterdir()) == {author / "V", author / "cover.jpg", author / "268MB"}
+
+
+@pytest.mark.parametrize("entry", ["symlink", "nonmedia", "fifo"])
 def test_luolcy_author_with_unreviewed_entries_keeps_manual_assignment(tmp_path, entry):
     client, settings, root = _fixture(tmp_path)
     author = root / "2511/251115/作者"
     author.mkdir(parents=True)
     (author / "cover.jpg").write_bytes(b"p")
-    if entry in {"existing_package", "target_bucket"}:
-        name = "独立包" if entry == "existing_package" else "P [1 1B]"
-        (author / name).mkdir()
-        (author / name / "001.jpg").write_bytes(b"x")
-    elif entry == "symlink":
+    if entry == "symlink":
         (author / "link.jpg").symlink_to(author / "cover.jpg")
     elif entry == "nonmedia":
         (author / "notes.txt").write_bytes(b"notes")
@@ -126,6 +321,7 @@ def test_luolcy_author_with_unreviewed_entries_keeps_manual_assignment(tmp_path,
         {str(author / "cover.jpg"), str(author / "notes.txt")} if entry == "nonmedia"
         else {str(author / "cover.jpg")}
     )
+    assert all(row["unit"] != str(author) or not row["sample_moves"] for row in preview["units"])
 
 
 @pytest.mark.parametrize("after_freeze", [False, True])

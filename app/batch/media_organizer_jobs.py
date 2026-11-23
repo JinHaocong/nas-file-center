@@ -398,6 +398,8 @@ def _preview_row(record: dict, report: Path) -> dict:
         "operation": record.get("operation"), "organizer_mode": record.get("organizer_mode"),
         **({"local_media_kinds": record["local_media_kinds"]} if record.get("local_media_kinds") else {}),
         **({"whole_author": True} if record.get("whole_author") else {}),
+        **({"luolcy_author_siblings": record["luolcy_author_siblings"]}
+           if record.get("luolcy_author_siblings") else {}),
         "totals": totals, "total_files": sum(totals.values()),
         "total_bytes": record.get("total_bytes", 0), "groups": record.get("groups", []),
         "needed_moves": record.get("actual_moves", 0),
@@ -511,6 +513,7 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence)
             if (manifest.get("organizer_mode") != options["mode"]
                     or tuple(manifest.get("local_media_kinds", ())) != local_media_kinds
                     or manifest.get("whole_author", False) != whole_author
+                    or manifest.get("luolcy_author_siblings", {}) != unit.get("luolcy_author_siblings", {})
                     or manifest.get("input_fingerprint") != unit["input_fingerprint"]
                     or manifest.get("media_package_root") != (str(package_root) if package_root else None)
                     or manifest.get("quarantine_root") != (str(settings.quarantine_root)

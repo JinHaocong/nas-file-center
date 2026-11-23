@@ -16,7 +16,7 @@ from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, numbered_name
 from app.batch.media_package_organizer import (
     MAX_DEPTH, MAX_FILES_PER_GROUP, MAX_PACKAGE_DIRECTORIES, MAX_PACKAGE_FILES, MAX_SCOPE_ENTRIES_PER_DIRECTORY,
     PROMOTE_NUMBERED_PHOTO_GROUPS,
-    _classify, _package_path, _size_label, _walk_luolcy_author, _walk_package,
+    _classify, _luolcy_author_inventory, _package_path, _size_label, _walk_package,
     iter_media_package_discovery, plan_media_layout,
 )
 from app.path_safety import require_allowed_path, require_unreserved_path
@@ -428,9 +428,10 @@ def walk_organizing_unit(
         raise ValueError("Invalid local media scope")
     if mode == "luolcy" and media_package_root is not None:
         if whole_author:
+            items, _ = _luolcy_author_inventory(unit, media_package_root, check_cancelled=check_cancelled)
             if directories is not None:
                 directories.add(unit)
-            yield from _walk_luolcy_author(unit, media_package_root, check_cancelled=check_cancelled)
+            yield from items
         else:
             yield from _walk_package(unit, directories=directories)
     elif mode == "semantic":
@@ -969,7 +970,11 @@ def preview_organizing_unit(
                     and _work_media_component(unit, entries, device, protected) is None):
                 local_media_kinds = _layer_media_kinds(unit, entries, device, protected)
     append_videos = False
-    if photo_groups is not None:
+    luolcy_siblings = {}
+    if mode == "luolcy" and whole_author:
+        items, luolcy_siblings = _luolcy_author_inventory(unit, media_package_root, check_cancelled=check_cancelled)
+        directories = {unit}
+    elif photo_groups is not None:
         items, directories = photo_groups
     elif author_inventory is not None:
         items, directories, append_videos = author_inventory
@@ -1016,6 +1021,9 @@ def preview_organizing_unit(
         **plan, "unit": str(unit), "organizer_mode": mode,
         **({"local_media_kinds": list(local_media_kinds)} if local_media_kinds else {}),
         **scope,
+        **({"luolcy_author_siblings": luolcy_siblings} if luolcy_siblings else {}),
+        **({"_luolcy_merged_children": sorted(str(path) for path in origin_dirs if path.parent == unit)}
+           if mode == "luolcy" and whole_author else {}),
         "total_bytes": sum(row["bytes"] for row in items),
         "wrapper_cleanup": sorted((str(path) for path in cleanup), key=lambda path: (-len(Path(path).parts), path)),
     }
@@ -1146,6 +1154,7 @@ def iter_organizing_previews(
         selection.is_relative_to(package_root) or package_root.is_relative_to(selection)
     ):
         package_selection = selection if selection.is_relative_to(package_root) else package_root
+        merged_children: set[Path] = set()
         try:
             for entry in iter_media_package_discovery(
                 package_selection, media_package_root=package_root,
@@ -1153,13 +1162,22 @@ def iter_organizing_previews(
                 isolate_conflicts=True, check_cancelled=check_cancelled, include_author_files=True,
             ):
                 unit = entry.path
+                if unit in merged_children:
+                    merged_children.remove(unit)
+                    continue
                 if entry.reason:
                     yield _blocked(unit, "luolcy", entry.reason)
-                elif entry.loose_files:
+                elif entry.loose_files or entry.author_rebuild_candidate:
                     if is_reserved_workspace(unit) or (quarantine_root and unit.is_relative_to(quarantine_root)):
                         continue
-                    if entry.all_direct_media:
-                        yield preview(unit, "luolcy", True)
+                    if entry.author_rebuild_candidate:
+                        row = preview(unit, "luolcy", True)
+                        if row["status"] != "skipped":
+                            if row["status"] in {"ready", "already_organized"}:
+                                merged_children.update(Path(path) for path in row["_luolcy_merged_children"])
+                            yield row
+                            continue
+                    if not entry.loose_files:
                         continue
                     counts = Counter(row["kind"] for row in entry.loose_files)
                     yield {

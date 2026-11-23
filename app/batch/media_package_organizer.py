@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from app.batch.file_rename import _open_directory_nofollow
-from app.batch.media_package_naming import allocate_names, media_source_sort_key
+from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, allocate_names, media_source_sort_key
 from app.filters.media_types import get_media_type
 from app.path_safety import require_allowed_path, require_unreserved_path
 
@@ -30,6 +30,20 @@ APPEND_VIDEO_OPERATIONS = frozenset({APPEND_SINGLE_VIDEO, APPEND_AUTHOR_VIDEOS})
 PROMOTE_NUMBERED_PHOTO_GROUPS = "promote_numbered_photo_groups"
 _MONTH = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])$")
 _DAY = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])$")
+_AUTHOR_CLASSIFICATION = re.compile(r"([pv])(?:_?[1-9]\d*)?", re.I)
+_AUTHOR_DEFAULT_FOLDER = re.compile(r"(?:新建文件夹|未命名文件夹|new folder)(?:\s*\(\d+\))?", re.I)
+_AUTHOR_MEDIA_COUNT = re.compile(r"(?:[\u3400-\u9fff]{1,6}\s*)?\d+\s*(?:[pv]|张(?:图)?|个视频)", re.I)
+_AUTHOR_BATCH_LABEL = re.compile(
+    r"(?:new[\s_-]*)?(?:\d+(?:[.,]\d+)?\s*(?:"
+    r"[kmgt]i?b|[kmgtb](?![a-z])|小时|分钟|秒(?:钟)?|[时分]|hours?|hrs?|minutes?|mins?|seconds?|secs?|[hms](?![a-z]))"
+    r"|\d{1,3}:\d{2}(?::\d{2})?)", re.I,
+)
+_AUTHOR_DATE_LABEL = re.compile(
+    r"(?:(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])?"
+    r"|(?:19|20)?\d{2}[-_.年](?:0?[1-9]|1[0-2])月?"
+    r"|(?:(?:19|20)?\d{2}[-_.年])?(?:0?[1-9]|1[0-2])"
+    r"(?:[-_.月](?:0?[1-9]|[12]\d|3[01])(?:日|号)?|月))",
+)
 
 
 def _size_label(size: int) -> str:
@@ -87,7 +101,7 @@ class MediaPackageScopeEntry:
     loose_files: list[dict] | None = None
     packages: dict[str, list[int]] | None = None
     author_identity: list[int] | None = None
-    all_direct_media: bool = False
+    author_rebuild_candidate: bool = False
 
 
 def _validate_scope(selection: str | Path, *, media_package_root: str | Path,
@@ -144,6 +158,53 @@ def _open_luolcy_author(author: Path, root: Path) -> int:
         raise
 
 
+def _luolcy_batch_boundary(name: str) -> bool:
+    """Recognize author subpackages labelled by size, duration or date."""
+    label = name.strip()
+    return bool(_AUTHOR_BATCH_LABEL.match(label) or _MONTH.fullmatch(label) or _DAY.fullmatch(label)
+                or _AUTHOR_DATE_LABEL.fullmatch(label))
+
+
+def _luolcy_classification_kind(name: str) -> str | None:
+    """Recognize classification labels before checking their actual contents."""
+    bucket = MEDIA_BUCKET_PATTERN.fullmatch(name)
+    if bucket:
+        return bucket["kind"].upper()
+    plain = _AUTHOR_CLASSIFICATION.fullmatch(name)
+    if plain:
+        return plain[1].upper()
+    label = name.casefold()
+    if label in {"图片", "照片", "photo", "photos", "image", "images"}:
+        return "P"
+    if label in {"视频", "video", "videos"}:
+        return "V"
+    return "PV" if label in {"pv", "p+v", "图视频"} else None
+
+
+def _luolcy_leaf_hint(name: str) -> bool:
+    """Identify a short media label or an unnamed folder in a pair of leaves."""
+    name = name.strip()
+    if MEDIA_BUCKET_PATTERN.fullmatch(name):
+        # A previously published bucket is not evidence of a temporary split.
+        return False
+    return bool(_luolcy_classification_kind(name) or _AUTHOR_DEFAULT_FOLDER.fullmatch(name)
+                or _AUTHOR_MEDIA_COUNT.fullmatch(name))
+
+
+def _luolcy_leaf_promotion(direct_kinds: set[str], child_kinds: dict[str, set[str]]) -> bool:
+    """Confirm whether the author root and a small set of flat media leaves belong together."""
+    media = {"P", "V"}
+    if not direct_kinds or not direct_kinds <= media or any(
+        _luolcy_batch_boundary(name) or not kinds or not kinds <= media
+        for name, kinds in child_kinds.items()
+    ):
+        return False
+    if len(child_kinds) == 1:
+        kinds, = child_kinds.values()
+        return len(direct_kinds) == len(kinds) == 1 and direct_kinds.isdisjoint(kinds)
+    return len(child_kinds) == 2 and any(_luolcy_leaf_hint(name) for name in child_kinds)
+
+
 def _child_directories(
     directory: Path, *, isolate_conflicts: bool, excluded_names: frozenset[str],
     include_loose_files: bool = False, check_cancelled: Callable[[], None] | None = None,
@@ -196,12 +257,23 @@ def _child_directories(
     finally:
         os.close(fd)
     author = None
-    if files and author_stat is not None:
+    if author_stat is not None:
+        has_labelled_batch = any(_luolcy_batch_boundary(name) for name in packages)
+        candidate = (
+            count == len(files) + len(packages)
+            and all(row["kind"] in {"P", "V"} for row in files)
+            and (bool(files) or (not has_labelled_batch and any(
+                _luolcy_classification_kind(name) and not MEDIA_BUCKET_PATTERN.fullmatch(name)
+                for name in packages
+            )))
+        )
+        if not (files or candidate):
+            return sorted(names), sorted(conflicts, key=lambda entry: entry.path), None
         author = MediaPackageScopeEntry(
             directory, loose_files=sorted(files, key=lambda row: row["source"]),
             packages={name: packages[name] for name in sorted(packages)},
             author_identity=[author_stat.st_dev, author_stat.st_ino],
-            all_direct_media=count == len(files) and all(row["kind"] in {"P", "V"} for row in files),
+            author_rebuild_candidate=candidate,
         )
     return sorted(names), sorted(conflicts, key=lambda entry: entry.path), author
 
@@ -309,31 +381,121 @@ def _classify(filename: str) -> str:
     return "P" if media_type == "image" else "V" if media_type == "video" else "Other"
 
 
-def _walk_luolcy_author(
+def _author_media_row(path: Path, info: os.stat_result, kind: str) -> dict:
+    return {
+        "path": str(path), "name": path.name, "kind": kind, "bytes": info.st_size,
+        "dev": info.st_dev, "ino": info.st_ino, "mtime_ns": info.st_mtime_ns,
+    }
+
+
+def _luolcy_classification_inventory(
+    folder: Path, device: int, label: str, check_cancelled: Callable[[], None] | None,
+    *, flat_only: bool = False,
+) -> list[dict] | None:
+    """Confirm one media classification folder, or a PV wrapper around P/V leaves."""
+    rows = []
+    kinds = {"P", "V"} if label == "PV" else {label}
+    fd = _open_directory_nofollow(folder)
+    try:
+        if os.fstat(fd).st_dev != device:
+            return None
+        with os.scandir(fd) as entries:
+            for count, entry in enumerate(entries, 1):
+                if count > MAX_SCOPE_ENTRIES_PER_DIRECTORY or len(rows) > MAX_PACKAGE_FILES:
+                    raise ValueError("Too many Luolcy classification entries")
+                if check_cancelled is not None and count % 256 == 0:
+                    check_cancelled()
+                path = folder / entry.name
+                info = entry.stat(follow_symlinks=False)
+                if info.st_dev != device or entry.name.casefold().startswith(".nfc-"):
+                    return None
+                if stat.S_ISREG(info.st_mode) and (kind := _classify(entry.name)) in kinds:
+                    rows.append(_author_media_row(path, info, kind))
+                elif not flat_only and label == "PV" and stat.S_ISDIR(info.st_mode) and (
+                    child_label := _luolcy_classification_kind(entry.name)
+                ) in kinds:
+                    nested = _luolcy_classification_inventory(path, device, child_label, check_cancelled)
+                    if not nested:
+                        return None
+                    rows.extend(nested)
+                else:
+                    return None
+    finally:
+        os.close(fd)
+    if len(rows) > MAX_PACKAGE_FILES:
+        raise ValueError("Too many Luolcy classification files")
+    bucket = MEDIA_BUCKET_PATTERN.fullmatch(folder.name)
+    if bucket and (len(rows) > MAX_FILES_PER_GROUP
+                   or bucket["label"] != f"[{len(rows)} {_size_label(sum(row['bytes'] for row in rows))}]"):
+        return None
+    return rows or None
+
+
+def _luolcy_author_inventory(
     author: Path, root: Path, *, check_cancelled: Callable[[], None] | None = None,
-) -> Iterator[dict]:
-    """Inventory a file-only author directory for a new in-place plan."""
+) -> tuple[list[dict], dict[str, list[int]]]:
+    """Collect files owned by the author root and identities of preserved named works."""
+    rows = []
+    children = {}
     fd = _open_luolcy_author(author, root)
     try:
         device = os.fstat(fd).st_dev
         with os.scandir(fd) as entries:
             for count, entry in enumerate(entries, 1):
-                if count > MAX_SCOPE_ENTRIES_PER_DIRECTORY:
+                if count > MAX_SCOPE_ENTRIES_PER_DIRECTORY or len(rows) > MAX_PACKAGE_FILES:
                     raise ValueError("Too many Luolcy author entries")
                 if check_cancelled is not None and count % 256 == 0:
                     check_cancelled()
                 path = author / entry.name
                 info = entry.stat(follow_symlinks=False)
-                kind = _classify(entry.name)
-                if (kind not in {"P", "V"} or info.st_dev != device
-                        or not stat.S_ISREG(info.st_mode) or entry.name.casefold().startswith(".nfc-")):
+                if info.st_dev != device or entry.name.casefold().startswith(".nfc-"):
                     raise ValueError(f"Luolcy author contains an unreviewed entry: {path}")
-                yield {
-                    "path": str(path), "name": entry.name, "kind": kind, "bytes": info.st_size,
-                    "dev": info.st_dev, "ino": info.st_ino, "mtime_ns": info.st_mtime_ns,
-                }
+                if stat.S_ISREG(info.st_mode) and (kind := _classify(entry.name)) in {"P", "V"}:
+                    rows.append(_author_media_row(path, info, kind))
+                    continue
+                if not stat.S_ISDIR(info.st_mode):
+                    raise ValueError(f"Luolcy author contains an unreviewed entry: {path}")
+                children[entry.name] = [info.st_dev, info.st_ino]
     finally:
         os.close(fd)
+
+    if any(_luolcy_batch_boundary(name) for name in children):
+        # Labelled batches make every child an independent package.
+        return rows, children
+
+    direct_kinds = {row["kind"] for row in rows}
+    inspect_leaves = bool(direct_kinds) and (
+        len(children) == 1 or (len(children) == 2 and any(_luolcy_leaf_hint(name) for name in children))
+    )
+    classifications = {}
+    leaves = {}
+    inferred = {}
+    scanned_files = len(rows)
+    for name in children:
+        folder = author / name
+        label = _luolcy_classification_kind(name)
+        if label is None and not inspect_leaves:
+            continue
+        media = _luolcy_classification_inventory(folder, device, label or "PV", check_cancelled,
+                                                 flat_only=label is None)
+        if not media:
+            continue
+        scanned_files += len(media)
+        if scanned_files > MAX_PACKAGE_FILES:
+            raise ValueError("Too many Luolcy author files")
+        if label is not None:
+            classifications[name] = media
+        if inspect_leaves and all(Path(row["path"]).parent == folder for row in media):
+            leaves[name] = {row["kind"] for row in media}
+            if label is None:
+                # Use the inferred directory only if every sibling passes the leaf rule.
+                inferred[name] = media
+    if inferred and leaves.keys() == children.keys() and _luolcy_leaf_promotion(direct_kinds, leaves):
+        classifications.update(inferred)
+    for name, media in classifications.items():
+        rows.extend(media)
+        del children[name]
+    return rows, children
 
 
 def _walk_package(package: Path, *, directories: set[Path] | None = None):

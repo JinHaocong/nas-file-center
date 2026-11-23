@@ -936,7 +936,7 @@ def test_fixed_luolcy_and_semantic_versions_are_separate_in_one_batch(tmp_path):
 
     preview = _preview(client, settings, root.parent)
     assert preview["summary"]["totals"] == {"P": 2, "V": 2, "Other": 0}
-    assert preview["summary"]["needs_assignment_count"] == 1
+    assert preview["summary"]["needs_assignment_count"] == 0
     assert {unit["unit"]: unit["organizer_mode"] for unit in preview["units"]} == {
         str(package): "luolcy", str(package.parent): "luolcy",
         str(work / "4K"): "semantic", str(work / "PT"): "semantic",
@@ -947,10 +947,10 @@ def test_fixed_luolcy_and_semantic_versions_are_separate_in_one_batch(tmp_path):
     batch_id = _batch(client, preview)
     assert _run_next(settings, batch_id)
     result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
-    assert result["summary"]["success_count"] == 3, result
-    assert result["summary"]["skipped_count"] == 1, result
+    assert result["summary"]["success_count"] == 4, result
+    assert result["summary"]["skipped_count"] == 0, result
     assert (package / "001.JPG").read_bytes() == b"photo"
-    assert (package.parent / "作者封面.webp").read_bytes() == b"author"
+    assert (package.parent / "001.webp").read_bytes() == b"author"
     assert empty.is_dir()
     assert not photos.exists()
     for version in ("4K", "PT"):
