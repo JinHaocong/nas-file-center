@@ -399,6 +399,18 @@ def _luolcy_numbered_files(rows: list[dict]) -> bool:
                for index, row in enumerate(sorted(rows, key=lambda item: item["name"]), 1))
 
 
+def _luolcy_verified_bucket(name: str, rows: list[dict]) -> bool:
+    """Confirm the exact numbered bucket name and the files described by it."""
+    slot = _luolcy_bucket_slot(name)
+    if slot is None or not 0 < len(rows) <= MAX_FILES_PER_GROUP:
+        return False
+    kind, ordinal = slot
+    if any(row["kind"] != kind for row in rows) or not _luolcy_numbered_files(rows):
+        return False
+    stem = kind if ordinal == "0" else f"{kind}_{ordinal}"
+    return name == f"{stem} [{len(rows)} {_size_label(sum(row['bytes'] for row in rows))}]"
+
+
 def _luolcy_classification_inventory(
     folder: Path, device: int, label: str, check_cancelled: Callable[[], None] | None,
     *, flat_only: bool = False,
@@ -502,10 +514,7 @@ def _luolcy_nested_buckets(
                         break
                     path = shell / entry.name
                     rows = _luolcy_classification_inventory(path, device, kind, check_cancelled)
-                    if not rows or not _luolcy_numbered_files(rows):
-                        break
-                    stem = kind if slot[1] == "0" else f"{kind}_{slot[1]}"
-                    if path.name != f"{stem} [{len(rows)} {_size_label(sum(row['bytes'] for row in rows))}]":
+                    if not rows or not _luolcy_verified_bucket(path.name, rows):
                         break
                     selected_count += len(rows)
                     if total + selected_count > MAX_PACKAGE_FILES:
@@ -516,6 +525,25 @@ def _luolcy_nested_buckets(
                     total += selected_count
         finally:
             os.close(fd)
+    return buckets
+
+
+def _luolcy_buckets_to_repack(
+    author: Path, nested: dict[Path, list[dict]], siblings: dict[str, list[int]], device: int,
+    check_cancelled: Callable[[], None] | None,
+) -> dict[Path, list[dict]] | None:
+    """Collect root and nested buckets when competing ordinals require regrouping."""
+    root_buckets = {name: slot for name in siblings if (slot := _luolcy_bucket_slot(name))}
+    nested_slots = [_luolcy_bucket_slot(path.name) for path in nested]
+    if len(set(nested_slots)) == len(nested_slots) and set(nested_slots).isdisjoint(root_buckets.values()):
+        return None
+    buckets = dict(nested)
+    for name, (kind, _) in root_buckets.items():
+        path = author / name
+        rows = _luolcy_classification_inventory(path, device, kind, check_cancelled)
+        if not rows or not _luolcy_verified_bucket(name, rows):
+            return None
+        buckets[path] = rows
     return buckets
 
 
@@ -534,7 +562,17 @@ def _luolcy_author_inventory(
         nested = _luolcy_nested_buckets(author, children, device, check_cancelled)
         if nested:
             shells = {path.parent.name for path in nested}
-            return rows, {name: item for name, item in children.items() if name not in shells}, nested
+            siblings = {name: item for name, item in children.items() if name not in shells}
+            regroup = _luolcy_buckets_to_repack(author, nested, siblings, device, check_cancelled)
+            if regroup is not None:
+                for path, files in regroup.items():
+                    rows.extend(files)
+                    if len(rows) > MAX_PACKAGE_FILES:
+                        raise ValueError(f"Too many Luolcy bucket files: {author}")
+                    if path.parent == author:
+                        del siblings[path.name]
+                return rows, siblings, {}
+            return rows, siblings, nested
 
     direct_kinds = {row["kind"] for row in rows}
     inspect_leaves = bool(direct_kinds) and (

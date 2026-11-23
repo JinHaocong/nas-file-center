@@ -14,7 +14,7 @@ from app.batch.media_package_execution import (
     prepare_organizer_manifest,
     save_frozen_manifest,
 )
-from app.batch.media_package_organizer import LIFT_LUOLCY_BUCKETS
+from app.batch.media_package_organizer import LIFT_LUOLCY_BUCKETS, _walk_package, plan_media_layout
 from tests.test_media_package_zfuse_publish import force_zos_no_directory_rename
 
 
@@ -51,10 +51,15 @@ def mixed_author(tmp_path):
 
 
 @pytest.mark.parametrize("fuse_compat", [False, True])
+@pytest.mark.parametrize("include_nested", [False, True])
 def test_rebuild_recovers_published_bucket_that_reoccupies_a_staged_sources_name(
-    mixed_author, tmp_path, monkeypatch, fuse_compat,
+    mixed_author, tmp_path, monkeypatch, fuse_compat, include_nested,
 ):
     root, author, bucket, sibling = mixed_author
+    nested = author / "P" / "P [1 1B]"
+    if include_nested:
+        nested.mkdir(parents=True)
+        (nested / "001.jpg").write_bytes(b"n")
     manifest = _prepare(author, root, _preview(author, root))
     saved = tmp_path / "frozen.json"
     save_frozen_manifest(saved, manifest)
@@ -78,19 +83,28 @@ def test_rebuild_recovers_published_bucket_that_reoccupies_a_staged_sources_name
 
     assert result["groups_published"] == 2
     assert (bucket / "001.jpg").read_bytes() == b"r"
-    assert (author / "P_1 [1 1B]" / "001.jpg").read_bytes() == bytes([200])
+    second = author / ("P_1 [2 2B]" if include_nested else "P_1 [1 1B]")
+    assert (second / "001.jpg").read_bytes() == bytes([200])
+    if include_nested:
+        assert (second / "002.jpg").read_bytes() == b"n"
+        assert not nested.parent.exists()
     assert (author / "V [1 1B]" / "001.mp4").read_bytes() == b"v"
     assert (sibling / "001.jpg").read_bytes() == b"independent"
     assert {child.name for child in author.iterdir()} == {
-        bucket.name, "P_1 [1 1B]", "V [1 1B]", sibling.name,
+        bucket.name, second.name, "V [1 1B]", sibling.name,
     }
     assert execute_frozen_manifest(manifest, lease_fence=lambda: pytest.fail("Unexpected mutation"))[
         "files_reconciled"
-    ] == 202
+    ] == (203 if include_nested else 202)
 
 
-def test_rebuild_rejects_foreign_file_in_verified_bucket_before_staging(mixed_author):
+@pytest.mark.parametrize("include_nested", [False, True])
+def test_rebuild_rejects_foreign_file_in_verified_bucket_before_staging(mixed_author, include_nested):
     root, author, bucket, _ = mixed_author
+    if include_nested:
+        bucket = author / "P" / "P [1 1B]"
+        bucket.mkdir(parents=True)
+        (bucket / "001.jpg").write_bytes(b"n")
     manifest = _prepare(author, root, _preview(author, root))
     foreign = bucket / "unreviewed.jpg"
     foreign.write_bytes(b"new")
@@ -189,6 +203,40 @@ def test_flat_rebuild_recovers_owned_fuse_link_and_removes_nested_classification
     assert (author / "001.jpg").read_bytes() == b"root"
     assert (author / "002.jpg").read_bytes() == b"nested"
     assert {child.name for child in author.iterdir()} == {"001.jpg", "002.jpg"}
+
+
+@pytest.mark.parametrize(("bucket_name", "filename", "valid"), [
+    ("P [1 4B]", "001.jpg", True),
+    ("P [2 4B]", "001.jpg", False),
+    ("P [1 5B]", "001.jpg", False),
+    ("P [1 4B]", "002.jpg", False),
+    ("V [1 4B]", "001.jpg", False),
+])
+def test_rebuild_freezes_only_verified_nested_buckets(tmp_path, bucket_name, filename, valid):
+    root = tmp_path / "Luolcy"
+    author = root / "2611" / "261123" / "author"
+    existing = author / "P [1 4B]"
+    existing.mkdir(parents=True)
+    (existing / "001.jpg").write_bytes(b"root")
+    nested = author / "P" / bucket_name
+    nested.mkdir(parents=True)
+    (nested / filename).write_bytes(b"leaf")
+    # General layout accepts every scanned file. Luolcy freezing must bind the
+    # same-type nested source to its reviewed bucket metadata before mutation.
+    plan = plan_media_layout(author, list(_walk_package(author)), include_items=True, include_mapping=True)
+    scope = {"organizer_mode": "luolcy", "whole_author": True}
+
+    if not valid:
+        with pytest.raises(MediaPackageExecutionConflict):
+            execution._freeze_layout(author, plan, media_package_root=root, job_id=170, organizer_scope=scope)
+        assert (nested / filename).read_bytes() == b"leaf"
+        return
+
+    manifest = execution._freeze_layout(author, plan, media_package_root=root, job_id=170, organizer_scope=scope)
+    assert execute_frozen_manifest(manifest, lease_fence=lambda: None)["files_moved"] == 2
+    assert {child.name: child.read_bytes() for child in author.iterdir()} == {
+        "001.jpg": b"root", "002.jpg": b"leaf",
+    }
 
 
 @pytest.fixture

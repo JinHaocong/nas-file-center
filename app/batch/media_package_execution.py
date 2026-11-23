@@ -22,7 +22,8 @@ from app.batch.media_package_organizer import (
     APPEND_SINGLE_VIDEO, APPEND_VIDEO_OPERATIONS, LIFT_LUOLCY_BUCKETS, MAX_FILES_PER_GROUP,
     PROMOTE_NUMBERED_PHOTO_GROUPS, _author_media_row, _classify, _input_fingerprint,
     _luolcy_batch_boundary, _luolcy_bucket_slot, _luolcy_classification_kind, _luolcy_leaf_promotion,
-    _open_luolcy_author, _package_path, _size_label, _walk_package, preview_media_package_package,
+    _luolcy_verified_bucket, _open_luolcy_author, _package_path, _size_label, _walk_package,
+    preview_media_package_package,
 )
 from app.fs_ops import rename_directory_noreplace_compat, rename_noreplace_at
 
@@ -1400,6 +1401,8 @@ def _validate_luolcy_sources(manifest: dict, package: Path) -> None:
     expected_origins = set()
     direct_kinds: set[str] = set()
     child_kinds: dict[str, set[str]] = {}
+    leaf_origins: set[Path] = set()
+    nested_buckets: dict[Path, list[dict]] = {}
     has_unlabelled_origin = False
     moving_names = {group["final"].casefold() for group in manifest["groups"]}
     lifting = manifest["operation"] == LIFT_LUOLCY_BUCKETS
@@ -1428,17 +1431,28 @@ def _validate_luolcy_sources(manifest: dict, package: Path) -> None:
             continue
         classification = _luolcy_classification_kind(top)
         if (classification not in {None, kind, "PV"} or len(children) > 2
-                or top.casefold().startswith(".nfc-") or "\x00" in top
-                or (len(children) == 2 and (classification != "PV"
-                                            or _luolcy_classification_kind(children[0]) != kind))):
+                or top.casefold().startswith(".nfc-") or "\x00" in top):
             raise MediaPackageExecutionConflict("Invalid frozen Luolcy classification path")
         if classification is None:
             has_unlabelled_origin = True
         child_kinds.setdefault(top, set()).add(kind)
         expected_origins.add(str(package / top))
-        if len(children) == 2:
-            expected_origins.add(str(package / top / children[0]))
+        if len(children) == 1:
+            leaf_origins.add(source.parent)
+            continue
+        if classification == kind and not _luolcy_bucket_slot(top):
+            size = row["identity"][2]
+            if type(size) is not int or size < 0:
+                raise MediaPackageExecutionConflict("Invalid frozen Luolcy bucket file size")
+            nested_buckets.setdefault(source.parent, []).append({"name": source.name, "kind": kind, "bytes": size})
+        elif classification != "PV" or _luolcy_classification_kind(children[0]) != kind:
+            raise MediaPackageExecutionConflict("Invalid frozen Luolcy classification path")
+        expected_origins.add(str(source.parent))
 
+    # Verify the original shell from the frozen rows, even after its files have been staged.
+    if any(path.parent in leaf_origins or not _luolcy_verified_bucket(path.name, rows)
+           for path, rows in nested_buckets.items()):
+        raise MediaPackageExecutionConflict("Invalid frozen Luolcy nested bucket contents")
     if origins.keys() != expected_origins:
         raise MediaPackageExecutionConflict("Frozen Luolcy origins differ from its media sources")
     # Promotion requires every author child to be an immediate media leaf.

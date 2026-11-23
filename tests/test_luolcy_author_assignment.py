@@ -144,9 +144,40 @@ def test_luolcy_lifts_verified_buckets_without_changing_names_or_root_files(tmp_
     assert not rescan["summary"]["ready_count"] and not rescan["summary"]["blocked_count"]
 
 
+@pytest.mark.parametrize("root_label", ["P [1 1B]", "P [1 2B]"])
+def test_luolcy_rebuilds_verified_root_and_nested_buckets_with_the_same_ordinal(tmp_path, root_label):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251120/作者"
+    root_photo = b"a" if root_label == "P [1 1B]" else b"aa"
+    video = author / "V [1 1B]/001.mp4"
+    for path, content in {
+        author / root_label / "001.jpg": root_photo,
+        author / "p/P [1 1B]/001.png": b"b",
+        video: b"v",
+    }.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    original_video = video.stat().st_ino
+
+    preview = _preview(client, settings, author)
+    row, = preview["units"]
+    assert (row["status"], row["totals"]) == ("ready", {"P": 2, "V": 1, "Other": 0}), row
+    output = author / f"P [2 {len(root_photo) + 1}B]"
+    assert {group["destination"] for group in row["groups"]} == {str(output), str(video.parent)}
+
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert report["summary"]["success_count"] == 1, report
+    assert set(author.iterdir()) == {output, video.parent}
+    assert sorted(path.read_bytes() for path in output.iterdir()) == [root_photo, b"b"]
+    assert video.read_bytes() == b"v" and video.stat().st_ino == original_video
+    assert _preview(client, settings, author)["summary"]["ready_count"] == 0
+
+
 @pytest.mark.parametrize(("source", "other", "status"), [
+    ("P/P [1 1B]/001.jpg", "P [2 2B]/001.jpg", "blocked"),
     ("P/P [1 1B]/001.jpg", "P [1 1B]/001.jpg", "blocked"),
-    ("P/P [1 1B]/001.jpg", "P [1 2B]/001.jpg", "blocked"),
     ("P/P [1 1B]/001.jpg", "268MB/001.mp4", None),
     ("P/P [1 1B]/001.jpg", "11.19/001.mp4", None),
     ("P/V [1 1B]/001.mp4", None, None),

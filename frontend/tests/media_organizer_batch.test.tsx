@@ -47,6 +47,15 @@ const report = {
 /** Wait for React Query's scheduled result notifications. */
 const settle = () => new Promise(resolve => setTimeout(resolve, 20));
 
+/** Wait for the expected render even when query notifications arrive in a later tick. */
+async function waitForRenderedText(view: ReactTestRenderer, text: string) {
+  const deadline = Date.now() + 2000;
+  while (!JSON.stringify(view.toJSON()).includes(text) && Date.now() < deadline) {
+    await act(settle);
+  }
+  assert.ok(JSON.stringify(view.toJSON()).includes(text), `Expected the rendered page to contain ${text}`);
+}
+
 test.beforeEach(() => {
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { title: '' } });
 });
@@ -84,12 +93,11 @@ test('one selected directory previews automatically and repeated confirmation st
   t.after(dispose);
   await act(async () => {
     view.root.findByType(DirectoryPicker).props.onChange(selection);
-    await settle();
   });
   assert.deepEqual(requests, [{
     url: '/api/media-organizer/previews', body: { selection, batch_flow: true },
   }], 'selecting a directory must immediately submit a recursive preview');
-  assert.match(JSON.stringify(view.toJSON()), /目标路径已存在/);
+  await waitForRenderedText(view, '目标路径已存在');
   assert.match(JSON.stringify(view.toJSON()), /blocked\/001.jpg/);
   const confirm = view.root.findAllByType('button').find(button =>
     button.findAllByType('span').some(span => span.children.join('') === '确认整理全部'));
@@ -104,10 +112,9 @@ test('one selected directory previews automatically and repeated confirmation st
   }]);
   await act(async () => {
     finishBatch(Response.json({ job_id: batchId, status: 'queued' }));
-    await settle();
   });
-  assert.match(JSON.stringify(view.toJSON()), /整理结果/);
-  assert.match(JSON.stringify(view.toJSON()), /目标路径已存在/);
+  await waitForRenderedText(view, '整理结果');
+  await waitForRenderedText(view, '目标路径已存在');
   assert.doesNotMatch(JSON.stringify(view.toJSON()), /EXECUTE_MEDIA_ORGANIZER|RECOVER_MEDIA_ORGANIZER|维护窗口/);
 });
 
