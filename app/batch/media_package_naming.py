@@ -10,6 +10,8 @@ import os
 import re
 from pathlib import Path
 
+from app.filters.media_types import VIDEO_EXTENSIONS
+
 
 MEDIA_BUCKET_PATTERN = re.compile(
     r"^(?P<kind>p|v)(?:_(?P<index>[1-9]\d*))? (?P<label>\[\d+ [^/]+\])$",
@@ -38,7 +40,14 @@ def media_source_sort_key(path: str, unit: Path) -> tuple:
 def numbered_name(index: int, name: str) -> str:
     if not isinstance(index, int) or index < 1:
         raise ValueError("Numbering index must be positive")
-    return f"{index:03d}{Path(name).suffix}"
+    return f"{index:03d}{organizer_extension(name)}"
+
+
+def organizer_extension(name: str) -> str:
+    """Treat an exact video extension used as the entire basename as the suffix."""
+    if name.startswith(".") and name[1:].casefold() in VIDEO_EXTENSIONS:
+        return name
+    return Path(name).suffix
 
 
 def allocate_names(rows: list[dict], *, kind: str) -> tuple[list[str], int]:

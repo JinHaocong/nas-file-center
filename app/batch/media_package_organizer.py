@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from app.batch.file_rename import _open_directory_nofollow
-from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, allocate_names, media_source_sort_key, numbered_name
+from app.batch.media_package_naming import (
+    MEDIA_BUCKET_PATTERN, allocate_names, media_source_sort_key, numbered_name, organizer_extension,
+)
 from app.filters.media_types import get_media_type
 from app.path_safety import require_allowed_path, require_unreserved_path
 
@@ -378,7 +380,7 @@ def iter_media_package_previews(selection: str | Path, *,
 
 
 def _classify(filename: str) -> str:
-    media_type = get_media_type(Path(filename).suffix)
+    media_type = get_media_type(organizer_extension(filename))
     return "P" if media_type == "image" else "V" if media_type == "video" else "Other"
 
 

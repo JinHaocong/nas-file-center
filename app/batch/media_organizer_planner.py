@@ -71,16 +71,25 @@ _PHOTO_ALIASES = frozenset({
 })
 _ALIASES = _PHOTO_ALIASES | {"视频", "video", "videos"}
 _JPEG_LABELS = frozenset({"jpg", "jpeg"})
-_JPEG_EXTENSIONS = frozenset({".jpg", ".jpeg"})
+_JPEG_EXTENSIONS = frozenset({".jpg", ".jpeg", ".jfif"})
 _TYPED_WRAPPER_KINDS = {"movie": "V", "img": "P", "gif": "P", "selfies": "P", "jpg": "P", "jpeg": "P"}
 _FANTIA_COLLECTION = re.compile(r"(?<![a-z0-9])fantia(?![a-z0-9])", re.I | re.ASCII)
 _FANTIA_TIER = re.compile(r"\$(?P<amount>[0-9]+)_.*")
+_FANTIA_POST_STAMP = re.compile(
+    r"(?:0[1-9]|[12][0-9]|3[01])_(?:[01][0-9]|2[0-3])[0-5][0-9]_.+"
+    r"|(?:(?:19|20)[0-9]{2})?(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])\s+.+",
+)
+_FANTIA_PREVIEW_NAMES = frozenset({"無料", "無料&封面", "無料＆封面", "封面", "cover"})
 _PREVIEW_CACHE_DIRECTORIES = 128
 _PREVIEW_CACHE_ENTRIES = 16_384
 
 
 def _fantia_collection(path: Path) -> bool:
     return _FANTIA_COLLECTION.search(path.name) is not None
+
+
+def _fantia_dated_post(path: Path) -> bool:
+    return bool(_FANTIA_POST_STAMP.fullmatch(path.name) and _fantia_collection(path.parent))
 
 
 def _is_wrapper(
@@ -366,10 +375,13 @@ def _semantic_inventory(
             directories.add(folder)
         children = []
         entries = _entries(folder, device)
+        post_sources = None
         if not depth and not (whole_author or local_media_kinds):
-            repeated = _repeated_work_wrapper(unit, entries, device, protected_roots)
+            post_sources = _fantia_post_bucket_sources(unit, entries, device, protected_roots)
+            if post_sources is None:
+                repeated = _repeated_work_wrapper(unit, entries, device, protected_roots)
         work_component = (_work_media_component(unit, entries, device, protected_roots)
-                          if not depth and not (whole_author or local_media_kinds) else None)
+                          if not depth and not (whole_author or local_media_kinds or post_sources) else None)
         for name, info in entries:
             path = folder / name
             if name.casefold().startswith(".nfc-"):
@@ -390,7 +402,8 @@ def _semantic_inventory(
                 elif not depth and local_media_kinds:
                     if _labelled_bucket_kind(name) in local_media_kinds and _verified_bucket_kind(path, device):
                         children.append((path, depth + 1))
-                elif (repeated is not None and repeated.is_relative_to(path)) or name == work_component:
+                elif (post_sources is not None and name in post_sources
+                      or (repeated is not None and repeated.is_relative_to(path)) or name == work_component):
                     children.append((path, depth + 1))
                 elif _is_wrapper(folder, name, device=device, protected_roots=protected_roots):
                     if depth or _pure_wrapper(path, device, protected_roots):
@@ -680,6 +693,45 @@ def _fantia_tier_wrapper(post: Path, name: str, device: int, protected_roots: tu
     # Media type comes from the files. A title or emoji suffix carries no type guarantee.
     kinds = [_direct_leaf_kinds(post / sibling, device) for sibling in (first, second)]
     return {"P"} in kinds and {"V"} in kinds
+
+
+def _fantia_post_bucket_sources(
+    post: Path, entries: list[tuple[str, os.stat_result]], device: int, protected_roots: tuple[Path, ...],
+) -> set[str] | None:
+    """Recognize media wrappers belonging to one dated Fantia post."""
+    if not _fantia_dated_post(post):
+        return None
+    direct_media = False
+    has_bucket = False
+    sources = []
+    for name, info in entries:
+        path = post / name
+        if info.st_dev != device or _protected(path, protected_roots) or is_reserved_workspace(path):
+            return None
+        if stat.S_ISREG(info.st_mode) and _classify(name) in {"P", "V"}:
+            direct_media = True
+            continue
+        if not stat.S_ISDIR(info.st_mode):
+            return None
+        bucket = MEDIA_BUCKET_PATTERN.fullmatch(name) is not None
+        preview = name.casefold() in _FANTIA_PREVIEW_NAMES
+        if not (bucket or preview or _FANTIA_TIER.fullmatch(name)):
+            return None
+        has_bucket |= bucket
+        sources.append((name, info, bucket, preview))
+    # The old one-folder layout remains valid for a post containing only that folder.
+    if not sources or not (direct_media or has_bucket or len(sources) > 1):
+        return None
+    try:
+        for name, info, bucket, preview in sources:
+            path = post / name
+            folder, content = (post, [(name, info)]) if bucket else (path, _entries(path, device))
+            counts = _work_media_counts(folder, content, device, protected_roots, allow_buckets=True)
+            if not counts or (preview and set(counts) != {"P"}):
+                return None
+    except (OSError, ValueError):
+        return None
+    return {name for name, _, _, _ in sources}
 
 
 def _verified_bucket_kind(path: Path, device: int) -> str | None:
@@ -1089,6 +1141,8 @@ def _semantic_previews(
         repeated = _repeated_work_wrapper(unit, entries, device, protected_roots) if hold_reason is None else None
         work_component = (_work_media_component(unit, entries, device, protected_roots)
                           if hold_reason is None else None)
+        post_sources = (_fantia_post_bucket_sources(unit, entries, device, protected_roots)
+                        if hold_reason is None else None)
         has_pure_wrappers = False
         has_input = False
         for name, info in entries:
@@ -1098,7 +1152,8 @@ def _semantic_previews(
             if name.casefold().startswith(".nfc-") or info.st_dev != device:
                 yield _blocked(child, "semantic", "Reserved or cross-device entry")
             elif stat.S_ISDIR(info.st_mode):
-                if (repeated is not None and repeated.is_relative_to(child)) or name == work_component:
+                if (post_sources is not None and name in post_sources
+                        or (repeated is not None and repeated.is_relative_to(child)) or name == work_component):
                     has_pure_wrappers = True
                 elif _is_wrapper(unit, name, device=device, protected_roots=protected_roots):
                     if _pure_wrapper(child, device, protected_roots, check_cancelled):

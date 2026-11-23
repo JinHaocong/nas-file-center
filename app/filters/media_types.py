@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({
-    "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "tiff", "svg"
+    "jpg", "jpeg", "jfif", "png", "webp", "gif", "bmp", "heic", "avif", "tiff", "svg"
 })
 
 VIDEO_EXTENSIONS: frozenset[str] = frozenset({

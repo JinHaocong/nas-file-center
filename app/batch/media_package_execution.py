@@ -18,6 +18,7 @@ from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_link_intent import LinkIntent
+from app.batch.media_package_naming import organizer_extension
 from app.batch.media_package_organizer import (
     APPEND_SINGLE_VIDEO, APPEND_VIDEO_OPERATIONS, LIFT_LUOLCY_BUCKETS, MAX_FILES_PER_GROUP,
     PROMOTE_NUMBERED_PHOTO_GROUPS, _author_media_row, _classify, _input_fingerprint,
@@ -1549,7 +1550,7 @@ def _validate_frozen_paths(manifest: dict) -> None:
         if (not isinstance(target_name, str) or not target_name
                 or Path(target_name).name != target_name
                 or target_name in (".", "..")
-                or Path(target_name).suffix != src.suffix
+                or organizer_extension(target_name) != organizer_extension(src.name)
                 or row.get("original_name") != src.name
                 or row.get("original_relative_path") != os.path.relpath(src, package)
                 or row.get("final_relative_path") != os.path.relpath(final, package)):

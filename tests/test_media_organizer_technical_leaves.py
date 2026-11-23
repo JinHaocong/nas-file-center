@@ -1,10 +1,14 @@
-"""Regression coverage for validated semantic media leaves."""
+"""Regression coverage for validated media leaves."""
 
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from app.batch.media_organizer_planner import iter_organizing_previews
+from tests.test_media_organizer_batch import _batch, _preview, _run_next
+from tests.test_media_package_execute_jobs import _fixture
 
 
 def put(path: Path) -> None:
@@ -17,6 +21,48 @@ def previews(scope: Path, root: Path, **options) -> dict[Path, dict]:
         Path(row["unit"]): row
         for row in iter_organizing_previews(scope, allowed_roots=[root], include_mapping=True, **options)
     }
+
+
+@pytest.mark.parametrize("mode", ["semantic", "luolcy"])
+def test_jfif_in_an_old_other_bucket_returns_to_its_own_work(tmp_path, mode):
+    client, settings, root = _fixture(tmp_path)
+    if mode == "luolcy":
+        scope = root / "2611/261115/作者"
+        work = scope / "6.7G"
+        sibling = scope / "另一资源包/001.mp4"
+    else:
+        scope = settings.data_mount / "Else/作品"
+        work = scope / "原图无水印"
+        sibling = scope / "001.mp4"
+
+    # JPEG payloads with different colors make it possible to verify file ownership after execution.
+    payloads = []
+    for color in ("red", "navy"):
+        with BytesIO() as output:
+            Image.new("RGB", (2, 2), color).save(output, format="JPEG")
+            payloads.append(output.getvalue())
+    original_jpeg, misclassified_jfif = payloads
+    bucket = work / f"Other [1 {len(misclassified_jfif)}B]"
+    source = bucket / "original.JfIf"
+    photo = work / f"P [1 {len(original_jpeg)}B]/001.jpg"
+    for path, payload in ((source, misclassified_jfif), (photo, original_jpeg), (sibling, b"video")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
+    preview = _preview(client, settings, scope)
+    row, = (unit for unit in preview["units"] if unit["unit"] == str(work))
+    assert row["status"] == "ready"
+    assert row["totals"] == {"P": 2, "V": 0, "Other": 0}
+    move, = (move for move in row["sample_moves"] if move["source"] == str(source))
+    assert (move["kind"], move["target"]) == ("P", str(work / "001.JfIf"))
+    assert source.read_bytes() == misclassified_jfif
+
+    assert _run_next(settings, _batch(client, preview))
+    assert {path.name: path.read_bytes() for path in work.iterdir()} == {
+        "001.JfIf": misclassified_jfif, "002.jpg": original_jpeg,
+    }
+    assert sibling.read_bytes() == b"video"
+    assert _preview(client, settings, scope)["summary"]["ready_count"] == 0
 
 
 @pytest.mark.parametrize(("folder", "photos", "videos", "group_counts"), [

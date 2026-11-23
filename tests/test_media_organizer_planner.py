@@ -315,7 +315,7 @@ def test_fantia_posts_that_resemble_classification_labels_keep_their_boundaries(
     ("NotFantiax 合集", None),
 ])
 def test_tier_wrapper_keeps_its_unit_when_post_context_is_ambiguous(tmp_path, collection, extra):
-    post = tmp_path / collection / "03_2026_帖子"
+    post = tmp_path / collection / "帖子"
     tier = post / "$0_"
     put(tier / "cover.jpg")
     if extra is not None:

@@ -1142,6 +1142,95 @@ def test_batch_absorbs_confirmed_media_wrappers_into_their_work(tmp_path, relati
     ]
 
 
+@pytest.mark.parametrize(("post_name", "free_folder", "video"), [
+    ("17_2133_帖子", "$0_", False),
+    ("12_1900_帖子", "$0_🍑", False),
+    ("02_2037_帖子", "$0_", True),
+    ("20220319 帖子", "無料", True),
+    ("0709 帖子", "無料＆封面", True),
+])
+def test_fantia_dated_post_merges_cover_and_all_tiers_at_the_post_root(tmp_path, post_name, free_folder, video):
+    client, settings, _ = _fixture(tmp_path)
+    collection = settings.data_mount / "Else/Fantia 合集"
+    post = collection / post_name
+    sources = [
+        (f"{free_folder}/001.jpg", b"free"),
+        ("$1800_🌷/first.JPG", b"a"),
+        ("$1800_🌷/second.jpg", b"bb"),
+        ("001.jpeg", b"cover"),
+    ]
+    prefix = "P [4 12B]/" if video else ""
+    inputs = {source: (f"{prefix}{index:03d}{Path(source).suffix}", payload)
+              for index, (source, payload) in enumerate(sorted(sources), 1)}
+    if video:
+        inputs["$2500_🎬/clip.mp4"] = ("V [1 1B]/001.mp4", b"v")
+    for relative, (_, payload) in inputs.items():
+        path = post / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+    preview = _preview(client, settings, collection)
+    assert {row["unit"]: row["status"] for row in preview["units"]} == {str(post): "ready"}
+    moves = next(row["sample_moves"] for row in preview["units"] if row["unit"] == str(post))
+    assert {Path(move["source"]).relative_to(post).as_posix():
+            Path(move["target"]).relative_to(post).as_posix() for move in moves} == {
+        source: target for source, (target, _) in inputs.items()
+    }
+
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert result["summary"] == {"success_count": 1, "skipped_count": 0, "conflict_count": 0, "failed_count": 0}, result
+    assert {path.relative_to(post).as_posix(): path.read_bytes() for path in post.rglob("*") if path.is_file()} == dict(
+        inputs.values()
+    )
+    assert not (post / free_folder).exists() and not list(post.glob("$*"))
+    assert _preview(client, settings, collection)["summary"]["ready_count"] == 0
+
+
+def test_fantia_post_rejects_an_older_combined_plan_when_an_independent_post_appears(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    post = settings.data_mount / "Else/Fantia 合集/17_2133_帖子"
+    for relative in ("$0_/001.jpg", "$1800_/001.jpg", "001.jpeg"):
+        path = post / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"image")
+    preview = _preview(client, settings, post)
+    assert preview["summary"]["ready_count"] == 1
+    nested = post / "23_1936_另一个帖子"
+    nested.mkdir()
+    (nested / "001.jpg").write_bytes(b"separate")
+
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert result["summary"]["conflict_count"] == 1, result
+    assert {(path.relative_to(post).as_posix(), path.read_bytes()) for path in post.rglob("*") if path.is_file()} == {
+        ("$0_/001.jpg", b"image"), ("$1800_/001.jpg", b"image"), ("001.jpeg", b"image"),
+        ("23_1936_另一个帖子/001.jpg", b"separate"),
+    }
+
+
+@pytest.mark.parametrize(("filename", "luolcy"), [(".mov", False), (".MP4", True)])
+def test_organizer_gives_a_video_named_only_by_its_extension_a_number(tmp_path, filename, luolcy):
+    client, settings, root = _fixture(tmp_path)
+    unit = (root / "2611/261123/作者/作品" if luolcy else settings.data_mount / "Else/作品")
+    source = unit / "Other [1 5B]" / filename
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"video")
+    target = unit / f"001{filename}"
+
+    preview = _preview(client, settings, unit)
+    row, = preview["units"]
+    assert (row["status"], row["totals"]) == ("ready", {"P": 0, "V": 1, "Other": 0})
+    assert {move["target"] for move in row["sample_moves"]} == {str(target)}
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert result["summary"]["success_count"] == 1, result
+    assert list(unit.iterdir()) == [target] and target.read_bytes() == b"video"
+    assert _preview(client, settings, unit)["summary"]["ready_count"] == 0
+
+
 def test_fantia_pair_resume_rechecks_a_retargeted_quarantine_link(tmp_path, monkeypatch):
     from app.batch import media_package_execution as engine
 
