@@ -122,6 +122,71 @@ def _batch(client, preview):
     return response.json()["job_id"]
 
 
+def test_batch_flattens_the_whole_author_tree_around_one_mixed_numbered_folder(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    author = settings.data_mount / "Else/2611/261123/作者A"
+    files = {
+        "1/a.mp4": b"numbered-folder-video",
+        "1/子作品/clip.mp4": b"nested-work-video",
+        "z-root.mp4": b"author-root-video",
+        "其他作品/clip.mp4": b"sibling-work-video",
+    }
+    for name, content in files.items():
+        path = author / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+    preview = _preview(client, settings, author.parent.parent)
+    assert [(row["unit"], row["status"], row["needed_moves"]) for row in preview["units"]] == [
+        (str(author), "ready", 4),
+    ]
+    assert all((author / name).read_bytes() == content for name, content in files.items())
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert report["summary"] == {"success_count": 1, "conflict_count": 0, "failed_count": 0, "skipped_count": 0}
+    assert {path.name: path.read_bytes() for path in author.iterdir()} == {
+        f"{index:03d}.mp4": content for index, content in enumerate(files.values(), 1)
+    }
+    again = _preview(client, settings, author.parent.parent)
+    assert [(row["unit"], row["status"]) for row in again["units"]] == [
+        (str(author), "already_organized"),
+    ]
+
+
+@pytest.mark.parametrize("after_freeze", [False, True])
+def test_whole_author_batch_leaves_files_in_place_if_a_numbered_sibling_appears(
+    tmp_path, monkeypatch, after_freeze,
+):
+    from app.batch import media_package_execution
+
+    client, settings, _ = _fixture(tmp_path)
+    author = settings.data_mount / "Else/2611/261123/作者A"
+    sources = [author / name for name in ("root.mp4", "1/clip.mp4", "1/子作品/nested.mp4")]
+    for path in sources:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"original")
+    preview = _preview(client, settings, author)
+    assert [row["unit"] for row in preview["units"]] == [str(author)]
+    if after_freeze:
+        save_manifest = media_package_execution.save_frozen_manifest
+
+        def add_folder_after_saving(path, manifest):
+            save_manifest(path, manifest)
+            (author / "02").mkdir()
+
+        monkeypatch.setattr(media_package_execution, "save_frozen_manifest", add_folder_after_saving)
+    else:
+        (author / "02").mkdir()
+
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert report["summary"]["conflict_count"] == 1
+    assert all(path.read_bytes() == b"original" for path in sources)
+    assert not (author / "001.mp4").exists()
+
+
 def test_batch_preserves_ambiguous_loose_files_and_organizes_confirmed_units(tmp_path):
     client, settings, _ = _fixture(tmp_path)
     selection = settings.data_mount / "Else album"
@@ -489,6 +554,55 @@ def test_batch_groups_leaf_photo_packs_and_author_date_categories(tmp_path):
     assert not (dated / "视频").exists()
     assert kept.read_bytes() == b"original batch"
     assert _preview(client, settings, day)["summary"]["already_organized_count"] == 3
+
+
+@pytest.mark.parametrize(("relative", "moves"), [
+    ("NO.017 粉红色制服", {
+        "cover.jpg": ("P [1 4B]/001.jpg", b"phot"),
+        "MOVIE/clip.MP4": ("V [1 4B]/001.MP4", b"clip"),
+    }),
+    ("NO.022 雷姆", {
+        "IMG/cover.JPG": ("P [2 8B]/001.JPG", b"phot"),
+        "P [1 4B]/001.jpg": ("P [2 8B]/002.jpg", b"prev"),
+        "V [1 4B]/001.mp4": ("V [1 4B]/001.mp4", b"clip"),
+    }),
+    ("No.105 2024年09月 Fantia/03_2026_帖子", {
+        "$1800_/cover.jpg": ("001.jpg", b"phot"),
+    }),
+    ("NO.180 千夏", {
+        "GIF/motion.GiF": ("P [2 8B]/001.GiF", b"anim"),
+        "P [1 4B]/001.jpg": ("P [2 8B]/002.jpg", b"phot"),
+        "V [1 4B]/001.mp4": ("V [1 4B]/001.mp4", b"clip"),
+    }),
+])
+def test_batch_absorbs_confirmed_media_wrappers_into_their_work(tmp_path, relative, moves):
+    client, settings, _ = _fixture(tmp_path)
+    author = settings.data_mount / "Else/2611/261104/作者A"
+    unit = author / relative
+    for source, (_, payload) in moves.items():
+        path = unit / source
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
+    preview = _preview(client, settings, author)
+    assert [(row["unit"], row["status"]) for row in preview["units"]] == [(str(unit), "ready")]
+    assert {Path(move["target"]).relative_to(unit).as_posix() for move in preview["units"][0]["sample_moves"]} == {
+        destination for destination, _ in moves.values()
+    }
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    summary = client.get(f"/api/media-organizer/batches/{batch_id}").json()["summary"]
+    assert summary == {"success_count": 1, "skipped_count": 0, "conflict_count": 0, "failed_count": 0}
+    assert {path.relative_to(unit).as_posix(): path.read_bytes() for path in unit.rglob("*") if path.is_file()} == dict(
+        moves.values()
+    )
+    final_parents = {Path(destination).parent for destination, _ in moves.values()}
+    removed = {Path(source).parent for source in moves} - final_parents - {Path(".")}
+    assert all(not (unit / folder).exists() for folder in removed)
+    again = _preview(client, settings, author)
+    assert [(row["unit"], row["status"]) for row in again["units"]] == [
+        (str(unit), "already_organized"),
+    ]
 
 
 def test_grouped_batch_uses_sized_buckets_and_then_skips(tmp_path):

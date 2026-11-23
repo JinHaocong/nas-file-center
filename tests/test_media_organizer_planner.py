@@ -11,6 +11,78 @@ def put(path: Path, content: bytes = b"data") -> None:
     path.write_bytes(content)
 
 
+@pytest.mark.parametrize("exception_path", ["1/作品/cover.jpg", "02/clip.mp4", "1/作品/notes.txt"])
+def test_whole_author_rule_keeps_separate_units_when_its_narrow_shape_changes(tmp_path, exception_path):
+    author = tmp_path / "2611/261123/作者A"
+    put(author / "root.mp4")
+    put(author / "1/clip.mp4")
+    put(author / "1/作品/nested.mp4")
+    put(author / exception_path)
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(author.parent, allowed_roots=[tmp_path])}
+
+    assert rows[str(author)]["totals"] == {"P": 0, "V": 1, "Other": 0}
+    assert rows[str(author / "1")]["status"] == "blocked"
+    assert str(author / "1/作品") in rows
+
+
+@pytest.mark.parametrize("symlinked", [False, True])
+def test_whole_author_rule_never_absorbs_a_protected_branch(tmp_path, symlinked):
+    author = tmp_path / "2611/261123/作者A"
+    protected = author / "1/作品"
+    put(author / "root.mp4")
+    put(author / "1/clip.mp4")
+    put(protected / "nested.mp4")
+    quarantine_root = protected
+    if symlinked:
+        quarantine_root = tmp_path / "configured-quarantine"
+        quarantine_root.symlink_to(protected, target_is_directory=True)
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(
+        author.parent, allowed_roots=[tmp_path], quarantine_root=quarantine_root, include_mapping=True,
+    )}
+
+    assert rows[str(author)]["totals"] == {"P": 0, "V": 1, "Other": 0}
+    assert rows[str(author / "1")]["status"] == "blocked"
+    assert all(not Path(move["source"]).is_relative_to(protected)
+               for row in rows.values() if row["status"] == "ready" for move in row["_mapping_items"])
+
+
+def test_whole_author_rule_preserves_a_held_photo_wrapper_scope(tmp_path):
+    photos = tmp_path / "2611/261123/作者A/archive/2611/261123/photos"
+    put(photos / "root.jpg")
+    put(photos / "1/cover.jpg")
+    put(photos / "1/作品/nested.jpg")
+
+    rows = list(iter_organizing_previews(tmp_path, allowed_roots=[tmp_path], include_mapping=True))
+
+    ready_sources = [move["source"] for row in rows if row["status"] == "ready" for move in row["_mapping_items"]]
+    assert sorted(ready_sources) == sorted([str(photos / "root.jpg"), str(photos / "1/作品/nested.jpg")])
+
+
+@pytest.mark.parametrize("occupied", [False, True])
+def test_large_whole_author_uses_existing_bucket_limits_and_checks_targets(tmp_path, occupied):
+    author = tmp_path / "2611/261123/作者A"
+    put(author / "root.mp4")
+    put(author / "1/clip.mp4")
+    for index in range(198):
+        put(author / "1/作品" / f"{index:03d}.mp4")
+    bucket = author / "V [200 800B]"
+    put(bucket / "video.mp4")
+    if occupied:
+        (bucket / "empty-folder").mkdir()
+
+    rows = list(iter_organizing_previews(author, allowed_roots=[tmp_path]))
+
+    assert [row["unit"] for row in rows] == [str(author)]
+    if occupied:
+        assert rows[0]["status"] == "blocked"
+        assert rows[0]["reason"] == "A target media bucket contains a non-input directory"
+    else:
+        assert rows[0]["status"] == "ready"
+        assert [group["name"] for group in rows[0]["groups"]] == ["V [200 800B]", "V_1 [1 4B]"]
+
+
 def test_leaf_photo_pack_joins_its_works_direct_videos(tmp_path):
     work = tmp_path / "圣诞雪饼带视频"
     put(work / "图包" / "cover.JPG")
@@ -48,6 +120,106 @@ def test_photo_pack_at_author_level_stays_separate_when_named_works_are_present(
 
     assert str(author) not in rows
     assert rows[str(pack)]["sample_moves"][0]["target"] == str(pack / "001.jpg")
+
+
+@pytest.mark.parametrize(("folder", "file"), [("MOVIE", "cover.jpg"), ("IMG", "clip.mp4"), ("gif", "cover.jpg")])
+def test_alias_with_a_mismatched_file_type_keeps_its_own_unit(tmp_path, folder, file):
+    work = tmp_path / "作者A/NO.185"
+    leaf = work / folder
+    put(work / "001.mp4")
+    put(leaf / file)
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(work, allowed_roots=[tmp_path])}
+
+    assert rows[str(work)]["status"] == "already_organized"
+    assert rows[str(leaf)]["sample_moves"][0]["target"] == str(leaf / ("001" + Path(file).suffix))
+
+
+def test_typed_media_label_at_author_level_remains_an_independent_unit(tmp_path):
+    author = tmp_path / "2611/261104/作者A"
+    put(author / "IMG/cover.jpg")
+    put(author / "NO.022/photo.jpg")
+
+    rows = list(iter_organizing_previews(author, allowed_roots=[tmp_path]))
+
+    assert {row["unit"] for row in rows} == {str(author / "IMG"), str(author / "NO.022")}
+
+
+def test_typed_media_label_is_still_discovered_inside_a_held_wrapper(tmp_path):
+    mixed = tmp_path / "NO.123/photos"
+    put(mixed / "root.jpg")
+    put(mixed / "IMG/cover.jpg")
+    put(mixed / "NO.124/photo.jpg")
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(
+        mixed.parent, allowed_roots=[tmp_path], include_mapping=True,
+    )}
+
+    assert rows[str(mixed)]["totals"] == {"P": 1, "V": 0, "Other": 0}
+    assert rows[str(mixed / "IMG")]["sample_moves"][0]["target"] == str(mixed / "IMG/001.jpg")
+    assert rows[str(mixed / "NO.124")]["sample_moves"][0]["target"] == str(mixed / "NO.124/001.jpg")
+
+
+@pytest.mark.parametrize(("photo_post", "video_post"), [("P", "photos"), ("01", "261123")])
+def test_fantia_posts_that_resemble_classification_labels_keep_their_boundaries(tmp_path, photo_post, video_post):
+    collection = tmp_path / "Fantia 合集"
+    photo = collection / photo_post / "$0_/cover.jpg"
+    video = collection / video_post / "$1800_/clip.mp4"
+    put(photo)
+    put(video)
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(collection, allowed_roots=[tmp_path])}
+
+    assert {path: row["sample_moves"][0]["target"] for path, row in rows.items()} == {
+        str(collection / photo_post): str(collection / photo_post / "001.jpg"),
+        str(collection / video_post): str(collection / video_post / "001.mp4"),
+    }
+    photo.rename(collection / photo_post / "001.jpg")
+    video.rename(collection / video_post / "001.mp4")
+    photo.parent.rmdir()
+    video.parent.rmdir()
+    again = list(iter_organizing_previews(collection, allowed_roots=[tmp_path]))
+    assert {(row["unit"], row["status"]) for row in again} == {
+        (str(collection / photo_post), "already_organized"),
+        (str(collection / video_post), "already_organized"),
+    }
+
+
+@pytest.mark.parametrize(("collection", "extra"), [
+    ("Fantia 合集", "$1800_/paid.jpg"),
+    ("Fantia 合集", "root.jpg"),
+    ("Fantia 合集", "$0_/mixed.mp4"),
+    ("百度网盘合集", None),
+    ("NotFantiax 合集", None),
+])
+def test_tier_wrapper_keeps_its_unit_when_post_context_is_ambiguous(tmp_path, collection, extra):
+    post = tmp_path / collection / "03_2026_帖子"
+    tier = post / "$0_"
+    put(tier / "cover.jpg")
+    if extra is not None:
+        put(post / extra)
+
+    rows = {row["unit"]: row for row in iter_organizing_previews(post, allowed_roots=[tmp_path], include_mapping=True)}
+
+    assert rows[str(tier)]["status"] == "ready"
+    assert all(Path(move["target"]).is_relative_to(tier) for move in rows[str(tier)]["_mapping_items"])
+
+
+def test_typed_leaf_does_not_absorb_a_symlinked_quarantine_root(tmp_path):
+    work = tmp_path / "NO.017"
+    protected = work / "MOVIE"
+    put(work / "001.jpg")
+    put(protected / "clip.mp4")
+    quarantine_root = tmp_path / "configured-quarantine"
+    quarantine_root.symlink_to(protected, target_is_directory=True)
+
+    rows = list(iter_organizing_previews(
+        work, allowed_roots=[tmp_path], quarantine_root=quarantine_root, include_mapping=True,
+    ))
+
+    assert [(row["unit"], row["status"], row["totals"]) for row in rows] == [
+        (str(work), "already_organized", {"P": 1, "V": 0, "Other": 0}),
+    ]
 
 
 def test_author_dated_batch_absorbs_categories_but_outer_calendar_keeps_author_names(tmp_path):

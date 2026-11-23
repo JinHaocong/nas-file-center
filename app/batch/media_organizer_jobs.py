@@ -229,6 +229,7 @@ def _preview_row(record: dict, report: Path) -> dict:
         "unit": record["unit"], "status": record["status"], "reason": record.get("reason"),
         "operation": record.get("operation"), "organizer_mode": record.get("organizer_mode"),
         **({"local_media_kinds": record["local_media_kinds"]} if record.get("local_media_kinds") else {}),
+        **({"whole_author": True} if record.get("whole_author") else {}),
         "totals": totals, "total_files": sum(totals.values()),
         "total_bytes": record.get("total_bytes", 0), "groups": record.get("groups", []),
         "needed_moves": record.get("actual_moves", 0),
@@ -326,6 +327,7 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence)
     try:
         chosen = _selection(unit["unit"], settings)
         local_media_kinds = tuple(unit.get("local_media_kinds", ()))
+        whole_author = unit.get("whole_author", False)
         options = {
             "mode": unit["organizer_mode"], "allowed_roots": settings.allowed_roots,
             "media_package_root": settings.media_package_root, "quarantine_root": settings.quarantine_root,
@@ -335,6 +337,7 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence)
             package_root = settings.media_package_root
             if (manifest.get("organizer_mode") != options["mode"]
                     or tuple(manifest.get("local_media_kinds", ())) != local_media_kinds
+                    or manifest.get("whole_author", False) != whole_author
                     or manifest.get("input_fingerprint") != unit["input_fingerprint"]
                     or manifest.get("media_package_root") != (str(package_root) if package_root else None)
                     or manifest.get("quarantine_root") != (str(settings.quarantine_root)
@@ -349,7 +352,7 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence)
             link_intent=LinkIntent(path.with_suffix(".link.json")),
         )
         fresh = preview_organizing_unit(
-            chosen, include_items=True, local_media_kinds=local_media_kinds, **options,
+            chosen, include_items=True, local_media_kinds=local_media_kinds, whole_author=whole_author, **options,
         )
         if fresh["status"] != "already_organized":
             raise MediaPackageExecutionConflict("整理后重新扫描时仍发现变更")

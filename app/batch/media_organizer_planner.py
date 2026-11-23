@@ -26,6 +26,7 @@ _CALENDAR_DAY = re.compile(
     r"(?:\d{2}|\d{4})(?:[-_.]?(?:0[1-9]|1[0-2])[-_.]?(?:0[1-9]|[12]\d|3[01])"
     r"|年(?:0?[1-9]|1[0-2])月(?:0?[1-9]|[12]\d|3[01])日)"
 )
+_CALENDAR_MONTH = re.compile(r"(?:\d{2}|\d{4})(?:[-_.]?(?:0[1-9]|1[0-2])|年(?:0?[1-9]|1[0-2])月)")
 _DEFAULT_FOLDER = re.compile(r"新建文件夹(?:\s*\(\d+\))?")
 _AMBIGUOUS = re.compile(r"\d{1,3}|" + _DEFAULT_FOLDER.pattern, re.I)
 _NUMBERED_LEAF = re.compile(r"[0-9]{1,3}")
@@ -40,11 +41,23 @@ _PHOTO_ALIASES = frozenset({
     "图片", "图", "照片", "photo", "photos", "image", "images", "picture", "pictures", "pic",
 })
 _ALIASES = _PHOTO_ALIASES | {"视频", "video", "videos"}
+_TYPED_WRAPPER_KINDS = {"movie": "V", "img": "P", "gif": "P"}
+_FANTIA_COLLECTION = re.compile(r"(?<![a-z0-9])fantia(?![a-z0-9])", re.I | re.ASCII)
+_FANTIA_TIER = re.compile(r"\$[0-9]+_.*")
+
+
+def _fantia_collection(path: Path) -> bool:
+    return _FANTIA_COLLECTION.search(path.name) is not None
 
 
 def _is_wrapper(parent: Path, name: str, *, device: int | None = None) -> bool:
     """Identify classification folders within works and author-level batches."""
-    if MEDIA_BUCKET_PATTERN.fullmatch(name) or _OTHER_BUCKET.fullmatch(name):
+    if device is not None and _FANTIA_TIER.fullmatch(name):
+        return _sole_fantia_tier(parent, name, device)
+    if _fantia_collection(parent):
+        # A post may be called P or photos. Only verified output buckets belong to the collection.
+        return device is not None and _verified_bucket_kind(parent / name, device) is not None
+    if _labelled_bucket_kind(name):
         return True
     if _CALENDAR_DIRECTORY.fullmatch(parent.name) and not any(
         _author_layer(ancestor) and not _CALENDAR_DIRECTORY.fullmatch(ancestor.name)
@@ -64,6 +77,8 @@ def _is_wrapper(parent: Path, name: str, *, device: int | None = None) -> bool:
                 for peer, info in _entries(parent, device)
             )
         return True
+    if device is not None and name.casefold() in _TYPED_WRAPPER_KINDS:
+        return _typed_leaf_wrapper(parent, name, device)
     return bool(_LEGACY_BUCKET.fullmatch(name) or name.casefold() in _ALIASES)
 
 
@@ -102,6 +117,11 @@ def _entries(folder: Path, device: int) -> list[tuple[str, os.stat_result]]:
 
 def _protected(path: Path, protected_roots: tuple[Path, ...]) -> bool:
     return any(path.is_relative_to(root) for root in protected_roots)
+
+
+def _resolved_protected_roots(*roots: Path | None) -> tuple[Path, ...]:
+    """Use the same physical protection boundary for selection and wrapper traversal."""
+    return tuple(Path(root).expanduser().resolve(strict=False) for root in roots if root is not None)
 
 
 def _author_layer(unit: Path) -> bool:
@@ -195,6 +215,7 @@ def _repeated_work_wrapper(unit: Path, entries: list[tuple[str, os.stat_result]]
                            device: int, protected_roots: tuple[Path, ...]) -> Path | None:
     """Collapse a single exact-name wrapper around a canonical, bucketed work."""
     if (len(entries) != 1 or _CALENDAR_DIRECTORY.fullmatch(unit.name)
+            or _fantia_collection(unit)
             or unit.name.casefold() in _VERSION_NAMES or _author_layer(unit)
             or _AMBIGUOUS.fullmatch(unit.name) or _is_wrapper(unit.parent, unit.name)
             or unit.name == "图包"):
@@ -224,13 +245,18 @@ def _repeated_work_wrapper(unit: Path, entries: list[tuple[str, os.stat_result]]
 def _semantic_inventory(
     unit: Path, protected_roots: tuple[Path, ...],
     directories: set[Path] | None = None,
-    local_media_kinds: tuple[str, ...] = (),
+    local_media_kinds: tuple[str, ...] = (), *, whole_author: bool = False,
+    check_cancelled: Callable[[], None] | None = None,
 ) -> Iterator[dict]:
-    """Read only direct files and proven classification wrappers."""
+    """Read the semantic unit, including its descendants for a whole-author plan."""
+    if _protected(unit, protected_roots):
+        raise ValueError(f"Protected media directory: {unit}")
     folders = [(unit, 0)]
     device = os.lstat(unit).st_dev
     files = directory_count = 0
     while folders:
+        if check_cancelled is not None:
+            check_cancelled()
         folder, depth = folders.pop()
         directory_count += 1
         if depth > MAX_DEPTH or directory_count > MAX_PACKAGE_DIRECTORIES:
@@ -240,12 +266,19 @@ def _semantic_inventory(
         children = []
         entries = _entries(folder, device)
         repeated = (_repeated_work_wrapper(unit, entries, device, protected_roots)
-                    if not depth and not local_media_kinds else None)
+                    if not depth and not (whole_author or local_media_kinds) else None)
         for name, info in entries:
             path = folder / name
             if name.casefold().startswith(".nfc-"):
                 raise ValueError(f"Reserved workspace needs reconciliation: {path}")
+            if whole_author and _protected(path, protected_roots):
+                raise ValueError(f"Protected entry in author directory: {path}")
             if stat.S_ISDIR(info.st_mode):
+                if whole_author:
+                    if info.st_dev != device:
+                        raise ValueError(f"Cross-device directory in author tree: {path}")
+                    children.append((path, depth + 1))
+                    continue
                 if depth and local_media_kinds:
                     raise ValueError("A local media bucket now contains a nested directory")
                 if _protected(path, protected_roots):
@@ -281,19 +314,22 @@ def _semantic_inventory(
 def walk_organizing_unit(
     unit: Path, *, mode: str, media_package_root: Path | None = None,
     quarantine_root: Path | None = None, directories: set[Path] | None = None,
-    local_media_kinds: tuple[str, ...] = (),
+    local_media_kinds: tuple[str, ...] = (), whole_author: bool = False,
 ) -> Iterator[dict]:
     """Return the raw inventory required to revalidate a previously checked unit."""
     unit = Path(unit)
+    if whole_author and (mode != "semantic" or local_media_kinds):
+        raise ValueError("Invalid whole-author media scope")
     if local_media_kinds and (mode != "semantic" or not {"P", "V"}.intersection(local_media_kinds)
                               or any(kind not in ("P", "V", "Other") for kind in local_media_kinds)):
         raise ValueError("Invalid local media scope")
     if mode == "luolcy" and media_package_root is not None:
         yield from _walk_package(unit, directories=directories)
     elif mode == "semantic":
-        protected_roots = tuple(Path(root) for root in (media_package_root, quarantine_root)
-                                if root is not None)
-        yield from _semantic_inventory(unit, protected_roots, directories, local_media_kinds)
+        protected_roots = _resolved_protected_roots(media_package_root, quarantine_root)
+        yield from _semantic_inventory(
+            unit, protected_roots, directories, local_media_kinds, whole_author=whole_author,
+        )
     else:
         raise ValueError("Invalid organizer mode or missing MediaPackage root")
 
@@ -346,6 +382,41 @@ def _regular_media_entries(path: Path, device: int) -> list[tuple[str, os.stat_r
     ):
         return []
     return entries
+
+
+def _typed_leaf_wrapper(parent: Path, name: str, device: int) -> bool:
+    """Confirm a work's direct media label using the leaf's actual files."""
+    if (_author_layer(parent) or _CALENDAR_DIRECTORY.fullmatch(parent.name)
+            or _is_wrapper(parent.parent, parent.name)):
+        return False
+    label = name.casefold()
+    entries = _regular_media_entries(parent / name, device)
+    kind = _TYPED_WRAPPER_KINDS[label]
+    return bool(entries) and all(
+        _classify(filename) == kind and (label != "gif" or Path(filename).suffix.casefold() == ".gif")
+        for filename, _ in entries
+    )
+
+
+def _sole_fantia_tier(post: Path, name: str, device: int) -> bool:
+    """Remove a tier layer only within one confirmed Fantia post."""
+    if not _fantia_collection(post.parent) or _labelled_bucket_kind(post.name):
+        return False
+    try:
+        fd = _open_directory_nofollow(post)
+        try:
+            if os.fstat(fd).st_dev != device:
+                return False
+            with os.scandir(fd) as siblings:
+                only = next(siblings, None)
+                if only is None or only.name != name or next(siblings, None) is not None:
+                    return False
+        finally:
+            os.close(fd)
+    except OSError:
+        return False
+    entries = _regular_media_entries(post / name, device)
+    return {_classify(filename) for filename, _ in entries} in ({"P"}, {"V"})
 
 
 def _verified_bucket_kind(path: Path, device: int) -> str | None:
@@ -403,29 +474,78 @@ def _numbered_siblings(unit: Path, entries: list[tuple[str, os.stat_result]],
     return set(names) if all(_media_leaf_kinds(unit / name, device) & {"P", "V"} for name in names) else set()
 
 
+def _numbered_author_wrapper(entries: list[tuple[str, os.stat_result]]) -> str | None:
+    """Find one numbered child beside the author's direct files."""
+    if not any(stat.S_ISREG(info.st_mode) for _, info in entries):
+        return None
+    names = [name for name, info in entries
+             if stat.S_ISDIR(info.st_mode) and _NUMBERED_LEAF.fullmatch(name)]
+    return names[0] if len(names) == 1 else None
+
+
+def _whole_author_inventory(
+    unit: Path, entries: list[tuple[str, os.stat_result]], device: int,
+    protected_roots: tuple[Path, ...], check_cancelled: Callable[[], None] | None,
+) -> tuple[list[dict], set[Path]] | None:
+    """Recognize a dated author with a mixed numbered wrapper and one media type."""
+    if (not _author_layer(unit) or _CALENDAR_DIRECTORY.fullmatch(unit.name)
+            or not _CALENDAR_MONTH.fullmatch(unit.parent.parent.name)):
+        return None
+    name = _numbered_author_wrapper(entries)
+    if name is None:
+        return None
+    kinds = {_classify(filename) for filename, info in entries if stat.S_ISREG(info.st_mode)}
+    if kinds not in ({"P"}, {"V"}):
+        return None
+    try:
+        if _protected(unit / name, protected_roots):
+            return None
+        inner = _entries(unit / name, device)
+        if (not any(stat.S_ISDIR(info.st_mode) for _, info in inner)
+                or {_classify(filename) for filename, info in inner if stat.S_ISREG(info.st_mode)} != kinds):
+            return None
+        directories: set[Path] = set()
+        items = list(_semantic_inventory(
+            unit, protected_roots, directories, whole_author=True, check_cancelled=check_cancelled,
+        ))
+    except (OSError, ValueError):
+        return None
+    return (items, directories) if {row["kind"] for row in items} == kinds else None
+
+
 def preview_organizing_unit(
     unit: Path, *, mode: str, allowed_roots: list[Path],
     quarantine_root: Path | None = None, media_package_root: Path | None = None,
     max_rows: int = 100, include_items: bool = False, include_mapping: bool = False,
-    local_media_kinds: tuple[str, ...] | None = None,
+    local_media_kinds: tuple[str, ...] | None = None, whole_author: bool | None = None,
+    check_cancelled: Callable[[], None] | None = None,
 ) -> dict:
-    """Plan a bounded, independently identified organizing unit."""
+    """Plan an organizing unit. Only an unspecified whole-author scope is inferred."""
     unit = _checked_scope(unit, allowed_roots, quarantine_root)
+    protected = _resolved_protected_roots(media_package_root, quarantine_root)
     if mode == "luolcy" and media_package_root is not None:
         unit = _package_path(unit, media_package_root, allowed_roots, quarantine_root)
-    elif mode != "semantic" or (media_package_root is not None
-                                and unit.is_relative_to(media_package_root)):
+    elif mode != "semantic" or _protected(unit, protected):
         raise ValueError("Invalid unit or mode")
-    protected = tuple(Path(root) for root in (media_package_root, quarantine_root) if root is not None)
-    if local_media_kinds is None and mode == "semantic" and (_author_layer(unit) or _photo_wrapper(unit)):
-        device = os.lstat(unit).st_dev
-        local_media_kinds = _layer_media_kinds(unit, _entries(unit, device), device, protected)
-    local_media_kinds = local_media_kinds or ()
-    directories: set[Path] = set()
-    items = list(walk_organizing_unit(
-        unit, mode=mode, media_package_root=media_package_root, quarantine_root=quarantine_root,
-        directories=directories, local_media_kinds=local_media_kinds,
-    ))
+    author_inventory = None
+    if mode == "semantic" and not whole_author and not local_media_kinds:
+        needs_layer_scope = local_media_kinds is None
+        if (whole_author is None or needs_layer_scope) and (_author_layer(unit) or _photo_wrapper(unit)):
+            device = os.lstat(unit).st_dev
+            entries = _entries(unit, device)
+            if whole_author is None:
+                author_inventory = _whole_author_inventory(unit, entries, device, protected, check_cancelled)
+            if author_inventory is None and needs_layer_scope:
+                local_media_kinds = _layer_media_kinds(unit, entries, device, protected)
+    if author_inventory is not None:
+        items, directories = author_inventory
+        whole_author = True
+    else:
+        directories = set()
+        items = list(walk_organizing_unit(
+            unit, mode=mode, media_package_root=media_package_root, quarantine_root=quarantine_root,
+            directories=directories, local_media_kinds=local_media_kinds or (), whole_author=bool(whole_author),
+        ))
     origin_dirs = set()
     for row in items:
         for parent in Path(row["path"]).parents:
@@ -438,7 +558,7 @@ def preview_organizing_unit(
         legacy_bucket_conflicts=not (mode == "semantic"
                                      and (local_media_kinds or _CALENDAR_DIRECTORY.fullmatch(unit.name))),
     )
-    if mode == "semantic" and plan["status"] == "ready" and not local_media_kinds:
+    if mode == "semantic" and plan["status"] == "ready" and not (local_media_kinds or whole_author):
         held = _author_loose_record(unit, items, directories, protected)
         if held is not None:
             return held
@@ -450,19 +570,21 @@ def preview_organizing_unit(
         for parent in empty.parents if parent in origin_dirs
     }
     occupied_groups = final_dirs & occupied_ancestors
+    scope = {"whole_author": True} if whole_author else {}
     if occupied_groups:
-        return _blocked(unit, mode, "A target media bucket contains a non-input directory")
+        return {**_blocked(unit, mode, "A target media bucket contains a non-input directory"), **scope}
     cleanup = origin_dirs - final_dirs - occupied_ancestors if plan["status"] == "ready" else set()
     return {
         **plan, "unit": str(unit), "organizer_mode": mode,
         **({"local_media_kinds": list(local_media_kinds)} if local_media_kinds else {}),
+        **scope,
         "total_bytes": sum(row["bytes"] for row in items),
         "wrapper_cleanup": sorted((str(path) for path in cleanup), key=lambda path: (-len(Path(path).parts), path)),
     }
 
 
 def _semantic_previews(
-    selection: Path, protected_roots: tuple[Path, ...], preview: Callable[[Path, str], dict],
+    selection: Path, protected_roots: tuple[Path, ...], preview: Callable[[Path, str, bool | None], dict],
     check_cancelled: Callable[[], None] | None,
 ) -> Iterator[dict]:
     device = os.lstat(selection).st_dev
@@ -481,6 +603,13 @@ def _semantic_previews(
         except (OSError, ValueError) as exc:
             yield _blocked(unit, "semantic", str(exc))
             continue
+        author_preview = None
+        if hold_reason is None and _author_layer(unit) and _numbered_author_wrapper(entries) is not None:
+            author_preview = preview(unit, "semantic", None)
+            if author_preview.get("whole_author"):
+                # The whole author owns these files, so descendants cannot also become units.
+                yield author_preview
+                continue
         children: list[tuple[Path, int, str | None]] = []
         numbered = _numbered_siblings(unit, entries, device, protected_roots)
         repeated = _repeated_work_wrapper(unit, entries, device, protected_roots) if hold_reason is None else None
@@ -500,7 +629,7 @@ def _semantic_previews(
                         has_pure_wrappers = True
                     else:
                         children.append((child, depth + 1, _MIXED_WRAPPER_REASON))
-                elif (_AMBIGUOUS.fullmatch(name) and name not in numbered
+                elif (_AMBIGUOUS.fullmatch(name) and name not in numbered and not _fantia_collection(unit)
                       and not _default_folder_is_media_unit(child, device)):
                     children.append((child, depth + 1, _AMBIGUOUS_DIRECTORY_REASON))
                 else:
@@ -511,12 +640,12 @@ def _semantic_previews(
                 yield _blocked(child, "semantic", "Symlink or special entry")
         if (hold_reason == _MIXED_WRAPPER_REASON and _photo_wrapper(unit)
                 and _layer_media_kinds(unit, entries, device, protected_roots)):
-            yield preview(unit, "semantic")
+            yield preview(unit, "semantic", False)
         elif hold_reason is not None:
             if hold_reason != _MIXED_WRAPPER_REASON or has_input or has_pure_wrappers:
                 yield _held_files(unit, entries, hold_reason)
         elif has_input or has_pure_wrappers:
-            yield preview(unit, "semantic")
+            yield author_preview if author_preview is not None else preview(unit, "semantic", False)
         children.sort(key=lambda entry: (str(entry[0]).casefold(), str(entry[0])), reverse=True)
         pending.extend(children)
 
@@ -529,15 +658,16 @@ def iter_organizing_previews(
 ) -> Iterator[dict]:
     """Yield read-only previews from the selected scope."""
     selection = _checked_scope(selection, allowed_roots, quarantine_root)
-    protected = tuple(Path(root) for root in (media_package_root, quarantine_root) if root is not None)
+    protected = _resolved_protected_roots(media_package_root, quarantine_root)
     package_root = Path(media_package_root) if media_package_root is not None else None
 
-    def preview(path: Path, mode: str) -> dict:
+    def preview(path: Path, mode: str, whole_author: bool | None = False) -> dict:
         try:
             return preview_organizing_unit(
                 path, mode=mode, allowed_roots=allowed_roots,
                 quarantine_root=quarantine_root, media_package_root=package_root,
-                max_rows=max_rows, include_mapping=include_mapping,
+                max_rows=max_rows, include_mapping=include_mapping, check_cancelled=check_cancelled,
+                whole_author=whole_author,
             )
         except (OSError, ValueError) as exc:
             return _blocked(path, mode, str(exc))

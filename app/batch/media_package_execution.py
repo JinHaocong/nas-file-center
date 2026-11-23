@@ -93,12 +93,15 @@ def prepare_organizer_manifest(
     from app.batch.media_organizer_planner import preview_organizing_unit
 
     local_media_kinds = tuple(preview_record.get("local_media_kinds", ()))
+    whole_author = preview_record.get("whole_author", False)
+    # Only discover the wider scope again when it was part of the approved preview.
     fresh = preview_organizing_unit(
         unit, mode=mode, allowed_roots=allowed_roots, quarantine_root=quarantine_root,
         media_package_root=media_package_root, include_items=True, include_mapping=True,
-        local_media_kinds=local_media_kinds,
+        local_media_kinds=local_media_kinds, whole_author=None if whole_author else False,
     )
     if (preview_record.get("status") != "ready" or fresh.get("status") != "ready"
+            or fresh.get("whole_author", False) != whole_author
             or fresh["actual_moves"] != preview_record.get("needed_moves")
             or any(fresh.get(key) != preview_record.get(key)
                    for key in ("unit", "input_fingerprint", "operation", "groups", "renamed_count"))):
@@ -107,6 +110,7 @@ def prepare_organizer_manifest(
         **_freeze_layout(unit, fresh, media_package_root=media_package_root, job_id=job_id),
         "organizer_mode": mode, "quarantine_root": str(quarantine_root) if quarantine_root else None,
         **({"local_media_kinds": list(local_media_kinds)} if local_media_kinds else {}),
+        **({"whole_author": True} if whole_author else {}),
     }
 
 
@@ -1387,6 +1391,28 @@ def _exact_published_snapshot(manifest: dict, live: list[dict]) -> bool:
     return True
 
 
+def _live_organizer_snapshot(manifest: dict, package: Path, mode: str) -> list[dict]:
+    """Recheck whole-author eligibility and destination occupancy before the first write."""
+    from app.batch.media_organizer_planner import preview_organizing_unit, walk_organizing_unit
+
+    options = {
+        "mode": mode,
+        "media_package_root": Path(manifest["media_package_root"]) if manifest.get("media_package_root") else None,
+        "quarantine_root": Path(manifest["quarantine_root"]) if manifest.get("quarantine_root") else None,
+        "local_media_kinds": tuple(manifest.get("local_media_kinds", ())),
+    }
+    whole_author = manifest.get("whole_author", False)
+    if whole_author:
+        preview = preview_organizing_unit(package, allowed_roots=[package], include_items=True, **options)
+        if preview.get("whole_author") and preview["status"] == "ready":
+            return preview["_snapshot_items"]
+    live = list(walk_organizing_unit(package, whole_author=whole_author, **options))
+    # A grouped plan can have published every output before its final cleanup ran.
+    if whole_author and not _exact_published_snapshot(manifest, live):
+        raise MediaPackageExecutionConflict("Whole-author scope or destination changed since preview")
+    return live
+
+
 def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
                             progress: Callable[[int, int], None] | None = None,
                             allow_fuse_compat: bool = False,
@@ -1421,18 +1447,8 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
     if not recovery_artifact:
         try:
             mode = manifest.get("organizer_mode")
-            if mode is None:
-                live = list(_walk_package(package))
-            else:
-                from app.batch.media_organizer_planner import walk_organizing_unit
-
-                root = manifest.get("media_package_root")
-                quarantine = manifest.get("quarantine_root")
-                live = list(walk_organizing_unit(
-                    package, mode=mode, media_package_root=Path(root) if root else None,
-                    quarantine_root=Path(quarantine) if quarantine else None,
-                    local_media_kinds=tuple(manifest.get("local_media_kinds", ())),
-                ))
+            live = (list(_walk_package(package)) if mode is None
+                    else _live_organizer_snapshot(manifest, package, mode))
         except (OSError, ValueError) as exc:
             raise MediaPackageExecutionConflict(
                 f"Unsafe package changed since frozen preview: {exc}"
