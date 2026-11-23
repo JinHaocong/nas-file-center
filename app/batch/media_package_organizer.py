@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from app.batch.file_rename import _open_directory_nofollow
-from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, allocate_names, media_source_sort_key
+from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, allocate_names, media_source_sort_key, numbered_name
 from app.filters.media_types import get_media_type
 from app.path_safety import require_allowed_path, require_unreserved_path
 
@@ -28,6 +28,7 @@ APPEND_SINGLE_VIDEO = "append_single_video"
 APPEND_AUTHOR_VIDEOS = "append_author_videos"
 APPEND_VIDEO_OPERATIONS = frozenset({APPEND_SINGLE_VIDEO, APPEND_AUTHOR_VIDEOS})
 PROMOTE_NUMBERED_PHOTO_GROUPS = "promote_numbered_photo_groups"
+LIFT_LUOLCY_BUCKETS = "lift_luolcy_buckets"
 _MONTH = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])$")
 _DAY = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])$")
 _AUTHOR_CLASSIFICATION = re.compile(r"([pv])(?:_?[1-9]\d*)?", re.I)
@@ -388,6 +389,16 @@ def _author_media_row(path: Path, info: os.stat_result, kind: str) -> dict:
     }
 
 
+def _luolcy_bucket_slot(name: str) -> tuple[str, str] | None:
+    bucket = MEDIA_BUCKET_PATTERN.fullmatch(name)
+    return (bucket["kind"].upper(), bucket["index"] or "0") if bucket else None
+
+
+def _luolcy_numbered_files(rows: list[dict]) -> bool:
+    return all(row["name"] == numbered_name(index, row["name"])
+               for index, row in enumerate(sorted(rows, key=lambda item: item["name"]), 1))
+
+
 def _luolcy_classification_inventory(
     folder: Path, device: int, label: str, check_cancelled: Callable[[], None] | None,
     *, flat_only: bool = False,
@@ -431,10 +442,10 @@ def _luolcy_classification_inventory(
     return rows or None
 
 
-def _luolcy_author_inventory(
+def _read_luolcy_author(
     author: Path, root: Path, *, check_cancelled: Callable[[], None] | None = None,
-) -> tuple[list[dict], dict[str, list[int]]]:
-    """Collect files owned by the author root and identities of preserved named works."""
+) -> tuple[list[dict], dict[str, list[int]], int]:
+    """Read direct author media and bind each child directory without following links."""
     rows = []
     children = {}
     fd = _open_luolcy_author(author, root)
@@ -458,10 +469,72 @@ def _luolcy_author_inventory(
                 children[entry.name] = [info.st_dev, info.st_ino]
     finally:
         os.close(fd)
+    return rows, children, device
+
+
+def _luolcy_nested_buckets(
+    author: Path, children: dict[str, list[int]], device: int,
+    check_cancelled: Callable[[], None] | None,
+) -> dict[Path, list[dict]]:
+    """Select same-type shells made exclusively of verified numbered buckets."""
+    buckets = {}
+    total = 0
+    for name in children:
+        kind = _luolcy_classification_kind(name)
+        if kind not in {"P", "V"} or _luolcy_bucket_slot(name):
+            continue
+        shell = author / name
+        selected = {}
+        selected_count = 0
+        fd = _open_directory_nofollow(shell)
+        try:
+            info = os.fstat(fd)
+            if [info.st_dev, info.st_ino] != children[name]:
+                raise ValueError(f"Luolcy classification directory changed: {shell}")
+            with os.scandir(fd) as entries:
+                for count, entry in enumerate(entries, 1):
+                    if count > MAX_SCOPE_ENTRIES_PER_DIRECTORY:
+                        raise ValueError(f"Too many Luolcy buckets: {shell}")
+                    if check_cancelled is not None:
+                        check_cancelled()
+                    slot = _luolcy_bucket_slot(entry.name)
+                    if not (slot and slot[0] == kind and entry.is_dir(follow_symlinks=False)):
+                        break
+                    path = shell / entry.name
+                    rows = _luolcy_classification_inventory(path, device, kind, check_cancelled)
+                    if not rows or not _luolcy_numbered_files(rows):
+                        break
+                    stem = kind if slot[1] == "0" else f"{kind}_{slot[1]}"
+                    if path.name != f"{stem} [{len(rows)} {_size_label(sum(row['bytes'] for row in rows))}]":
+                        break
+                    selected_count += len(rows)
+                    if total + selected_count > MAX_PACKAGE_FILES:
+                        raise ValueError(f"Too many Luolcy bucket files: {author}")
+                    selected[path] = rows
+                else:
+                    buckets.update(selected)
+                    total += selected_count
+        finally:
+            os.close(fd)
+    return buckets
+
+
+def _luolcy_author_inventory(
+    author: Path, root: Path, *, check_cancelled: Callable[[], None] | None = None,
+    lift_buckets: bool = False,
+) -> tuple[list[dict], dict[str, list[int]], dict[Path, list[dict]]]:
+    """Collect reviewed author inputs and identities of independent child directories."""
+    rows, children, device = _read_luolcy_author(author, root, check_cancelled=check_cancelled)
 
     if any(_luolcy_batch_boundary(name) for name in children):
         # Labelled batches make every child an independent package.
-        return rows, children
+        return rows, children, {}
+
+    if lift_buckets:
+        nested = _luolcy_nested_buckets(author, children, device, check_cancelled)
+        if nested:
+            shells = {path.parent.name for path in nested}
+            return rows, {name: item for name, item in children.items() if name not in shells}, nested
 
     direct_kinds = {row["kind"] for row in rows}
     inspect_leaves = bool(direct_kinds) and (
@@ -471,9 +544,16 @@ def _luolcy_author_inventory(
     leaves = {}
     inferred = {}
     scanned_files = len(rows)
+    # Numbered root media of another type can coexist with published buckets.
+    preserve_other_buckets = (len(direct_kinds) == 1 and len(rows) <= MAX_FILES_PER_GROUP
+                              and _luolcy_numbered_files(rows)
+                              and all(_luolcy_bucket_slot(name) or not _luolcy_classification_kind(name)
+                                      for name in children))
     for name in children:
         folder = author / name
         label = _luolcy_classification_kind(name)
+        if preserve_other_buckets and _luolcy_bucket_slot(name) and label not in direct_kinds:
+            continue
         if label is None and not inspect_leaves:
             continue
         media = _luolcy_classification_inventory(folder, device, label or "PV", check_cancelled,
@@ -495,7 +575,7 @@ def _luolcy_author_inventory(
     for name, media in classifications.items():
         rows.extend(media)
         del children[name]
-    return rows, children
+    return rows, children, {}
 
 
 def _walk_package(package: Path, *, directories: set[Path] | None = None):
@@ -554,6 +634,58 @@ def _input_fingerprint(files: list[dict], package: Path) -> str:
         digest.update(json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
         digest.update(b"\\n")
     return digest.hexdigest()
+
+
+def _plan_luolcy_bucket_lift(
+    author: Path, buckets: dict[Path, list[dict]], siblings: dict[str, list[int]], direct_kinds: set[str],
+    *, max_rows: int, include_items: bool, include_mapping: bool,
+) -> dict:
+    """Move verified buckets to the author root with their original names and contents."""
+    groups, items, mapping, conflicts = [], [], [], []
+    totals = {"P": 0, "V": 0, "Other": 0}
+    occupied = {slot: name for name in siblings if (slot := _luolcy_bucket_slot(name))}
+    for source, rows in sorted(buckets.items(), key=lambda pair: media_source_sort_key(str(pair[0] / "_"), author)):
+        name = source.name
+        slot = _luolcy_bucket_slot(name)
+        kind = slot[0]
+        destination = author / name
+        if slot in occupied:
+            conflicts.append({"directory": str(destination), "existing": occupied[slot],
+                              "reason": "existing_bucket_name_requires_review"})
+        occupied[slot] = name
+        count = len(rows)
+        totals[kind] += count
+        groups.append({"name": name, "kind": kind, "count": count,
+                       "bytes": sum(row["bytes"] for row in rows), "destination": str(destination)})
+        ordered = sorted(rows, key=lambda row: row["name"])
+        items.extend(ordered)
+        for row in ordered:
+            if include_mapping or len(mapping) < max_rows:
+                mapping.append({
+                    "source": row["path"], "target": str(destination / row["name"]),
+                    "source_name": row["name"], "target_name": row["name"],
+                    "original_relative_path": os.path.relpath(row["path"], author),
+                    "bytes": row["bytes"], "kind": kind,
+                })
+    count = len(items)
+    overlapping_kinds = sorted(kind for kind in direct_kinds if totals[kind])
+    if overlapping_kinds:
+        conflicts.append({"reason": "root_media_requires_bucket_rebuild", "kinds": overlapping_kinds})
+    plan = {
+        "package": str(author), "operation": LIFT_LUOLCY_BUCKETS,
+        "input_fingerprint": _input_fingerprint(items, author), "read_only": True,
+        "status": "blocked" if conflicts else "ready",
+        "reason": ("作者根已有同类型散件，需单独确认如何合并" if overlapping_kinds
+                   else "作者根的目标桶编号已占用" if conflicts else None),
+        "totals": totals, "total_files": count, "groups": groups, "conflicts": conflicts,
+        "needed_moves": count, "actual_moves": count, "renamed_count": 0, "resolved_collision_count": 0,
+        "sample_moves": mapping[:max_rows], "total_proposals": count, "truncated": count > max_rows,
+    }
+    if include_items:
+        plan["_snapshot_items"] = items
+    if include_mapping:
+        plan["_mapping_items"] = mapping
+    return plan
 
 
 def preview_media_package_package(package: str | Path, *, media_package_root: str | Path,

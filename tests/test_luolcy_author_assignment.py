@@ -105,6 +105,82 @@ def test_luolcy_direct_author_media_organizes_in_place(tmp_path, image_count, vi
     assert again["summary"]["already_organized_count"] == (len(groups) or 1)
 
 
+def test_luolcy_lifts_verified_buckets_without_changing_names_or_root_files(tmp_path):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251104/作者"
+    sources = {
+        "图片/P [2 2B]/001.png": b"a",
+        "图片/P [2 2B]/002.JPG": b"b",
+        "图片/P_1 [1 1B]/001.png": b"c",
+        "001.mp4": b"root video",
+        "命名作品/001.jpg": b"work",
+    }
+    for relative, content in sources.items():
+        path = author / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    untouched = {name: (author / name).stat().st_ino for name in ("001.mp4", "命名作品/001.jpg")}
+
+    preview = _preview(client, settings, author)
+    author_row, work = preview["units"]
+    assert (author_row["unit"], author_row["status"], author_row["needed_moves"], author_row["renamed_count"]) == (
+        str(author), "ready", 3, 0,
+    )
+    assert work["unit"] == str(author / "命名作品")
+    assert {Path(move["source"]).relative_to(author).as_posix():
+            Path(move["target"]).relative_to(author).as_posix() for move in author_row["sample_moves"]} == {
+        name: name.removeprefix("图片/") for name in sources if name.startswith("图片/")
+    }
+
+    batch_id = _batch(client, preview)
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert report["summary"] == {"success_count": 1, "skipped_count": 1, "conflict_count": 0, "failed_count": 0}, report
+    assert not (author / "图片").exists()
+    for relative, content in sources.items():
+        assert (author / relative.removeprefix("图片/")).read_bytes() == content
+    assert all((author / name).stat().st_ino == inode for name, inode in untouched.items())
+    rescan = _preview(client, settings, author)
+    assert not rescan["summary"]["ready_count"] and not rescan["summary"]["blocked_count"]
+
+
+@pytest.mark.parametrize(("source", "other", "status"), [
+    ("P/P [1 1B]/001.jpg", "P [1 1B]/001.jpg", "blocked"),
+    ("P/P [1 1B]/001.jpg", "P [1 2B]/001.jpg", "blocked"),
+    ("P/P [1 1B]/001.jpg", "268MB/001.mp4", None),
+    ("P/P [1 1B]/001.jpg", "11.19/001.mp4", None),
+    ("P/V [1 1B]/001.mp4", None, None),
+    ("P/P [2 1B]/001.jpg", None, None),
+    ("P/P [1 2B]/001.jpg", None, None),
+    ("P/P [1 1B]/002.jpg", None, None),
+    ("P/P [1 1B]/001.jpg", "P/独立作品/001.jpg", None),
+    ("P/P [1 1B]/001.jpg", "P/002.jpg", None),
+    ("P/P [1 1B]/001.jpg", "001.jpg", "blocked"),
+])
+def test_luolcy_lift_requires_verified_numbered_buckets_and_free_targets(tmp_path, source, other, status):
+    client, settings, root = _fixture(tmp_path)
+    author = root / "2511/251104/作者"
+    files = {source: b"a"}
+    if other:
+        files[other] = b"bb"
+    for relative, contents in files.items():
+        path = author / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(contents)
+
+    preview = _preview(client, settings, author)
+    units = {row["unit"]: row for row in preview["units"]}
+    if status is None:
+        assert str(author) not in units
+    else:
+        row = units[str(author)]
+        assert row["status"] == status
+        assert row["reason"] == ("作者根已有同类型散件，需单独确认如何合并" if other == "001.jpg"
+                                 else "作者根的目标桶编号已占用")
+        assert row["sample_moves"] == []
+        assert str(author / "P") not in units
+
+
 def test_luolcy_author_rebuild_combines_classification_contents_and_keeps_named_work(tmp_path):
     client, settings, root = _fixture(tmp_path)
     author = root / "2511/251104/作者"

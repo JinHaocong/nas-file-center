@@ -14,6 +14,7 @@ from app.batch.media_package_execution import (
     prepare_organizer_manifest,
     save_frozen_manifest,
 )
+from app.batch.media_package_organizer import LIFT_LUOLCY_BUCKETS
 from tests.test_media_package_zfuse_publish import force_zos_no_directory_rename
 
 
@@ -188,3 +189,125 @@ def test_flat_rebuild_recovers_owned_fuse_link_and_removes_nested_classification
     assert (author / "001.jpg").read_bytes() == b"root"
     assert (author / "002.jpg").read_bytes() == b"nested"
     assert {child.name for child in author.iterdir()} == {"001.jpg", "002.jpg"}
+
+
+@pytest.fixture
+def bucket_lift(tmp_path):
+    root = tmp_path / "Luolcy"
+    author = root / "2611" / "261123" / "author"
+    bucket = author / "P" / "P_3 [2 11B]"
+    bucket.mkdir(parents=True)
+    media = {"001.JPG": b"photo", "002.png": b"second"}
+    for name, content in media.items():
+        (bucket / name).write_bytes(content)
+    direct = author / "001.mp4"
+    direct.write_bytes(b"loose")
+    sibling = author / "P [1 7B]"
+    sibling.mkdir()
+    (sibling / "001.jpg").write_bytes(b"sibling")
+    return root, author, bucket, direct, sibling
+
+
+@pytest.mark.parametrize("fuse_compat", [False, True])
+def test_bucket_lift_preserves_names_and_recovers_after_first_group_is_published(
+    bucket_lift, tmp_path, monkeypatch, fuse_compat,
+):
+    root, author, bucket, direct, sibling = bucket_lift
+    second_bucket = bucket.parent / "P_4 [1 4B]"
+    second_bucket.mkdir()
+    (second_bucket / "001.jpg").write_bytes(b"next")
+    identity = direct.stat()
+    preview = _preview(author, root)
+    assert preview["operation"] == LIFT_LUOLCY_BUCKETS
+    manifest = _prepare(author, root, preview)
+    saved = tmp_path / "frozen.json"
+    save_frozen_manifest(saved, manifest)
+    if fuse_compat:
+        force_zos_no_directory_rename(monkeypatch)
+    publish = execution._publish_group
+
+    def interrupt_after_first_group(*args, **kwargs):
+        publish(*args, **kwargs)
+        raise RuntimeError("interrupted after publishing first lift group")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(execution, "_publish_group", interrupt_after_first_group)
+        with pytest.raises(RuntimeError, match="after publishing first lift group"):
+            execute_frozen_manifest(manifest, lease_fence=lambda: None, allow_fuse_compat=fuse_compat)
+
+    lifted = author / "P_3 [2 11B]"
+    assert (lifted / "001.JPG").read_bytes() == b"photo"
+    assert not (author / second_bucket.name).exists()
+    manifest = load_frozen_manifest(saved, job_id=170, package=author)
+    result = execute_frozen_manifest(manifest, lease_fence=lambda: None, allow_fuse_compat=fuse_compat)
+
+    assert result["files_reconciled"] == 3
+    assert result["groups_published"] == 1
+    assert {child.name: child.read_bytes() for child in lifted.iterdir()} == {
+        "001.JPG": b"photo", "002.png": b"second",
+    }
+    assert (author / second_bucket.name / "001.jpg").read_bytes() == b"next"
+    assert not bucket.parent.exists()
+    assert direct.read_bytes() == b"loose"
+    assert (direct.stat().st_ino, direct.stat().st_mtime_ns) == (identity.st_ino, identity.st_mtime_ns)
+    assert (sibling / "001.jpg").read_bytes() == b"sibling"
+    assert {item.name for item in author.iterdir()} == {
+        direct.name, sibling.name, lifted.name, second_bucket.name,
+    }
+
+    assert execute_frozen_manifest(
+        manifest, lease_fence=lambda: pytest.fail("Unexpected mutation"), allow_fuse_compat=fuse_compat,
+    )["files_reconciled"] == 3
+
+
+@pytest.mark.parametrize("change", ["added", "removed", "replaced"])
+@pytest.mark.parametrize("after_freeze", [False, True])
+def test_bucket_lift_rejects_changes_to_reviewed_root_files_before_staging(bucket_lift, change, after_freeze):
+    root, author, bucket, direct, _ = bucket_lift
+    preview = _preview(author, root)
+    manifest = _prepare(author, root, preview) if after_freeze else None
+    if change == "added":
+        (author / "another.mp4").write_bytes(b"foreign")
+    elif change == "removed":
+        direct.unlink()
+    else:
+        replacement = author.parent / "replacement"
+        replacement.write_bytes(b"loose")
+        replacement.replace(direct)
+
+    with pytest.raises(MediaPackageExecutionConflict):
+        if after_freeze:
+            execute_frozen_manifest(manifest, lease_fence=lambda: pytest.fail("Unexpected mutation"))
+        else:
+            _prepare(author, root, preview)
+
+    assert (bucket / "001.JPG").read_bytes() == b"photo"
+    assert not list(author.glob(".nfc-*"))
+
+
+@pytest.mark.parametrize("change", ["renumbered", "wrong_kind_shell", "same_ordinal"])
+def test_bucket_lift_rejects_unreviewable_frozen_layout(bucket_lift, change):
+    root, author, _, _, sibling = bucket_lift
+    manifest = _prepare(author, root, _preview(author, root))
+    if change == "renumbered":
+        row = manifest["moves"][0]
+        row["target_name"] = "003.JPG"
+        for key in ("target", "final", "final_relative_path"):
+            row[key] = str(Path(row[key]).with_name("003.JPG"))
+    elif change == "wrong_kind_shell":
+        manifest["origin_directories"] = {
+            str(author / "V" / Path(path).relative_to(author / "P")): identity
+            for path, identity in manifest["origin_directories"].items()
+        }
+        for row in manifest["moves"]:
+            relative = Path("V") / Path(row["source"]).relative_to(author / "P")
+            row["source"] = str(author / relative)
+            row["original_relative_path"] = str(relative)
+    else:
+        # An existing bucket of a different size can still use the same ordinal.
+        manifest["luolcy_author_siblings"] = {
+            "P_3 [1 7B]": manifest["luolcy_author_siblings"][sibling.name],
+        }
+
+    with pytest.raises(MediaPackageExecutionConflict):
+        execution._validate_frozen_paths(manifest)

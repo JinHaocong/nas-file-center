@@ -19,10 +19,10 @@ from typing import Callable
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_package_organizer import (
-    APPEND_SINGLE_VIDEO, APPEND_VIDEO_OPERATIONS, MAX_FILES_PER_GROUP,
-    PROMOTE_NUMBERED_PHOTO_GROUPS, _classify, _input_fingerprint, _open_luolcy_author,
-    _luolcy_batch_boundary, _luolcy_classification_kind, _luolcy_leaf_promotion,
-    _package_path, _size_label, _walk_package, preview_media_package_package,
+    APPEND_SINGLE_VIDEO, APPEND_VIDEO_OPERATIONS, LIFT_LUOLCY_BUCKETS, MAX_FILES_PER_GROUP,
+    PROMOTE_NUMBERED_PHOTO_GROUPS, _author_media_row, _classify, _input_fingerprint,
+    _luolcy_batch_boundary, _luolcy_bucket_slot, _luolcy_classification_kind, _luolcy_leaf_promotion,
+    _open_luolcy_author, _package_path, _size_label, _walk_package, preview_media_package_package,
 )
 from app.fs_ops import rename_directory_noreplace_compat, rename_noreplace_at
 
@@ -113,7 +113,8 @@ def prepare_organizer_manifest(
             or fresh["actual_moves"] != preview_record.get("needed_moves")
             or fresh.get("luolcy_author_siblings", {}) != preview_record.get("luolcy_author_siblings", {})
             or any(fresh.get(key) != preview_record.get(key)
-                   for key in ("unit", "input_fingerprint", "operation", "groups", "renamed_count"))):
+                   for key in ("unit", "input_fingerprint", "operation", "groups", "renamed_count",
+                               "luolcy_root_fingerprint"))):
         raise MediaPackageExecutionConflict(f"Organizing unit changed since preview: {unit}")
     scope = {
         "organizer_mode": mode, "quarantine_root": str(quarantine_root) if quarantine_root else None,
@@ -122,6 +123,8 @@ def prepare_organizer_manifest(
     }
     if fresh.get("luolcy_author_siblings"):
         scope["luolcy_author_siblings"] = fresh["luolcy_author_siblings"]
+    if fresh["operation"] == LIFT_LUOLCY_BUCKETS:
+        scope["luolcy_root_fingerprint"] = fresh.get("luolcy_root_fingerprint")
     return _freeze_layout(unit, fresh, media_package_root=media_package_root, job_id=job_id,
                           organizer_scope=scope)
 
@@ -1365,6 +1368,28 @@ def _execute_flat_manifest(manifest: dict, lease_fence: Callable[[], None],
             "groups_published": 0}
 
 
+def _validate_luolcy_lift_groups(manifest: dict) -> set[tuple[str, str]]:
+    """Validate exact group names, one complete numbered source and unique bucket ordinals."""
+    slots: set[tuple[str, str]] = set()
+    for index, group in enumerate(manifest["groups"]):
+        name, kind = group["final"], group["kind"]
+        slot = _luolcy_bucket_slot(name)
+        if slot is None:
+            raise MediaPackageExecutionConflict("Invalid frozen Luolcy bucket name")
+        ordinal = slot[1]
+        stem = kind if ordinal == "0" else f"{kind}_{ordinal}"
+        rows = _group_files(manifest, index)
+        paths = [Path(row["source"]) for row in rows]
+        expected_numbers = {f"{number:03d}" for number in range(1, group["count"] + 1)}
+        if (name != f"{stem} [{group['count']} {_size_label(group['bytes'])}]"
+                or slot in slots or len({path.parent for path in paths}) != 1
+                or {path.stem for path in paths} != expected_numbers
+                or sum(row["identity"][2] for row in rows) != group["bytes"]):
+            raise MediaPackageExecutionConflict("Invalid frozen Luolcy bucket contents")
+        slots.add(slot)
+    return slots
+
+
 def _validate_luolcy_sources(manifest: dict, package: Path) -> None:
     """Constrain frozen inputs to reviewed classifications or a complete set of media leaves."""
     origins = manifest.get("origin_directories")
@@ -1377,6 +1402,8 @@ def _validate_luolcy_sources(manifest: dict, package: Path) -> None:
     child_kinds: dict[str, set[str]] = {}
     has_unlabelled_origin = False
     moving_names = {group["final"].casefold() for group in manifest["groups"]}
+    lifting = manifest["operation"] == LIFT_LUOLCY_BUCKETS
+    lift_slots = _validate_luolcy_lift_groups(manifest) if lifting else set()
     for row in manifest["moves"]:
         source = Path(row["source"])
         top, *children = source.relative_to(package).parts
@@ -1389,6 +1416,13 @@ def _validate_luolcy_sources(manifest: dict, package: Path) -> None:
             moving_names.add(row["target_name"].casefold())
         elif manifest["groups"][group_index]["kind"] != kind:
             raise MediaPackageExecutionConflict("Frozen Luolcy input is in the wrong group")
+        if lifting:
+            if (len(children) != 2 or group_index is None or row["target_name"] != source.name
+                    or children[0] != manifest["groups"][group_index]["final"]
+                    or _luolcy_classification_kind(top) != kind or _luolcy_bucket_slot(top)):
+                raise MediaPackageExecutionConflict("Invalid frozen Luolcy bucket lift path")
+            expected_origins.update((str(package / top), str(source.parent)))
+            continue
         if not children:
             direct_kinds.add(kind)
             continue
@@ -1419,6 +1453,8 @@ def _validate_luolcy_sources(manifest: dict, package: Path) -> None:
                 or folded.startswith(".nfc-") or folded in moving_names
                 or (expected_origins and _luolcy_batch_boundary(name))):
             raise MediaPackageExecutionConflict("Invalid frozen Luolcy named work")
+        if lifting and _luolcy_bucket_slot(name) in lift_slots:
+            raise MediaPackageExecutionConflict("Frozen Luolcy bucket ordinal is already occupied")
         moving_names.add(folded)
     if any(not isinstance(identity, list) or len(identity) != 2
            or identity[0] != manifest["package_dev"]
@@ -1438,10 +1474,16 @@ def _validate_frozen_paths(manifest: dict) -> None:
         raise MediaPackageExecutionConflict("Invalid frozen filesystem identity")
     root_stage = manifest.get("root_stage")
     luolcy_author = _is_luolcy_author(manifest)
+    lifting = manifest.get("operation") == LIFT_LUOLCY_BUCKETS
+    if lifting and (not luolcy_author or not manifest.get("groups")
+                    or not isinstance(manifest.get("luolcy_root_fingerprint"), str)):
+        raise MediaPackageExecutionConflict("Invalid frozen Luolcy bucket lift scope")
     if luolcy_author and (
         not manifest.get("media_package_root")
         or manifest.get("local_media_kinds")
-        or manifest.get("operation") not in {"flatten_pure_media", "bucket_pure_media", "sort_mixed_media"}
+        or manifest.get("operation") not in {
+            "flatten_pure_media", "bucket_pure_media", "sort_mixed_media", LIFT_LUOLCY_BUCKETS,
+        }
     ):
         raise MediaPackageExecutionConflict("Invalid frozen Luolcy author scope")
     if root_stage is not None:
@@ -1470,10 +1512,11 @@ def _validate_frozen_paths(manifest: dict) -> None:
             ordinal = kind_indexes.get(group["kind"])
             if ordinal is None or not isinstance(group.get("bytes"), int) or group["bytes"] < 0:
                 raise MediaPackageExecutionConflict("Invalid frozen Luolcy author group")
-            stem = group["kind"] if ordinal == 0 else f"{group['kind']}_{ordinal}"
-            if group["final"] != f"{stem} [{group['count']} {_size_label(group['bytes'])}]":
-                raise MediaPackageExecutionConflict("Invalid frozen Luolcy author bucket name")
-            kind_indexes[group["kind"]] += 1
+            if not lifting:
+                stem = group["kind"] if ordinal == 0 else f"{group['kind']}_{ordinal}"
+                if group["final"] != f"{stem} [{group['count']} {_size_label(group['bytes'])}]":
+                    raise MediaPackageExecutionConflict("Invalid frozen Luolcy author bucket name")
+                kind_indexes[group["kind"]] += 1
 
     rows = manifest.get("moves")
     if not isinstance(rows, list):
@@ -1671,6 +1714,8 @@ def _verify_luolcy_author_scope(manifest: dict, package: Path, *, completed: boo
     if root_stage is not None:
         stages.add(root_stage)
 
+    lifting = manifest["operation"] == LIFT_LUOLCY_BUCKETS
+    preserved_media = []
     root_files = {}
     possible_groups = {}
     live_stages = set()
@@ -1699,7 +1744,10 @@ def _verify_luolcy_author_scope(manifest: dict, package: Path, *, completed: boo
                 elif str(path) in origins:
                     _scan_luolcy_origin(path, origins, sources, live_sources)
                     live_origins.add(name)
-                elif stat.S_ISREG(info.st_mode):
+                elif (lifting and stat.S_ISREG(info.st_mode) and info.st_dev == manifest["package_dev"]
+                      and not name.casefold().startswith(".nfc-") and (kind := _classify(name)) in {"P", "V"}):
+                    preserved_media.append(_author_media_row(path, info, kind))
+                elif not lifting and stat.S_ISREG(info.st_mode):
                     root_files[str(path)] = _identity(info)
                 else:
                     raise MediaPackageExecutionConflict(f"Unreviewed entry in Luolcy author root: {path}")
@@ -1707,6 +1755,8 @@ def _verify_luolcy_author_scope(manifest: dict, package: Path, *, completed: boo
         os.close(fd)
     if live_siblings != siblings.keys():
         raise MediaPackageExecutionConflict("A reviewed Luolcy named work is missing")
+    if lifting and _input_fingerprint(preserved_media, package) != manifest["luolcy_root_fingerprint"]:
+        raise MediaPackageExecutionConflict("Reviewed Luolcy author root files changed")
 
     live_targets = set()
     live_finals = set()

@@ -15,8 +15,9 @@ from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, numbered_name
 from app.batch.media_package_organizer import (
     MAX_DEPTH, MAX_FILES_PER_GROUP, MAX_PACKAGE_DIRECTORIES, MAX_PACKAGE_FILES, MAX_SCOPE_ENTRIES_PER_DIRECTORY,
-    PROMOTE_NUMBERED_PHOTO_GROUPS,
-    _classify, _luolcy_author_inventory, _package_path, _size_label, _walk_package,
+    LIFT_LUOLCY_BUCKETS, PROMOTE_NUMBERED_PHOTO_GROUPS,
+    _classify, _input_fingerprint, _luolcy_author_inventory, _package_path, _plan_luolcy_bucket_lift, _size_label,
+    _walk_package,
     iter_media_package_discovery, plan_media_layout,
 )
 from app.path_safety import require_allowed_path, require_unreserved_path
@@ -428,7 +429,7 @@ def walk_organizing_unit(
         raise ValueError("Invalid local media scope")
     if mode == "luolcy" and media_package_root is not None:
         if whole_author:
-            items, _ = _luolcy_author_inventory(unit, media_package_root, check_cancelled=check_cancelled)
+            items, _, _ = _luolcy_author_inventory(unit, media_package_root, check_cancelled=check_cancelled)
             if directories is not None:
                 directories.add(unit)
             yield from items
@@ -971,8 +972,19 @@ def preview_organizing_unit(
                 local_media_kinds = _layer_media_kinds(unit, entries, device, protected)
     append_videos = False
     luolcy_siblings = {}
+    root_fingerprint = None
+    plan = None
     if mode == "luolcy" and whole_author:
-        items, luolcy_siblings = _luolcy_author_inventory(unit, media_package_root, check_cancelled=check_cancelled)
+        items, luolcy_siblings, nested_buckets = _luolcy_author_inventory(
+            unit, media_package_root, check_cancelled=check_cancelled, lift_buckets=True,
+        )
+        if nested_buckets:
+            root_fingerprint = _input_fingerprint(items, unit)
+            plan = _plan_luolcy_bucket_lift(
+                unit, nested_buckets, luolcy_siblings, {row["kind"] for row in items},
+                max_rows=max_rows, include_items=include_items, include_mapping=include_mapping,
+            )
+            items = [row for bucket in nested_buckets.values() for row in bucket]
         directories = {unit}
     elif photo_groups is not None:
         items, directories = photo_groups
@@ -992,15 +1004,16 @@ def preview_organizing_unit(
         while parent != unit and parent not in origin_dirs:
             origin_dirs.add(parent)
             parent = parent.parent
-    plan = plan_media_layout(
-        unit, items, max_rows=max_rows,
-        include_items=include_items, include_mapping=include_mapping, organizer_mode=True,
-        legacy_bucket_conflicts=not (mode == "semantic"
-                                     and (photo_groups is not None or local_media_kinds
-                                          or _CALENDAR_DIRECTORY.fullmatch(unit.name))),
-        append_videos=append_videos,
-        numbered_photo_groups=photo_groups is not None,
-    )
+    if plan is None:
+        plan = plan_media_layout(
+            unit, items, max_rows=max_rows,
+            include_items=include_items, include_mapping=include_mapping, organizer_mode=True,
+            legacy_bucket_conflicts=not (mode == "semantic"
+                                         and (photo_groups is not None or local_media_kinds
+                                              or _CALENDAR_DIRECTORY.fullmatch(unit.name))),
+            append_videos=append_videos,
+            numbered_photo_groups=photo_groups is not None,
+        )
     if mode == "semantic" and plan["status"] == "ready" and not (local_media_kinds or whole_author):
         held = _author_loose_record(unit, items, directories, protected)
         if held is not None:
@@ -1022,6 +1035,7 @@ def preview_organizing_unit(
         **({"local_media_kinds": list(local_media_kinds)} if local_media_kinds else {}),
         **scope,
         **({"luolcy_author_siblings": luolcy_siblings} if luolcy_siblings else {}),
+        **({"luolcy_root_fingerprint": root_fingerprint} if root_fingerprint is not None else {}),
         **({"_luolcy_merged_children": sorted(str(path) for path in origin_dirs if path.parent == unit)}
            if mode == "luolcy" and whole_author else {}),
         "total_bytes": sum(row["bytes"] for row in items),
@@ -1173,7 +1187,9 @@ def iter_organizing_previews(
                     if entry.author_rebuild_candidate:
                         row = preview(unit, "luolcy", True)
                         if row["status"] != "skipped":
-                            if row["status"] in {"ready", "already_organized"}:
+                            if (row["status"] in {"ready", "already_organized"}
+                                    or row.get("operation") == LIFT_LUOLCY_BUCKETS):
+                                # A blocked lift still owns its input buckets. Do not independently renumber them.
                                 merged_children.update(Path(path) for path in row["_luolcy_merged_children"])
                             yield row
                             continue
