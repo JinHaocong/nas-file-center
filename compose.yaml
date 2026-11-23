@@ -1,7 +1,7 @@
 name: nas-file-center
 
 x-common: &common
-  image: nas-file-center:1.7.4
+  image: nas-file-center:1.7.5
   build:
     context: .
     args:

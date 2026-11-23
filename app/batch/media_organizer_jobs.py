@@ -13,6 +13,7 @@ from sqlalchemy import func, select, text
 
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_organizer_planner import is_reserved_workspace
+from app.batch.media_package_organizer import APPEND_SINGLE_VIDEO
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.config import Settings
 from app.models import TaskEvent, WorkJob, utcnow
@@ -218,6 +219,8 @@ def get_batch(session_factory, job_id: int, *, page: int, page_size: int) -> dic
 
 def _preview_row(record: dict, report: Path) -> dict:
     mapping = record.get("_mapping_items", []) if record["status"] == "ready" else []
+    if record.get("operation") == APPEND_SINGLE_VIDEO:
+        mapping = [move for move in mapping if move["source"] != move["target"]]
     mapping_id = hashlib.sha256(record["unit"].encode()).hexdigest() if mapping else None
     if mapping_id is not None:
         with _report_file(report / f"{mapping_id}.jsonl") as stream:

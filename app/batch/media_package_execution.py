@@ -19,7 +19,7 @@ from typing import Callable
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_package_organizer import (
-    MAX_FILES_PER_GROUP, _input_fingerprint, _package_path, _walk_package,
+    APPEND_SINGLE_VIDEO, MAX_FILES_PER_GROUP, _input_fingerprint, _package_path, _walk_package,
     preview_media_package_package,
 )
 from app.fs_ops import rename_directory_noreplace_compat, rename_noreplace_at
@@ -30,6 +30,7 @@ class MediaPackageExecutionConflict(ValueError):
 
 
 MANIFEST_VERSION = 2
+_FLAT_OPERATIONS = frozenset({"flatten_pure_media", APPEND_SINGLE_VIDEO})
 
 
 def _identity(st) -> list[int]:
@@ -142,7 +143,7 @@ def _freeze_layout(source: Path, fresh: dict, *, media_package_root: Path | None
                 directories[key] = [int(st.st_dev), int(st.st_ino)]
             parent = parent.parent
 
-    is_flat = fresh["operation"] == "flatten_pure_media"
+    is_flat = fresh["operation"] in _FLAT_OPERATIONS
     root_stage = f".nfc-media_package-stage-{job_id}-root" if is_flat else None
     groups = []
     group_indexes = {}
@@ -171,8 +172,6 @@ def _freeze_layout(source: Path, fresh: dict, *, media_package_root: Path | None
             "original_relative_path": os.path.relpath(item["path"], source),
             "final_relative_path": os.path.relpath(final, source),
         })
-    if len(moves) != fresh["needed_moves"]:
-        raise MediaPackageExecutionConflict("Frozen move count differs from reviewed preview")
     manifest = {
         "schema_version": MANIFEST_VERSION, "job_id": job_id, "package": str(source),
         "media_package_root": str(media_package_root) if media_package_root is not None else None,
@@ -181,6 +180,10 @@ def _freeze_layout(source: Path, fresh: dict, *, media_package_root: Path | None
         "root_stage": root_stage, "groups": groups, "moves": moves, "origin_directories": directories,
     }
     _validate_frozen_paths(manifest)
+    if (len(_flat_rows(manifest)) if is_flat else len(moves)) != fresh["needed_moves"]:
+        raise MediaPackageExecutionConflict("Frozen move count differs from reviewed preview")
+    if fresh["operation"] == APPEND_SINGLE_VIDEO and len(moves) != len(items):
+        raise MediaPackageExecutionConflict("Frozen append is missing numbered inputs")
     return manifest
 
 
@@ -1040,6 +1043,8 @@ _ROOT_READY_MARKER = ".nfc-publish-ready"
 
 
 def _flat_rows(manifest: dict) -> list[dict]:
+    if manifest["operation"] == APPEND_SINGLE_VIDEO:
+        return [row for row in manifest["moves"] if row["source"] != row["final"]]
     return manifest["moves"]
 
 
@@ -1052,11 +1057,11 @@ def _root_finals_complete(manifest: dict) -> bool:
     """
     package = Path(manifest["package"])
     manifest_final_targets = {
-        row["final"]: row["identity"] for row in _flat_rows(manifest)
+        row["final"]: row["identity"] for row in manifest["moves"]
     }
     if len(manifest_final_targets) != len(manifest["moves"]):
         raise MediaPackageExecutionConflict("Duplicate flat final targets")
-    for row in _flat_rows(manifest):
+    for row in manifest["moves"]:
         target = Path(row["final"])
         st = _entry(package, target.name)
         if st is None or not stat.S_ISREG(st.st_mode) or _identity(st) != row["identity"]:
@@ -1083,9 +1088,10 @@ def _root_finals_complete(manifest: dict) -> bool:
 
 def _flat_stage_inspect(manifest: dict, stage: Path) -> bool:
     """Validate all existing stage entries; return whether publish marker exists."""
+    rows = _flat_rows(manifest)
     expected = {Path(row["target"]).name.casefold(): row["identity"]
-                for row in _flat_rows(manifest)}
-    if len(expected) != len(manifest["moves"]):
+                for row in rows}
+    if len(expected) != len(rows):
         raise MediaPackageExecutionConflict("Flat numbered destination collision")
     folder = _open_folder(stage)
     has_marker = False
@@ -1232,12 +1238,48 @@ def _remove_flat_stage(manifest: dict, stage: Path,
         os.close(parent_fd)
 
 
+def _verify_append_scope(manifest: dict, package: Path) -> None:
+    """Check the approved one-video layout before staging or resuming publication."""
+    if manifest["operation"] != APPEND_SINGLE_VIDEO:
+        return
+    move, = _flat_rows(manifest)
+    source = Path(move["source"])
+    expected = {row["target_name"]: row for row in manifest["moves"]}
+    allowed = {*expected, source.parent.name, manifest["root_stage"]}
+    package_fd = _open_verified_package(manifest)
+    try:
+        with os.scandir(package_fd) as entries:
+            live = {entry.name: entry.stat(follow_symlinks=False) for entry in entries}
+    finally:
+        os.close(package_fd)
+    if live.keys() - allowed:
+        raise MediaPackageExecutionConflict("Single-video append has unreviewed entries in the author root")
+    for name, row in expected.items():
+        if row["source"] == row["final"] or name in live:
+            _check_file(live.get(name), row["identity"], package / name)
+    if source.parent.name not in live:
+        return
+    fd = _open_folder(source.parent)
+    try:
+        info = os.fstat(fd)
+        if [info.st_dev, info.st_ino] != manifest["origin_directories"].get(str(source.parent)):
+            raise MediaPackageExecutionConflict("Single-video source folder changed")
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                if entry.name != source.name:
+                    raise MediaPackageExecutionConflict("Single-video source folder has unreviewed entries")
+                _check_file(entry.stat(follow_symlinks=False), move["identity"], source)
+    finally:
+        os.close(fd)
+
+
 def _execute_flat_manifest(manifest: dict, lease_fence: Callable[[], None],
                            progress: Callable[[int, int], None] | None,
                            link_intent: LinkIntent | None = None) -> dict:
     package = Path(manifest["package"])
     stage = package / manifest["root_stage"]
     total = len(_flat_rows(manifest))
+    _verify_append_scope(manifest, package)
     if _root_finals_complete(manifest):
         if link_intent is not None and stage.exists() and _flat_stage_inspect(manifest, stage):
             for row in _flat_rows(manifest):
@@ -1273,6 +1315,7 @@ def _execute_flat_manifest(manifest: dict, lease_fence: Callable[[], None],
         # published, including an item whose original source name is identical.
         recovered = total
 
+    _verify_append_scope(manifest, package)
     for row in _flat_rows(manifest):
         _publish_flat_file(row, stage, package, lease_fence, link_intent)
     _remove_flat_stage(manifest, stage, lease_fence)
@@ -1291,11 +1334,11 @@ def _validate_frozen_paths(manifest: dict) -> None:
         raise MediaPackageExecutionConflict("Invalid frozen filesystem identity")
     root_stage = manifest.get("root_stage")
     if root_stage is not None:
-        if (manifest.get("operation") != "flatten_pure_media"
+        if (manifest.get("operation") not in _FLAT_OPERATIONS
                 or root_stage != f".nfc-media_package-stage-{manifest['job_id']}-root"
                 or manifest.get("groups")):
             raise MediaPackageExecutionConflict("Invalid frozen flat staging scope")
-    elif manifest.get("operation") == "flatten_pure_media":
+    elif manifest.get("operation") in _FLAT_OPERATIONS:
         raise MediaPackageExecutionConflict("Missing flat staging authority")
     for index, group in enumerate(manifest.get("groups", [])):
         stage = f".nfc-media_package-stage-{manifest['job_id']}-{index}"
@@ -1358,6 +1401,10 @@ def _validate_frozen_paths(manifest: dict) -> None:
         if (len(rows) > MAX_FILES_PER_GROUP or any(row["group"] is not None for row in rows)
                 or len({row["target_name"].casefold() for row in rows}) != len(rows)):
             raise MediaPackageExecutionConflict("Flat frozen numbering is inconsistent")
+        if manifest["operation"] == APPEND_SINGLE_VIDEO:
+            moving = _flat_rows(manifest)
+            if len(rows) < 2 or len(moving) != 1 or Path(moving[0]["source"]).parent.parent != package:
+                raise MediaPackageExecutionConflict("Invalid frozen single-video append")
     else:
         covered = sum(group["count"] for group in manifest["groups"])
         if covered != len(rows):
@@ -1404,13 +1451,35 @@ def _live_organizer_snapshot(manifest: dict, package: Path, mode: str) -> list[d
     whole_author = manifest.get("whole_author", False)
     if whole_author:
         preview = preview_organizing_unit(package, allowed_roots=[package], include_items=True, **options)
-        if preview.get("whole_author") and preview["status"] == "ready":
+        if (preview.get("whole_author") and preview["status"] == "ready"
+                and preview.get("operation") == manifest.get("operation")):
             return preview["_snapshot_items"]
     live = list(walk_organizing_unit(package, whole_author=whole_author, **options))
     # A grouped plan can have published every output before its final cleanup ran.
     if whole_author and not _exact_published_snapshot(manifest, live):
         raise MediaPackageExecutionConflict("Whole-author scope or destination changed since preview")
     return live
+
+
+def _verify_recovery_protection(manifest: dict, package: Path) -> None:
+    """Keep approved staging recoverable without crossing a retargeted protection boundary."""
+    from app.batch.media_organizer_planner import _resolved_protected_roots
+
+    mode = manifest.get("organizer_mode")
+    if mode is None:
+        return
+    media_root = manifest.get("media_package_root") if mode == "semantic" else None
+    quarantine = manifest.get("quarantine_root")
+    roots = _resolved_protected_roots(
+        Path(media_root) if media_root else None, Path(quarantine) if quarantine else None,
+    )
+    for root in roots:
+        if package.is_relative_to(root) or (root.is_relative_to(package) and any(
+            Path(row[key]).is_relative_to(root)
+            for row in manifest["moves"]
+            for key in ("source", "target", "final")
+        )):
+            raise MediaPackageExecutionConflict(f"Protected organizer scope changed since preview: {root}")
 
 
 def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
@@ -1444,7 +1513,9 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
             or _compat_inspect_group(manifest, index) is not None
             for index, group in enumerate(manifest["groups"])
         )
-    if not recovery_artifact:
+    if recovery_artifact:
+        _verify_recovery_protection(manifest, package)
+    else:
         try:
             mode = manifest.get("organizer_mode")
             live = (list(_walk_package(package)) if mode is None

@@ -1,7 +1,7 @@
 {
   "name": "nas-file-center-frontend",
   "private": true,
-  "version": "1.7.4",
+  "version": "1.7.5",
   "type": "module",
   "scripts": {
     "dev": "vite",

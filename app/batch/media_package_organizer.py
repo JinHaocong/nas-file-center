@@ -23,6 +23,7 @@ MAX_FILES_PER_GROUP = 200
 MAX_PACKAGE_FILES = 300_000
 MAX_PACKAGE_DIRECTORIES = 100_000
 MAX_DEPTH = 64
+APPEND_SINGLE_VIDEO = "append_single_video"
 _MONTH = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])$")
 _DAY = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])$")
 
@@ -305,7 +306,7 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
 def plan_media_layout(
     source: Path, items: list[dict], *, max_rows: int = 100, include_items: bool = False,
     include_mapping: bool = False, organizer_mode: bool = False,
-    legacy_bucket_conflicts: bool = True,
+    legacy_bucket_conflicts: bool = True, append_single_video: bool = False,
 ) -> dict:
     """Plan the same final media layout from a mode-specific bounded inventory."""
     input_fingerprint = _input_fingerprint(items, source)
@@ -330,6 +331,7 @@ def plan_media_layout(
     if (len(items) <= MAX_FILES_PER_GROUP and totals["Other"] == 0
             and (totals["P"] == 0 or totals["V"] == 0)):
         ordered = sorted(items, key=lambda row: (
+            append_single_video and Path(row["path"]).parent != source,
             os.path.relpath(row["path"], source).casefold(),
             os.path.relpath(row["path"], source),
         ))
@@ -352,8 +354,8 @@ def plan_media_layout(
             for name in new_names
             if str(source / name) not in source_paths and os.path.lexists(source / name)
         ] if organizer_mode else []
-        # The execution phase must stage ALL files, including already-numbered
-        # root entries that currently occupy another file's desired target.
+        # Retain the complete final map for freezing and result verification.
+        # The append operation needs only the changed row in its preview.
         mapping = [
             {"source": row["path"], "target": str(source / name),
              "source_name": row["name"], "target_name": name,
@@ -361,7 +363,9 @@ def plan_media_layout(
              "bytes": row["bytes"], "kind": row["kind"]}
             for row, name in zip(ordered, new_names)
         ] if actual_moves or include_mapping else []
-        planned = mapping if actual_moves else []
+        planned = [
+            row for row in mapping if not append_single_video or row["source"] != row["target"]
+        ] if actual_moves else []
         return {
             "package": str(source),
             "input_fingerprint": input_fingerprint,
@@ -375,7 +379,7 @@ def plan_media_layout(
             "resolved_collision_count": collision_count,
             "truncated": len(planned) > max_rows,
             "read_only": True,
-            "operation": "flatten_pure_media",
+            "operation": APPEND_SINGLE_VIDEO if append_single_video else "flatten_pure_media",
             **({"_snapshot_items": items} if include_items else {}),
             **({"_mapping_items": mapping} if include_mapping else {}),
             **({"actual_moves": actual_moves} if organizer_mode else {}),

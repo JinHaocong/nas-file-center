@@ -122,6 +122,123 @@ def _batch(client, preview):
     return response.json()["job_id"]
 
 
+def test_batch_appends_an_only_child_video_without_moving_numbered_root_videos(tmp_path, monkeypatch):
+    from app.batch import media_package_execution
+
+    client, settings, _ = _fixture(tmp_path)
+    author = settings.data_mount / "Else/2611/261123/AKS"
+    video = author / "#AKs 11.19号 标题" / "001.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"nested")
+    originals = {author / f"{index:03d}.mp4": bytes([index]) for index in range(1, 6)}
+    for path, content in originals.items():
+        path.write_bytes(content)
+    destination = author / "006.mp4"
+
+    preview = _preview(client, settings, author.parent)
+    assert [(row["unit"], row["status"], row["needed_moves"]) for row in preview["units"]] == [
+        (str(author), "ready", 1),
+    ]
+    assert [(move["source"], move["target"]) for move in preview["units"][0]["sample_moves"]] == [
+        (str(video), str(destination)),
+    ]
+    assert video.read_bytes() == b"nested"
+    staged_sources = []
+    move_one = media_package_execution._move_one
+
+    def record_move(row, **kwargs):
+        staged_sources.append(row["source"])
+        return move_one(row, **kwargs)
+
+    monkeypatch.setattr(media_package_execution, "_move_one", record_move)
+    job = _batch(client, preview)
+    assert _run_next(settings, job)
+    report = client.get(f"/api/media-organizer/batches/{job}").json()
+    assert report["summary"]["success_count"] == 1, report
+    assert staged_sources == [str(video)]
+    assert all(path.read_bytes() == content for path, content in originals.items())
+    assert destination.read_bytes() == b"nested"
+    assert not video.parent.exists()
+    again = _preview(client, settings, author.parent)
+    assert [(row["unit"], row["status"]) for row in again["units"]] == [
+        (str(author), "already_organized"),
+    ]
+
+
+@pytest.mark.parametrize("foreign_path", [None, "003.mp4", "002.mp4", "#AKS 标题/new.mp4"])
+def test_appending_one_video_checks_its_scope_before_resuming_publication(tmp_path, monkeypatch, foreign_path):
+    from app.batch import media_package_execution as engine
+
+    client, settings, _ = _fixture(tmp_path)
+    author = settings.data_mount / "Else/2611/261123/AKS"
+    video = author / "#AKS 标题" / "001.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"nested")
+    kept = author / "001.mp4"
+    kept.write_bytes(b"existing")
+    inode = kept.stat().st_ino
+    batch_id = _batch(client, _preview(client, settings, author))
+
+    def stop_before_publication(*args, **kwargs):
+        raise SystemExit("Worker stopped after staging the new video")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine, "_publish_flat_file", stop_before_publication)
+        with pytest.raises(SystemExit):
+            _run_next(settings, batch_id)
+    assert kept.read_bytes() == b"existing"
+    assert not (author / "002.mp4").exists()
+    assert not video.exists()
+    if foreign_path:
+        (author / foreign_path).write_bytes(b"foreign")
+
+    db, sessions = create_engine_and_session(settings.database_path)
+    try:
+        recovered = recover_interrupted_jobs(db, sessions, worker_id="organizer-test-worker")
+        assert recovered["recovered_requeued"] == 1
+    finally:
+        db.dispose()
+    assert _run_next(settings, batch_id)
+    summary = client.get(f"/api/media-organizer/batches/{batch_id}").json()["summary"]
+    assert kept.stat().st_ino == inode and kept.read_bytes() == b"existing"
+    if foreign_path:
+        assert summary["conflict_count"] == 1
+        assert (author / foreign_path).read_bytes() == b"foreign"
+        assert (author / "002.mp4").exists() == (foreign_path == "002.mp4")
+        staged, = author.glob(".nfc-*/002.mp4")
+        assert staged.read_bytes() == b"nested"
+    else:
+        assert summary["success_count"] == 1
+        assert (author / "002.mp4").read_bytes() == b"nested"
+        assert {item.name for item in author.iterdir()} == {"001.mp4", "002.mp4"}
+
+
+def test_append_refuses_an_occupied_target_before_staging(tmp_path, monkeypatch):
+    from app.batch import media_package_execution as engine
+
+    client, settings, _ = _fixture(tmp_path)
+    author = settings.data_mount / "Else/2611/261123/AKS"
+    video = author / "#AKS 标题" / "001.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"nested")
+    (author / "001.mp4").write_bytes(b"existing")
+    batch_id = _batch(client, _preview(client, settings, author))
+    save_manifest = engine.save_frozen_manifest
+
+    def occupy_target(path, manifest):
+        save_manifest(path, manifest)
+        (author / "002.mp4").write_bytes(b"foreign")
+
+    monkeypatch.setattr(engine, "save_frozen_manifest", occupy_target)
+    assert _run_next(settings, batch_id)
+    report = client.get(f"/api/media-organizer/batches/{batch_id}").json()
+    assert report["summary"]["conflict_count"] == 1, report
+    assert (author / "001.mp4").read_bytes() == b"existing"
+    assert (author / "002.mp4").read_bytes() == b"foreign"
+    assert video.read_bytes() == b"nested"
+    assert not list(author.glob(".nfc-*"))
+
+
 def test_batch_flattens_the_whole_author_tree_around_one_mixed_numbered_folder(tmp_path):
     client, settings, _ = _fixture(tmp_path)
     author = settings.data_mount / "Else/2611/261123/作者A"
@@ -569,9 +686,18 @@ def test_batch_groups_leaf_photo_packs_and_author_date_categories(tmp_path):
     ("No.105 2024年09月 Fantia/03_2026_帖子", {
         "$1800_/cover.jpg": ("001.jpg", b"phot"),
     }),
+    ("No.105 2024年09月 Fantia/17_1932_帖子", {
+        "$1800_/cover.jpg": ("P [1 4B]/001.jpg", b"phot"),
+        "$1800_🎬/clip.mp4": ("V [1 4B]/001.mp4", b"clip"),
+    }),
     ("NO.180 千夏", {
         "GIF/motion.GiF": ("P [2 8B]/001.GiF", b"anim"),
         "P [1 4B]/001.jpg": ("P [2 8B]/002.jpg", b"phot"),
+        "V [1 4B]/001.mp4": ("V [1 4B]/001.mp4", b"clip"),
+    }),
+    ("PoppaChan NO.032", {
+        "P [1 4B]/001.jpg": ("P [2 8B]/001.jpg", b"phot"),
+        "Selfies/cover.JPG": ("P [2 8B]/002.JPG", b"self"),
         "V [1 4B]/001.mp4": ("V [1 4B]/001.mp4", b"clip"),
     }),
 ])
@@ -603,6 +729,50 @@ def test_batch_absorbs_confirmed_media_wrappers_into_their_work(tmp_path, relati
     assert [(row["unit"], row["status"]) for row in again["units"]] == [
         (str(unit), "already_organized"),
     ]
+
+
+def test_fantia_pair_resume_rechecks_a_retargeted_quarantine_link(tmp_path, monkeypatch):
+    from app.batch import media_package_execution as engine
+
+    client, settings, _ = _fixture(tmp_path)
+    post = settings.data_mount / "Else/2611/261109/作者A/Fantia 合集/帖子"
+    photo = post / "$1800_/cover.jpg"
+    video = post / "$1800_🎬/clip.mp4"
+    for path, content in [(photo, b"phot"), (video, b"clip")]:
+        path.parent.mkdir(parents=True)
+        path.write_bytes(content)
+    isolated = settings.data_mount / "isolated"
+    isolated.mkdir()
+    quarantine = settings.data_mount / "quarantine-link"
+    quarantine.symlink_to(isolated, target_is_directory=True)
+    settings.quarantine_root = quarantine
+    batch_id = _batch(client, _preview(client, settings, post))
+    real_move = engine._move_one
+
+    def stop_after_first_stage(row, **kwargs):
+        assert row["source"] == str(photo)
+        real_move(row, **kwargs)
+        raise SystemExit("Worker stopped before staging the video")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine, "_move_one", stop_after_first_stage)
+        with pytest.raises(SystemExit):
+            _run_next(settings, batch_id)
+    quarantine.unlink()
+    quarantine.symlink_to(video.parent, target_is_directory=True)
+
+    db, sessions = create_engine_and_session(settings.database_path)
+    try:
+        recovered = recover_interrupted_jobs(db, sessions, worker_id="organizer-test-worker")
+        assert recovered["recovered_requeued"] == 1
+    finally:
+        db.dispose()
+    assert _run_next(settings, batch_id)
+    summary = client.get(f"/api/media-organizer/batches/{batch_id}").json()["summary"]
+    assert summary["conflict_count"] == 1, summary
+    assert video.read_bytes() == b"clip"
+    staged, = post.glob(".nfc-*/001.jpg")
+    assert staged.read_bytes() == b"phot"
 
 
 def test_grouped_batch_uses_sized_buckets_and_then_skips(tmp_path):
