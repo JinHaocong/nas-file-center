@@ -103,12 +103,14 @@ def prepare_organizer_manifest(
     from app.batch.media_organizer_planner import preview_organizing_unit
 
     local_media_kinds = tuple(preview_record.get("local_media_kinds", ()))
+    local_scope = preview_record.get("local_scope")
     whole_author = preview_record.get("whole_author", False)
     # Only discover the wider scope again when it was part of the approved preview.
     fresh = preview_organizing_unit(
         unit, mode=mode, allowed_roots=allowed_roots, quarantine_root=quarantine_root,
         media_package_root=media_package_root, include_items=True, include_mapping=True,
         local_media_kinds=local_media_kinds,
+        local_scope=local_scope,
         whole_author=None if mode == "semantic" and whole_author else whole_author,
     )
     if (preview_record.get("status") != "ready" or fresh.get("status") != "ready"
@@ -122,6 +124,7 @@ def prepare_organizer_manifest(
     scope = {
         "organizer_mode": mode, "quarantine_root": str(quarantine_root) if quarantine_root else None,
         **({"local_media_kinds": list(local_media_kinds)} if local_media_kinds else {}),
+        **({"local_scope": local_scope} if local_scope is not None else {}),
         **({"whole_author": True} if whole_author else {}),
     }
     if fresh.get("luolcy_author_siblings"):
@@ -1498,6 +1501,16 @@ def _validate_frozen_paths(manifest: dict) -> None:
         raise MediaPackageExecutionConflict("Invalid frozen filesystem identity")
     root_stage = manifest.get("root_stage")
     luolcy_author = _is_luolcy_author(manifest)
+    local_scope = manifest.get("local_scope")
+    if local_scope is not None:
+        from app.batch.media_organizer_planner import DIRECT_MEDIA_SCOPE
+
+        kinds = manifest.get("local_media_kinds")
+        if (local_scope != DIRECT_MEDIA_SCOPE or manifest.get("organizer_mode") != "semantic"
+                or manifest.get("whole_author") or not isinstance(kinds, list)
+                or not 1 <= len(kinds) <= 2 or any(kind not in ("P", "V") for kind in kinds)
+                or kinds != sorted(set(kinds))):
+            raise MediaPackageExecutionConflict("Invalid frozen direct media scope")
     lifting = manifest.get("operation") == LIFT_LUOLCY_BUCKETS
     if lifting and (not luolcy_author or not manifest.get("groups")
                     or not isinstance(manifest.get("luolcy_root_fingerprint"), str)):
@@ -1640,6 +1653,7 @@ def _live_organizer_snapshot(manifest: dict, package: Path, mode: str) -> list[d
         "media_package_root": Path(manifest["media_package_root"]) if manifest.get("media_package_root") else None,
         "quarantine_root": Path(manifest["quarantine_root"]) if manifest.get("quarantine_root") else None,
         "local_media_kinds": tuple(manifest.get("local_media_kinds", ())),
+        "local_scope": manifest.get("local_scope"),
     }
     whole_author = manifest.get("whole_author", False)
     numbered_photos = manifest.get("operation") == PROMOTE_NUMBERED_PHOTO_GROUPS

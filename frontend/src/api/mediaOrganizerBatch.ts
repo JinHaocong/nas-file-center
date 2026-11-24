@@ -35,14 +35,17 @@ interface MediaPreviewConflict {
   existing?: string[];
 }
 
+type OrganizerMappingKind = MediaKind | 'Directory';
+
 export interface MediaBatchPreviewUnit {
   unit: string;
   status: MediaUnitStatus;
   reason: string | null;
+  operation?: string | null;
   totals: Record<MediaKind, number>;
   total_bytes?: number;
   groups: Array<{ name: string; destination: string; count: number; bytes: number }>;
-  sample_moves?: Array<{ source: string; target: string; kind: MediaKind; bytes: number }>;
+  sample_moves?: Array<{ source: string; target: string; kind: OrganizerMappingKind; bytes: number }>;
   needed_moves: number;
   renamed_count: number;
   wrapper_cleanup_count?: number;
@@ -74,7 +77,7 @@ export interface MediaBatchPreview extends OrganizerJob, OrganizerReportPage {
 
 interface MediaMappingPage extends Page {
   total_moves: number;
-  moves: Array<{ source: string; target: string; kind: MediaKind; bytes: number }>;
+  moves: Array<{ source: string; target: string; kind: OrganizerMappingKind; bytes: number }>;
 }
 
 interface MediaLooseFilesPage extends Page {

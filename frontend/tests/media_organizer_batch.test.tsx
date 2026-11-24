@@ -98,6 +98,24 @@ test('mobile media organizer inserts one inspector just after the selected row',
   assert.equal(view.root.findByProps({ id: 'organizer-unit-inspection' }).type, 'section');
 });
 
+test('an archive promotion identifies whole child directories in its preview', t => {
+  const unit = {
+    ...readyUnit, unit: '/synthetic/old/old', operation: 'promote_repeated_archive_children',
+    totals: { P: 0, V: 0, Other: 0 }, total_files: 0, total_proposals: 2, needed_moves: 2,
+  } as MediaBatchPreview['units'][number];
+  let view!: ReactTestRenderer;
+  act(() => {
+    view = TestRenderer.create(<DisplayPreferencesProvider>
+      <MediaOrganizerPreviewReport preview={{ ...preview, units: [unit] }} selected={unit}
+        onSelect={() => {}} onDetails={() => {}} action={null} footer={null}>{null}</MediaOrganizerPreviewReport>
+    </DisplayPreferencesProvider>);
+  });
+  t.after(() => act(() => view.unmount()));
+  const rendered = JSON.stringify(view.toJSON());
+  assert.match(rendered, /整体上提 2 个子目录/);
+  assert.doesNotMatch(rendered, /0 个文件/);
+});
+
 /** Render a real route with a fresh query client. */
 async function openBatch(location: string, page = <BatchPage />,
   createNodeMock?: (element: React.ReactElement) => unknown) {

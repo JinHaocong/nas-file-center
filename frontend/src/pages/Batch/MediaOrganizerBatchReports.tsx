@@ -44,7 +44,7 @@ const outcomes = {
   failed: { label: '失败', tone: 'failed' },
 } satisfies Record<MediaBatchOutcome, { label: string; tone: string }>;
 const resultStatuses: readonly MediaBatchOutcome[] = ['success', 'skipped', 'conflict', 'failed'];
-const mappingKindLabels = { P: '图片', V: '视频', Other: '其他' };
+const mappingKindLabels = { P: '图片', V: '视频', Other: '其他', Directory: '目录' };
 
 type OpenUnitDetails = (row: MediaBatchPreviewUnit, opener: HTMLButtonElement) => void;
 
@@ -87,6 +87,9 @@ function PreviewUnitDetails({ row, onDetails }: { row: MediaBatchPreviewUnit; on
 
 /** Name the actual media present without synthesizing a filename or destination. */
 function unitMediaLabel(row: MediaBatchPreviewUnit) {
+  if (row.operation === 'promote_repeated_archive_children') {
+    return `整体上提 ${row.needed_moves.toLocaleString()} 个子目录`;
+  }
   const counts = [];
   if (row.totals.P) counts.push(`${row.totals.P.toLocaleString()} 张图片`);
   if (row.totals.V) counts.push(`${row.totals.V.toLocaleString()} 段视频`);
@@ -106,6 +109,7 @@ function UnitInspection({ row, onDetails, panelRef }: {
   panelRef: React.Ref<HTMLElement>;
 }) {
   const sample = row.sample_moves?.find(move => move.source !== move.target);
+  const archiveLift = row.operation === 'promote_repeated_archive_children';
   return (
     <section ref={panelRef} className="nfc-unit-inspection" aria-label="所选目录整理详情" id="organizer-unit-inspection">
       <div className="nfc-unit-inspection-heading">
@@ -115,12 +119,14 @@ function UnitInspection({ row, onDetails, panelRef }: {
       <CodePath value={row.unit} />
       <div className="nfc-unit-facts">
         <span>{unitMediaLabel(row)}</span>
-        {row.total_bytes !== undefined && <span>{formatBytes(row.total_bytes)}</span>}
-        <span>移动 {row.needed_moves.toLocaleString()} · 改名 {row.renamed_count.toLocaleString()}</span>
-        {row.wrapper_cleanup_count !== undefined && <span>清空旧分类 {row.wrapper_cleanup_count}</span>}
+        {archiveLift ? <span>保留子目录内部结构</span> : <>
+          {row.total_bytes !== undefined && <span>{formatBytes(row.total_bytes)}</span>}
+          <span>移动 {row.needed_moves.toLocaleString()} · 改名 {row.renamed_count.toLocaleString()}</span>
+          {row.wrapper_cleanup_count !== undefined && <span>清空旧分类 {row.wrapper_cleanup_count}</span>}
+        </>}
       </div>
       {sample && (
-        <dl className="nfc-unit-path-comparison" aria-label="文件路径调整示例">
+        <dl className="nfc-unit-path-comparison" aria-label={archiveLift ? '目录上提示例' : '文件路径调整示例'}>
           <div><dt>当前路径</dt><dd><CodePath value={sample.source} /></dd></div>
           <div><dt>整理后路径</dt><dd><CodePath value={sample.target} /></dd></div>
         </dl>
@@ -277,8 +283,9 @@ export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClos
                     <th scope="col">目标路径</th><th scope="col">大小</th></tr></thead>
                   <tbody>{data.moves.map(move => (
                     <tr key={move.source}>
-                      <td>{move.kind}</td><td><CodePath value={move.source} /></td>
-                      <td><CodePath value={move.target} /></td><td>{formatBytes(move.bytes)}</td>
+                      <td>{move.kind === 'Directory' ? mappingKindLabels.Directory : move.kind}</td>
+                      <td><CodePath value={move.source} /></td>
+                      <td><CodePath value={move.target} /></td><td>{move.kind === 'Directory' ? '—' : formatBytes(move.bytes)}</td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -288,7 +295,7 @@ export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClos
                   <li key={move.source}>
                     <div className="nfc-v2-batch-organizer-record-heading">
                       <strong className="nfc-v2-batch-organizer-kind">{mappingKindLabels[move.kind]}</strong>
-                      <span>{formatBytes(move.bytes)}</span>
+                      {move.kind !== 'Directory' && <span>{formatBytes(move.bytes)}</span>}
                     </div>
                     <dl className="nfc-v2-batch-organizer-paths">
                       <div><dt>源路径</dt><dd><CodePath value={move.source} /></dd></div>

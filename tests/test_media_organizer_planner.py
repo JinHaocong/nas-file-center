@@ -142,7 +142,9 @@ def test_whole_author_rule_keeps_separate_units_when_its_narrow_shape_changes(tm
     rows = {row["unit"]: row for row in iter_organizing_previews(author.parent, allowed_roots=[tmp_path])}
 
     assert rows[str(author)]["totals"] == {"P": 0, "V": 1, "Other": 0}
-    assert rows[str(author / "1")]["status"] == "blocked"
+    local = rows[str(author / "1")]
+    assert local["status"] == "ready"
+    assert {move["target"] for move in local["sample_moves"]} == {str(author / "1/001.mp4")}
     assert str(author / "1/作品") in rows
 
 
@@ -177,7 +179,11 @@ def test_whole_author_rule_preserves_a_held_photo_wrapper_scope(tmp_path):
     rows = list(iter_organizing_previews(tmp_path, allowed_roots=[tmp_path], include_mapping=True))
 
     ready_sources = [move["source"] for row in rows if row["status"] == "ready" for move in row["_mapping_items"]]
-    assert sorted(ready_sources) == sorted([str(photos / "root.jpg"), str(photos / "1/作品/nested.jpg")])
+    assert sorted(ready_sources) == sorted(
+        str(photos / name) for name in ("root.jpg", "1/cover.jpg", "1/作品/nested.jpg")
+    )
+    local = next(row for row in rows if row["unit"] == str(photos / "1"))
+    assert [move["target"] for move in local["_mapping_items"]] == [str(photos / "1/001.jpg")]
 
 
 @pytest.mark.parametrize("occupied", [False, True])

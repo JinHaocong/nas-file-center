@@ -15,6 +15,7 @@ from uuid import uuid4
 from sqlalchemy import func, select, text
 
 from app.batch.file_rename import _open_directory_nofollow
+from app.batch.media_organizer_archive import PROMOTE_ARCHIVE_CHILDREN
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_organizer_planner import is_reserved_workspace
 from app.batch.media_package_organizer import APPEND_VIDEO_OPERATIONS, _validate_scope
@@ -25,7 +26,7 @@ from app.models import TaskEvent, WorkJob, utcnow
 from app.path_safety import validate_mutation_destination
 from app.tasks.context import JobContext
 from app.tasks.handlers_base import TaskHandler, register_handler
-from app.tasks.logging import log_task_event
+from app.tasks.logging import log_task_event, sanitize_text
 
 PREVIEW_KIND = "media-organizer-preview"
 BATCH_KIND = "media-organizer-batch"
@@ -397,6 +398,7 @@ def _preview_row(record: dict, report: Path) -> dict:
         "unit": record["unit"], "status": record["status"], "reason": record.get("reason"),
         "operation": record.get("operation"), "organizer_mode": record.get("organizer_mode"),
         **({"local_media_kinds": record["local_media_kinds"]} if record.get("local_media_kinds") else {}),
+        **({"local_scope": record["local_scope"]} if record.get("local_scope") is not None else {}),
         **({"whole_author": True} if record.get("whole_author") else {}),
         **({"luolcy_author_siblings": record["luolcy_author_siblings"]}
            if record.get("luolcy_author_siblings") else {}),
@@ -490,8 +492,10 @@ def _record_results(context: JobContext, ordinal: int, total: int, results: list
         session.commit()
 
 
-def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence) -> tuple[str, str | None]:
-    from app.batch.media_organizer_planner import preview_organizing_unit
+def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence,
+                 *, selection: Path) -> tuple[str, str | None]:
+    from app.batch.media_organizer_archive import execute_repeated_archive, freeze_repeated_archive
+    from app.batch.media_organizer_planner import _resolved_protected_roots, preview_organizing_unit
     from app.batch.media_package_execution import (
         MediaPackageExecutionConflict, execute_frozen_manifest, load_frozen_manifest,
         prepare_organizer_manifest, save_frozen_manifest,
@@ -503,6 +507,23 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence)
         return "skipped", unit["reason"]
     try:
         chosen = _selection(unit["unit"], settings)
+        if unit.get("operation") == PROMOTE_ARCHIVE_CHILDREN:
+            if unit.get("organizer_mode") != "semantic" or not chosen.parent.is_relative_to(selection):
+                raise ValueError("重复归档目标超出原确认范围")
+            _selection(str(chosen.parent), settings)
+            protected = _resolved_protected_roots(settings.media_package_root, settings.quarantine_root)
+            fingerprint = unit.get("input_fingerprint")
+            if not isinstance(fingerprint, str):
+                raise ValueError("重复归档预览缺少目录指纹")
+            if os.path.lexists(path):
+                manifest = load_frozen_manifest(path, job_id=job_id, package=chosen)
+            else:
+                manifest = freeze_repeated_archive(chosen, protected, fingerprint, job_id, check_cancelled=fence)
+                fence()
+                save_frozen_manifest(path, manifest)
+            execute_repeated_archive(chosen, manifest, protected, fingerprint, lease_fence=fence,
+                                     allow_fuse_compat=settings.media_package_fuse_compat_enabled)
+            return "success", None
         local_media_kinds = tuple(unit.get("local_media_kinds", ()))
         whole_author = unit.get("whole_author", False)
         options = {
@@ -514,6 +535,7 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence)
             package_root = settings.media_package_root
             if (manifest.get("organizer_mode") != options["mode"]
                     or tuple(manifest.get("local_media_kinds", ())) != local_media_kinds
+                    or manifest.get("local_scope") != unit.get("local_scope")
                     or manifest.get("whole_author", False) != whole_author
                     or manifest.get("luolcy_author_siblings", {}) != unit.get("luolcy_author_siblings", {})
                     or manifest.get("luolcy_root_fingerprint") != unit.get("luolcy_root_fingerprint")
@@ -534,7 +556,8 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence)
             # The executor verified the exact frozen files and buckets at the author root.
             return "success", None
         fresh = preview_organizing_unit(
-            chosen, include_items=True, local_media_kinds=local_media_kinds, whole_author=whole_author, **options,
+            chosen, include_items=True, local_media_kinds=local_media_kinds, whole_author=whole_author,
+            local_scope=unit.get("local_scope"), **options,
         )
         if fresh["status"] != "already_organized":
             raise MediaPackageExecutionConflict("整理后重新扫描时仍发现变更")
@@ -548,6 +571,22 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence)
         return "conflict", str(exc)
     except OSError as exc:
         return "failed", str(exc)
+
+
+def _archive_children_need_attention(context: JobContext, unit: str) -> bool:
+    """A prior failure must retain the reported original descendant paths."""
+    prefix = unit + "/"
+    if sanitize_text(prefix) != prefix:
+        # Stored task paths are sanitized. A redacted ancestor cannot prove
+        # ownership of all failure events in this subtree.
+        return True
+    status = func.json_extract(TaskEvent.context_json, "$.status")
+    path = func.json_extract(TaskEvent.context_json, "$.unit")
+    with context.SessionLocal() as session:
+        return session.scalar(select(TaskEvent.id).where(
+            TaskEvent.job_id == context.job_id, TaskEvent.event_type == RESULT_EVENT,
+            status.in_(("failed", "conflict")), func.substr(path, 1, len(prefix)) == prefix,
+        ).limit(1)) is not None
 
 
 @register_handler
@@ -603,7 +642,13 @@ class MediaOrganizerBatchHandler(TaskHandler):
                 if ready:
                     # Checkpoint the prefix before starting a frozen filesystem operation.
                     commit_pending()
-                status, reason = _finish_unit(unit, settings, folder / f"{ordinal}.json", job.id, fence)
+                if (ready and unit.get("operation") == PROMOTE_ARCHIVE_CHILDREN
+                        and _archive_children_need_attention(context, unit["unit"])):
+                    status, reason = "skipped", "归档内有未整理完成的子目录，已保留原位置"
+                else:
+                    status, reason = _finish_unit(
+                        unit, settings, folder / f"{ordinal}.json", job.id, fence, selection=selection,
+                    )
                 pending.append({"unit": unit["unit"], "status": status, "reason": reason})
                 if (ready or len(pending) >= RESULT_COMMIT_SIZE
                         or time.monotonic() - last_commit >= RESULT_COMMIT_INTERVAL):
