@@ -1,3 +1,5 @@
+@import './console-v2-media-thumbnails.css';
+
 /* Console v2 Batch — native Draft-only form, no direct filesystem execution. */
 .nfc-v2-batch {
   --nfc-batch-paper:var(--nfc-surface-1);

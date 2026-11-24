@@ -33,6 +33,7 @@ export function MediaOrganizerBatchEditor() {
   const savedPreviewId = organizerJobId(params, 'preview');
   const batchId = organizerJobId(params, 'batch');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [inspectedUnit, setInspectedUnit] = useState<string | null>(null);
   const [action, setAction] = useState<'preview' | 'confirm' | null>(null);
   const [problem, setProblem] = useState('');
   const [previewPage, setPreviewPage] = useState({ page: 1, size: 25 });
@@ -73,7 +74,12 @@ export function MediaOrganizerBatchEditor() {
     }, { replace: true });
   }, [batchId, existingBatchId, setParams]);
 
-  const selection = selectedPath ?? result?.selection ?? preview?.selection ?? '';
+  const suggestedPaths = params.has('preview') || params.has('batch') || params.has('execution')
+    ? [] : params.getAll('directory');
+  const suggested = suggestedPaths.length === 1 ? suggestedPaths[0] : '';
+  const suggestedValid = suggested.startsWith('/') && !suggested.startsWith('//') && !suggested.includes('\0') &&
+    !suggested.split('/').some(part => part === '..' || part === '.');
+  const selection = selectedPath ?? result?.selection ?? preview?.selection ?? (suggestedValid ? suggested : '');
   const scanning = (previewId !== null && previewQuery.isPending) || isActive(preview?.status);
   const organizing = (batchId !== null && resultQuery.isPending) || isActive(result?.status);
   const busy = action !== null || scanning || organizing;
@@ -105,6 +111,7 @@ export function MediaOrganizerBatchEditor() {
       const next = new URLSearchParams(current);
       next.set('operation', 'media-organize');
       next.delete('execution');
+      next.delete('directory');
       next.delete('preview');
       next.delete('batch');
       if (previewJobId) next.set('preview', previewJobId);
@@ -120,6 +127,7 @@ export function MediaOrganizerBatchEditor() {
     if (signal.aborted) return;
     setPreviewPage({ page: 1, size: 25 });
     setFilter('all');
+    setInspectedUnit(null);
     setDetails(null);
     setResultPage({ page: 1, size: 25 });
     setSelectedPath(null);
@@ -129,7 +137,7 @@ export function MediaOrganizerBatchEditor() {
   /** A directory chosen in the picker immediately starts its recursive preview. */
   function chooseDirectory(value: string | string[]) {
     if (busy || inFlight.current) return;
-    const path = (Array.isArray(value) ? value[0] ?? '' : value).trim();
+    const path = Array.isArray(value) ? value[0] ?? '' : value;
     if (!path) {
       setSelectedPath('');
       setDetails(null);
@@ -159,7 +167,14 @@ export function MediaOrganizerBatchEditor() {
   const canConfirm = currentPreview?.status === 'completed' &&
     currentPreview.execution_enabled && Boolean(currentPreview.summary?.ready_count) &&
     batchId === null && !existingBatchId;
-  const currentDetails = details?.previewId === previewId ? details : null;
+  const currentUnit = currentPreview?.units.find(row => row.unit === inspectedUnit) ?? currentPreview?.units[0];
+  const currentDetails = details?.previewId === previewId && details?.unit === currentUnit?.unit ? details : null;
+
+  /** Switch the inspector and discard any detail report belonging to the previous unit. */
+  function inspectUnit(row: MediaBatchPreviewUnit) {
+    if (currentUnit?.unit !== row.unit) setDetails(null);
+    setInspectedUnit(row.unit);
+  }
 
   /** Open the paginated report attached to one preview row. */
   function openDetails(row: MediaBatchPreviewUnit, opener: HTMLButtonElement) {
@@ -173,28 +188,31 @@ export function MediaOrganizerBatchEditor() {
   /** Return keyboard focus to the row that opened the report. */
   function closeDetails() {
     setDetails(null);
-    detailOpener.current?.focus();
+    const opener = detailOpener.current;
+    // 窗口尺寸跨过断点后，详情可能已经移动到目录卡片所在的行。
+    if (opener?.isConnected === false) {
+      document.querySelector<HTMLButtonElement>('.nfc-unit-card[aria-pressed="true"]')?.focus();
+    } else {
+      opener?.focus();
+    }
   }
 
   return (
     <>
-      <DataPanel title="智能媒体整理" className={`${panelClass} nfc-tool-workbench`}
-        description="选择文件夹后自动扫描子目录。查看预览后，一次确认即可整理所有可处理的单元。">
-        <div className="nfc-v2-batch-form">
-          <div className="nfc-v2-batch-field">
-            <DirectoryPicker value={selection} onChange={chooseDirectory} disabled={busy}
-              allowManualInput={false} placeholder="选择媒体所在的目录" />
-          </div>
-          {selection && (
-            <div className="nfc-file-tool-primary-actions">
-              <ConsoleButton variant="secondary" disabled={busy}
-                onClick={() => chooseDirectory(selection)}>重新扫描</ConsoleButton>
-            </div>
-          )}
-          {invalidLink && <p className="nfc-v2-batch-error" role="alert">整理任务编号无效</p>}
-          {problem && <p className="nfc-v2-batch-error" role="alert">{problem}</p>}
+      <section className="nfc-organizer-scope" aria-label="整理目录">
+        <div className="nfc-organizer-scope-controls">
+          <strong>整理目录</strong>
+          <DirectoryPicker value={selection} onChange={chooseDirectory} disabled={busy}
+            allowManualInput={false} placeholder="选择媒体所在的目录" />
+          {selection && <ConsoleButton variant="secondary" disabled={busy}
+            onClick={() => chooseDirectory(selection)}>{suggestedValid && !currentPreview ? '预览' : '重新扫描'}</ConsoleButton>}
         </div>
-      </DataPanel>
+        {!selection && <p className="nfc-form-note">选择文件夹后自动扫描子目录。</p>}
+        {invalidLink && <p className="nfc-v2-batch-error" role="alert">整理任务编号无效</p>}
+        {suggestedPaths.length > 0 && !suggestedValid &&
+          <p className="nfc-v2-batch-error" role="alert">目录入口无效，请重新选择目录。</p>}
+        {problem && <p className="nfc-v2-batch-error" role="alert">{problem}</p>}
+      </section>
 
       {(action === 'preview' || scanning || previewQuery.isError ||
         currentPreview?.status === 'failed' || currentPreview?.status === 'cancelled') && (
@@ -226,25 +244,23 @@ export function MediaOrganizerBatchEditor() {
       )}
 
       {currentPreview?.status === 'completed' && currentPreview.summary && (
-        <MediaOrganizerPreviewReport preview={currentPreview} onDetails={openDetails}
+        <MediaOrganizerPreviewReport preview={currentPreview} selected={currentUnit} onSelect={inspectUnit} onDetails={openDetails}
           action={canConfirm && (
             <ConsoleButton variant="primary" disabled={busy} loading={action === 'confirm'}
               onClick={confirmBatch}>确认整理全部</ConsoleButton>
           )}
           footer={<ConsolePagination page={previewPage.page} pageSize={previewPage.size}
             total={currentPreview.filtered_total} pageSizes={pageSizes}
-            onChange={(page, size) => setPreviewPage({ page, size })} />}>
+            onChange={(page, size) => { setDetails(null); setPreviewPage({ page, size }); }} />}>
           {!currentPreview.execution_enabled && <p className="nfc-form-note">当前仅可预览。</p>}
           {currentPreview.summary.ready_count === 0 && <p className="nfc-form-note">没有可整理的单元。</p>}
           {!!currentPreview.summary.needs_assignment_count && (
             <p className="nfc-form-note">批量整理会跳过待确认归属的散件。可逐个作者选择文件和目标资源包。</p>
           )}
-          {canConfirm && currentPreview.summary.blocked_count > 0 && (
-            <p className="nfc-form-note">有冲突的单元会列在结果中，其余可整理的单元会继续处理。</p>
-          )}
-          <div className="nfc-v2-batch-field">
+          <div className="nfc-unit-filter">
             <label htmlFor="media-organizer-batch-filter">筛选状态</label>
             <select id="media-organizer-batch-filter" value={filter} onChange={event => {
+              setDetails(null);
               setFilter(event.target.value as MediaPreviewFilter);
               setPreviewPage(previous => ({ ...previous, page: 1 }));
             }}>

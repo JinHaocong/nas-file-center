@@ -52,7 +52,7 @@ describe('Console v2 classic dedupe and diagnostic migrations', () => {
       "navigate('/plans/' + res.id)", 'planMutation.isPending',
       'submittingRef.current', 'onEscapeKeyDown', 'onPointerDownOutside',
       'Freeze → Validate → Execute', 'SHA256', 'toast.error(message)',
-      'planMutation.reset()', 'Number.isSafeInteger(scanId)',
+      'planMutation.reset()', 'sqliteIdText(scanId)',
     ]) assert.ok(modal.includes(token), token);
     assert.doesNotMatch(modal, /from ['"]antd['"]|@ant-design\/icons|<Form\b|<Modal\b|message\./);
   });

@@ -40,13 +40,10 @@
 }
 /* Keep the credential form opaque and the illustration in its own surface. */
 .nfc-v2-login-shell {
-  --nfc-v2-login-canvas: #ffffff;
-  --nfc-v2-login-panel: #ffffff;
+  --nfc-v2-login-canvas: var(--studio-ground);
+  --nfc-v2-login-panel: var(--studio-paper);
   --nfc-v2-login-line: #eaeae7;
   --nfc-v2-login-muted: #62625e;
-  --nfc-v2-login-art-start: #edf5ff;
-  --nfc-v2-login-art-end: #d4e5fc;
-  --nfc-v2-login-art-glow: rgba(255, 255, 255, .85);
   --nfc-v2-login-elevation: 0 16px 54px rgba(32, 55, 98, .08);
   display: flex;
   flex-direction: column;
@@ -56,15 +53,13 @@
   padding: max(24px, env(safe-area-inset-top)) clamp(20px, 5vw, 64px)
     max(24px, env(safe-area-inset-bottom));
   background: var(--nfc-v2-login-canvas);
+  font-family: var(--studio-font);
 }
 [data-theme='dark'] .nfc-v2-login-shell {
-  --nfc-v2-login-canvas: #171716;
-  --nfc-v2-login-panel: #242422;
+  --nfc-v2-login-canvas: var(--studio-ground);
+  --nfc-v2-login-panel: var(--studio-paper);
   --nfc-v2-login-line: #383834;
   --nfc-v2-login-muted: #bebeba;
-  --nfc-v2-login-art-start: #23304b;
-  --nfc-v2-login-art-end: #192438;
-  --nfc-v2-login-art-glow: rgba(131, 169, 225, .23);
   --nfc-v2-login-elevation: 0 20px 60px rgba(0, 0, 0, .24);
 }
 
@@ -137,7 +132,8 @@
 
 .nfc-v2-login-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.13fr) minmax(0, 1fr);
+  width: min(100%, 460px);
+  grid-template-columns: minmax(0, 1fr);
   margin-block: auto;
   border: 1px solid var(--nfc-v2-login-line);
   border-radius: calc(var(--nfc-panel-radius, 18px) + 6px);
@@ -145,23 +141,6 @@
   box-shadow: var(--nfc-v2-login-elevation);
   animation: nfc-login-enter var(--nfc-motion-normal, 220ms)
     var(--nfc-motion-ease, ease-out) both;
-}
-
-.nfc-v2-login-showcase {
-  min-height: 460px;
-  display: grid;
-  place-items: center;
-  background:
-    radial-gradient(ellipse at 46% 32%, var(--nfc-v2-login-art-glow), transparent 67%),
-    linear-gradient(145deg, var(--nfc-v2-login-art-start), var(--nfc-v2-login-art-end));
-}
-
-.nfc-v2-login-showcase img {
-  display: block;
-  width: min(86%, 460px);
-  height: auto;
-  aspect-ratio: 1;
-  object-fit: contain;
 }
 
 .nfc-v2-login-shell .nfc-login-panel {
@@ -324,7 +303,6 @@
 
 @media (max-width: 859px) {
   .nfc-v2-login-layout { max-width: 456px; grid-template-columns: minmax(0, 1fr); }
-  .nfc-v2-login-showcase { display: none; }
 }
 
 @media(max-width:767px) {

@@ -378,7 +378,7 @@ export const WorkflowBuilderPage: React.FC = () => {
             <span className="nfc-kind-badge">{versionLabel}</span>
             <span className="nfc-kind-badge">{modeLabel(mode)}</span>
             {isArchived && <span className="nfc-status-badge nfc-status-danger"><span className="nfc-status-dot" />已归档</span>}
-            {isBuiltin && <span className="nfc-kind-badge">builtin / readonly</span>}
+            {isBuiltin && <span className="nfc-kind-badge">内置 · 只读</span>}
             {isDirty && <span className="nfc-status-badge nfc-status-warning"><span className="nfc-status-dot" />未保存修改</span>}
           </div>
         }
@@ -445,8 +445,7 @@ export const WorkflowBuilderPage: React.FC = () => {
       <div className="nfc-workflow-editor-layout">
         <aside className="nfc-workflow-definition-rail">
           <DataPanel
-        title="基础信息与执行模式"
-        description="模式切换会重置为对应模式的标准拓扑，并需要保存为新的 revision。"
+        title="工作流设置"
         className="nfc-complex-form-panel"
       >
         <form className="nfc-v2-workflow-form" noValidate
@@ -494,7 +493,6 @@ export const WorkflowBuilderPage: React.FC = () => {
                     onChange={() => handleModeChange(option)} />
                   {modeIcon(option)}
                   <span>{modeLabel(option)}</span>
-                  <small>{option}</small>
                 </label>
               ))}
             </div>
@@ -503,19 +501,21 @@ export const WorkflowBuilderPage: React.FC = () => {
           </DataPanel>
         </aside>
 
-        <main className="nfc-workflow-pipeline-canvas">
+        <section className="nfc-workflow-pipeline-canvas" aria-label="执行步骤">
           <DataPanel
-        title="流水线执行步骤"
-        description="步骤严格自上而下线性执行；Preview 使用已保存 revision 作为权威定义。"
-      >
-        <StepList
-          steps={steps}
-          mode={mode}
-          readOnly={!canEdit}
-          onChange={handleStepChange}
-        />
+            title="执行步骤"
+            description="从上往下执行，预览使用已保存的版本。"
+            action={<span className="nfc-panel-count">{steps.length} 步{!canEdit && ' · 只读'}</span>}
+          >
+            <StepList
+              key={`${id ?? 'new'}:${mode}:${targetRevision ?? 'current'}`}
+              steps={steps}
+              mode={mode}
+              readOnly={!canEdit}
+              onChange={handleStepChange}
+            />
           </DataPanel>
-        </main>
+        </section>
       </div>
 
       {!isNew &&

@@ -1,69 +1,55 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useRef } from 'react';
+import { useLocation } from 'react-router-dom';
+import * as Dialog from '@radix-ui/react-dialog';
 import { Sidebar } from '../Sidebar';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
 
-interface ResponsiveNavProps {
-  isMobile: boolean;
-  mobileOpen: boolean;
-  onMobileClose: () => void;
-  collapsed: boolean;
-  onCollapse: (collapsed: boolean) => void;
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  opener: React.RefObject<HTMLElement>;
 }
 
-export const ResponsiveNav: React.FC<ResponsiveNavProps> = ({
-  isMobile, mobileOpen, onMobileClose, collapsed, onCollapse,
-}) => {
-  const closeRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!isMobile || !mobileOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    document.body.style.overflow = 'hidden';
-    closeRef.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onMobileClose();
-      } else if (event.key === 'Tab') {
-        const buttons = dialogRef.current?.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
-        );
-        if (!buttons?.length) return;
-        const first = buttons[0];
-        const last = buttons[buttons.length - 1];
-        if (event.shiftKey && (document.activeElement === first || !dialogRef.current?.contains(document.activeElement))) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && (document.activeElement === last || !dialogRef.current?.contains(document.activeElement))) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', onKey);
-      previouslyFocused?.focus();
-    };
-  }, [isMobile, mobileOpen, onMobileClose]);
-
-  if (!isMobile) return <Sidebar collapsed={collapsed} onCollapse={onCollapse} />;
-  if (!mobileOpen) return null;
-
-  return (
-    <div className="nfc-v2-mobile-nav-layer">
-      <button className="nfc-v2-mobile-nav-backdrop" type="button"
-        onClick={onMobileClose} aria-label="关闭导航菜单" />
-      <div ref={dialogRef} className="nfc-v2-mobile-nav-dialog" role="dialog" aria-modal="true"
-        aria-label="NAS File Center 主导航">
-        <button ref={closeRef} type="button" className="nfc-v2-mobile-nav-close"
-          aria-label="关闭导航菜单" onClick={onMobileClose}>
-          <ConsoleIcon name="x" size={20} />
-        </button>
-        <Sidebar collapsed={false} onCollapse={onCollapse} embedded onNavigate={onMobileClose} />
-      </div>
-    </div>
-  );
+/** One keyboard-accessible tool directory, centered on desktop and docked on mobile. */
+export const ResponsiveNav: React.FC<Props> = ({ open, onClose, opener }) => {
+  const content = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+  const openedAt = useRef('');
+  return <Dialog.Root open={open} onOpenChange={next => { if (!next) onClose(); }}>
+    <Dialog.Portal>
+      <Dialog.Overlay className="nfc-v2-mobile-nav-backdrop nfc-studio-nav-backdrop" />
+      <Dialog.Content ref={content} className="nfc-v2-mobile-nav-dialog nfc-studio-tools-dialog"
+        aria-describedby={undefined}
+        onOpenAutoFocus={event => {
+          openedAt.current = location.pathname + location.search;
+          const field = content.current?.querySelector('input');
+          if (field && window.matchMedia?.('(min-width: 768px)').matches) {
+            event.preventDefault();
+            field.focus();
+          }
+        }}
+        onCloseAutoFocus={event => {
+          if (openedAt.current !== location.pathname + location.search) {
+            event.preventDefault();
+            document.getElementById('main-content')?.focus({ preventScroll: true });
+            return;
+          }
+          if (opener.current?.isConnected && opener.current.getClientRects().length) {
+            event.preventDefault();
+            opener.current.focus();
+          } else {
+            event.preventDefault();
+            document.querySelector<HTMLButtonElement>('.nfc-header-nav-toggle')?.focus();
+          }
+        }}>
+        <header className="nfc-studio-tools-title">
+          <Dialog.Title>所有工具</Dialog.Title>
+          <Dialog.Close className="nfc-v2-mobile-nav-close" aria-label="关闭导航菜单">
+            <ConsoleIcon name="x" size={19} />
+          </Dialog.Close>
+        </header>
+        <Sidebar onNavigate={onClose} />
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>;
 };

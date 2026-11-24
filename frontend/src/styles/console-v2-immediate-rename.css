@@ -8,8 +8,13 @@
 .nfc-v2-immediate-field > input { box-sizing:border-box;width:100%;min-height:42px;padding:9px 11px;
   border:1px solid var(--nfc-im-line);border-radius:8px;background:var(--nfc-im-paper);
   color:var(--nfc-im-text);font:inherit;font-size:12px; }
-.nfc-v2-immediate-field .nfc-directory-picker-single { display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
-.nfc-v2-immediate-field .nfc-v2-directory-input-wrap { flex:1 1 210px;min-width:0; }
+.nfc-v2-immediate-field .nfc-directory-picker-single {
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;
+}
+.nfc-v2-immediate-field .nfc-v2-directory-input-wrap { min-width:0; }
+.nfc-v2-immediate-field .nfc-directory-picker-single > .nfc-console-button {
+  white-space:nowrap;color:var(--nfc-tint);
+}
 .nfc-v2-immediate-radio { display:flex;align-items:center;flex-wrap:wrap;gap:9px; }
 .nfc-v2-immediate-radio label { display:inline-flex;align-items:center;gap:7px;padding:9px 12px;
   min-height:38px;box-sizing:border-box;border:1px solid var(--nfc-im-line);

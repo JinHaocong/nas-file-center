@@ -2,14 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import TestRenderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import { DirectoryPicker } from '../src/components/DirectoryPicker';
 import { ConsoleConfirmDialog } from '../src/components/ui/ConsoleConfirmDialog';
 import { ConsoleToastProvider } from '../src/components/ui/ConsoleToast';
+import { DisplayPreferencesProvider } from '../src/contexts/DisplayPreferencesContext';
 import { BatchPage } from '../src/pages/Batch';
+import { MediaOrganizerPreviewReport } from '../src/pages/Batch/MediaOrganizerBatchReports';
 import { PlanDetailPage } from '../src/pages/Plans/PlanDetail';
+
+import type { MediaBatchPreview } from '../src/api/mediaOrganizerBatch';
 
 const selection = '/synthetic/parent';
 const previewId = '9007199254740993';
@@ -26,7 +30,7 @@ const blockedUnit = {
   conflicts: [{ reason: 'target_path_exists', target: selection + '/blocked/001.jpg' }],
 };
 const preview = {
-  job_id: previewId, selection, status: 'completed', error: null,
+  job_id: previewId, selection, status: 'completed' as const, error: null,
   progress, execution_enabled: true, units: [readyUnit, blockedUnit], page: 1, page_size: 25, filtered_total: 2,
   summary: {
     unit_count: 2, ready_count: 1, blocked_count: 1, already_organized_count: 0,
@@ -57,10 +61,42 @@ async function waitForRenderedText(view: ReactTestRenderer, text: string) {
 }
 
 test.beforeEach(() => {
-  Object.defineProperty(globalThis, 'document', { configurable: true, value: { title: '' } });
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: Object.assign(new EventTarget(), { title: '' }) });
 });
 
 test.afterEach(() => { Reflect.deleteProperty(globalThis, 'document'); });
+
+test('mobile media organizer inserts one inspector just after the selected row', t => {
+  const settings = Object.assign(new EventTarget(), {
+    innerWidth: 390,
+    localStorage: { getItem: () => 'on', setItem: () => {} },
+  });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: settings });
+  const allUnits = [readyUnit, blockedUnit, ...['third', 'fourth', 'fifth'].map(name =>
+    ({ ...readyUnit, unit: selection + '/' + name }))] as MediaBatchPreview['units'];
+  const render = (index: number) => (
+    <DisplayPreferencesProvider>
+      <MediaOrganizerPreviewReport preview={{ ...preview, units: allUnits }} selected={allUnits[index]}
+        onSelect={() => {}} onDetails={() => {}} action={null} footer={null}>{null}</MediaOrganizerPreviewReport>
+    </DisplayPreferencesProvider>
+  );
+  let view!: ReactTestRenderer;
+  act(() => { view = TestRenderer.create(render(0)); });
+  t.after(() => { act(() => view.unmount()); Reflect.deleteProperty(globalThis, 'window'); });
+
+  const order = () => view.root.findByType('ul').findAllByType('li').map(item =>
+    item.props.className === 'nfc-unit-gallery-inspection' ? 'details'
+      : item.findByType('button').props.title.replace(selection + '/', ''));
+  assert.deepEqual(order(), ['ready', 'blocked', 'details', 'third', 'fourth', 'fifth']);
+  act(() => view.update(render(4)));
+  assert.deepEqual(order(), ['ready', 'blocked', 'third', 'fourth', 'fifth', 'details']);
+  act(() => view.update(render(2)));
+  act(() => view.root.findAllByType('button').find(item => item.props.role === 'switch')!.props.onClick());
+  assert.deepEqual(order(), ['ready', 'blocked', 'third', 'details', 'fourth', 'fifth']);
+  act(() => { settings.innerWidth = 1200; settings.dispatchEvent(new Event('resize')); });
+  assert.deepEqual(order(), ['ready', 'blocked', 'third', 'fourth', 'fifth']);
+  assert.equal(view.root.findByProps({ id: 'organizer-unit-inspection' }).type, 'section');
+});
 
 /** Render a real route with a fresh query client. */
 async function openBatch(location: string, page = <BatchPage />,
@@ -98,6 +134,8 @@ test('one selected directory previews automatically and repeated confirmation st
   assert.deepEqual(requests, [{
     url: '/api/media-organizer/previews', body: { selection, batch_flow: true },
   }], 'selecting a directory must immediately submit a recursive preview');
+  await waitForRenderedText(view, '逐目录整理预览');
+  act(() => view.root.findByProps({ type: 'button', title: blockedUnit.unit }).props.onClick());
   await waitForRenderedText(view, '目标路径已存在');
   assert.match(JSON.stringify(view.toJSON()), /blocked\/001.jpg/);
   const confirm = view.root.findAllByType('button').find(button =>
@@ -119,6 +157,32 @@ test('one selected directory previews automatically and repeated confirmation st
   assert.doesNotMatch(JSON.stringify(view.toJSON()), /EXECUTE_MEDIA_ORGANIZER|RECOVER_MEDIA_ORGANIZER|维护窗口/);
 });
 
+test('a directory shortcut prefills its exact path and only starts a job after clicking preview', async t => {
+  const path = '/synthetic/照片 & 旅行 ';
+  const requests: Array<{ url: string; method?: string; body?: BodyInit | null }> = [];
+  t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+    requests.push({ url, method: options.method, body: options.body });
+    return Response.json(options.method === 'POST' ? { job_id: previewId } : { ...preview, selection: path });
+  });
+  function Location() {
+    return <output>{useLocation().search}</output>;
+  }
+  const { view, dispose } = await openBatch('/batch?operation=media-organize&directory=' + encodeURIComponent(path),
+    <><BatchPage /><Location /></>);
+  t.after(dispose);
+  assert.equal(view.root.findByProps({ 'aria-label': '目录路径' }).props.value, path);
+  assert.equal(requests.length, 0);
+  const button = view.root.findAllByType('button').find(item =>
+    item.findAllByType('span').some(span => span.children.join('') === '预览'));
+  assert.ok(button);
+  await act(async () => { button.props.onClick(); await settle(); });
+  assert.equal(requests.filter(item => item.method === 'POST').length, 1);
+  assert.deepEqual(JSON.parse(String(requests[0].body)), { selection: path, batch_flow: true });
+  const params = new URLSearchParams(view.root.findByType('output').children.join(''));
+  assert.equal(params.get('preview'), previewId);
+  assert.equal(params.has('directory'), false);
+});
+
 test('opening the batch result URL preserves the exact string job ID and loads the existing report', async t => {
   const requests: string[] = [];
   t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
@@ -127,9 +191,10 @@ test('opening the batch result URL preserves the exact string job ID and loads t
     if (url.includes('/batches/')) return Response.json(report);
     return Response.json(preview);
   });
-  const { view, dispose } = await openBatch(`/batch?operation=media_package-organize&batch=${batchId}`);
+  const { view, dispose } = await openBatch(`/batch?operation=media_package-organize&batch=${batchId}&directory=%2Fother`);
   t.after(dispose);
   assert.ok(requests.some(url => url.startsWith(`/api/media-organizer/batches/${batchId}?`)));
+  assert.equal(view.root.findByType(DirectoryPicker).props.value, selection);
   assert.match(JSON.stringify(view.toJSON()), /整理结果/);
   assert.match(JSON.stringify(view.toJSON()), /目标路径已存在/);
 });
@@ -206,6 +271,13 @@ for (const width of [767, 768]) {
     disposeView = dispose;
     await waitForRenderedText(view, '整理预览');
     await waitForRenderedText(view, '整理结果');
+    const gallery = view.root.findByProps({ role: 'list', 'aria-label': '逐目录整理预览' });
+    assert.equal(gallery.findAllByProps({ className: 'nfc-unit-card' }).length, 3);
+    act(() => gallery.findByProps({ type: 'button', title: skippedUnit.unit }).props.onClick());
+    await waitForRenderedText(view, '当前目录没有待整理文件');
+    act(() => gallery.findByProps({ type: 'button', title: blockedUnit.unit }).props.onClick());
+    await waitForRenderedText(view, '目标路径已存在');
+    act(() => gallery.findByProps({ type: 'button', title: readyUnit.unit }).props.onClick());
     const openMapping = view.root.findAllByType('button').find(button =>
       button.findAllByType('span').some(span => span.children.join('').includes('查看完整映射')));
     assert.ok(openMapping);
@@ -215,14 +287,13 @@ for (const width of [767, 768]) {
     await waitForRenderedText(view, source);
     assert.equal(focusedMapping, true, 'opening the mapping must bring keyboard focus into the report');
 
-    const captions = ['逐目录整理预览', '各整理单元结果', '媒体文件位置调整明细'];
+    const captions = ['各整理单元结果', '媒体文件位置调整明细'];
     if (width < 768) {
       assert.equal(view.root.findAllByType('table').length, 0);
       for (const caption of captions) {
         const list = view.root.findByProps({ role: 'list', 'aria-label': caption });
         assert.ok(list.findAllByType('li').length > 0);
       }
-      await waitForRenderedText(view, '当前目录没有待整理文件');
     } else {
       assert.deepEqual(view.root.findAllByType('caption').map(caption => caption.children.join('')).sort(),
         captions.sort());

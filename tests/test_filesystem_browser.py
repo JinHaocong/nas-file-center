@@ -100,6 +100,23 @@ def test_list_filesystem_success(tmp_path: Path):
     assert resp_cn.json()["parent"] == str(data_dir.resolve())
 
 
+def test_directory_browser_and_recents_keep_distinct_trailing_space_names(tmp_path: Path):
+    app, data_dir, _ = _create_test_app(tmp_path)
+    client = _get_auth_client(app)
+    plain, spaced = data_dir / "相册", data_dir / "相册 "
+    plain.mkdir()
+    spaced.mkdir()
+    (spaced / "子目录").mkdir()
+
+    listing = client.get("/api/filesystem/list", params={"path": str(spaced)})
+    assert listing.status_code == 200
+    assert listing.json()["path"] == str(spaced.resolve())
+    assert [item["name"] for item in listing.json()["items"]] == ["子目录"]
+    recent = client.post("/api/filesystem/recent", json={"paths": [str(plain), str(spaced)]})
+    assert recent.status_code == 200
+    assert {item["path"] for item in recent.json()["items"]} == {str(plain.resolve()), str(spaced.resolve())}
+
+
 def test_list_filesystem_default_root_and_custom_subroot(tmp_path: Path):
     # 1. When path is omitted, backend defaults to allowed_roots[0]
     app1, data_dir, _ = _create_test_app(tmp_path)

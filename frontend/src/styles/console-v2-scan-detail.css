@@ -77,3 +77,22 @@
 @media (prefers-reduced-motion: reduce) {
   .nfc-v2-group-expand[aria-expanded='true'] svg { transition: none; }
 }
+
+.nfc-scan-snapshot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--studio-line);
+}
+.nfc-scan-evidence-link {
+  display: inline-flex; align-items: center; min-height: 36px;
+  color: var(--nfc-tint); font-weight: 650; text-underline-offset: .2em;
+}
+.nfc-scan-evidence-target { scroll-margin-top: 84px; }
+.nfc-scan-evidence-target:focus-visible { outline: 2px solid var(--nfc-tint); outline-offset: 3px; }
+@media (max-width: 767px) {
+  .nfc-scan-evidence-link { min-height: 44px; }
+  .nfc-scan-evidence-target { scroll-margin-top: 65px; }
+}

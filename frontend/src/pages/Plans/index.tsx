@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { plansApi } from '../../api/domain';
 import type { Plan } from '../../types';
 import { useTitle } from '../../hooks/useTitle';
@@ -9,6 +9,7 @@ import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
 import { PlanHistoryCleanupModal } from '../../components/plans/PlanHistoryCleanupModal';
 import { LegacyPlanCleanup } from '../../components/plans/LegacyPlanCleanup';
 import { invalidatePlanDeleteFailure } from '../../components/plans/plan_cleanup';
+import { sqliteIdText } from '../../utils/sqliteId';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
@@ -20,14 +21,42 @@ import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
 
+/** Make the link describe the record the user will review. */
+function planReviewLabel(status: Plan['status']): string {
+  switch (status) {
+    case 'draft': return '核对草稿';
+    case 'frozen': return '查看待校验项';
+    case 'stale': return '核对失效项';
+    case 'completed': case 'failed': case 'partial': return '核对结果';
+    default: return '查看计划';
+  }
+}
+
+/** Only the real task ID enables a link into the Worker inspector. */
+function LinkedPlanTask({ plan }: { plan: Plan }) {
+  const id = sqliteIdText(plan.active_work_job_id);
+  return id ? <Link to={'/tasks?task=' + id} className="nfc-plan-task-link">查看任务 #{id}</Link> : null;
+}
+
 export const PlansPage: React.FC = () => {
   useTitle('执行计划');
   const toast = useConsoleToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [search, setSearch] = useSearchParams();
+  const requestedPage = Number(search.get('page'));
+  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const requestedSize = Number(search.get('size'));
+  const pageSize = [10, 20, 50, 100].includes(requestedSize) ? requestedSize : 20;
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const writeListPage = useCallback((destination: number, size: number) => {
+    setSearch(previous => {
+      const next = new URLSearchParams(previous);
+      if (destination === 1) next.delete('page'); else next.set('page', String(destination));
+      if (size === 20) next.delete('size'); else next.set('size', String(size));
+      return next;
+    }, { replace: true });
+  }, [setSearch]);
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: ['plansList', page, pageSize],
@@ -41,6 +70,13 @@ export const PlansPage: React.FC = () => {
     },
   });
 
+  useEffect(() => {
+    if (!data || isError || data.items.length) return;
+    // A deletion in detail (or another client) can remove the last page while the list is closed.
+    const lastPage = Math.max(1, Math.ceil(data.total / pageSize));
+    if (page > lastPage) writeListPage(lastPage, pageSize);
+  }, [data, isError, page, pageSize, writeListPage]);
+
   const deletePlanMutation = useMutation({
     mutationFn: (id: number) => plansApi.deletePlan(id),
     onMutate: (id) => setDeletingId(id),
@@ -50,7 +86,7 @@ export const PlansPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
       queryClient.invalidateQueries({ queryKey: ['scansList'] });
       if (data?.items?.length === 1 && page > 1) {
-        setPage(prev => prev - 1);
+        changePage(page - 1, pageSize);
       }
     },
     onError: (err: any, id: number) => {
@@ -61,20 +97,17 @@ export const PlansPage: React.FC = () => {
   });
 
   const items: Plan[] = data?.items || [];
-  const openPlan = (id: number) => navigate('/plans/' + id);
-  const changePage = (nextPage: number, nextSize: number) => {
-    if (nextSize !== pageSize) {
-      setPageSize(nextSize);
-      setPage(1);
-    } else {
-      setPage(nextPage);
-    }
-  };
+  const openPlan = (id: number) => navigate('/plans/' + id, { state: { fromPlanList: true } });
+
+  /** Page size changes reset to the first page and a return from detail retains the list position. */
+  function changePage(nextPage: number, nextSize: number) {
+    writeListPage(nextSize === pageSize ? nextPage : 1, nextSize);
+  }
 
   return (
     <div className="nfc-operations-page nfc-plans-page nfc-page-layout-ledger nfc-v2-plans-page">
-      <PageHeader eyebrow="Execution control" title="执行计划"
-        description="Dry Run 计划生命周期：Draft → Frozen → Validate → Execute。任何真实文件变更都必须经过计划链路。"
+      <PageHeader title="执行计划"
+        description="在执行前核对范围、冻结快照并校验文件。"
         actions={
           <ActionBar compact>
             <ConsoleButton loading={isFetching}
@@ -86,8 +119,8 @@ export const PlansPage: React.FC = () => {
       />
       <LegacyPlanCleanup />
       <DataPanel title="计划列表"
-        description="显示计划状态、预期变更和预计可释放空间。点击任一计划查看校验与执行细节。"
-        action={<span className="nfc-panel-count">{data?.total ?? 0} plans</span>}
+        description="选择计划查看待变更的文件和校验结果。"
+        action={<span className="nfc-panel-count">{data?.total ?? 0} 项</span>}
         className="nfc-panel-flush" variant="dense">
         {isError ? (
           <div className="nfc-v2-plan-list-state">
@@ -133,8 +166,9 @@ export const PlansPage: React.FC = () => {
                       <td className="nfc-v2-plan-date">{formatDateTime(plan.created_at)}</td>
                       <td><div className="nfc-row-actions">
                         <ConsoleButton size="sm" variant="ghost" onClick={() => openPlan(plan.id)}>
-                          查看与执行
+                          {planReviewLabel(plan.status)}
                         </ConsoleButton>
+                        <LinkedPlanTask plan={plan} />
                         <PlanDeleteButton plan={plan}
                           onDelete={() => deletePlanMutation.mutateAsync(plan.id)}
                           loading={deletingId === plan.id} type="text" />
@@ -165,7 +199,8 @@ export const PlansPage: React.FC = () => {
                     </div>
                     <div className="nfc-mobile-record-actions">
                       <ConsoleButton variant="ghost" size="sm"
-                        onClick={() => openPlan(plan.id)}>查看与执行</ConsoleButton>
+                        onClick={() => openPlan(plan.id)}>{planReviewLabel(plan.status)}</ConsoleButton>
+                      <LinkedPlanTask plan={plan} />
                       <PlanDeleteButton plan={plan}
                         onDelete={() => deletePlanMutation.mutateAsync(plan.id)}
                         loading={deletingId === plan.id} type="text" size="middle" />

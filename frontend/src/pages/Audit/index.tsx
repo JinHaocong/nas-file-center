@@ -53,9 +53,8 @@ export const AuditPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-audit-page nfc-page-layout-ledger nfc-v2-audit-page">
       <PageHeader
-        eyebrow="Forensics"
         title="审计日志"
-        description="按系统数据生命周期保留策略记录文件操作、隔离变更与执行校验事件。"
+        description="按系统数据生命周期保留策略记录文件操作、隔离变更和计划校验结果。"
         actions={<ActionBar compact>
           {lifecyclePolicy && <span className="nfc-retention-badge">
             保留 {formatAuditRetention(lifecyclePolicy.audit_retention_days)}
@@ -66,7 +65,7 @@ export const AuditPage: React.FC = () => {
       />
       <DataPanel title="审计事件"
         description="按操作、路径和服务端可搜索字段检索。"
-        action={<span className="nfc-panel-count">{data?.total ?? 0} events</span>}
+        action={<span className="nfc-panel-count">{data?.total ?? 0} 条</span>}
         className="nfc-panel-flush" variant="dense">
         <ActionBar className="nfc-filter-bar nfc-v2-audit-filter">
           <label className="nfc-v2-audit-search" htmlFor="audit-search-input">

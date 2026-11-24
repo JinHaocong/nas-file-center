@@ -101,8 +101,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
 
   return (
     <ConsoleSheet open={open} onClose={onClose} title="去重决策分析"
-      description="只读展示后端评分、资格、安全排除和容量平衡依据"
-      eyebrow="Decision explain" className="nfc-v2-dedupe-explain-sheet nfc-dedupe-explain-drawer"
+      description="只读展示后端评分、资格、安全排除和容量平衡依据" className="nfc-v2-dedupe-explain-sheet nfc-dedupe-explain-drawer"
       titleAside={<DecisionTag decision={decisionCls.kind} eligible={member.eligible_as_keep} />}>
       <div className="nfc-overlay-stack nfc-dedupe-explain-stack nfc-v2-dedupe-explain">
         {member.incomplete && (

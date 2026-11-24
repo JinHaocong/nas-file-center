@@ -1,45 +1,31 @@
 import React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
-import type { ConsoleIconName } from '../ui/ConsoleIcon';
+import { currentDestination, primaryDestinations } from './navItems';
 
 interface Props {
   moreOpen: boolean;
-  onMore: () => void;
+  onMore: React.MouseEventHandler<HTMLButtonElement>;
 }
 
-const primaryItems: Array<{ key: string; label: string; icon: ConsoleIconName }> = [
-  { key: '/dashboard', label: '概览', icon: 'layout-dashboard' },
-  { key: '/scans', label: '扫描', icon: 'layers' },
-  { key: '/plans', label: '计划', icon: 'list-checks' },
-  { key: '/tasks', label: '任务', icon: 'activity' },
-];
-
+/** Keep the selected destination visible across nested routes and organizer reports. */
 export const MobileDock: React.FC<Props> = ({ moreOpen, onMore }) => {
   const location = useLocation();
-  const navigate = useNavigate();
-  const activeRoot = '/' + location.pathname.split('/')[1];
-  const activeTab = primaryItems.findIndex(item => item.key === activeRoot);
+  const current = currentDestination(location.pathname, location.search);
+  const activeTab = primaryDestinations.findIndex(item => item.path === current);
   const moreActive = moreOpen || activeTab < 0;
-  const indicatorStyle = { '--nfc-dock-index': moreActive ? primaryItems.length : activeTab } as React.CSSProperties;
-
-  return (
-    <nav className="nfc-mobile-dock nfc-v2-mobile-dock" aria-label="移动端快捷导航">
-      <div className="nfc-mobile-dock-surface" style={indicatorStyle}>
-        {primaryItems.map(item => (
-          <button type="button" key={item.key}
-            className={'nfc-mobile-dock-item' + (activeRoot === item.key ? ' is-active' : '')}
-            aria-current={activeRoot === item.key ? 'page' : undefined}
-            onClick={() => navigate(item.key)}>
-            <ConsoleIcon name={item.icon} size={20} />
-            <span>{item.label}</span>
-          </button>
-        ))}
-        <button type="button" className={'nfc-mobile-dock-item' + (moreActive ? ' is-active' : '')}
-          aria-haspopup="dialog" aria-expanded={moreOpen} onClick={onMore}>
-          <ConsoleIcon name="menu" size={20} /><span>更多</span>
-        </button>
-      </div>
-    </nav>
-  );
+  const indicatorStyle = { '--nfc-dock-index': moreActive ? primaryDestinations.length : activeTab } as React.CSSProperties;
+  return <nav className="nfc-mobile-dock nfc-v2-mobile-dock" aria-label="移动端快捷导航">
+    <div className="nfc-mobile-dock-surface" style={indicatorStyle}>
+      {primaryDestinations.map((item, index) => <Link key={item.path} to={item.path}
+        aria-current={activeTab === index ? 'page' : undefined}
+        className={'nfc-mobile-dock-item' + (!moreOpen && activeTab === index ? ' is-active' : '')}>
+        <ConsoleIcon name={item.icon} size={19} /><span>{item.label}</span>
+      </Link>)}
+      <button type="button" className={'nfc-mobile-dock-item' + (moreActive ? ' is-active' : '')}
+        aria-haspopup="dialog" aria-expanded={moreOpen} onClick={onMore}>
+        <ConsoleIcon name="menu" size={19} /><span>更多</span>
+      </button>
+    </div>
+  </nav>;
 };

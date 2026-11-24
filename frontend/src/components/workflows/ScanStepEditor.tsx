@@ -19,7 +19,7 @@ export const ScanStepEditor: React.FC<Props> = ({ step, onChange, readOnly = fal
   const isOrganizer = mode === 'organizer';
   const labelForRoot = (rootId: number) => {
     const known = roots.find(r => r.id === rootId);
-    return known ? known.root + ' (ID: ' + known.id + ')' : '根目录 #' + rootId + '（当前列表未返回）';
+    return known ? known.root : '根目录 #' + rootId + '（当前不可用）';
   };
   const handleOrganizerRoot = (value: string) => {
     if (readOnly) return;
@@ -37,11 +37,11 @@ export const ScanStepEditor: React.FC<Props> = ({ step, onChange, readOnly = fal
     <fieldset className="nfc-workflow-step-form nfc-v2-simple-step-form nfc-v2-step-root-form" disabled={readOnly}>
       <div className="nfc-v2-step-field">
         <label id={id + '-root-label'} htmlFor={isOrganizer ? id + '-root' : undefined}>
-          扫描索引根目录 (root_ids) <span aria-hidden="true">*</span>
+          扫描索引根目录 <span aria-hidden="true">*</span>
         </label>
         <p id={id + '-root-help'}>{isOrganizer
-          ? '整理模式 (Organizer) 仅支持且必须选择 1 个根目录'
-          : '选择工作流执行范围所涵盖的已注册索引根路径 (支持多选 1..16)'}</p>
+          ? '目录整理需要选择一个根目录。'
+          : `选择要扫描的目录，最多可选 ${MAX_SCAN_ROOTS} 个。`}</p>
         {isLoading && <span className="nfc-v2-step-muted" role="status">正在加载索引根目录…</span>}
         {isError && <span className="nfc-v2-step-warning" role="alert">索引根目录加载失败，已有选择不会被清空。</span>}
         {isOrganizer ? (
@@ -70,11 +70,11 @@ export const ScanStepEditor: React.FC<Props> = ({ step, onChange, readOnly = fal
         )}
       </div>
       <div className="nfc-v2-step-field">
-        <label htmlFor={id + '-subpath'}>子路径范围过滤 (subpath)</label>
-        <p id={id + '-subpath-help'}>可选。限定扫描子目录，无需前导斜杠（例如：photos/2026）。禁止填写 null。</p>
+        <label htmlFor={id + '-subpath'}>扫描子路径</label>
+        <p id={id + '-subpath-help'}>留空扫描整个根目录，也可填写相对路径，例如 photos/2026。</p>
         <input type="text" id={id + '-subpath'} className="nfc-workflow-full-control"
           aria-describedby={id + '-subpath-help'}
-          value={step.subpath ?? ''} placeholder="留空表示扫描整个根目录"
+          value={step.subpath ?? ''} placeholder="例如 photos/2026"
           onChange={event => { if (!readOnly) onChange({ ...step, subpath: scanSubpathValue(event.target.value) }); }} />
       </div>
     </fieldset>

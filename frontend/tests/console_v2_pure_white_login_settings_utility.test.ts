@@ -71,8 +71,8 @@ describe('Pure White Stage 4A login, settings and utility preview', () => {
 
   test('Login/Settings old blue-black surfaces defer to scoped Pure White owners with live Chromium paint guards', () => {
     for (const token of [
-      '--nfc-v2-login-canvas: #ffffff', '--nfc-v2-login-canvas: #171716',
-      '--nfc-v2-login-panel: #ffffff', '--nfc-v2-login-panel: #242422',
+      '--nfc-v2-login-canvas: var(--studio-ground)',
+      '--nfc-v2-login-panel: var(--studio-paper)',
       '--nfc-v2-login-line: #eaeae7', '--nfc-v2-login-line: #383834',
       '--nfc-v2-login-muted: #62625e', '--nfc-v2-login-muted: #bebeba',
       'background: var(--nfc-v2-login-canvas);',

@@ -35,8 +35,8 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
   const currentValues: string[] = React.useMemo(() => {
     if (!value) return [];
     if (Array.isArray(value)) return value.filter(Boolean);
-    return [String(value).trim()].filter(Boolean);
-  }, [value]);
+    return [allowManualInput ? value.trim() : value].filter(Boolean);
+  }, [value, allowManualInput]);
 
   const singleValue = currentValues[0] || '';
 

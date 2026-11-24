@@ -23,7 +23,7 @@ describe('Console v2 StepCard native UI and unchanged workflow definitions', () 
       'DedupeStepEditor', 'SingleChildWrapperCollapseStepEditor',
     ]) assert.ok(s.includes('<' + editor), editor);
     for (const token of [
-      'step.root_ids.join', 'step.destination_root_id', 'step.touch_now',
+      'step.root_ids.length', 'step.destination_root_id', 'step.touch_now',
       'step.mtime_ns / 1e6', 'step.profile_snapshot?.name', 'step.scorer_config?.selection_mode',
       'getStepMeta(step)', 'mode={mode}', 'readOnly={readOnly}',
     ]) assert.ok(s.includes(token), token);
@@ -34,14 +34,14 @@ describe('Console v2 StepCard native UI and unchanged workflow definitions', () 
     for (const token of [
       '<section', '<header', '<button type="button"', 'aria-expanded={expanded}',
       'aria-controls={editorId}', 'const editorId = useId()',
-      'hidden={!expanded}', 'onClick={() => setExpanded(value => !value)}',
+      'hidden={!expanded}', 'onClick={onToggle}',
       'ConsoleButton', '<ConsoleIcon',
       'if (!readOnly && canMoveUp) onMoveUp()',
       'if (!readOnly && canMoveDown) onMoveDown()',
       'if (!readOnly && canDelete) onDelete()',
       'if (!readOnly && updated.type === step.type && updated.id === step.id) onChange(updated)',
-      'disabled={!canMoveUp}', 'disabled={!canMoveDown}', 'disabled={!canDelete}',
-      '!readOnly && (', '只读',
+      '{canMoveUp && (', '{canMoveDown && (', '{canDelete && (',
+      '!readOnly && expanded',
     ]) assert.ok(s.includes(token), token);
     assert.doesNotMatch(s, /from ['"]antd['"]|@ant-design\/icons|<Card\b|<Tag\b|<Tooltip\b|<Button\b/);
     const scan: WorkflowStep = { id: 's', type: 'scan', root_ids: [1] };

@@ -175,8 +175,7 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
     <>
       <ConsoleSheet open={open} onClose={handleClose}
         title={`Workflow #${workflowId}`}
-        description="版本历史 · Definition SHA256 对应已保存的不可变工作流定义"
-        eyebrow="Revision history" className="nfc-v2-revision-sheet">
+        description="版本历史 · Definition SHA256 对应已保存的不可变工作流定义" className="nfc-v2-revision-sheet">
         {isError && (
           <div className="nfc-v2-revision-error" role="alert">
             <strong>获取版本历史失败</strong>

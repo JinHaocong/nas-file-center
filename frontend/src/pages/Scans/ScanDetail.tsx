@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { scansApi } from '../../api/domain';
+import { isSqliteId } from '../../utils/sqliteId';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import type { DuplicateGroup } from '../../types';
@@ -22,9 +23,8 @@ import { useConsoleToast } from '../../components/ui/ConsoleToast';
 import { DedupeDiagnosticModal } from '../../components/dedupe/DedupeDiagnosticModal';
 
 export const ScanDetailPage: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
-  const scanId = Number(id);
-  const validScanId = Number.isSafeInteger(scanId) && scanId > 0;
+  const { id: scanId = '' } = useParams<{ id: string }>();
+  const validScanId = isSqliteId(scanId);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
@@ -39,6 +39,8 @@ export const ScanDetailPage: React.FC = () => {
   useEffect(() => {
     setPage(1);
     setExpandedGroupIds([]);
+    setPlanModalOpen(false);
+    setDiagnosticOpen(false);
   }, [scanId]);
 
   const deleteScanMutation = useMutation({
@@ -117,7 +119,7 @@ export const ScanDetailPage: React.FC = () => {
         <h2>{!validScanId || (!scanLoading && !scan && !scanError)
           ? '扫描任务不存在' : '无法加载扫描详情'}</h2>
         <p>{scanFetchError instanceof Error ? scanFetchError.message
-          : '未找到扫描任务 #' + (id || '—') + '，或扫描服务暂时不可用。'}</p>
+          : '未找到扫描任务 #' + (scanId || '—') + '，或扫描服务暂时不可用。'}</p>
         <ConsoleButton onClick={() => navigate('/scans')}>返回扫描列表</ConsoleButton>
         {validScanId && scanError && (
           <ConsoleButton onClick={() => refetchScan()}>重新加载</ConsoleButton>
@@ -133,7 +135,7 @@ export const ScanDetailPage: React.FC = () => {
   }
 
   const descriptionItems = [
-    { label: '任务 ID', value: <span className="nfc-mono">#{scan.id}</span> },
+    { label: '扫描 ID', value: <span className="nfc-mono">#{scanId}</span> },
     { label: '扫描模式', value: <span className="nfc-kind-badge">
       {scan.mode === 'isolate' ? 'A/B isolate' : 'standard'}
     </span> },
@@ -154,33 +156,27 @@ export const ScanDetailPage: React.FC = () => {
         title={scan.name}
         description={
           <div className="nfc-plan-header-meta">
-            <span className="nfc-mono">Scan #{scan.id}</span>
+            <span className="nfc-mono">扫描 #{scanId}</span>
             <StatusBadge status={scan.status} />
-            {scan.has_dependent_plan && <span className="nfc-kind-badge">dependent plan</span>}
+            {scan.has_dependent_plan && <span className="nfc-kind-badge">已关联计划</span>}
           </div>
         }
         actions={
           <ActionBar compact>
-            <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-right" size={16} />}
+            <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
               onClick={() => navigate('/scans')}>返回列表</ConsoleButton>
             <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
               onClick={() => {
                 refetchScan();
                 if (scan.status === 'completed') refetchGroups();
               }} loading={scanFetching}>刷新</ConsoleButton>
-            <ConsoleButton leadingIcon={<ConsoleIcon name="search" size={16} />}
-              onClick={() => setDiagnosticOpen(true)}>重复诊断</ConsoleButton>
-            <ScanDeleteButton key={scan.id} scan={scan}
-              onDelete={() => deleteScanMutation.mutate()}
-              loading={deleteScanMutation.isPending}
-              buttonText="删除扫描" type="default" />
             {scan.status === 'completed' && scan.total_groups > 0 && (
               <>
                 <ConsoleButton leadingIcon={<ConsoleIcon name="list-checks" size={16} />}
                   onClick={() => setPlanModalOpen(true)}>经典去重计划</ConsoleButton>
                 <ConsoleButton variant="primary" leadingIcon={<ConsoleIcon name="zap" size={16} />}
-                  onClick={() => navigate('/scans/' + scan.id + '/dedupe')}>
-                  高级去重 (Advanced Dedupe)
+                  onClick={() => navigate('/scans/' + scanId + '/dedupe')}>
+                  高级去重
                 </ConsoleButton>
               </>
             )}
@@ -205,12 +201,23 @@ export const ScanDetailPage: React.FC = () => {
             {scan.roots.map((root, index) => <CodePath value={root} key={index} />)}
           </div>
         </div>
+        <ActionBar className="nfc-scan-snapshot-actions">
+          {scan.status === 'completed' && scan.total_groups > 0 &&
+            <a className="nfc-scan-evidence-link" href="#scan-group-evidence">查看重复组证据</a>}
+            <ConsoleButton leadingIcon={<ConsoleIcon name="search" size={16} />}
+              onClick={() => setDiagnosticOpen(true)}>重复诊断</ConsoleButton>
+            <ScanDeleteButton key={scanId} scan={{ ...scan, id: scanId }}
+              onDelete={() => deleteScanMutation.mutate()}
+              loading={deleteScanMutation.isPending}
+              buttonText="删除扫描" type="default" />
+        </ActionBar>
       </DataPanel>
 
       {scan.status === 'completed' && (
+        <div id="scan-group-evidence" tabIndex={-1} role="region" aria-label="重复组证据" className="nfc-scan-evidence-target">
         <DataPanel title="重复文件组"
           description="展开组查看各个文件成员；数据只读，不会直接修改文件。"
-          action={<span className="nfc-panel-count">{groupsTotal ?? '—'} groups</span>}
+          action={<span className="nfc-panel-count">{groupsTotal ?? '—'} 组</span>}
           className="nfc-panel-flush nfc-v2-groups-panel" variant="dense">
           {groupsError ? (
             <div className="nfc-v2-group-status" role="alert">
@@ -312,6 +319,7 @@ export const ScanDetailPage: React.FC = () => {
               onChange={changePage} />
           )}
         </DataPanel>
+        </div>
       )}
 
       <DedupePlanModal scanId={scanId} open={planModalOpen}

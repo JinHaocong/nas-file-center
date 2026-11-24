@@ -12,11 +12,11 @@ const safe = read('src/styles/console-v2-dedupe-safety.css');
 const scorer = read('src/styles/console-v2-dedupe-scorer.css');
 
 describe('Pure White Stage 3B complex form details', () => {
-  test('StepCard uses neutral chips and safe long summaries without breaking disclosure', () => {
+  test('StepCard uses shared workspace colors and clips long summaries without breaking disclosure', () => {
     for (const token of [
-      '--nfc-info-soft: var(--nfc-accent-soft)',
-      'nfc-v2-step-card:focus-within', 'overflow-wrap: anywhere',
-      'nfc-v2-step-type.is-dedupe', 'min-height: 44px',
+      '--nfc-info-soft: var(--nfc-tint-soft)',
+      'nfc-v2-step-card:focus-within', 'text-overflow: ellipsis',
+      'nfc-v2-step-type', 'min-height: 44px',
     ]) assert.ok(step.includes(token), token);
     assert.doesNotMatch(step, /#8668d4|#e2ae52/);
     const source = read('src/components/workflows/StepCard.tsx');
@@ -28,18 +28,18 @@ describe('Pure White Stage 3B complex form details', () => {
 
   test('Workflow root cards support keyboard-visible neutral checked/hover states', () => {
     for (const token of [
-      ':has(input:checked) { background: var(--nfc-accent-soft)',
+      ':has(input:checked) { background: var(--nfc-tint-soft)',
       '.nfc-v2-step-root-option:focus-within',
       '.nfc-v2-step-root-option:hover:not(:has(input:disabled))',
-      'accent-color: var(--nfc-accent)',
+      'accent-color: var(--nfc-tint-fill)',
       'min-height: 44px',
     ]) assert.ok(fields.includes(token), token);
   });
 
   test('Organizer Portal is neutral across themes while DirectoryPicker remains on top', () => {
     for (const token of [
-      '--nfc-accent: #252525', '--nfc-accent: #e9e9e6',
-      '--nfc-text: #20201f', '--nfc-surface-1: #242422',
+      '--nfc-accent: var(--nfc-tint)', '--nfc-hairline: var(--studio-line)',
+      '--nfc-text: var(--studio-ink)', '--nfc-surface-1: var(--studio-paper)',
       'z-index: 1140', 'z-index: 1141', 'overflow-wrap: anywhere',
       'max-height: calc(100dvh - 12px)', ':focus-visible',
     ]) assert.ok(org.includes(token), token);
@@ -72,7 +72,7 @@ describe('Pure White Stage 3B complex form details', () => {
 
   test('Scorer maintains numeric truth, validation and visible focus in both themes', () => {
     for (const token of [
-      '--nfc-scorer-accent: #252525', '--nfc-scorer-accent: #e9e9e6',
+      '--nfc-scorer-accent: var(--nfc-tint)', '--nfc-scorer-paper: var(--studio-paper)',
       '.nfc-v2-scorer-rule-row:focus-within',
       '.nfc-v2-scorer-option:focus-within',
       'font-variant-numeric: tabular-nums', 'min-height: 44px',

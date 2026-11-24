@@ -14,8 +14,8 @@ describe('Console v2 native dedupe scoring editor', () => {
     for (const token of [
       'weighted', 'balanced_by_bytes', 'recursive_directory_balanced_by_bytes',
       'handleSelectionModeChange', 'isRecursiveDirectoryBalance',
-      'Recursive Last-File Protection — 强制启用',
-      '该保护不可关闭，前端不提供禁用开关',
+      '目录最后一个文件保护 · 强制启用',
+      '递归目录模式始终保留每个受约束目录中的最后一个文件',
       'nfc-v2-scorer-notice', 'schema_version',
     ]) {
       if (token === 'schema_version') continue;
@@ -79,6 +79,13 @@ describe('Console v2 native dedupe scoring editor', () => {
       '<ConsoleButton', '<ConsoleIcon', 'nfc-v2-scorer-rule-actions',
     ]) assert.ok(s.includes(token), token);
     assert.doesNotMatch(s, /from ['"]antd['"]|@ant-design\/icons|<Card\b|<Switch\b|<InputNumber\b|<Radio\b|<Select\b|<Alert\b/);
+  });
+
+  test('only enabled factors expose weight and rule controls', () => {
+    const source = read('src/components/dedupe/DedupeScorerConfigEditor.tsx');
+    assert.match(source, /\{path_priority\.enabled && \(\s*<div[^>]*>\s*<div[^>]*nfc-v2-scorer-weight/);
+    assert.match(source, /\{preferred_extension\.enabled && \(\s*<div[^>]*>\s*<div[^>]*nfc-v2-scorer-weight/);
+    assert.match(source, /\{mtime\.mode !== 'none' && \(\s*<div[^>]*nfc-v2-scorer-weight/);
   });
 
   test('shared native editor supports workflow and scan; light/dark/mobile and focus treatment', () => {

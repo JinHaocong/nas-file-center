@@ -20,7 +20,7 @@
   font-size:12px;white-space:normal;overflow-wrap:anywhere;
 }
 .nfc-v2-scheduler-table-scroll { width:100%;max-width:100%;overflow-x:auto;scrollbar-width:thin; }
-.nfc-v2-scheduler-table { min-width:1190px;width:100%;border-collapse:collapse;
+.nfc-v2-scheduler-table { min-width:890px;width:100%;border-collapse:collapse;
   color:var(--nfc-sched-text);font-size:12px;line-height:1.65;table-layout:fixed; }
 .nfc-v2-scheduler-table th { padding:12px 11px;text-align:left;font-size:11px;
   font-weight:700;color:var(--nfc-sched-muted);background:var(--nfc-sched-soft);
@@ -29,12 +29,15 @@
   vertical-align:middle;overflow-wrap:anywhere; }
 .nfc-v2-scheduler-table tbody tr:last-child td { border-bottom:0; }
 .nfc-v2-scheduler-table tbody tr:hover { background:color-mix(in srgb,var(--nfc-sched-soft) 70%,transparent); }
-.nfc-v2-scheduler-table th:nth-child(1) { width:19%; }
-.nfc-v2-scheduler-table th:nth-child(2) { width:91px; }
-.nfc-v2-scheduler-table th:nth-child(3) { width:17%; }
-.nfc-v2-scheduler-table th:nth-child(4) { width:17%; }
-.nfc-v2-scheduler-table th:nth-child(5),.nfc-v2-scheduler-table th:nth-child(6) { width:156px; }
-.nfc-v2-scheduler-table th:nth-child(7) { width:210px; }
+.nfc-v2-scheduler-table th:nth-child(1) { width: 19%; }
+.nfc-v2-scheduler-table th:nth-child(2) { width: 82px; }
+.nfc-v2-scheduler-table th:nth-child(3) { width: 19%; }
+.nfc-v2-scheduler-table th:nth-child(4) { width: 14%; }
+.nfc-v2-scheduler-table th:nth-child(5) { width: 170px; }
+.nfc-v2-scheduler-table th:nth-child(6) { width: 155px; }
+.nfc-scheduler-occurrence { display: grid; gap: 4px; font-variant-numeric: tabular-nums; }
+.nfc-scheduler-occurrence time { font-weight: 680; }
+.nfc-scheduler-occurrence small { color: var(--studio-muted); }
 .nfc-v2-scheduler-actions { display:flex;flex-wrap:wrap;gap:6px;align-items:center; }
 .nfc-v2-scheduler-switch { display:inline-flex;align-items:center;gap:7px;
   color:var(--nfc-sched-text);font-size:12px;cursor:pointer; }
@@ -67,18 +70,37 @@
   background:var(--nfc-sched-soft);font-size:12px; }
 .nfc-scheduler-mobile-cron span { color:var(--nfc-sched-muted);font-size:12px; }
 
-.nfc-v2-scheduler-editor {
-  --nfc-sched-editor-ink:var(--nfc-text,#172338);
-  --nfc-sched-editor-paper:var(--nfc-surface-1,#fff);
-  --nfc-sched-editor-soft:var(--nfc-surface-2,#f5f7fb);
-  --nfc-sched-editor-line:var(--nfc-hairline,#dce5ee);
-  --nfc-sched-editor-accent:var(--nfc-accent,#286ff1);
-  width:min(94vw,760px);max-width:760px;max-height:89dvh;overflow-y:auto;color:var(--nfc-sched-editor-ink);
+.nfc-v2-dialog.nfc-v2-scheduler-editor {
+  --nfc-sched-editor-ink:var(--studio-ink);
+  --nfc-sched-editor-paper:var(--studio-paper);
+  --nfc-sched-editor-soft:var(--studio-ground);
+  --nfc-sched-editor-line:var(--studio-line);
+  --nfc-sched-editor-accent:var(--nfc-tint);
+  --nfc-sched-editor-inset:24px;
+  display:flex;flex-direction:column;width:min(660px,calc(100vw - 28px));max-height:calc(100dvh - 36px);
+  overflow:hidden;color:var(--nfc-sched-editor-ink);background:var(--nfc-sched-editor-paper);
+  border-color:var(--nfc-sched-editor-line);
 }
-.nfc-v2-scheduler-editor .nfc-v2-dialog-heading { align-items:flex-start; }
+.nfc-v2-scheduler-editor .nfc-v2-dialog-heading {
+  flex:none;align-items:flex-start;padding-inline:var(--nfc-sched-editor-inset);border-color:var(--nfc-sched-editor-line);
+}
 .nfc-v2-scheduler-editor .nfc-v2-dialog-heading > div { flex:1;min-width:0; }
-.nfc-v2-scheduler-editor .nfc-v2-dialog-heading p { margin:6px 0 0;font-size:11px;line-height:1.6; }
-.nfc-v2-scheduler-form { display:grid;gap:15px;margin-top:14px;min-width:0; }
+.nfc-v2-scheduler-editor .nfc-v2-dialog-heading p { margin:6px 0 0;font-size:12px;line-height:1.6;color:var(--studio-muted); }
+.nfc-v2-scheduler-form { display:flex;flex-direction:column;min-width:0;min-height:0; }
+.nfc-v2-scheduler-form-body {
+  display:grid;align-content:start;gap:15px;min-height:0;min-width:0;overflow:auto;
+  padding:16px var(--nfc-sched-editor-inset) 20px;scroll-padding:12px;
+}
+.nfc-v2-scheduler-form-actions {
+  display:flex;flex:none;justify-content:flex-end;gap:8px;padding:12px var(--nfc-sched-editor-inset);
+  border-top:1px solid var(--nfc-sched-editor-line);
+}
+.nfc-v2-scheduler-editor .nfc-console-button-primary:not(:disabled) {
+  background:var(--nfc-tint-fill);border-color:var(--nfc-tint-fill);color:var(--nfc-tint-on-fill);
+}
+.nfc-v2-scheduler-editor .nfc-console-button-primary:hover:not(:disabled) {
+  background:var(--nfc-tint-hover);border-color:var(--nfc-tint-hover);
+}
 .nfc-scheduler-form-grid { display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,.44fr);
   gap:14px;align-items:start; }
 .nfc-v2-scheduler-field { display:grid;gap:7px;min-width:0;
@@ -131,13 +153,6 @@
   align-items:center;color:var(--nfc-text-secondary);font-size:12px; }
 .nfc-scheduler-history-loading { padding:24px 0;text-align:center;color:var(--nfc-text-tertiary); }
 .nfc-v2-scheduler-history.nfc-v2-sheet { width:min(620px,100vw); }
-[data-theme='dark'] .nfc-v2-scheduler-editor {
-  --nfc-sched-editor-paper:var(--nfc-surface-1,#1a2434);
-  --nfc-sched-editor-soft:var(--nfc-surface-2,#222e41);
-  --nfc-sched-editor-ink:var(--nfc-text,#f1f5fb);
-  --nfc-sched-editor-line:var(--nfc-hairline,#36435a);
-  --nfc-sched-editor-accent:var(--nfc-accent,#83b5ff);
-}
 [data-theme='dark'] .nfc-scheduler-page {
   --nfc-sched-paper:var(--v2-paper,#1a2434);
   --nfc-sched-soft:var(--v2-canvas,#111827);
@@ -150,12 +165,15 @@
   .nfc-scheduler-page { gap:12px; }
   .nfc-scheduler-form-grid { grid-template-columns:1fr;gap:10px; }
   .nfc-scheduler-pin-panel { grid-template-columns:1fr; }
-  .nfc-v2-scheduler-editor { width:min(96vw,760px);max-height:93dvh; }
+  .nfc-v2-dialog.nfc-v2-scheduler-editor {
+    --nfc-sched-editor-inset:16px;
+    max-height:calc(100dvh - 24px);
+  }
   .nfc-v2-scheduler-history.nfc-v2-sheet { width:100vw; }
   .nfc-scheduler-run-facts { display:grid;gap:6px; }
   .nfc-scheduler-mobile-card .nfc-mobile-record-actions { flex-wrap:wrap;justify-content:flex-start; }
   .nfc-v2-scheduler-page .nfc-console-button,
-  .nfc-v2-scheduler-editor :is(.nfc-console-button,input,select) { min-height:44px; }
+  .nfc-v2-scheduler-editor :is(.nfc-console-button,.nfc-v2-dialog-close,input:not([type='checkbox']),select,.nfc-v2-scheduler-toggle) { min-height:44px; }
 }
 @media (prefers-reduced-motion:reduce) {
   .nfc-v2-scheduler-page *, .nfc-v2-scheduler-editor *, .nfc-v2-scheduler-history * {

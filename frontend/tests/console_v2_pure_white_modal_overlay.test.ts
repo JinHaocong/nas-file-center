@@ -94,13 +94,14 @@ describe('Pure White portal overlay clarity and stacking', () => {
 
   test('Quarantine Restore-to-Purge transition waits for actual portal pointer ownership', () => {
     const browser = read('scripts/browser-quarantine-plan-overlays.mjs');
-    assert.ok(browser.includes('async function waitForInteractivePortal(page, selector)'));
-    assert.ok(browser.includes("dialog.getAttribute('data-state') !== 'open'"));
-    assert.ok(browser.includes('document.elementFromPoint(x, y)?.closest(sel)'));
+    const readiness = read('scripts/interactive-portal.mjs');
+    assert.ok(browser.includes("import { waitForInteractivePortal } from './interactive-portal.mjs'"));
+    assert.ok(readiness.includes("dialog.getAttribute('data-state') !== 'open'"));
+    assert.ok(readiness.includes('document.elementFromPoint(x, y)?.closest(sel)'));
     assert.ok(browser.includes("await waitForInteractivePortal(page, '.nfc-v2-quarantine-dialog')"));
     assert.ok(browser.includes("check(Boolean(hit?.closest(selector)), 'Scrim intercepts pointer hits')"),
       'Never remove strict final scrim/portal hit test');
-    assert.ok(browser.includes('timeout: 3500, polling: 50'),
+    assert.ok(readiness.includes("timeout: 3500, polling: 'raf'"),
       'The stabilizing wait must be bounded: a real obstruction still fails');
   });
 

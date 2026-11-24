@@ -77,7 +77,8 @@
 .nfc-download-verify-page .nfc-dv-workspace { display:grid;gap:21px; }
 .nfc-download-verify-page .nfc-dv-workspace > .nfc-dv-source { max-width:520px; }
 .nfc-download-verify-page .nfc-dv-pair {
-  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px;align-items:stretch;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 11px; align-items: stretch;
 }
 .nfc-download-verify-page .nfc-dv-pair-card {
   border:1px solid var(--dv-line);background:var(--dv-paper);
@@ -86,7 +87,12 @@
 .nfc-download-verify-page .nfc-dv-pair-heading {
   display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--dv-text);
 }
-.nfc-download-verify-page .nfc-dv-pair-heading svg {color:var(--nfc-accent);}
+.nfc-download-verify-page .nfc-dv-pair-heading svg { color: var(--nfc-tint); }
+.nfc-dv-pair-connector { align-self: center; color: var(--nfc-tint); }
+.nfc-download-verify-page .nfc-dv-pair-card:last-child {
+  background: color-mix(in srgb, var(--nfc-tint-soft) 48%, var(--studio-paper));
+  border-color: var(--nfc-tint-line);
+}
 .nfc-download-verify-page .nfc-dv-pair-card .nfc-dv-field {width:100%;}
 .nfc-download-verify-page .nfc-dv-pair-card .nfc-v2-directory-picker {width:100%;min-width:0;}
 .nfc-download-verify-page .nfc-dv-pair-card .nfc-directory-picker-single {min-width:0;}
@@ -121,12 +127,17 @@
   margin-bottom:12px;font-size:12px;color:var(--dv-muted);
 }
 .nfc-download-verify-page .nfc-dv-bulk-actions {display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-.nfc-download-verify-page .nfc-dv-select-cell {width:40px;text-align:center;white-space:nowrap;}
-.nfc-download-verify-page .nfc-dv-select-cell input[type="checkbox"] {
-  width:16px;height:16px;min-height:0;margin:0;padding:0;vertical-align:middle;
-  accent-color:var(--nfc-accent);cursor:pointer;
+.nfc-dv-bulk-selection {display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;}
+.nfc-dv-selection {
+  display:inline-flex;align-items:center;gap:8px;min-height:36px;
+  color:var(--studio-ink);font-weight:650;
 }
-.nfc-download-verify-page .nfc-dv-select-cell input[type="checkbox"]:disabled {cursor:not-allowed;}
+.nfc-download-verify-page .nfc-dv-select-cell {width:40px;text-align:center;white-space:nowrap;}
+.nfc-download-verify-page :is(.nfc-dv-select-cell,.nfc-dv-selection) input[type="checkbox"] {
+  width:16px;height:16px;min-height:0;margin:0;padding:0;vertical-align:middle;
+  accent-color:var(--nfc-tint-fill);cursor:pointer;flex:none;
+}
+.nfc-download-verify-page :is(.nfc-dv-select-cell,.nfc-dv-selection) input[type="checkbox"]:disabled {cursor:not-allowed;}
 .nfc-download-verify-page .nfc-dv-row-actions {
   display:flex;align-items:center;gap:7px;flex-wrap:nowrap;
 }
@@ -148,9 +159,13 @@
 .nfc-dv-remote-dialog .nfc-dv-remote-current {
   display:block;overflow-wrap:anywhere;max-width:440px;margin-top:7px;font-size:13px;
 }
-.nfc-dv-source-page .nfc-dv-source-list {display:grid;gap:10px;}
+.nfc-dv-source-page .nfc-dv-source-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 14px;
+}
 .nfc-dv-source-page .nfc-dv-source-entry {
-  display:flex;gap:14px;align-items:center;padding:16px;
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: start; padding: 16px;
   border:1px solid var(--dv-line);background:var(--dv-paper);border-radius:11px;min-width:0;
 }
 .nfc-dv-source-page .nfc-dv-source-symbol {
@@ -162,7 +177,24 @@
 .nfc-dv-source-page .nfc-dv-source-info strong {font-size:13px;}
 .nfc-dv-source-page .nfc-dv-source-info span {font-size:12px;}
 .nfc-dv-source-page .nfc-dv-source-info small {font-size:11px;color:var(--dv-muted);}
-.nfc-dv-source-page .nfc-dv-source-buttons {display:flex;gap:8px;flex:0 0 auto;}
+.nfc-dv-source-page .nfc-dv-source-buttons {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--studio-line);
+  padding-top: 10px;
+}
+.nfc-dv-source-fields {
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-radius-control);
+  background: var(--studio-ground);
+}
+.nfc-dv-source-fields legend { color: var(--nfc-tint); padding-inline: 5px; font-size: 13px; font-weight: 680; }
 .nfc-dv-source-page .nfc-dv-source-form {max-width:790px;display:grid;gap:14px;}
 .nfc-dv-source-page .nfc-dv-source-form label {display:grid;gap:7px;min-width:0;font-size:12px;font-weight:640;}
 .nfc-dv-source-page .nfc-dv-empty {
@@ -172,13 +204,14 @@
 .nfc-dv-source-page .nfc-dv-empty strong {color:var(--dv-text);}
 @media(max-width:950px) {
   .nfc-download-verify-page .nfc-dv-pair {grid-template-columns:minmax(0,1fr);}
+  .nfc-dv-pair-connector { display: none; }
 }
 @media(max-width:767px) {
   .nfc-download-verify-page .nfc-dv-pair-card {padding:13px;}
   .nfc-download-verify-page .nfc-dv-footer {align-items:stretch;flex-direction:column;}
   .nfc-download-verify-page .nfc-dv-footer .nfc-console-button {width:100%;justify-content:center;}
   .nfc-dv-source-page .nfc-dv-source-entry {align-items:flex-start;flex-wrap:wrap;}
-  .nfc-dv-source-page .nfc-dv-source-buttons {width:100%;padding-left:56px;}
+  .nfc-dv-source-page .nfc-dv-source-buttons { width: 100%; justify-content: flex-start; }
   .nfc-dv-source-page .nfc-dv-manager-grid {grid-template-columns:minmax(0,1fr);}
   .nfc-dv-source-page .nfc-dv-manager-grid .nfc-dv-wide {grid-column:auto;}
   .nfc-dv-remote-dialog .nfc-directory-picker-footer {align-items:stretch;flex-wrap:wrap;}
@@ -201,4 +234,60 @@
 }
 .nfc-download-verify-page .nfc-dv-detail-count {
   font-size:12px;color:var(--dv-muted);font-variant-numeric:tabular-nums;
+}
+
+#nfc-download-report {scroll-margin-block-start:12px;}
+#nfc-download-report:focus-visible {outline:2px solid var(--nfc-tint);outline-offset:2px;}
+.nfc-dv-mobile-history,.nfc-dv-mobile-items {
+  display:grid;gap:9px;margin:0;padding:0;min-width:0;list-style:none;
+}
+.nfc-dv-mobile-run,.nfc-dv-mobile-item {
+  min-width:0;border:1px solid var(--studio-line);border-radius:11px;
+  color:var(--studio-ink);background:var(--studio-paper);
+}
+.nfc-dv-mobile-run {display:grid;gap:8px;padding:9px 12px;}
+.nfc-dv-mobile-run:has(input:checked) {border-color:var(--nfc-tint);background:var(--nfc-tint-soft);}
+.nfc-dv-mobile-run-heading {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0 9px;}
+.nfc-dv-mobile-run-result {display:grid;gap:4px;overflow-wrap:anywhere;font-size:13px;}
+.nfc-dv-mobile-run-result > span {color:var(--studio-muted);font-size:12px;}
+.nfc-dv-mobile-run .nfc-dv-row-actions {flex-wrap:wrap;}
+.nfc-dv-mobile-run .nfc-dv-row-actions .nfc-console-button {min-height:44px;}
+.nfc-dv-mobile-run .nfc-dv-row-actions .nfc-console-button:first-child {
+  color:var(--nfc-tint);border-color:var(--nfc-tint-line);background:var(--nfc-tint-soft);
+}
+.nfc-dv-mobile-run .nfc-dv-row-actions .nfc-console-button:first-child:hover {
+  border-color:var(--nfc-tint);
+}
+.nfc-dv-mobile-run-paths {border-top:1px solid var(--studio-line);padding-top:2px;}
+.nfc-dv-mobile-run-paths summary,.nfc-dv-mobile-item summary {
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  min-height:44px;font-size:12px;list-style:none;cursor:pointer;
+}
+.nfc-dv-mobile-run-paths summary {color:var(--studio-muted);}
+.nfc-dv-mobile-item summary {
+  display:grid;grid-template-columns:minmax(0,1fr) auto 14px;padding:10px 12px;
+}
+.nfc-dv-mobile-item summary strong {overflow-wrap:anywhere;}
+.nfc-dv-mobile-item summary .nfc-status-badge {max-width:105px;white-space:normal;}
+.nfc-dv-mobile-run-paths summary::-webkit-details-marker,.nfc-dv-mobile-item summary::-webkit-details-marker {display:none;}
+.nfc-dv-mobile-run-paths summary:focus-visible,.nfc-dv-mobile-item summary:focus-visible {
+  outline:2px solid var(--nfc-tint);outline-offset:-2px;border-radius:8px;
+}
+.nfc-dv-mobile-run-paths summary > svg,.nfc-dv-mobile-item summary > svg {
+  color:var(--studio-muted);transition:rotate var(--nfc-motion-fast) var(--nfc-motion-ease);
+}
+.nfc-dv-mobile-run-paths[open] summary > svg,.nfc-dv-mobile-item details[open] summary > svg {rotate:180deg;}
+.nfc-dv-mobile-run-paths dl,.nfc-dv-mobile-item dl {display:grid;gap:8px;margin:0 0 8px;font-size:12px;}
+.nfc-dv-mobile-item dl {padding:10px 12px 0;border-top:1px solid var(--studio-line);}
+.nfc-dv-mobile-run-paths dl > div,.nfc-dv-mobile-item dl > div {
+  display:grid;grid-template-columns:75px minmax(0,1fr);gap:8px;min-width:0;
+}
+.nfc-dv-mobile-run-paths dt,.nfc-dv-mobile-item dt {color:var(--studio-muted);overflow-wrap:anywhere;}
+.nfc-dv-mobile-run-paths dd,.nfc-dv-mobile-item dd {margin:0;min-width:0;overflow-wrap:anywhere;}
+@media(max-width:767px) {
+  #nfc-download-report {scroll-margin-block-start:72px;}
+  .nfc-dv-selection,.nfc-dv-detail-filter {min-height:44px;}
+}
+@media(prefers-reduced-motion:reduce) {
+  .nfc-dv-mobile-run-paths summary > svg,.nfc-dv-mobile-item summary > svg {transition:none;}
 }

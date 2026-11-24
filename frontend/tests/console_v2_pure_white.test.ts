@@ -28,16 +28,15 @@ describe('Console surfaces, navigation materials and controls', () => {
     assert.match(shell, /\.nfc-v2-nav-item\.is-active\s*\{[^}]*background:\s*var\(--nfc-tint-soft\);[^}]*color:\s*var\(--nfc-tint\);/);
   });
 
-  test('sidebar uses an inset navigation surface and retains current-page semantics', () => {
-    assert.match(shell, /\.nfc-v2-shell \.nfc-v2-sidebar\s*\{[^}]*position:\s*sticky;[^}]*background:\s*var\(--nfc-material-bg\);[^}]*border-radius:\s*var\(--nfc-overlay-radius\);/);
-    assert.match(shell, /\.nfc-v2-brand-icon\s*\{[^}]*background:\s*var\(--nfc-tint-fill\);/);
-    assert.match(shell, /\.nfc-v2-nav-item\.is-active::before\s*\{[^}]*width:\s*2px;[^}]*height:\s*18px;/);
-    assert.doesNotMatch(shell, /linear-gradient\(100deg,\s*#1c4c91/);
+  test('the top navigation opens a searchable tool directory with page identity and version', () => {
     const sidebar = read('src/components/Sidebar.tsx');
-    assert.match(sidebar, /aria-current=\{selectedKey === item\.path \? 'page' : undefined\}/);
+    const header = read('src/components/Header.tsx');
+    assert.ok(header.includes('nfc-studio-brand'));
+    assert.ok(header.includes('primaryDestinations'));
+    assert.ok(sidebar.includes('type="search"'));
+    assert.ok(sidebar.includes("selectedKey === item.path ? 'page'"));
     const productVersion = JSON.parse(read('package.json')).version as string;
     assert.ok(sidebar.includes(`className="nfc-v2-release-version">v${productVersion}</small>`));
-    assert.doesNotMatch(sidebar, /SECURE FILE OPERATIONS · v[0-9]/);
   });
 
   test('header uses a consistent material with a divider and visible focus', () => {
@@ -46,9 +45,10 @@ describe('Console surfaces, navigation materials and controls', () => {
     assert.match(shell, /\.nfc-v2-avatar\s*\{[^}]*background:\s*var\(--nfc-tint-soft\);/);
   });
 
-  test('Dashboard keeps live data and separates product art from text', () => {
-    assert.match(shell, /\.nfc-v2-dashboard-hero\s*\{[^}]*background:\s*var\(--nfc-hero-from\);/);
-    assert.match(shell, /\.nfc-v2-hero-illustration\s*\{[^}]*object-fit:\s*contain;/);
+  test('Dashboard presents working directory shortcuts alongside live data', () => {
+    assert.match(shell, /\.nfc-v2-dashboard-hero\s*\{[^}]*background:\s*var\(--studio-ground\);/);
+    assert.ok(read('src/pages/Dashboard/DirectoryShelf.tsx').includes('filesystemApi.listRecent'));
+    assert.ok(read('src/pages/Dashboard/DirectoryShelf.tsx').includes('MediaThumbnail'));
     assert.match(shell, /\.nfc-v2-dashboard \.nfc-metric-card\s*\{[^}]*border-radius:\s*var\(--nfc-panel-radius\) !important;[^}]*box-shadow:\s*var\(--v2-shadow\) !important;/);
     assert.match(shell, /\.nfc-v2-data-table tbody tr:hover,\s*\.nfc-v2-data-table tbody tr:focus-within\s*\{\s*background:\s*var\(--v2-indigo-soft\);/);
     const dashboard = read('src/pages/Dashboard/index.tsx');

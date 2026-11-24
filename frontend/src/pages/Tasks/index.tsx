@@ -1,6 +1,8 @@
+import { sqliteIdText } from '../../utils/sqliteId';
+import { taskTypeLabel } from '../../utils/taskTypeLabel';
 import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { tasksApi } from '../../api/tasks';
 import { useTitle } from '../../hooks/useTitle';
@@ -36,12 +38,12 @@ const STATUS_OPTIONS = [
 const JOB_TYPE_OPTIONS = [
   { label: '全部类型', value: 'all' },
   { label: '媒体整理', value: 'media-organizer-batch' },
-  { label: 'fclones-scan', value: 'fclones-scan' },
-  { label: 'index-root', value: 'index-root' },
-  { label: 'workflow-scheduled', value: 'workflow-scheduled' },
-  { label: 'media-analysis', value: 'media-analysis' },
-  { label: 'media-integrity-verify', value: 'media-integrity-verify' },
-  { label: 'download-verify-webdav', value: 'download-verify-webdav' },
+  { label: taskTypeLabel('fclones-scan'), value: 'fclones-scan' },
+  { label: taskTypeLabel('index-root'), value: 'index-root' },
+  { label: taskTypeLabel('workflow-scheduled'), value: 'workflow-scheduled' },
+  { label: taskTypeLabel('media-analysis'), value: 'media-analysis' },
+  { label: taskTypeLabel('media-integrity-verify'), value: 'media-integrity-verify' },
+  { label: taskTypeLabel('download-verify-webdav'), value: 'download-verify-webdav' },
 ];
 
 export const TasksPage: React.FC = () => {
@@ -52,22 +54,35 @@ export const TasksPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [jobTypeFilter, setJobTypeFilter] = useState('all');
   const [searchParams, setSearchParams] = useSearchParams();
-  const [selectedTaskId, setSelectedTaskId] = useState<TaskId | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const selectedTaskId = sqliteIdText(searchParams.get('task'));
   const [currentTime, setCurrentTime] = useState<dayjs.Dayjs>(() => dayjs());
 
-  useEffect(() => {
-    const raw = searchParams.get('task');
-    if (raw && /^[1-9]\d*$/.test(raw)) setSelectedTaskId(raw);
-  }, [searchParams]);
+  /** Put drawer selection in the URL so reload and browser Back restore the shown record. */
+  function openTaskDetail(taskId: TaskId) {
+    const nextId = sqliteIdText(taskId);
+    if (!nextId || nextId === selectedTaskId) return;
+    const next = new URLSearchParams(searchParams);
+    next.set('task', nextId);
+    setSearchParams(next, {
+      replace: selectedTaskId !== null,
+      state: { taskFromList: selectedTaskId === null || location.state?.taskFromList === true },
+    });
+  }
 
-  const closeTaskDetail = () => {
-    setSelectedTaskId(null);
+  /** A deep link closes into the list; an in-list opener returns to its history entry. */
+  function closeTaskDetail() {
+    if (location.state?.taskFromList === true) {
+      navigate(-1);
+      return;
+    }
     if (searchParams.has('task')) {
       const next = new URLSearchParams(searchParams);
       next.delete('task');
       setSearchParams(next, { replace: true });
     }
-  };
+  }
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['tasksList', page, pageSize, statusFilter, jobTypeFilter],
@@ -144,15 +159,14 @@ export const TasksPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-tasks-page nfc-page-layout-ledger nfc-v2-tasks-page">
       <PageHeader
-        eyebrow="Operations"
         title="任务中心"
-        description="实时观察 Worker 的扫描、索引与计划执行任务；活动任务会自动刷新。"
+        description="查看正在进行的任务，打开记录可核对进度和执行结果。"
         actions={
           <ActionBar compact>
             <TaskHistoryCleanupModal
               onCleaned={() => {
                 setPage(1);
-                setSelectedTaskId(null);
+                closeTaskDetail();
               }}
             />
             <ConsoleButton
@@ -179,8 +193,8 @@ export const TasksPage: React.FC = () => {
 
       <DataPanel
         title="任务队列"
-        description="按状态和类型筛选；运行中的任务会更新进度与 ETA，进度未知时不会显示虚构百分比。"
-        action={<span className="nfc-panel-count">{isError ? '—' : data?.total ?? 0} tasks</span>}
+        description="按状态和类型筛选任务。"
+        action={<span className="nfc-panel-count">{isError ? '—' : data?.total ?? 0} 项</span>}
         className="nfc-panel-flush"
         variant="dense"
       >
@@ -229,11 +243,11 @@ export const TasksPage: React.FC = () => {
                       <tr key={task.id}>
                         <td>
                           <button type="button" className="nfc-table-link nfc-mono nfc-v2-task-id"
-                            onClick={() => setSelectedTaskId(task.id)}>
+                            onClick={() => openTaskDetail(task.id)}>
                             #{task.id}
                           </button>
                         </td>
-                        <td><span className="nfc-kind-badge">{task.job_type}</span></td>
+                        <td><span className="nfc-kind-badge" title={task.job_type}>{taskTypeLabel(task.job_type)}</span></td>
                         <td><StatusBadge status={task.status} /></td>
                         <td className="nfc-v2-task-progress-cell">
                           <TaskProgress progress={task.progress} status={task.status}
@@ -253,7 +267,7 @@ export const TasksPage: React.FC = () => {
                         <td><div className="nfc-row-actions">
                           <ConsoleButton size="sm" variant="ghost"
                             leadingIcon={<ConsoleIcon name="search" size={15} />}
-                            onClick={() => setSelectedTaskId(task.id)}>详情</ConsoleButton>
+                            onClick={() => openTaskDetail(task.id)}>详情</ConsoleButton>
                           <TaskDeleteButton task={task} size="small" type="text"
                             onSuccess={() => handleDeleted(task.id)} />
                         </div></td>
@@ -270,8 +284,8 @@ export const TasksPage: React.FC = () => {
                     <div className="nfc-mobile-record-heading">
                       <div>
                         <button type="button" className="nfc-mobile-record-title nfc-mono"
-                          onClick={() => setSelectedTaskId(task.id)}>#{task.id}</button>
-                        <span className="nfc-kind-badge">{task.job_type}</span>
+                          onClick={() => openTaskDetail(task.id)}>#{task.id}</button>
+                        <span className="nfc-kind-badge" title={task.job_type}>{taskTypeLabel(task.job_type)}</span>
                       </div>
                       <StatusBadge status={task.status} />
                     </div>
@@ -292,7 +306,7 @@ export const TasksPage: React.FC = () => {
                     <div className="nfc-mobile-record-actions">
                       <ConsoleButton size="sm" variant="ghost"
                         leadingIcon={<ConsoleIcon name="search" size={15} />}
-                        onClick={() => setSelectedTaskId(task.id)}>查看详情</ConsoleButton>
+                        onClick={() => openTaskDetail(task.id)}>查看详情</ConsoleButton>
                       <TaskDeleteButton task={task} type="text"
                         onSuccess={() => handleDeleted(task.id)} />
                     </div>
@@ -309,7 +323,7 @@ export const TasksPage: React.FC = () => {
         taskId={selectedTaskId}
         open={selectedTaskId !== null}
         onClose={closeTaskDetail}
-        onViewTask={(newId) => setSelectedTaskId(newId)}
+        onViewTask={openTaskDetail}
       />
     </div>
   );

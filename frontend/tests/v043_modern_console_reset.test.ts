@@ -23,10 +23,9 @@ describe('v0.4.3 console invariants carried into v0.4.7', () => {
     const layout = read('src/layouts/MainLayout.tsx');
     const dock = read('src/components/layout/MobileDock.tsx');
     assert.match(layout, /<MobileDock/);
-    assert.match(dock, /\/dashboard/);
-    assert.match(dock, /\/scans/);
-    assert.match(dock, /\/plans/);
-    assert.match(dock, /\/tasks/);
+    assert.ok(dock.includes('primaryDestinations.map'));
+    const routes = read('src/components/layout/navItems.ts').split('export const primaryDestinations')[1];
+    for (const route of ['/dashboard', '/batch?operation=media-organize', '/scans', '/tasks']) assert.ok(routes.includes(route));
     assert.match(dock, /更多/);
     assert.match(dock, /nfc-mobile-dock/);
   });

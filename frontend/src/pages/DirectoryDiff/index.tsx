@@ -165,19 +165,20 @@ export const DirectoryDiffPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-directory-diff-page nfc-page-layout-workbench nfc-v2-directory-diff">
       <PageHeader title="双目录差异对比"
-        description="按相对路径递归比较两个目录，完全只读；大小相同不代表内容相同，必要时可单项 SHA256 核验。" />
+        description="逐项核对相对路径、文件类型和大小，必要时校验文件内容。" />
       <DataPanel title="选择对比目录"
-        description="只读取两个互不包含的目录树；排除隔离区及符号链接，单侧最多扫描 10,000 个文件/目录条目。"
+        description="选择两个互不包含的目录。每侧最多读取 10,000 个条目，自动排除隔离区和符号链接。"
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
         <div className="nfc-v2-directory-diff-form">
-          <div className="nfc-form-grid">
+          <div className="nfc-v2-directory-diff-pair">
             <div className="nfc-v2-directory-diff-field" role="group" aria-label="目录 A">
-              <span>目录 A</span>
+              <span className="nfc-v2-directory-diff-label"><ConsoleIcon name="folder-open" size={18} />目录 A</span>
               <DirectoryPicker value={rootA} placeholder="选择待对比的 A 目录"
                 onChange={value => patchRoot('a', typeof value === 'string' ? value : value[0] || '')} />
             </div>
+            <ConsoleIcon name="git-compare" size={19} className="nfc-v2-directory-diff-connector" />
             <div className="nfc-v2-directory-diff-field" role="group" aria-label="目录 B">
-              <span>目录 B</span>
+              <span className="nfc-v2-directory-diff-label"><ConsoleIcon name="folder-open" size={18} />目录 B</span>
               <DirectoryPicker value={rootB} placeholder="选择待对比的 B 目录"
                 onChange={value => patchRoot('b', typeof value === 'string' ? value : value[0] || '')} />
             </div>
@@ -191,9 +192,8 @@ export const DirectoryDiffPage: React.FC = () => {
       </DataPanel>
       <div className="nfc-v2-directory-diff-notice nfc-page-alert" role="note">
         <ConsoleIcon name="info" size={19} />
-        <div><strong>V1 不做自动同步或任何文件修改</strong>
-          <p>目录均存在仅表示相对目录名存在，并不意味着目录内文件相同。
-            大小相同的文件需要 SHA256 校验才能确认内容一致；单文件校验上限 256 MiB。</p>
+        <div><strong>只读核验</strong>
+          <p>目录按相对路径对应。大小相同的文件可做 SHA256 核验，单文件校验上限 256 MiB。</p>
         </div>
       </div>
       {result && (

@@ -24,12 +24,12 @@ describe('v0.4.0 responsive App Shell contract', () => {
     assert.match(source, /isDesktop/);
   });
 
-  test('navigation uses accessible native dialog on mobile and independent desktop sidebar', () => {
+  test('navigation exposes the same accessible modal tool directory on all viewports', () => {
     const source = read('src/components/layout/ResponsiveNav.tsx');
-    assert.match(source, /role="dialog"/);
-    assert.match(source, /aria-modal="true"/);
+    assert.match(source, /Dialog.Root/);
+    assert.match(source, /Dialog.Content/);
     assert.match(source, /Sidebar/);
-    assert.match(source, /isMobile/);
+    assert.match(source, /onCloseAutoFocus/);
     assert.doesNotMatch(source, /from 'antd'/);
   });
 

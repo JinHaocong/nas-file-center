@@ -3804,7 +3804,8 @@ class FileCenterService:
         if not path or not path.strip():
             target_path = self.settings.allowed_roots[0]
         else:
-            target_path = Path(path.strip())
+            # An absolute NAS path can end in whitespace that belongs to its basename.
+            target_path = Path(path if path.startswith("/") else path.strip())
 
         safe_path = require_allowed_path(target_path, self.settings.allowed_roots)
         require_unreserved_path(safe_path, self.settings.quarantine_root)
@@ -4031,7 +4032,7 @@ class FileCenterService:
                 if not raw or not raw.strip():
                     continue
                 try:
-                    safe = require_allowed_path(raw.strip(), self.settings.allowed_roots)
+                    safe = require_allowed_path(raw if raw.startswith("/") else raw.strip(), self.settings.allowed_roots)
                     if not safe.exists() or not safe.is_dir():
                         continue
                 except ValueError:

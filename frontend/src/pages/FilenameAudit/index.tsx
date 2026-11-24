@@ -217,7 +217,7 @@ export const FilenameAuditPage: React.FC = () => {
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
         <div className="nfc-v2-filename-form">
           <div className="nfc-v2-filename-field">
-            <label id="nfc-filename-directory-label">目标目录</label>
+            <label id="nfc-filename-directory-label"><ConsoleIcon name="folder-open" size={18} />目标目录</label>
             <div aria-labelledby="nfc-filename-directory-label">
               <DirectoryPicker value={parent} disabled={planLoading}
                 placeholder="选择文件名质量巡检目录"
@@ -233,14 +233,10 @@ export const FilenameAuditPage: React.FC = () => {
           </ActionBar>
         </div>
       </DataPanel>
-      <div className="nfc-v2-filename-notice nfc-page-alert" role="note">
-        <ConsoleIcon name="info" size={19} />
-        <div>
-          <strong>巡检结果是风险提示，不自动修改 NAS 数据</strong>
-          <p>重复扩展名、双扩展名、Unicode 和 Windows 兼容性问题需要人工判断。
-            只对首尾普通空格提供修复建议，仍需创建 Rename Plan、冻结与校验后才能执行。</p>
-        </div>
-      </div>
+      <details className="nfc-v2-filename-notice nfc-page-alert">
+        <summary>查看巡检和修复规则</summary>
+        <p>重复扩展名、双扩展名、Unicode 和 Windows 兼容性问题需要人工判断。只对首尾普通空格提供修复建议，创建计划后还需冻结与校验。</p>
+      </details>
       {result && (
         <DataPanel title="巡检报告" variant="dense"
           className="nfc-panel-flush nfc-file-tool-result-panel"

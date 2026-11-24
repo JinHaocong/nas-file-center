@@ -1,4 +1,7 @@
-import React from 'react';
+import { taskSourceLink } from './taskRecordLinks';
+import { sqliteIdText } from '../../utils/sqliteId';
+import { taskTypeLabel } from '../../utils/taskTypeLabel';
+import React, { useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { tasksApi } from '../../api/tasks';
@@ -6,10 +9,11 @@ import { TaskProgress } from './TaskProgress';
 import { TaskLogTable } from './TaskLogTable';
 import { formatDateTime, formatElapsed } from '../../utils/format';
 import { sanitizeContext } from '../../utils/sanitize';
-import { calculateTaskEta } from './task_utils';
+import { getTaskDeleteAvailability } from './task_cleanup';
 import { TaskActionBar } from './TaskActionBar';
 import { TaskDeleteButton } from './TaskDeleteButton';
 import { MediaPackageRecoveryPanel } from './MediaPackageRecoveryPanel';
+import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleSheet } from '../ui/ConsoleSheet';
 import { StatusBadge } from '../ui/StatusBadge';
 import type { TaskId } from '../../types/task';
@@ -38,7 +42,8 @@ const ContextDetails: React.FC<{
 );
 
 export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onViewTask }) => {
-  const { data: task, isLoading, isError, error } = useQuery({
+  const logs = useRef<HTMLElement>(null);
+  const { data: task, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ['taskDetail', taskId === null ? null : String(taskId)],
     queryFn: () => (taskId ? tasksApi.getTaskDetail(taskId) : Promise.reject('No ID')),
     enabled: Boolean(taskId && open),
@@ -49,32 +54,13 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
     },
   });
 
-  const caps = task?.capabilities || {
-    supports_pause: false,
-    supports_resume: false,
-    supports_cancel: false,
-    supports_retry: false,
-  };
-
-  const capabilityBadges = (
-    <div className="nfc-v2-task-capabilities">
-      {([
-        ['暂停', caps.supports_pause],
-        ['恢复', caps.supports_resume],
-        ['取消', caps.supports_cancel],
-        ['重试', caps.supports_retry],
-      ] as const).map(([label, supported]) => (
-        <span key={label} className={'nfc-v2-task-capability' + (supported ? ' is-supported' : '')}>
-          {label} {supported ? '支持' : '不支持'}
-        </span>
-      ))}
-    </div>
-  );
+  const sourceLink = task && taskSourceLink(task);
+  const originalTaskId = sqliteIdText(task?.retry_of);
 
   return (
     <ConsoleSheet open={open} onClose={onClose}
-      title="任务详情" eyebrow="Task inspector"
-      description="查看 Worker 任务执行记录、恢复上下文与关联事件日志。"
+      title="任务详情"
+      description={task ? taskTypeLabel(task.job_type) : undefined}
       className="nfc-task-detail-drawer"
       titleAside={task ? (
         <><span className="nfc-v2-task-id">#{task.id}</span><StatusBadge status={task.status} /></>
@@ -85,6 +71,7 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
         <div className="nfc-v2-task-inline-alert" role="alert">
           <strong>加载任务详情失败</strong>
           <p>{error instanceof Error ? error.message : '网络请求异常'}</p>
+          <ConsoleButton size="sm" onClick={() => { void refetch(); }} loading={isFetching}>重试</ConsoleButton>
         </div>
       )}
       {!isError && task && (
@@ -109,26 +96,40 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
             </div>
           )}
 
-          <section className="nfc-overlay-section">
+          <section className="nfc-overlay-section nfc-v2-task-overview">
             <header className="nfc-overlay-section-header">
-              <div><span>Execution</span><h3>执行状态</h3></div>
+              <div><h3>执行进度</h3></div>
             </header>
-            <dl className="nfc-v2-task-facts">
-              <div><dt>任务 ID</dt><dd><strong>#{task.id}</strong></dd></div>
-              <div><dt>任务类型</dt><dd><span className="nfc-kind-badge">{task.job_type}</span></dd></div>
-              <div><dt>当前状态</dt><dd><StatusBadge status={task.status} /></dd></div>
-              <div><dt>原始任务</dt><dd>{task.retry_of ? <strong>#{task.retry_of}</strong> : '—'}</dd></div>
-              <div className="is-wide"><dt>任务能力</dt><dd>{capabilityBadges}</dd></div>
-              <div className="is-wide"><dt>执行进度</dt><dd>
-                <TaskProgress progress={task.progress} status={task.status}
-                  startedAt={task.started_at} showDetails />
-              </dd></div>
-            </dl>
+            <TaskProgress progress={task.progress} status={task.status}
+              startedAt={task.started_at} summarized />
+          </section>
+
+          <section className="nfc-overlay-section nfc-v2-task-commands">
+            <header className="nfc-overlay-section-header">
+              <div><h3>任务操作</h3></div>
+            </header>
+            <TaskActionBar key={task.id} task={task} onViewTask={onViewTask} />
+            <div className="nfc-task-evidence-links">
+              {sourceLink && <Link className="nfc-task-origin-link" to={sourceLink.href}>{sourceLink.label}</Link>}
+              {originalTaskId && (onViewTask ? (
+                <button type="button" className="nfc-task-origin-link"
+                  onClick={() => onViewTask(originalTaskId)}>原任务 #{originalTaskId}</button>
+              ) : <span>原任务 #{originalTaskId}</span>)}
+              <button type="button" className="nfc-task-origin-link" onClick={() => {
+                logs.current?.focus({ preventScroll: true });
+                logs.current?.scrollIntoView({ block: 'start' });
+              }}>查看任务日志</button>
+              {getTaskDeleteAvailability(task).enabled &&
+                !(task.job_type === 'media_package-package-execute' && task.status === 'failed') && (
+                  <TaskDeleteButton key={task.id} task={task} size="small" type="default"
+                    danger onSuccess={onClose} />
+                )}
+            </div>
           </section>
 
           <section className="nfc-overlay-section">
             <header className="nfc-overlay-section-header">
-              <div><span>Timeline</span><h3>运行时间</h3></div>
+              <div><h3>运行时间</h3></div>
             </header>
             <dl className="nfc-v2-task-facts">
               <div><dt>创建</dt><dd>{formatDateTime(task.created_at)}</dd></div>
@@ -136,31 +137,7 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
               <div><dt>结束</dt><dd>{formatDateTime(task.finished_at)}</dd></div>
               <div><dt>最近心跳</dt><dd>{formatDateTime(task.heartbeat_at)}</dd></div>
               <div><dt>总耗时</dt><dd><strong>{formatElapsed(task.started_at, task.finished_at)}</strong></dd></div>
-              <div><dt>预计剩余</dt><dd><strong>
-                {calculateTaskEta(
-                  task.status,
-                  task.progress?.current,
-                  task.progress?.total,
-                  task.started_at,
-                  task.progress?.percent,
-                ).text}
-              </strong></dd></div>
             </dl>
-          </section>
-
-          <section className="nfc-overlay-section">
-            <header className="nfc-overlay-section-header nfc-overlay-section-header-actions">
-              <div><span>Controls</span><h3>任务操作</h3></div>
-              {!(task.job_type === 'media_package-package-execute' && task.status === 'failed') && (
-                <TaskDeleteButton key={task.id} task={task} size="small" type="default"
-                  danger onSuccess={onClose} />
-              )}
-            </header>
-            <TaskActionBar key={task.id} task={task} onViewTask={onViewTask} />
-            {task.job_type === 'media-organizer-batch' && (
-              <Link to={`/batch?operation=media-organize&batch=${encodeURIComponent(task.id)}`}
-                onClick={onClose}>查看整理报告</Link>
-            )}
           </section>
 
           {task.job_type === 'media_package-package-execute' &&
@@ -175,7 +152,7 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
 
           <section className="nfc-overlay-section">
             <header className="nfc-overlay-section-header">
-              <div><span>Recovery</span><h3>执行上下文</h3></div>
+              <div><h3>执行上下文</h3></div>
             </header>
             <div className="nfc-v2-task-context-stack">
               <ContextDetails title="断点恢复快照" data={task.checkpoint} emptyLabel="无断点数据" />
@@ -183,7 +160,7 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
             </div>
           </section>
 
-          <section className="nfc-overlay-section nfc-overlay-section-flush">
+          <section ref={logs} tabIndex={-1} aria-label="任务日志" className="nfc-overlay-section nfc-overlay-section-flush nfc-task-log-target">
             <TaskLogTable key={task.id} taskId={task.id} />
           </section>
         </div>

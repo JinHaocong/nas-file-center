@@ -42,6 +42,7 @@ export interface MediaBatchPreviewUnit {
   totals: Record<MediaKind, number>;
   total_bytes?: number;
   groups: Array<{ name: string; destination: string; count: number; bytes: number }>;
+  sample_moves?: Array<{ source: string; target: string; kind: MediaKind; bytes: number }>;
   needed_moves: number;
   renamed_count: number;
   wrapper_cleanup_count?: number;

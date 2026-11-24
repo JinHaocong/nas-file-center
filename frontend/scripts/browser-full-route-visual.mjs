@@ -420,6 +420,26 @@ try {
         if (item.id === 'login' || item.id === 'settings') {
           // Measured from mounted native React DOM, after late legacy owners.
           // Keep read-only: never submit login or mutate Settings state.
+          if (item.id === 'settings') {
+            const tabs = [
+              ['界面显示', 'appearance'], ['安全状态', 'safety'], ['保留策略', 'retention'],
+              ['资源设置', 'resources'], ['活动会话', 'sessions'],
+            ];
+            for (const [name, id] of tabs) {
+              const control = tab.getByRole('tab', { name, exact: true });
+              if (id !== 'appearance') await control.click();
+              await tab.locator('.nfc-settings-grid > #' + id).waitFor();
+              const rendered = await tab.locator('.nfc-settings-grid > .nfc-data-panel')
+                .evaluateAll(panels => panels.map(panel => panel.id));
+              if (rendered.length !== 1 || rendered[0] !== id ||
+                  await control.getAttribute('aria-selected') !== 'true') {
+                problems.push('Settings tab should display only its own panel: ' +
+                  JSON.stringify({ id, rendered }));
+              }
+            }
+            await tab.getByRole('tab', { name: '保留策略' }).click();
+            await tab.locator('#retention').waitFor();
+          }
           const painted = await tab.evaluate(route => {
             const readPaint = selector => {
               const node = document.querySelector(selector);
@@ -453,13 +473,20 @@ try {
           audit.loginSettingsPaint = { ...painted, required,
             softChannels: softChannels.map(v => Number(v.toFixed(2))),
             neutralSoft };
+          const loginPaint = theme.effective === 'dark'
+            ? { canvas: 'rgb(25, 28, 25)', panel: 'rgb(35, 39, 34)' }
+            : { canvas: 'rgb(247, 246, 241)', panel: 'rgb(255, 254, 250)' };
           const match = item.id === 'login'
-            ? painted.shell?.background === required.canvas &&
+            ? painted.shell?.background === loginPaint.canvas &&
               painted.shell?.image === 'none' &&
-              painted.panel?.background === required.panel
+              painted.panel?.background === loginPaint.panel
             : painted.panel?.background === required.panel && neutralSoft;
           if (!match) problems.push('Login/Settings actual neutral paint mismatch: ' +
             JSON.stringify({ route: item.id, effectiveTheme: theme.effective, painted }));
+          if (item.id === 'settings') {
+            await tab.getByRole('tab', { name: '界面显示' }).click();
+            await tab.locator('#appearance').waitFor();
+          }
         }
         if (item.id === 'tasks') {
           // Stage #70: actual 390/1440px dark screenshots of Tasks from
@@ -772,10 +799,10 @@ try {
                 .getPropertyValue('--nfc-wfl-bg').trim() };
           });
           // Actual Chromium shows a deliberately distinct neutral panel
-          // (#fbfbfa / #1e1e1c), while the mobile card uses the raised
+          // in the studio palette, while the mobile card uses the raised
           // paper surface (#fff / #242422); they must NOT be equalized.
           const panelColor = theme.effective === 'dark'
-            ? 'rgb(30, 30, 28)' : 'rgb(251, 251, 250)';
+            ? 'rgb(35, 39, 34)' : 'rgb(255, 254, 250)';
           const cardColor = theme.effective === 'dark'
             ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
           const headColor = theme.effective === 'dark'
@@ -839,7 +866,8 @@ try {
             const copy = hero?.querySelector('.nfc-page-header-copy');
             const actions = hero?.querySelector('.nfc-page-actions');
             const metrics = document.querySelector('.nfc-v2-dashboard-metrics');
-            if (!hero || !copy || !actions || !metrics) return null;
+            const shelf = document.querySelector('.nfc-studio-shelf');
+            if (!hero || !copy || !actions || !metrics || !shelf) return null;
             const h = hero.getBoundingClientRect();
             const c = copy.getBoundingClientRect();
             const a = actions.getBoundingClientRect();
@@ -850,8 +878,9 @@ try {
               copyFlexBasis: style.flexBasis,
               copyFlexGrow: style.flexGrow,
               copyHeight: Number(c.height.toFixed(1)),
+              actionsInline: a.left >= c.right - 1,
               actionGap: Number((a.top - c.bottom).toFixed(1)),
-              metricGap: Number((m.top - h.bottom).toFixed(1)),
+              metricGap: Number((m.top - shelf.getBoundingClientRect().bottom).toFixed(1)),
               actionVisible: a.width > 30 && a.height > 25,
             };
           });
@@ -861,7 +890,7 @@ try {
             if (geom.copyFlexBasis !== 'auto' || geom.copyFlexGrow !== '0')
               problems.push('Dashboard tablet flex-basis is not content-sized: ' +
                 geom.copyFlexBasis + ' grow=' + geom.copyFlexGrow);
-            if (geom.heroHeight > 300 || geom.actionGap > 96 || geom.actionGap < -2)
+            if (geom.heroHeight > 300 || (!geom.actionsInline && (geom.actionGap > 96 || geom.actionGap < -2)))
               problems.push('Dashboard tablet hero has excessive vertical gap: ' +
                 JSON.stringify(geom));
             if (!geom.actionVisible || geom.metricGap < -2 || geom.metricGap > 90)
@@ -929,6 +958,8 @@ try {
           }
         }
         if (item.id === 'download-verification') {
+          const mobile = width < 768;
+          if (mobile) await tab.locator('.nfc-dv-mobile-run').first().waitFor();
           const form = await tab.evaluate(() => {
             const field = document.querySelector('.nfc-download-verify-field');
             const name = field?.querySelector('label');
@@ -941,15 +972,28 @@ try {
               scrollerClient: scroller?.clientWidth ?? 0,
               scrollerContent: scroller?.scrollWidth ?? 0,
               scrollerOverflow: scroller ? getComputedStyle(scroller).overflowX : '',
+              mobileHistory: Boolean(document.querySelector('.nfc-dv-mobile-history .nfc-dv-mobile-run')),
             };
           });
           if (!form.hasAccessibleField) problems.push('Download verification remote folder field is missing');
           if (form.inputTop < form.labelBottom + 4) problems.push(
             'Download verification form field overlaps label');
-          if (form.scrollerContent <= form.scrollerClient && width <= 430) problems.push(
-            'Mobile six-column history should scroll within its panel');
-          if (form.scrollerOverflow !== 'auto') problems.push(
+          if (mobile && (!form.mobileHistory || form.scrollerClient)) problems.push(
+            'Mobile download history must display records without a horizontal table');
+          if (!mobile && form.scrollerOverflow !== 'auto') problems.push(
             'Download verification table lost local horizontal scrollbar');
+        }
+        if (item.id === 'rename' && width < 768) {
+          const field = tab.getByRole('textbox', { name: '目录路径', exact: true });
+          const chooser = tab.getByRole('button', { name: '选择目录', exact: true });
+          const inputBox = await field.boundingBox();
+          const chooserBox = await chooser.boundingBox();
+          if (!inputBox || !chooserBox ||
+              Math.max(inputBox.y, chooserBox.y) -
+                Math.min(inputBox.y + inputBox.height, chooserBox.y + chooserBox.height) > 16) {
+            problems.push('Mobile rename picker separates its input and button: ' +
+              JSON.stringify({ inputBox, chooserBox }));
+          }
         }
         if (item.id === 'scan-dedupe' && width <= 430) {
           // Stage #71 actual screenshot defect: inactive path/extension scorer
@@ -964,28 +1008,14 @@ try {
                 'section.nfc-v2-scorer-card[aria-labelledby$="' + suffix + '"]');
               const heading = card?.querySelector('.nfc-v2-scorer-heading');
               const weight = card?.querySelector('.nfc-v2-scorer-weight');
-              if (!card || !heading || !weight) return null;
+              if (!card || !heading) return null;
               const h = heading.getBoundingClientRect();
-              const w = weight.getBoundingClientRect();
+              const w = weight?.getBoundingClientRect();
               const c = card.getBoundingClientRect();
-              const cardStyle = getComputedStyle(card);
-              const weightStyle = getComputedStyle(weight);
-              const children = [...weight.children].map(el => ({
-                tag: el.tagName.toLowerCase(), height: Math.round(el.getBoundingClientRect().height),
-                top: Math.round(el.getBoundingClientRect().top - w.top),
-              }));
               return {
                 height: Math.round(c.height),
-                gapToWeight: Math.round(w.top - h.bottom),
-                remainingBelowWeight: Math.round(c.bottom - w.bottom),
-                headingHeight: Math.round(h.height),
-                weightHeight: Math.round(w.height),
-                minHeight: cardStyle.minHeight, cardHeight: cardStyle.height,
-                cardDisplay: cardStyle.display, cardFlex: cardStyle.flex,
-                weightMinHeight: weightStyle.minHeight,
-                weightJustify: weightStyle.justifyContent,
-                weightFlex: weightStyle.flex,
-                children,
+                gapToWeight: w ? Math.round(w.top - h.bottom) : null,
+                hasWeight: Boolean(w),
                 active: Boolean(card.querySelector('input[type="checkbox"]')?.checked),
               };
             };
@@ -1005,9 +1035,11 @@ try {
             for (const [factor, card] of [
               ['path', geometry.path], ['extension', geometry.extension],
             ]) {
-              if (!card.active && (card.height > 270 || card.gapToWeight > 90)) {
-                problems.push('Mobile inactive dedupe scorer card has excessive whitespace: ' +
+              if (!card.active && (card.height > 88 || card.hasWeight)) {
+                problems.push('Mobile inactive dedupe scorer must only show its heading and switch: ' +
                   JSON.stringify({ factor, ...card }));
+              } else if (card.active && !card.hasWeight) {
+                problems.push('Mobile active dedupe scorer has no weight field: ' + factor);
               }
             }
           }
@@ -1057,6 +1089,10 @@ try {
           // inside a fixed-height app shell. Chromium fullPage does NOT include
           // its offscreen contents. Keep the 800 baseline screenshots unchanged;
           // add a separately labeled bottom-of-workspace review PNG when needed.
+          if (item.id === 'settings') {
+            await tab.getByRole('tab', { name: '保留策略' }).click();
+            await tab.locator('#retention').waitFor();
+          }
           const scroll = await tab.evaluate(() => {
             const pane = document.querySelector('.nfc-app-main .nfc-page-content');
             if (!pane) return null;
@@ -1101,6 +1137,11 @@ try {
         // page must expose a legible skip link; Enter moves focus to the real
         // main landmark. Keep this AFTER baseline screenshots, not in their pixels.
         if (!item.public) {
+          if (item.id === 'settings') {
+            // Start the skip-link test from fresh navigation after the tab clicks.
+            await tab.goto(BASE + item.path, { waitUntil: 'domcontentloaded' });
+            await tab.locator('#appearance').waitFor();
+          }
           await tab.keyboard.press('Tab');
           const focusAudit = await tab.evaluate(() => {
             const skip = document.querySelector('.nfc-v2-skip-link');
@@ -1263,10 +1304,19 @@ try {
           await tab.screenshot({ path: resolve(OUT, name + '-remote-picker.png'), animations: 'disabled' });
           await remotePicker.getByRole('button', { name: '选择此目录' }).click();
           await remotePicker.waitFor({ state: 'hidden' });
-          // Capture the interactive detailed evidence table, not only the landing state.
+          // Capture the interactive report in its responsive layout.
           const action = tab.getByRole('button', { name: '查看条目' }).first();
           await action.click();
-          await tab.getByRole('table', { name: '校验明细' }).waitFor();
+          if (width < 768) {
+            const report = tab.getByRole('list', { name: '校验明细' });
+            await report.waitFor();
+            const entry = report.locator('details').first();
+            await entry.locator('summary').click();
+            if (await entry.getAttribute('open') === null) problems.push(
+              'Mobile download evidence must open from its record summary');
+          } else {
+            await tab.getByRole('table', { name: '校验明细' }).waitFor();
+          }
           // Selected-detail interaction evidence needs the SAME full-page
           // policy in explicit and system light/dark. Old code captured the
           // 390px long table only in explicit light, hiding lower dark content.
@@ -1313,6 +1363,12 @@ try {
             'Uncaught detail-panel React errors: ' + pageErrors.slice(beforeErrors).join('; '));
         }
         if (item.id === 'schedules') {
+          await tab.getByRole('button', { name: '新建计划任务', exact: true }).click();
+          const scheduleDialog = tab.getByRole('dialog', { name: '新建计划任务' });
+          await scheduleDialog.getByRole('textbox', { name: '名称', exact: true }).click({ timeout: 4000 });
+          await scheduleDialog.getByRole('button', { name: '关闭编辑窗口', exact: true }).click();
+          await scheduleDialog.waitFor({ state: 'hidden' });
+
           // Baseline happy-path screenshots and route keyboard gates above
           // are unchanged. Exercise a real React Query HTTP 503/refetch
           // only after the default route has been audited.
@@ -1371,6 +1427,30 @@ try {
               JSON.stringify({ width, theme: themeLabel, ...editorPixels }));
           }
           await tab.getByRole('button', { name: '取消' }).click();
+        }
+        if (item.id === 'dashboard') {
+          // Exercise the actual global shortcut, result list and return target after capturing the page.
+          const opener = tab.getByRole('button', { name: '打开导航菜单' });
+          await opener.focus();
+          await tab.keyboard.press('Control+k');
+          const directory = tab.getByRole('dialog', { name: '所有工具' });
+          const search = directory.getByRole('searchbox', { name: '搜索工具' });
+          await search.fill('隔离区');
+          await search.press('ArrowDown');
+          assert.equal(await tab.evaluate(() => document.activeElement?.getAttribute('href')), '/quarantine');
+          await tab.keyboard.press('Escape');
+          await directory.waitFor({ state: 'hidden' });
+          await tab.waitForFunction(() => document.activeElement === document.querySelector('.nfc-header-nav-toggle'));
+          if ((width === 390 || width === 1440) && themeLabel === 'light-dark') {
+            const shortcuts = tab.getByRole('navigation', { name: width === 390 ? '移动端快捷导航' : '常用页面' });
+            await shortcuts.getByRole('link', { name: '整理', exact: true }).click();
+            await tab.getByRole('heading', { name: '智能媒体整理', exact: true }).waitFor();
+            await opener.click();
+            await directory.getByRole('link', { name: '批量处理', exact: true }).click();
+            await tab.getByRole('heading', { name: '批量隔离', exact: true }).waitFor();
+            await tab.goBack();
+            await tab.getByRole('heading', { name: '智能媒体整理', exact: true }).waitFor();
+          }
         }
         report.push({ route: item.path, width, theme: themeLabel, ...audit, problems });
         if (problems.length) failures.push({ route: item.path, theme: themeLabel, problems });

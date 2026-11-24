@@ -47,7 +47,6 @@ export const WorkerStatusCard: React.FC = () => {
           {badgeConfig.label}
         </span>
         <div>
-          <div className="nfc-worker-eyebrow">Scheduler</div>
           <strong>调度 Worker</strong>
         </div>
       </div>

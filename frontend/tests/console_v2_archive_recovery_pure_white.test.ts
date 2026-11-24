@@ -18,7 +18,7 @@ describe('Archive Recovery follows Pure White visual and safety contracts', () =
   });
 
   test('unified panels preserve real directory picker, filtering and accessible selection', () => {
-    assert.match(view, /<PageHeader eyebrow="File tools" title="压缩包检测与恢复"/);
+    assert.match(view, /<PageHeader title="压缩包检测与恢复"/);
     assert.match(view, /className="nfc-archive-recovery-select-panel"/);
     assert.match(view, /className="nfc-archive-recovery-run-panel"/);
     assert.match(view, /<DirectoryPicker value=\{folder\}/);

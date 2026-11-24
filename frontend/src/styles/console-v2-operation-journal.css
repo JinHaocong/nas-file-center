@@ -1,5 +1,5 @@
 /* Console v2 Operation Journal: read-only Worker filesystem evidence. */
-.nfc-v2-operation-journal.nfc-v2-sheet { width:min(960px,100vw); }
+.nfc-v2-operation-journal.nfc-v2-sheet { width:min(960px,calc(100vw - 24px)); }
 .nfc-v2-journal-body { min-width:0; color:var(--v2-text,#172338); }
 .nfc-v2-journal-body .nfc-overlay-intro { color:var(--v2-muted,#65738a);line-height:1.65; }
 .nfc-v2-journal-table-scroll { max-width:100%; overflow-x:auto;scrollbar-width:thin; }

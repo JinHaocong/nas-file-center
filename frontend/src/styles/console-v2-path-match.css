@@ -67,3 +67,21 @@
 @media (prefers-reduced-motion:reduce) {
   .nfc-v2-path-match * { transition:none;animation:none;scroll-behavior:auto; }
 }
+
+.nfc-v2-path-match-scope {
+  align-self: stretch;
+  padding: 16px;
+  background: var(--studio-ground);
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-panel-radius);
+}
+.nfc-v2-path-match-scope label { display: flex; align-items: center; gap: 8px; }
+.nfc-v2-path-match-scope label svg { color: var(--nfc-tint); }
+.nfc-v2-path-match-scope label small { margin-inline-start: auto; }
+@media (min-width: 768px) {
+  .nfc-v2-path-match .nfc-path-match-form {
+    grid-template-columns: minmax(0, 3fr) minmax(200px, 2fr);
+    align-items: center;
+  }
+  .nfc-path-match-form > :is(.nfc-file-tool-primary-actions, .nfc-v2-path-match-patterns) { grid-column: 1 / -1; }
+}

@@ -1,111 +1,62 @@
-import React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import React, { useRef, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { ConsoleIcon } from './ui/ConsoleIcon';
-import { consoleNavGroups } from './layout/navItems';
+import { consoleNavGroups, currentDestination } from './layout/navItems';
 import { useTheme } from '../contexts/ThemeContext';
 
-interface Props {
-  collapsed: boolean;
-  onCollapse: (collapsed: boolean) => void;
-  embedded?: boolean;
-  onNavigate?: () => void;
-}
-
-export const Sidebar: React.FC<Props> = ({
-  collapsed,
-  onCollapse,
-  embedded = false,
-  onNavigate,
-}) => {
+/** Search the complete tool directory, including less frequently used workflows. */
+export const Sidebar: React.FC<{ onNavigate: () => void }> = ({ onNavigate }) => {
   const location = useLocation();
-  const navigate = useNavigate();
   const { mode, setMode } = useTheme();
-  const compact = collapsed && !embedded;
-  const selectedKey = '/' + location.pathname.split('/')[1];
-  const go = (path: string) => {
-    navigate(path);
-    onNavigate?.();
-  };
+  const [query, setQuery] = useState('');
+  const list = useRef<HTMLElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const term = query.trim().toLocaleLowerCase();
+  const selectedKey = currentDestination(location.pathname, location.search);
+  const groups = consoleNavGroups.map(group => ({
+    ...group, items: group.items.filter(item =>
+      [item.label, item.path, group.label].some(value => value.toLocaleLowerCase().includes(term))),
+  })).filter(group => group.items.length);
 
-  const navigation = (
-    <>
-      <button
-        type="button"
-        className="nfc-v2-brand"
-        onClick={() => go('/dashboard')}
-        title={compact ? 'NAS File Center — 返回仪表盘' : undefined}
-        aria-label="NAS File Center — 返回仪表盘"
-      >
-        <span className="nfc-v2-brand-icon"><ConsoleIcon name="hard-drive" size={22} /></span>
-        {!compact && (
-          <span className="nfc-v2-brand-copy">
-            <strong>NAS File Center</strong>
-          </span>
-        )}
-      </button>
-
-      <nav className="nfc-v2-nav" aria-label="主导航">
-        {consoleNavGroups.map(group => (
-          <section className="nfc-v2-nav-group" key={group.label} aria-label={group.label}>
-            {!compact && <h2 className="nfc-v2-nav-group-title">{group.label}</h2>}
-            {group.items.map(item => (
-              <button
-                type="button"
-                key={item.path}
-                title={compact ? item.label : undefined}
-                aria-label={item.label}
-                aria-current={selectedKey === item.path ? 'page' : undefined}
-                className={'nfc-v2-nav-item' + (selectedKey === item.path ? ' is-active' : '')}
-                onClick={() => go(item.path)}
-              >
-                <ConsoleIcon name={item.icon} size={19} />
-                {!compact && <span>{item.label}</span>}
-                {!compact && selectedKey === item.path &&
-                  <ConsoleIcon className="nfc-v2-nav-current" name="chevron-right" size={15} />}
-              </button>
-            ))}
-          </section>
-        ))}
-      </nav>
-      {embedded && (
-        <div className="nfc-v2-mobile-theme-switcher" role="group" aria-label="界面主题">
-          <span className="nfc-v2-mobile-theme-label">界面主题</span>
-          <div className="nfc-v2-mobile-theme-options">
-            {([
-              ['light', '浅色模式'], ['dark', '深色模式'], ['system', '跟随系统'],
-            ] as const).map(([key, label]) => (
-              <button key={key} type="button" aria-pressed={mode === key}
-                className={mode === key ? 'is-selected' : ''}
-                onClick={() => { setMode(key); onNavigate?.(); }}>
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      <div className="nfc-v2-sidebar-footer">
-        {!compact && (
-          <small className="nfc-v2-release-version">v1.7.12</small>
-        )}
+  return <div className="nfc-v2-sidebar nfc-v2-sidebar-mobile nfc-studio-tool-directory">
+    <label className="nfc-studio-tool-search">
+      <ConsoleIcon name="search" size={17} />
+      <input ref={input} type="search" onKeyDown={event => {
+        if (event.nativeEvent.isComposing || event.defaultPrevented) return;
+        const first = list.current?.querySelector('a');
+        if (first && event.key === 'ArrowDown') { event.preventDefault(); first.focus(); }
+        if (first && term && event.key === 'Enter') { event.preventDefault(); first.click(); }
+      }} aria-label="搜索工具" placeholder="搜索工具或页面" value={query}
+        onChange={event => setQuery(event.target.value)} />
+    </label>
+    <nav className="nfc-v2-nav" ref={list} aria-label="主导航" onKeyDown={event => {
+      if (!(event.target instanceof HTMLAnchorElement) || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const links = Array.from(event.currentTarget.querySelectorAll('a'));
+      const index = links.indexOf(event.target);
+      if (event.key === 'ArrowUp' && index === 0) { input.current?.focus(); return; }
+      const target = event.key === 'Home' ? 0 : event.key === 'End' ? links.length - 1 :
+        Math.min(links.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1));
+      links[target]?.focus();
+    }}>
+      {groups.map(group => <section key={group.label} className="nfc-v2-nav-group" aria-label={group.label}>
+        <h2 className="nfc-v2-nav-group-title">{group.label}</h2>
+        {group.items.map(item => <Link key={item.path} to={item.path} onClick={onNavigate}
+          aria-current={selectedKey === item.path ? 'page' : undefined}
+          className={'nfc-v2-nav-item' + (selectedKey === item.path ? ' is-active' : '')}>
+          <ConsoleIcon name={item.icon} size={17} /><span>{item.label}</span>
+        </Link>)}
+      </section>)}
+      {!groups.length && <p className="nfc-studio-no-tools" role="status">没有找到匹配的工具</p>}
+    </nav>
+    <div className="nfc-v2-mobile-theme-switcher" role="group" aria-label="界面主题">
+      <span className="nfc-v2-mobile-theme-label">界面主题</span>
+      <div className="nfc-v2-mobile-theme-options">
+        {([['light', '浅色模式'], ['dark', '深色模式'], ['system', '跟随系统']] as const).map(([key, label]) =>
+          <button type="button" key={key} aria-pressed={mode === key}
+            className={mode === key ? 'is-selected' : ''} onClick={() => { setMode(key); onNavigate(); }}>{label}</button>)}
       </div>
-      {!embedded && (
-        <button
-          className="nfc-v2-sidebar-collapse"
-          type="button"
-          aria-label={compact ? '展开侧边栏' : '收起侧边栏'}
-          title={compact ? '展开侧边栏' : '收起侧边栏'}
-          onClick={() => onCollapse(!collapsed)}
-        >
-          <ConsoleIcon name={compact ? 'chevron-right' : 'chevron-down'} size={16} />
-        </button>
-      )}
-    </>
-  );
-
-  if (embedded) return <div className="nfc-v2-sidebar nfc-v2-sidebar-mobile">{navigation}</div>;
-  return (
-    <aside className={'nfc-v2-sidebar' + (compact ? ' is-collapsed' : '')}>
-      {navigation}
-    </aside>
-  );
+    </div>
+    <div className="nfc-v2-sidebar-footer"><small className="nfc-v2-release-version">v1.8.0</small></div>
+  </div>;
 };

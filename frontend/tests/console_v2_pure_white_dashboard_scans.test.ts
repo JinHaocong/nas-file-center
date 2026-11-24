@@ -59,7 +59,7 @@ describe('Pure White v2.1 dashboard and scan detail pass', () => {
     assert.match(shell, /\.nfc-v2-dashboard \.nfc-quick-action:hover,\s*\.nfc-v2-dashboard \.nfc-quick-action:focus-visible\s*\{/);
     assert.match(shell, /\.nfc-v2-dashboard \.nfc-quick-action-copy\s*\{[^}]*min-width:\s*0;/);
     assert.match(shell, /@media \(max-width: 767px\)/);
-    assert.match(shell, /\.nfc-v2-dashboard-hero\s*\{\s*min-height:\s*0;\s*padding:\s*19px 16px;/);
+    assert.match(shell, /\.nfc-v2-dashboard-hero \.nfc-page-header\s*\{[^}]*flex-direction:\s*column;/);
   });
 
   test('Scan history keeps server pagination, polling and guarded deletion', () => {

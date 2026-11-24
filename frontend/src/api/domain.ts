@@ -15,6 +15,7 @@ import {
   PlanItem,
   RenameProposal,
   ScanJob,
+  ScanId,
   SystemSettings,
   WorkJob,
   DataLifecyclePolicy,
@@ -46,8 +47,8 @@ export const dashboardApi = {
 export const scansApi = {
   listScans: (page = 1, pageSize = 20) =>
     api.get<PaginatedResponse<ScanJob>>(`/api/scans?page=${page}&page_size=${pageSize}`),
-  getScanDetail: (id: number) => api.get<ScanJob>(`/api/scans/${id}`),
-  getScanGroups: (id: number, page = 1, pageSize = 20) =>
+  getScanDetail: (id: ScanId) => api.get<ScanJob>(`/api/scans/${id}`),
+  getScanGroups: (id: ScanId, page = 1, pageSize = 20) =>
     api.get<PaginatedResponse<DuplicateGroup>>(`/api/scans/${id}/groups?page=${page}&page_size=${pageSize}`),
   createScan: (payload: {
     name: string;
@@ -57,21 +58,21 @@ export const scansApi = {
     name_patterns?: string[] | null;
     exclude_patterns?: string[] | null;
   }) => api.post<{ scan_job_id: number; work_job_id: number }>('/api/scans', payload),
-  diagnosePair: (payload: { path_a: string; path_b: string; scan_job_id?: number | null }) =>
+  diagnosePair: (payload: { path_a: string; path_b: string; scan_job_id?: ScanId | null }) =>
     api.post<DedupeDiagnosticResponse>('/api/scans/diagnose-pair', payload),
   createDedupePlan: (
-    scanId: number,
+    scanId: ScanId,
     payload: {
       policy: string;
       path_priority_patterns?: string[] | null;
       relative_path_priority_patterns?: string[] | null;
     }
   ) => api.post<{ id: number; status: string; expected_changes: number }>(`/api/scans/${scanId}/dedupe-plan`, payload),
-  dedupePreview: (scanJobId: number, payload: DirectDedupePreviewRequest) =>
+  dedupePreview: (scanJobId: ScanId, payload: DirectDedupePreviewRequest) =>
     api.post<DirectDedupePreviewResponse>(`/api/scans/${scanJobId}/dedupe-preview`, payload),
-  createAdvancedDedupePlan: (scanJobId: number, payload: DirectAdvancedDedupeGenerateRequest) =>
+  createAdvancedDedupePlan: (scanJobId: ScanId, payload: DirectAdvancedDedupeGenerateRequest) =>
     api.post<DirectAdvancedDedupeGenerateResponse>(`/api/scans/${scanJobId}/dedupe-plan`, payload),
-  deleteScan: (id: number) => api.delete<{ deleted: boolean; id: number }>(`/api/scans/${id}`),
+  deleteScan: (id: ScanId) => api.delete<{ deleted: boolean; id: number }>(`/api/scans/${id}`),
 };
 
 export const storageOptimizationApi = {

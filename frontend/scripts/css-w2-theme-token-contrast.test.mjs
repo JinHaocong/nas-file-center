@@ -226,7 +226,7 @@ test('real authenticated ThemeProvider menu must update and restore painted metr
     'async function auditProviderMetricTheme(page, item, width, theme, motion = \'reduce\')',
     'summary[aria-label="切换界面主题"]',
     "page.getByRole('button', { name: '打开导航菜单' })",
-    "page.getByRole('dialog', { name: 'NAS File Center 主导航' })",
+    "page.getByRole('dialog', { name: '所有工具' })",
     "dialog.getByRole('group', { name: '界面主题' })",
     "await dialog.waitFor({ state: 'hidden' })",
     "menu.getByRole('button', { name: providerModeLabels[mode] })",
@@ -255,7 +255,7 @@ test('real authenticated ThemeProvider menu must update and restore painted metr
   const mobileNav = readFileSync('src/components/Sidebar.tsx', 'utf8');
   const mobileCss = readFileSync('src/styles/console-v2-mobile-header.css', 'utf8');
   for (const invariant of ['nfc-v2-mobile-theme-switcher', 'aria-label="界面主题"',
-    'aria-pressed={mode === key}', 'setMode(key); onNavigate?.()'])
+    'aria-pressed={mode === key}', 'setMode(key); onNavigate()'])
     assert.ok(mobileNav.includes(invariant),
       'Mobile drawer must expose an actual accessible ThemeProvider user control: ' + invariant);
   for (const invariant of ['.nfc-v2-mobile-theme-options > button',
@@ -355,7 +355,7 @@ test('Dashboard gradient isolation and real nested Radix alpha-tint contrast sta
   const overlay = readFileSync('scripts/browser-overlay-smoke.mjs', 'utf8');
   const requiredWorkspace = [
     'async function auditDashboardHeroPaint(page, width, theme)',
-    "getComputedStyle(illustration).display !== 'none'",
+    "document.querySelector('.nfc-studio-shelf')",
     "style.backgroundImage !== 'none'",
     "if (item.id === 'dashboard') {",
     "await auditDashboardHeroPaint(page, width, theme)",

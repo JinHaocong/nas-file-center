@@ -2,6 +2,7 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { filesystemApi } from '../src/api/filesystem';
 import {
   initialDirectorySelection, toggleDirectorySelection, resolveDirectorySelection,
   isWithinDirectoryRoots,
@@ -13,6 +14,7 @@ describe('Console v2 Radix directory browser migration', () => {
   test('single and multiple selections preserve fallback and clearing semantics', () => {
     assert.deepEqual(initialDirectorySelection([' /data/A ', '/data/A', '/data/B'], true), ['/data/A', '/data/B']);
     assert.deepEqual(initialDirectorySelection(['/data/A', '/data/B'], false), ['/data/A']);
+    assert.deepEqual(initialDirectorySelection(['/data/A ', '/data/A'], true), ['/data/A ', '/data/A']);
     assert.deepEqual(toggleDirectorySelection(['/data/A'], '/data/B', true), ['/data/A', '/data/B']);
     assert.deepEqual(toggleDirectorySelection(['/data/A', '/data/B'], '/data/A', true), ['/data/B']);
     assert.deepEqual(toggleDirectorySelection(['/data/A'], '/data/B', false), ['/data/B']);
@@ -28,6 +30,14 @@ describe('Console v2 Radix directory browser migration', () => {
     assert.equal(isWithinDirectoryRoots('data', ['/data']), false);
     assert.equal(isWithinDirectoryRoots('/anywhere', ['/']), true);
     assert.equal(isWithinDirectoryRoots('/data', []), false);
+  });
+
+  test('directory listing sends the selected absolute path unchanged', async t => {
+    const path = '/data/照片 & 旅行 ';
+    const fetch = t.mock.method(globalThis, 'fetch', async () => Response.json({ path, items: [] }));
+    await filesystemApi.listDirectory(path);
+    const [url] = fetch.mock.calls[0].arguments;
+    assert.equal(new URL(String(url), 'http://localhost').searchParams.get('path'), path);
   });
 
   test('modal keeps browse, favorites, recents, server pagination and safe cancellation', () => {

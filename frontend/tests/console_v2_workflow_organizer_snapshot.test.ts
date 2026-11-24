@@ -119,7 +119,8 @@ describe('Console v2 native Workflow Organizer immutable snapshot', () => {
       "'single_child_wrapper_collapse'", 'nfc-organizer-advanced-collapse',
       'aria-expanded={expandedRules.includes(key)}', 'hidden={!expandedRules.includes(key)}',
       'patchWorkflowOrganizerAdvancedRule', 'validateWorkflowOrganizerSnapshot',
-      'Stage A', 'Stage B', 'MOVE → rmdir_empty', 'natural_name', 'mtime_ns',
+      '目录结构整理完成后，重新生成预览，再生成命名计划',
+      '外层只有一个真实子目录时', '按文件名自然顺序编号', '纳秒级修改时间',
       'role="alert"', 'disabled={readOnly}', 'readOnly &&',
       'cleanup_patterns', 'preserve_tags', 'image_extensions', 'video_extensions',
     ]) assert.ok(s.includes(t), t);
@@ -137,5 +138,15 @@ describe('Console v2 native Workflow Organizer immutable snapshot', () => {
       'min-height:44px', '@media (prefers-reduced-motion:reduce)',
     ]) assert.ok(css.includes(t), t);
     assert.ok(main.includes("import './styles/console-v2-workflow-organizer.css';"));
+  });
+
+  test('all five compact tabs fit one grid row, with localized advanced rule names', () => {
+    const source = read('src/components/workflows/OrganizerSnapshotFields.tsx');
+    for (const label of [
+      '基础', '命名', '媒体', '编号', '高级', '按目录层级改名', '递归文件编号',
+      '最新子目录前缀', '折叠单子目录外层',
+    ]) assert.ok(source.includes("'" + label + "'"), label);
+    const css = read('src/styles/console-v2-workflow-organizer.css');
+    assert.match(css, /\.nfc-v2-organizer-tabs\s*\{[^}]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/);
   });
 });

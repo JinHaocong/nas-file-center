@@ -151,9 +151,8 @@ export const WorkflowListPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-workflows-page nfc-v2-workflow-list-page nfc-page-layout-ledger">
       <PageHeader
-        eyebrow="Automation workflows"
-        title="工作流编排中心"
-        description="以版本化定义编排 NAS 文件规则、目录整理、高级去重和目录工具；Preview 与 Draft 都不会直接执行文件操作。"
+        title="工作流"
+        description="把常用文件规则保存为工作流，按版本预览和生成计划。"
         actions={
           <ActionBar compact>
             <label className="nfc-v2-workflow-archive-filter">
@@ -179,9 +178,8 @@ export const WorkflowListPage: React.FC = () => {
         }
       />
       <DataPanel
-        title="工作流定义"
-        description="工作流保存为修订版本；内置与归档定义保持只读。"
-        action={<span className="nfc-panel-count">{items.length} workflows</span>}
+        title="工作流目录"
+        action={<span className="nfc-panel-count">{items.length} 个工作流</span>}
         className="nfc-panel-flush"
         variant="dense">
         {isError && (
@@ -208,26 +206,24 @@ export const WorkflowListPage: React.FC = () => {
                   <table className="nfc-v2-workflow-table">
                     <caption className="nfc-v2-workflow-sr-only">工作流定义、版本、状态与操作</caption>
                     <thead><tr>
-                      <th scope="col">ID</th><th scope="col">工作流</th>
-                      <th scope="col">模式</th><th scope="col">版本</th>
-                      <th scope="col">类别</th><th scope="col">状态</th>
-                      <th scope="col">更新时间</th><th scope="col">操作</th>
+                      <th scope="col">工作流</th><th scope="col">模式</th>
+                      <th scope="col">状态</th><th scope="col">最近修订</th><th scope="col">操作</th>
                     </tr></thead>
                     <tbody>
                       {visibleItems.map(workflow => (
                         <tr key={workflow.id}>
-                          <td className="nfc-mono">#{workflow.id}</td>
                           <td><button type="button" className="nfc-workflow-name"
                             onClick={() => navigate(`/workflows/${workflow.id}`)}>
                             <strong>{workflow.name}</strong>
                             {workflow.description && <span>{workflow.description}</span>}
-                          </button></td>
-                          <td><span className="nfc-kind-badge">{modeLabel(workflow.mode)}</span></td>
-                          <td className="nfc-mono">r{workflow.current_revision}</td>
-                          <td><span className="nfc-kind-badge">{workflow.is_builtin ? 'builtin' : 'user'}</span></td>
+                          </button><small className="nfc-workflow-list-meta">
+                            #{workflow.id} · {workflow.is_builtin ? '内置' : '自建'}
+                          </small></td>
+                          <td>{modeLabel(workflow.mode)}</td>
                           <td><StatusBadge status={workflow.archived_at ? 'stale' : 'completed'}
                             label={workflow.archived_at ? '已归档' : '启用中'} /></td>
-                          <td><time dateTime={workflow.updated_at} className="nfc-table-meta">
+                          <td><span className="nfc-workflow-list-version">r{workflow.current_revision}</span>
+                            <time dateTime={workflow.updated_at} className="nfc-table-meta">
                             {formatDateTime(workflow.updated_at)}
                           </time></td>
                           <td>{renderActions(workflow)}</td>
@@ -249,7 +245,7 @@ export const WorkflowListPage: React.FC = () => {
                           </button>
                           <div className="nfc-inline-badges">
                             <span className="nfc-kind-badge">{modeLabel(workflow.mode)}</span>
-                            <span className="nfc-kind-badge">{workflow.is_builtin ? 'builtin' : 'user'}</span>
+                            <span className="nfc-kind-badge">{workflow.is_builtin ? '内置' : '自建'}</span>
                           </div>
                         </div>
                         <StatusBadge status={workflow.archived_at ? 'stale' : 'completed'}

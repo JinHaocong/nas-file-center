@@ -34,12 +34,12 @@ describe('v0.4.2 taste principles carried into the current control plane', () =>
     assert.ok(css.includes('.nfc-dashboard-rail'));
   });
 
-  test('sidebar remains the navigation anchor while header is reduced to utility chrome', () => {
+  test('header exposes frequent destinations and the tool directory contains grouped routes', () => {
     const sidebar = read('src/components/Sidebar.tsx');
     const header = read('src/components/Header.tsx');
     const shell = read('src/styles/shell.css');
     const workspaceV2 = read('src/styles/v056-right-workspace-v2.css');
-    assert.ok(sidebar.includes('nfc-v2-brand'));
+    assert.ok(header.includes('nfc-studio-brand'));
     assert.ok(sidebar.includes('consoleNavGroups'));
     assert.doesNotMatch(sidebar, /from 'antd'/);
     assert.ok(shell.includes('.nfc-sidebar.nfc-sidebar'));

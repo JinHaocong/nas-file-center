@@ -20,7 +20,7 @@
 }
 .nfc-v2-workflow-archive-filter input { width: 17px; height: 17px; accent-color: var(--nfc-wfl-accent); }
 .nfc-v2-workflow-table-scroll { overflow-x: auto; max-width: 100%; width: 100%; }
-.nfc-v2-workflow-table { border-collapse: collapse; min-width: 1080px; width: 100%; font-size: 12px; text-align: left; }
+.nfc-v2-workflow-table { border-collapse: collapse; min-width: 770px; width: 100%; font-size: 12px; text-align: left; }
 .nfc-v2-workflow-table th {
   padding: 12px 13px; border-bottom: 1px solid var(--nfc-wfl-line);
   background: var(--nfc-wfl-soft); color: var(--nfc-wfl-muted); font-weight: 690;
@@ -30,7 +30,20 @@
 .nfc-v2-workflow-table tbody tr:last-child td { border-bottom: 0; }
 .nfc-v2-workflow-table tbody tr:hover { background: var(--nfc-wfl-soft); }
 .nfc-v2-workflow-table .nfc-workflow-name { color: var(--nfc-wfl-text); text-align: left; }
-.nfc-v2-workflow-table .nfc-workflow-name:hover { color: var(--nfc-wfl-accent); }
+.nfc-v2-workflow-table .nfc-workflow-name:hover { color: var(--nfc-tint); }
+.nfc-v2-workflow-table td:first-child { width: 30%; }
+.nfc-v2-workflow-table .nfc-workflow-list-meta {
+  display: block;
+  margin-top: 4px;
+  color: var(--studio-muted);
+  font-size: 11px;
+}
+.nfc-v2-workflow-table .nfc-workflow-list-version {
+  display: block;
+  font-weight: 700;
+  color: var(--studio-ink);
+  font-variant-numeric: tabular-nums;
+}
 .nfc-v2-workflow-table .nfc-table-meta { font-size: 11px; white-space: nowrap; color: var(--nfc-wfl-muted); }
 .nfc-v2-workflow-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .nfc-v2-workflow-actions .nfc-console-button { min-height: 34px; padding: 0 8px; }

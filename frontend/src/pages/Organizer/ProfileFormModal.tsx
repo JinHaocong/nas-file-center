@@ -71,8 +71,8 @@ export const ProfileFormModal: React.FC<Props> = ({
           onPointerDownOutside={event => event.preventDefault()}>
           <header className="nfc-v2-organizer-profile-heading">
             <div>
-              <Dialog.Title>{editingProfile ? '编辑方案: ' + editingProfile.name : '新建整理方案'}</Dialog.Title>
-              <Dialog.Description>配置方案仅存储规则；文件更改必须经过只读 Preview 和 Plan 安全检查。</Dialog.Description>
+              <Dialog.Title>{editingProfile ? '编辑方案 · ' + editingProfile.name : '新建整理方案'}</Dialog.Title>
+              <Dialog.Description>保存后会更新方案配置。文件改动需先预览，再生成执行计划。</Dialog.Description>
             </div>
             <button type="button" className="nfc-v2-organizer-profile-close"
               aria-label="关闭整理方案编辑" disabled={busy} onClick={close}>

@@ -6,9 +6,9 @@ import { AdvancedRenameEditor } from './AdvancedRenameEditor';
 
 type RenameScope = 'directories' | 'files' | 'advanced';
 const modes: readonly { value: RenameScope; label: string }[] = [
-  { value: 'directories', label: '一级目录批量重命名' },
-  { value: 'files', label: '一级文件批量重命名' },
-  { value: 'advanced', label: '高级文件重命名（原功能）' },
+  { value: 'directories', label: '目录改名' },
+  { value: 'files', label: '文件改名' },
+  { value: 'advanced', label: '高级规则' },
 ];
 
 /** Only the active mode is mounted; switching mode invalidates its local Preview. */

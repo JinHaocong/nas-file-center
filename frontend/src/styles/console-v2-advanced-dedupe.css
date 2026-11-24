@@ -128,3 +128,16 @@
     animation: none; border-right-color: currentColor;
   }
 }
+
+.nfc-dedupe-reviewed-results { display: grid; gap: 16px; min-width: 0; }
+.nfc-dedupe-location { scroll-margin-top: 84px; }
+.nfc-dedupe-location:focus-visible { outline: 2px solid var(--nfc-tint); outline-offset: 3px; }
+.nfc-dedupe-evidence-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+.nfc-dedupe-evidence-navigation a {
+  display: inline-flex; align-items: center; min-height: 36px;
+  color: var(--nfc-tint); font-weight: 640; text-underline-offset: .2em;
+}
+@media (max-width: 767px) {
+  .nfc-dedupe-evidence-navigation a { min-height: 44px; }
+  .nfc-dedupe-location { scroll-margin-top: 65px; }
+}

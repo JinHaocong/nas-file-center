@@ -8,6 +8,7 @@ import { tasksApi } from '../../api/tasks';
 import { getStructuredApiError } from '../../api/errors';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
 import { ActionBar } from '../../components/ui/ActionBar';
+import { CodePath } from '../../components/ui/CodePath';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { DataPanel } from '../../components/ui/DataPanel';
@@ -146,11 +147,10 @@ export const ArchiveRecoveryPage: React.FC = () => {
 
   return (
     <div className="nfc-operations-page nfc-page-layout-ledger nfc-archive-recovery-page">
-      <PageHeader eyebrow="File tools" title="压缩包检测与恢复"
-        description="支持 TAR、ZIP、7z、RAR 的尽力恢复。原压缩包只读；结果存放同级唯一文件夹，自动清理中间文件。" />
-      <div className="nfc-archive-recovery-intro" aria-label="恢复功能安全特性"><span>ZIP / TAR / 7z / RAR</span><span>原始文件只读</span><span>恢复结果独立保存</span></div>
+      <PageHeader title="压缩包检测与恢复"
+        description="检测 ZIP、TAR、7z 和 RAR 压缩包。原压缩包只读，结果存放同级唯一文件夹。" />
       <div className="nfc-archive-recovery-layout">
-      <DataPanel className="nfc-archive-recovery-select-panel" title="01 · 选择压缩包" description="从 NAS 目录中选择文件；仅展示已知扩展名，服务端会检查实际文件格式。">
+      <DataPanel className="nfc-archive-recovery-select-panel" title="选择压缩包" description="浏览目录或输入完整路径，检测时核验文件格式。">
         <div className="nfc-archive-recovery-field-label" id="recovery-folder-label">压缩包所在目录</div>
         <div id="recovery-folder" role="group" aria-labelledby="recovery-folder-label"><DirectoryPicker value={folder}
           onChange={value => {
@@ -206,13 +206,19 @@ export const ArchiveRecoveryPage: React.FC = () => {
             // Only the explicit terminal action may dismiss a WorkJob monitor.
           }} />
       </DataPanel>
-      <DataPanel className="nfc-archive-recovery-run-panel" title="02 · 检测与恢复" description="先检测文件与环境，再决定是否启动恢复任务。">
+      <DataPanel className="nfc-archive-recovery-run-panel" title="检测与恢复">
+        <div className="nfc-archive-source-summary">
+          <ConsoleIcon name="archive" size={21} />
+          <div><strong>待检测文件</strong>{selected ? <CodePath value={selected} /> : <span>请先选择压缩包</span>}</div>
+        </div>
         <label className="nfc-archive-recovery-field-label" htmlFor="recovery-password">密码（可留空，不保存到任务记录）</label>
         <input id="recovery-password" type="password" autoComplete="off" value={password}
           onChange={event => setPassword(event.target.value)} />
         <label className="nfc-archive-recovery-toggle"><input type="checkbox" checked={deep} onChange={event => setDeep(event.target.checked)} />
           启用增强恢复（ZIP/TAR 扫描、内层 TAR、符合条件的 7z AES + LZMA2 重同步）</label>
-        <p className="nfc-archive-recovery-help">7z AES/LZMA2 深度扫描需要正确密码、CRC 完好的 7z 文件头、可独立解码的 LZMA2 重置块及文件 CRC；不支持任意加密流重建和 RAR Solid 深度重同步。单个重置段最多处理 32 MiB；破损块头后的重新扫描窗口最多 8 MiB。整体文件产出限制为 10,000 个、4 GiB、30 分钟。</p>
+        <details className="nfc-archive-recovery-limits"><summary>增强恢复条件与资源上限</summary>
+          <p className="nfc-archive-recovery-help">7z AES/LZMA2 深度扫描需要正确密码、CRC 完好的 7z 文件头、可独立解码的 LZMA2 重置块及文件 CRC；不支持任意加密流重建和 RAR Solid 深度重同步。单个重置段最多处理 32 MiB；破损块头后的重新扫描窗口最多 8 MiB。整体文件产出限制为 10,000 个、4 GiB、30 分钟。</p>
+        </details>
         <ActionBar>
           <ConsoleButton disabled={!selected || check.isPending || Boolean(taskId)}
             loading={check.isPending} onClick={() => { void check.mutateAsync(selected).catch(() => {}); }}>检测</ConsoleButton>
@@ -235,7 +241,7 @@ export const ArchiveRecoveryPage: React.FC = () => {
         </div>}
       </DataPanel>
       </div>
-      {taskId !== null && <DataPanel className="nfc-archive-recovery-task-panel" title="03 · 恢复任务" description="任务状态与恢复证据将在这里更新。">
+      {taskId !== null && <DataPanel className="nfc-archive-recovery-task-panel" title="恢复任务">
         <p className="nfc-archive-recovery-task-status" role="status">任务 #{taskId} · {job.isError ? '状态暂不可用' : (job.data?.status || '排队中')} · {job.data?.progress.message || '等待 Worker'}</p>
         <p className="nfc-archive-recovery-help">切换待恢复文件或目录不会取消正在运行的任务。任务结束后，请通过“开始下一次恢复”明确结束本次跟踪；任务记录仍保留在任务中心。</p>
         {job.data && !recoveryJobMatches && <p role="alert">任务编号对应的不是压缩包恢复任务。此页面不会提供取消、报告或下一次恢复操作；请前往任务中心查看，或返回不带任务编号的压缩包恢复页面。</p>}

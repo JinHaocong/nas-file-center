@@ -1,7 +1,23 @@
-import type { Plan, PlanId } from '../types';
+import type { Plan, PlanId, PlanStatus } from '../types';
 import { isSqliteId } from './sqliteId';
 
 export type PlanLifecycleAction = 'freeze' | 'validate' | 'execute' | 'undo';
+type PlanRecoveryAction = 'rebuild' | 'workflow' | 'scan';
+
+/** Pick the primary control, leaving lifecycle authorization to canPlanLifecycleAction. */
+export function getPlanPrimaryAction(status: PlanStatus, {
+  allowMutation, hasBackgroundTask, recovery,
+}: { allowMutation: boolean; hasBackgroundTask?: boolean; recovery?: PlanRecoveryAction }) {
+  if (hasBackgroundTask) return 'background';
+  switch (status) {
+    case 'draft': return 'freeze';
+    case 'frozen': return 'validate';
+    case 'ready': return allowMutation ? 'execute' : 'validate';
+    case 'partial': return allowMutation ? 'execute' : 'journal';
+    case 'stale': return recovery ?? 'journal';
+    default: return 'journal';
+  }
+}
 
 export interface PlanActionContext {
   plan: (Pick<Plan, 'status' | 'active_work_job_id'> & { id: PlanId }) | null;

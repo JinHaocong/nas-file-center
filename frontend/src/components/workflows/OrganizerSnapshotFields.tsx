@@ -19,9 +19,9 @@ interface Props {
 }
 type Tab = 'basic' | 'template' | 'rules' | 'mtime' | 'advanced';
 const tabs: { key: Tab; title: string }[] = [
-  { key: 'basic', title: '基础配置' }, { key: 'template', title: '命名模板' },
-  { key: 'rules', title: '媒体与清理规则' }, { key: 'mtime', title: '编号与时间戳 (mtime)' },
-  { key: 'advanced', title: 'Advanced Rules' },
+  { key: 'basic', title: '基础' }, { key: 'template', title: '命名' },
+  { key: 'rules', title: '媒体' }, { key: 'mtime', title: '编号' },
+  { key: 'advanced', title: '高级' },
 ];
 
 const Tags: React.FC<{
@@ -73,7 +73,7 @@ const Tags: React.FC<{
   );
 };
 
-/** Shared native field editor for workflow snapshots and standalone profile CRUD; each parent owns persistence authority. */
+/** 在整理方案和工作流中编辑同一套规则，保存操作由各自的页面管理。 */
 export const OrganizerSnapshotFields: React.FC<Props> = ({
   value, onChange, readOnly = false, includeRoot = false,
 }) => {
@@ -113,6 +113,7 @@ export const OrganizerSnapshotFields: React.FC<Props> = ({
   }, [snapshot.rename_template, snapshot.statistics_template, snapshot.numbering_mode,
     snapshot.numbering_start, snapshot.numbering_padding]);
   const chooseTab = (key: Tab) => setTab(key);
+  /** 方向键切换配置类别，Home 和 End 跳到首尾，焦点留在标签栏。 */
   const onTabKey = (event: React.KeyboardEvent<HTMLButtonElement>, current: number) => {
     const next = event.key === 'ArrowRight' ? (current + 1) % tabs.length
       : event.key === 'ArrowLeft' ? (current + tabs.length - 1) % tabs.length
@@ -121,7 +122,7 @@ export const OrganizerSnapshotFields: React.FC<Props> = ({
     event.preventDefault();
     chooseTab(tabs[next].key);
     const node = event.currentTarget.closest('[role=tablist]');
-    (node?.querySelectorAll<HTMLButtonElement>('[role=tab]')[next])?.focus();
+    node?.querySelectorAll<HTMLButtonElement>('[role=tab]')[next]?.focus();
   };
   const textField = (key: 'name' | 'rename_template' | 'statistics_template', label: string, hint?: string) => (
     <label className="nfc-v2-organizer-field">
@@ -156,8 +157,9 @@ export const OrganizerSnapshotFields: React.FC<Props> = ({
       <button type="button" aria-expanded={expandedRules.includes(key)}
         aria-controls={uid + '-' + key} className="nfc-v2-organizer-rule-toggle"
         onClick={() => toggleRule(key)}>
-        <ConsoleIcon name={expandedRules.includes(key) ? 'chevron-down' : 'chevron-right'} size={17} />
         <span>{title}</span>
+        {advanced[key].enabled && <span className="nfc-v2-organizer-rule-status">已启用</span>}
+        <ConsoleIcon name="chevron-right" className="nfc-v2-organizer-rule-chevron" size={17} />
       </button>
       <div id={uid + '-' + key} hidden={!expandedRules.includes(key)} className="nfc-v2-organizer-rule-body">
         {children}
@@ -167,10 +169,10 @@ export const OrganizerSnapshotFields: React.FC<Props> = ({
 
   return (
     <div className="nfc-organizer-step-form nfc-v2-organizer-snapshot-form">
-      <div className="nfc-v2-organizer-tabs" role="tablist" aria-label="工作流 Organizer 配置">
+      <div className="nfc-v2-organizer-tabs" role="tablist" aria-label="整理方案配置">
         {tabs.map((item, i) => (
           <button key={item.key} id={uid + '-tab-' + item.key} type="button" role="tab"
-            aria-selected={tab === item.key} aria-controls={uid + '-panel-' + item.key}
+            aria-selected={tab === item.key} aria-controls={uid + '-panel'}
             tabIndex={tab === item.key ? 0 : -1}
             onClick={() => chooseTab(item.key)} onKeyDown={event => onTabKey(event, i)}>
             {item.title}
@@ -178,7 +180,7 @@ export const OrganizerSnapshotFields: React.FC<Props> = ({
         ))}
       </div>
       <fieldset className="nfc-v2-organizer-content" disabled={readOnly}>
-        <div id={uid + '-panel-' + tab} role="tabpanel" aria-labelledby={uid + '-tab-' + tab}>
+        <div id={uid + '-panel'} role="tabpanel" aria-labelledby={uid + '-tab-' + tab}>
           {tab === 'basic' && (
             <div className="nfc-v2-organizer-grid">
               {textField('name', '方案/快照名称')}
@@ -247,11 +249,11 @@ export const OrganizerSnapshotFields: React.FC<Props> = ({
                 next => patch('numbering_start', next))}
               {numberField('补零位数 (Padding)', snapshot.numbering_padding ?? 3, 3, 1, 10,
                 next => patch('numbering_padding', next))}
-              <label className="nfc-v2-organizer-field"><span>mtime 刷新模式</span>
+              <label className="nfc-v2-organizer-field"><span>修改时间更新方式</span>
                 <select disabled={readOnly} value={snapshot.mtime_mode || 'none'}
                   onChange={event => patch('mtime_mode', event.target.value as 'none' | 'ordered')}>
-                  <option value="none">不更新时间戳 (none)</option>
-                  <option value="ordered">按整理目标顺序刷新 (ordered)</option>
+                  <option value="none">保留原修改时间</option>
+                  <option value="ordered">按整理结果顺序更新</option>
                 </select>
               </label>
               {numberField('排序刷新间隔秒数', snapshot.mtime_delay_seconds ?? 2, 2, 0, 60,
@@ -262,32 +264,32 @@ export const OrganizerSnapshotFields: React.FC<Props> = ({
             <div className="nfc-organizer-advanced-rules nfc-v2-organizer-advanced">
               <div className="nfc-v2-organizer-notice" role="note">
                 <ConsoleIcon name="info" size={17}/>
-                <span>Advanced Rules 使用分阶段安全流程：必须先启用 recursive。Stage A 完成结构变更后须重新 Preview，才能生成 Stage B 命名计划。</span>
+                <span>高级规则需要先开启递归处理。目录结构整理完成后，重新生成预览，再生成命名计划。</span>
               </div>
               {rulesEnabled && !snapshot.recursive && <div role="alert" className="nfc-v2-organizer-danger">
-                启用 Advanced Rules 时必须开启递归处理子目录（recursive）。
+                启用高级规则前，请在「基础」开启递归处理子目录。
               </div>}
               {advanced.latest_child_prefix.enabled && snapshot.mtime_mode === 'ordered' && <div role="alert" className="nfc-v2-organizer-danger">
-                Latest-child prefix 与 ordered mtime 不兼容；不能同时启用。
+                「最新子目录前缀」和「按整理结果顺序更新」不能同时启用。
               </div>}
               <div className="nfc-organizer-advanced-collapse nfc-v2-organizer-advanced-collapse">
-                {ruleGroup('directory_depth', 'Depth-aware directory rules', <>
+                {ruleGroup('directory_depth', '按目录层级改名', <>
                   {boolField('从深层目录开始重命名', advanced.directory_depth.enabled,
                     checked => patchAdvanced('directory_depth', { enabled: checked }))}
-                  {numberField('开始重命名深度（V1 保留 depth 1，最小值 2）',
+                  {numberField('开始改名的层级（第 1 层保留，最小值为 2）',
                     advanced.directory_depth.rename_from_depth, 2, 2, 64,
                     next => patchAdvanced('directory_depth', { rename_from_depth: next }))}
                 </>)}
-                {ruleGroup('file_numbering', 'Recursive file numbering', <>
+                {ruleGroup('file_numbering', '递归文件编号', <>
                   {boolField('递归文件编号', advanced.file_numbering.enabled,
                     checked => patchAdvanced('file_numbering', { enabled: checked }))}
                   {numberField('起始编号', advanced.file_numbering.start, 1, 0, undefined,
                     next => patchAdvanced('file_numbering', { start: next }))}
                   {numberField('补零位数', advanced.file_numbering.padding, 3, 1, 10,
                     next => patchAdvanced('file_numbering', { padding: next }))}
-                  <span className="nfc-v2-organizer-help">V1 排序固定为 natural_name，扩展名按原文件 preserve。</span>
+                  <span className="nfc-v2-organizer-help">按文件名自然顺序编号，保留原扩展名。</span>
                 </>)}
-                {ruleGroup('latest_child_prefix', 'Latest-child prefix', <>
+                {ruleGroup('latest_child_prefix', '最新子目录前缀', <>
                   {boolField('为唯一最新子目录添加前缀', advanced.latest_child_prefix.enabled,
                     checked => patchAdvanced('latest_child_prefix', { enabled: checked }))}
                   <label className="nfc-v2-organizer-field"><span>前缀</span>
@@ -295,14 +297,14 @@ export const OrganizerSnapshotFields: React.FC<Props> = ({
                       disabled={readOnly} placeholder="New "
                       onChange={event => patchAdvanced('latest_child_prefix', { prefix: event.target.value })} />
                   </label>
-                  <span className="nfc-v2-organizer-help">时间权威固定为 mtime_ns；最高时间戳并列时 Preview 会阻塞。</span>
+                  <span className="nfc-v2-organizer-help">按纳秒级修改时间判断。最新修改时间并列时，预览会标记冲突。</span>
                 </>)}
-                {ruleGroup('single_child_wrapper_collapse', 'Collapse Single-Child Wrapper', <>
-                  {boolField('折叠 depth 2 的单子目录 wrapper',
+                {ruleGroup('single_child_wrapper_collapse', '折叠单子目录外层', <>
+                  {boolField('折叠第 2 层只含一个子目录的外层',
                     advanced.single_child_wrapper_collapse.enabled,
                     checked => patchAdvanced('single_child_wrapper_collapse', { enabled: checked }))}
                   <div className="nfc-v2-organizer-notice is-warning" role="note">
-                    结构变更仅通过 Stage A 执行；仅支持真实目录唯一子项。隐藏第二项、symlink、目标已存在或文件系统不支持都会阻塞，仍使用 MOVE → rmdir_empty，不提供立即执行。
+                    先预览结构调整。外层只有一个真实子目录时，计划才会提层并清理空目录。隐藏的第二项、符号链接、目标已存在或文件系统不支持都会阻止这项操作。
                   </div>
                 </>)}
               </div>

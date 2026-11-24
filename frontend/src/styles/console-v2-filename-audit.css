@@ -76,3 +76,26 @@
 @media (prefers-reduced-motion:reduce) {
   .nfc-v2-filename-audit * { transition:none; animation:none; scroll-behavior:auto; }
 }
+
+.nfc-v2-filename-field > label { display: flex; align-items: center; gap: 8px; }
+.nfc-v2-filename-field > label svg { color: var(--nfc-tint); }
+.nfc-v2-filename-audit details.nfc-v2-filename-notice {
+  display: block;
+  background: var(--studio-ground);
+  border-color: var(--studio-line);
+}
+.nfc-v2-filename-notice summary {
+  cursor: pointer;
+  color: var(--nfc-tint);
+  font-weight: 650;
+  min-height: 22px;
+  align-content: center;
+}
+.nfc-v2-filename-notice summary:focus-visible { outline: 2px solid var(--nfc-tint); outline-offset: 3px; }
+@media (min-width: 768px) {
+  .nfc-v2-filename-form { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+  .nfc-v2-filename-form > .nfc-file-tool-primary-actions { margin: 0; padding: 0; border: 0; }
+}
+@media (max-width: 767px) {
+  .nfc-v2-filename-notice summary { min-height: 44px; }
+}

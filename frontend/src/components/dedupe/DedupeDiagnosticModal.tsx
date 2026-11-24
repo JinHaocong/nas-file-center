@@ -1,3 +1,4 @@
+import type { ScanId } from '../../types';
 import React, { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation } from '@tanstack/react-query';
@@ -13,7 +14,7 @@ import { type DedupePairValues, validateDedupePair, toDedupePairPayload } from '
 interface DedupeDiagnosticModalProps {
   open: boolean;
   onClose: () => void;
-  scanJobId?: number | null;
+  scanJobId?: ScanId | null;
 }
 
 const diagnosisCopy: Record<

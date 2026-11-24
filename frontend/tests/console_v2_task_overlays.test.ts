@@ -8,12 +8,21 @@ import { getTaskActionAvailability } from '../src/components/tasks/task_actions'
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('Console v2 Task Center Radix overlays', () => {
+  test('the task inspector shows progress once and lists only actions supported in the current state', () => {
+    const drawer = read('src/components/tasks/TaskDetailDrawer.tsx');
+    const actions = read('src/components/tasks/TaskActionBar.tsx');
+    assert.doesNotMatch(drawer, /任务能力|<dt>当前状态<\/dt>|<dt>任务 ID<\/dt>|<dt>预计剩余<\/dt>/);
+    assert.match(drawer, /getTaskDeleteAvailability\(task\)\.enabled/);
+    for (const action of ['pause', 'resume', 'cancel', 'retry'])
+      assert.ok(actions.includes(`{(${action}Avail.enabled || activeAction === '${action}')`), action);
+  });
+
   test('the detail inspector is a controlled Radix sheet without Ant Drawer/Descriptions', () => {
     const drawer = read('src/components/tasks/TaskDetailDrawer.tsx');
     const sheet = read('src/components/ui/ConsoleSheet.tsx');
     for (const token of ['ConsoleSheet', 'TaskProgress', 'TaskLogTable',
       'TaskDeleteButton', 'TaskActionBar', 'nfc-overlay-section',
-      'nfc-code-block', 'sanitizeContext', 'calculateTaskEta',
+      'nfc-code-block', 'sanitizeContext', 'summarized',
       'taskDetail', 'return isActive ? 3000 : false']) {
       assert.ok(drawer.includes(token), token);
     }

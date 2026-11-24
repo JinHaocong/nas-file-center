@@ -75,9 +75,8 @@ export const ScansPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-scans-page nfc-v2-scans-page nfc-page-layout-ledger">
       <PageHeader
-        eyebrow="扫描与快照"
         title="扫描去重"
-        description="基于 fclones 的精确重复文件扫描；活动扫描自动刷新，扫描结果仅作为后续计划生成的只读快照。"
+        description="选择目录查找重复文件，完成后可逐组核对。"
         actions={
           <ActionBar compact>
             <ConsoleButton loading={isFetching}

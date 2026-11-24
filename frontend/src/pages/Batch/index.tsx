@@ -17,13 +17,13 @@ import { MediaSortEditor } from './MediaSortEditor';
 import { MediaOrganizerBatchEditor } from './MediaOrganizerBatchEditor';
 
 type BatchMode = BatchOperation | 'media-sort' | 'media-organize';
-const operations: readonly { op: BatchMode; title: string; detail: string }[] = [
-  { op: 'quarantine', title: '批量隔离', detail: 'Quarantine' },
-  { op: 'touch', title: '更新时间戳', detail: 'Touch' },
-  { op: 'move', title: '批量移动', detail: 'Move' },
-  { op: 'rename', title: '批量改名', detail: 'Rename' },
-  { op: 'media-sort', title: '媒体分类', detail: 'P / V' },
-  { op: 'media-organize', title: '智能媒体整理', detail: '递归预览' },
+const operations: readonly { op: BatchMode; title: string }[] = [
+  { op: 'quarantine', title: '批量隔离' },
+  { op: 'touch', title: '更新时间戳' },
+  { op: 'move', title: '批量移动' },
+  { op: 'rename', title: '批量改名' },
+  { op: 'media-sort', title: '媒体分类' },
+  { op: 'media-organize', title: '智能媒体整理' },
 ];
 
 /** Open the unified organizer from new and historical links. */
@@ -41,23 +41,33 @@ export const BatchPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const toast = useConsoleToast();
   const [name, setName] = useState('批量处理');
-  const [operation, setOperation] = useState<BatchMode>(() =>
-    opensMediaOrganizer(searchParams) ? 'media-organize' : 'quarantine');
+  // Both tool-directory links and browser Back can change only the query string.
+  const operation: BatchMode = opensMediaOrganizer(searchParams) ? 'media-organize' :
+    operations.find(item => item.op === searchParams.get('operation'))?.op ?? 'quarantine';
   const [paths, setPaths] = useState<string[]>([]);
   const [mappingsText, setMappingsText] = useState('');
   const [planLoading, setPlanLoading] = useState(false);
   const [validationError, setValidationError] = useState('');
+  const toolPicker = useRef<HTMLDetailsElement>(null);
   const mountedRef = useRef(true);
   const planGuard = useRef(false);
   const planMutation = useMutation({ mutationFn: plansApi.createPlan });
 
-  useEffect(() => {
-    if (opensMediaOrganizer(searchParams)) setOperation('media-organize');
-  }, [searchParams]);
+  useEffect(() => { setValidationError(''); }, [operation]);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
+  }, []);
+
+  useEffect(() => {
+    const closeOutside = (event: PointerEvent) => {
+      if (toolPicker.current?.open && event.target instanceof Node && !toolPicker.current.contains(event.target)) {
+        toolPicker.current.open = false;
+      }
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    return () => document.removeEventListener('pointerdown', closeOutside);
   }, []);
 
   const handleGeneratePlan = async () => {
@@ -90,20 +100,17 @@ export const BatchPage: React.FC = () => {
   /** Change tools and clear an organizer link when leaving the organizer. */
   const onOperationChange = (next: BatchMode) => {
     if (planGuard.current) return;
-    setOperation(next);
-    if (next === 'media-organize' || opensMediaOrganizer(searchParams)) {
-      setSearchParams(current => {
-        const params = new URLSearchParams(current);
-        if (next === 'media-organize') params.set('operation', next);
-        else {
-          params.delete('operation');
-          params.delete('execution');
-          params.delete('preview');
-          params.delete('batch');
-        }
-        return params;
-      }, { replace: true });
+    if (toolPicker.current?.open) {
+      toolPicker.current.open = false;
+      toolPicker.current.querySelector('summary')?.focus();
     }
+    setSearchParams(current => {
+      const params = new URLSearchParams(current);
+      for (const key of ['directory', 'execution', 'preview', 'batch']) params.delete(key);
+      if (next === 'quarantine') params.delete('operation');
+      else params.set('operation', next);
+      return params;
+    });
     setValidationError('');
   };
   const onPathsChange = (next: string | string[]) => {
@@ -112,47 +119,58 @@ export const BatchPage: React.FC = () => {
     setValidationError('');
   };
 
+  const isMedia = operation === 'media-sort' || operation === 'media-organize';
+  const tool = operations.find(item => item.op === operation);
+  const toolChooser = (
+    <details className="nfc-studio-tool-picker" ref={toolPicker}
+      onBlur={event => {
+        if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+      }}
+      onKeyDown={event => {
+        if (event.key === 'Escape') {
+          event.currentTarget.open = false;
+          event.currentTarget.querySelector('summary')?.focus();
+        }
+      }}>
+      <summary><ConsoleIcon name="sliders" size={15} />切换文件工具<ConsoleIcon name="chevron-down" size={14} /></summary>
+        <fieldset className="nfc-v2-batch-operations">
+          <legend>操作类型</legend>
+          <div className="nfc-batch-operation-grid">
+            {operations.map(item => (
+              <label key={item.op} className={'nfc-v2-batch-radio' +
+                (operation === item.op ? ' is-selected' : '')}>
+                <input type="radio" name="batch-operation" value={item.op}
+                  checked={operation === item.op} disabled={planLoading}
+                  onChange={() => onOperationChange(item.op)} />
+                <span>{item.title}</span>
+              </label>
+            ))}
+            <label className="nfc-v2-batch-radio is-disabled">
+              <input type="radio" value="hardlink" disabled />
+              <span>硬链接去重<small>未实现</small></span>
+            </label>
+            <label className="nfc-v2-batch-radio is-disabled">
+              <input type="radio" value="reflink" disabled />
+              <span>Reflink 浅克隆<small>未实现</small></span>
+            </label>
+          </div>
+        </fieldset>
+    </details>
+  );
   return (
     <div className="nfc-operations-page nfc-batch-page nfc-page-layout-workbench nfc-v2-batch">
-      <PageHeader title="批量文件处理"
-        description="批量隔离、更新时间戳、移动、改名、媒体分类及智能媒体整理。" />
-      <DataPanel title="批量操作定义"
-        description={operation === 'media-sort'
-           ? '选择媒体分类后，按 P / V 规则预览当前目录内的图片和视频。'
-           : operation === 'media-organize'
-             ? '递归识别资源包、作者、合集、作品和版本，分开预览和整理。'
-             : '选择操作类型并明确输入源路径/映射。这里创建 Plan，不会立即执行文件系统变更。'}
+      <PageHeader title={tool?.title ?? '批量处理'} actions={toolChooser} />
+
+      {!isMedia && <DataPanel title="操作范围" description="核对路径后生成执行计划。"
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
         <div className="nfc-batch-form nfc-v2-batch-form">
-          {operation !== 'media-sort' && operation !== 'media-organize' && <label className="nfc-v2-batch-field">
+          <label className="nfc-v2-batch-field">
             <span>计划名称</span>
             <input value={name} required disabled={planLoading}
               placeholder="批量处理计划" aria-invalid={Boolean(validationError) && !name.trim()}
               onChange={event => { setName(event.target.value); setValidationError(''); }} />
-          </label>}
-          <fieldset className="nfc-v2-batch-operations">
-            <legend>操作类型</legend>
-            <div className="nfc-batch-operation-grid">
-              {operations.map(item => (
-                <label key={item.op} className={'nfc-v2-batch-radio' +
-                  (operation === item.op ? ' is-selected' : '')}>
-                  <input type="radio" name="batch-operation" value={item.op}
-                    checked={operation === item.op} disabled={planLoading}
-                    onChange={() => onOperationChange(item.op)} />
-                  <span>{item.title}<small>{item.detail}</small></span>
-                </label>
-              ))}
-              <label className="nfc-v2-batch-radio is-disabled">
-                <input type="radio" value="hardlink" disabled />
-                <span>硬链接去重<small>未实现</small></span>
-              </label>
-              <label className="nfc-v2-batch-radio is-disabled">
-                <input type="radio" value="reflink" disabled />
-                <span>Reflink 浅克隆<small>未实现</small></span>
-              </label>
-            </div>
-          </fieldset>
-          {operation !== 'media-sort' && operation !== 'media-organize' && <>
+          </label>
+
           {operation === 'quarantine' && (
             <div className="nfc-v2-batch-notice nfc-page-alert" role="note">
               <ConsoleIcon name="shield-check" size={19} />
@@ -191,9 +209,8 @@ export const BatchPage: React.FC = () => {
               Plan 创建后仍需在计划详情完成 Freeze、Validate 与 Execute。
             </span>
           </ActionBar>
-          </>}
         </div>
-      </DataPanel>
+      </DataPanel>}
       {operation === 'media-sort' && <MediaSortEditor />}
       {operation === 'media-organize' && <MediaOrganizerBatchEditor />}
     </div>

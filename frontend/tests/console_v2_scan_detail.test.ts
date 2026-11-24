@@ -49,8 +49,8 @@ describe('Console v2 Scan Detail duplicate group inspector', () => {
     const page = read('src/pages/Scans/ScanDetail.tsx');
     for (const token of [
       "scan.status === 'completed' && scan.total_groups > 0",
-      'DedupePlanModal', 'Advanced Dedupe', "navigate('/scans/' + scan.id + '/dedupe')",
-      'DedupeDiagnosticModal', 'ScanDeleteButton key={scan.id}',
+      'DedupePlanModal', '高级去重', "navigate('/scans/' + scanId + '/dedupe')",
+      'DedupeDiagnosticModal', 'ScanDeleteButton key={scanId}',
       'deleteScanMutation.isPending', 'queryClient.invalidateQueries',
       'Plan 生命周期', '只读快照',
       'scan.has_dependent_plan',
@@ -69,7 +69,7 @@ describe('Console v2 Scan Detail duplicate group inspector', () => {
       'groupsFetchError', 'refetchGroups()',
     ]) assert.ok(page.includes(token), token);
     assert.match(page, /enabled: validScanId && scan\?\.status === 'completed'/);
-    assert.match(page, /Number\.isSafeInteger\(scanId\) && scanId > 0/);
+    assert.match(page, /isSqliteId\(scanId\)/);
   });
 
   test('scoped Scan Detail CSS is loaded after Scan History and honors mobile/reduced motion', () => {

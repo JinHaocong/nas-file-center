@@ -156,3 +156,61 @@
 @media (prefers-reduced-motion: reduce) {
   .nfc-v2-step-menu, .nfc-v2-step-menu-item { animation: none; transition: none; }
 }
+
+.nfc-workflow-builder-page .nfc-workflow-definition-rail .nfc-form-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+.nfc-workflow-builder-page .nfc-v2-workflow-mode-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--studio-ground);
+}
+.nfc-workflow-builder-page .nfc-v2-workflow-mode-choice.is-selected {
+  border-color: var(--nfc-tint);
+  color: var(--nfc-tint);
+  background: var(--nfc-tint-soft);
+}
+.nfc-workflow-builder-page .nfc-v2-workflow-mode-choice.is-selected svg { color: inherit; }
+.nfc-workflow-builder-page .nfc-workflow-pipeline-canvas .nfc-panel-count {
+  color: var(--nfc-tint);
+  font-variant-numeric: tabular-nums;
+}
+.nfc-workflow-builder-page .nfc-workflow-pipeline-canvas > .nfc-data-panel {
+  min-height: 0;
+}
+.nfc-workflow-builder-page .nfc-workflow-pipeline-canvas .nfc-data-panel-body {
+  padding: 10px 14px 12px;
+}
+.nfc-workflow-builder-page .nfc-workflow-step-list {
+  display: grid;
+  gap: 3px;
+}
+.nfc-workflow-builder-page .nfc-step-add-surface,
+.nfc-workflow-builder-page .nfc-step-end-note {
+  margin: 4px 0 0;
+  padding: 10px 13px 2px;
+  border-top: 1px solid var(--studio-line);
+}
+.nfc-workflow-builder-page .nfc-step-add-button { color: var(--nfc-tint); }
+.nfc-step-end-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--studio-muted);
+  font-size: 12px;
+}
+@media (max-width: 767px) {
+  .nfc-workflow-builder-page .nfc-workflow-pipeline-canvas .nfc-data-panel-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .nfc-workflow-builder-page .nfc-workflow-pipeline-canvas .nfc-data-panel-action {
+    justify-self: end;
+    width: auto;
+  }
+  .nfc-workflow-builder-page .nfc-workflow-pipeline-canvas .nfc-data-panel-body { padding-inline: 8px; }
+  .nfc-workflow-builder-page :is(.nfc-step-add-surface, .nfc-step-end-note) { padding-inline: 9px; }
+}

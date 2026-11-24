@@ -73,8 +73,10 @@ describe('v0.4.0 C6B overlay consistency contract', () => {
 
   test('task and plan overlays retain operational actions and journal authority', () => {
     const task = read('src/components/tasks/TaskDetailDrawer.tsx');
+    const taskActions = read('src/components/tasks/TaskActionBar.tsx');
+    assert.match(task, /<TaskActionBar\b/);
     for (const semantic of ['cancel', 'pause', 'resume']) {
-      assert.match(task, new RegExp(semantic, 'i'));
+      assert.match(taskActions, new RegExp(`getTaskActionAvailability\\(task, '${semantic}'\\)`));
     }
 
     const journal = read('src/pages/Plans/OperationJournalDrawer.tsx');

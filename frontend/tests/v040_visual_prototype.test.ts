@@ -10,7 +10,7 @@ describe('v0.4.0 C2A visual prototype contract', () => {
     const source = read('src/components/Sidebar.tsx');
     const nav = read('src/components/layout/navItems.ts');
     assert.match(source, /consoleNavGroups/);
-    for (const label of ['数据与扫描', '文件工具', '自动化', '安全与运行', '系统']) {
+    for (const label of ['我的文件', '查找与核对', '整理与恢复', '任务与设置']) {
       assert.match(nav, new RegExp(label));
     }
   });

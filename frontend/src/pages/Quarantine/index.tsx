@@ -516,7 +516,7 @@ export const QuarantinePage: React.FC = () => {
 
   return (
     <div className="nfc-operations-page nfc-quarantine-page nfc-page-layout-ledger nfc-v2-quarantine-ledger">
-      <PageHeader eyebrow="Safety boundary" title="文件隔离区"
+      <PageHeader title="文件隔离区"
         description="Quarantine-first 文件安全边界。恢复遵循零覆盖语义；永久删除同时受管理员、ALLOW_MUTATION 与 ALLOW_DELETE 约束。"
         actions={<ActionBar compact>
           <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
@@ -546,7 +546,7 @@ export const QuarantinePage: React.FC = () => {
             <ConsoleSelect id="quarantine-state-filter" label="隔离状态" value={stateFilter}
               options={STATE_FILTER_OPTIONS} onChange={handleFilterChange} />
           </ActionBar>
-          <ActionBar className="nfc-bulk-action-bar nfc-v2-quarantine-bulk-actions">
+          {!isError && <ActionBar className="nfc-bulk-action-bar nfc-v2-quarantine-bulk-actions">
             <span className={'nfc-selection-count' + (selectedEntryIds.length ? ' nfc-selection-count-active' : '')}
               aria-live="polite">已选择 {selectedEntryIds.length}</span>
             <ConsoleButton size="sm" disabled={currentPageSelectableIds.length === 0}
@@ -580,7 +580,7 @@ export const QuarantinePage: React.FC = () => {
                 批量删除记录
               </ConsoleButton>
             </span>
-          </ActionBar>
+          </ActionBar>}
           {selectionNotice && <div className="nfc-v2-quarantine-selection-notice nfc-selection-notice" role="status">
             <ConsoleIcon name="info" size={16} />{selectionNotice}
           </div>}

@@ -1,5 +1,24 @@
 /* Shared workspace, navigation materials and interaction tokens. */
+@font-face {
+  font-family: Manrope;
+  src: url('../assets/manrope-latin.woff2') format('woff2');
+  font-weight: 200 800;
+  font-display: swap;
+}
 :root {
+  --studio-ground: #f7f6f1;
+  --studio-paper: #fffefa;
+  --studio-soft: #f0efe7;
+  --studio-line: #e2e1d6;
+  --studio-ink: #232823;
+  --studio-success-ink: #265a48;
+  --studio-success-soft: #e8f2e9;
+  --studio-warn-ink: #785014;
+  --studio-warn-soft: #fff1d7;
+  --studio-danger-ink: #913641;
+  --studio-danger-soft: #f9e9e8;
+  --studio-muted: #596157;
+  --studio-font: Manrope, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --nfc-accent: #252525;
   --nfc-accent-soft: #f1f1ef;
   --nfc-canvas: #ffffff;
@@ -14,22 +33,21 @@
   /* 4.5:1+ WCAG AA across paper, neutral and accent-soft backgrounds. */
   --nfc-text-subtle: #6b6b66;
 
-  --nfc-tint: #2355b9;
-  --nfc-tint-fill: #245ad0;
-  --nfc-tint-hover: #1b4bb5;
+  --nfc-tint: #245b4b;
+  --nfc-tint-fill: #245c4b;
+  --nfc-tint-hover: #184637;
   --nfc-tint-on-fill: #ffffff;
-  --nfc-tint-soft: #ebf2ff;
-  --nfc-tint-line: #d0dfff;
-  --nfc-material-solid: #f5f8fd;
-  --nfc-material-bg: rgb(249 251 255 / .82);
-  --nfc-material-line: rgb(104 127 164 / .24);
+  --nfc-tint-soft: #eaf2e9;
+  --nfc-tint-line: #c9dacf;
+  --nfc-material-solid: #fbfaf6;
+  --nfc-material-bg: #fbfaf6;
+  --nfc-material-line: #dedfd3;
   --nfc-material-highlight: rgb(255 255 255 / .84);
-  --nfc-material-filter: blur(20px) saturate(145%);
-  --nfc-material-shadow: 0 12px 32px rgb(35 64 114 / .12), inset 0 1px var(--nfc-material-highlight);
-  --nfc-hero-from: #edf3ff;
+  --nfc-material-filter: none;
+  --nfc-material-shadow: 0 12px 32px rgb(43 53 37 / .08), inset 0 1px var(--nfc-material-highlight);
   --nfc-motion-ease: cubic-bezier(.22, .7, .28, 1);
-  --nfc-panel-radius: 18px;
-  --nfc-overlay-radius: 24px;
+  --nfc-panel-radius: 13px;
+  --nfc-overlay-radius: 18px;
 
   --nfc-canvas-tint-a: rgba(32, 32, 31, 0.015);
   --nfc-canvas-tint-b: rgba(32, 32, 31, 0.008);
@@ -57,7 +75,7 @@
   --nfc-radius-shell: 12px;
   --nfc-radius-workspace: 10px;
   --nfc-radius-inner: 8px;
-  --nfc-radius-control: 12px;
+  --nfc-radius-control: 9px;
   --nfc-radius-pill: 999px;
 
   --nfc-space-1: 4px;
@@ -98,6 +116,18 @@
 }
 
 [data-theme='dark'] {
+  --studio-ground: #191c19;
+  --studio-paper: #232722;
+  --studio-soft: #2b302a;
+  --studio-line: #40463e;
+  --studio-ink: #f0f2eb;
+  --studio-success-ink: #b0dec4;
+  --studio-success-soft: #26392d;
+  --studio-warn-ink: #f2cc8c;
+  --studio-warn-soft: #3a3022;
+  --studio-danger-ink: #f3b6bb;
+  --studio-danger-soft: #422a2d;
+  --studio-muted: #b8c0b5;
   --nfc-accent: #e9e9e6;
   --nfc-accent-soft: #323230;
   --nfc-canvas: #171716;
@@ -112,18 +142,17 @@
   /* Preserve AA on raised and accent-soft dark surfaces, not just canvas. */
   --nfc-text-subtle: #9d9d97;
 
-  --nfc-tint: #a9c4ff;
-  --nfc-tint-fill: #a9c4ff;
-  --nfc-tint-hover: #c1d4ff;
-  --nfc-tint-on-fill: #152b52;
-  --nfc-tint-soft: #263753;
-  --nfc-tint-line: #465a7c;
-  --nfc-material-solid: #252b36;
-  --nfc-material-bg: rgb(35 41 52 / .86);
-  --nfc-material-line: rgb(165 189 230 / .21);
-  --nfc-material-highlight: rgb(219 233 255 / .14);
+  --nfc-tint: #a6d9be;
+  --nfc-tint-fill: #a6d9be;
+  --nfc-tint-hover: #c2e8cc;
+  --nfc-tint-on-fill: #133d2e;
+  --nfc-tint-soft: #29392f;
+  --nfc-tint-line: #495e50;
+  --nfc-material-solid: #20231f;
+  --nfc-material-bg: #20231f;
+  --nfc-material-line: #3c443b;
+  --nfc-material-highlight: rgb(237 245 230 / .11);
   --nfc-material-shadow: 0 12px 32px rgb(0 0 0 / .28), inset 0 1px var(--nfc-material-highlight);
-  --nfc-hero-from: #242a35;
 
   --nfc-canvas-tint-a: rgba(245, 245, 242, 0.018);
   --nfc-canvas-tint-b: rgba(245, 245, 242, 0.008);

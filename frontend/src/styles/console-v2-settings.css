@@ -110,3 +110,46 @@
 @media(prefers-reduced-motion:reduce) {
   .nfc-v2-settings * { transition:none;animation:none;scroll-behavior:auto; }
 }
+.nfc-settings-section-nav {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px;
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-radius-control);
+  background: var(--studio-soft);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.nfc-settings-section-nav button {
+  flex: none;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--studio-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 620;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.nfc-settings-section-nav button:hover { color: var(--studio-ink); }
+.nfc-settings-section-nav button[aria-selected='true'] {
+  background: var(--studio-paper);
+  color: var(--nfc-tint);
+  box-shadow: 0 1px 3px rgb(36 48 32 / .1);
+}
+.nfc-settings-section-nav button:focus-visible,
+.nfc-v2-settings [role='tabpanel']:focus-visible {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: -2px;
+}
+@media (max-width: 767px) {
+  .nfc-settings-section-nav { gap: 2px; }
+  .nfc-settings-section-nav button { min-height: 44px; padding-inline: 7px; font-size: 12px; }
+}

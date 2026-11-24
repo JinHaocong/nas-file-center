@@ -119,7 +119,7 @@ describe('Console v2 native shared CodePath', () => {
       '.nfc-v2-code-path', '.nfc-v2-code-path-value',
       '.nfc-v2-code-path-copy', '.nfc-v2-code-path-feedback',
       'text-overflow: ellipsis', 'white-space: nowrap', 'user-select: text',
-      "[data-theme='dark']", ':focus-visible', '@media (max-width: 767px)',
+      'var(--nfc-surface-2)', 'var(--nfc-text)', '.nfc-path-disclosure', ':focus-visible', '@media (max-width: 767px)',
       'min-height: 44px', 'prefers-reduced-motion: reduce',
     ]) assert.ok(css.includes(token), token);
     assert.ok(main.includes("import './styles/console-v2-code-path.css';"));

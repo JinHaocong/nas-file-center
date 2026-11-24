@@ -1,3 +1,4 @@
+import { taskTypeLabel } from '../../utils/taskTypeLabel';
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -13,7 +14,7 @@ import type { ConsoleIconName } from '../../components/ui/ConsoleIcon';
 import { useResponsive } from '../../hooks/useResponsive';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
-import storageUnit from '../../assets/storage-unit.webp';
+import { DirectoryShelf } from './DirectoryShelf';
 
 interface QuickAction {
   title: string;
@@ -41,7 +42,7 @@ const taskStateLabel: Record<string, string> = {
 };
 
 export const DashboardPage: React.FC = () => {
-  useTitle('系统概览');
+  useTitle('文件空间');
   const navigate = useNavigate();
   const { isMobile } = useResponsive();
   const { data: summary, isLoading: summaryLoading, refetch: refetchSummary, isError: summaryError } = useQuery({
@@ -72,8 +73,8 @@ export const DashboardPage: React.FC = () => {
       <section className="nfc-v2-dashboard-hero" aria-label="NAS File Center 工作台">
         <div className="nfc-v2-hero-copy">
           <PageHeader
-            title="NAS File Center"
-            description="管理文件索引、去重扫描和媒体整理"
+            title="文件空间"
+            description="从目录继续整理，也可以查看最近的扫描和任务。"
             actions={
               <>
                 <ConsoleButton variant="primary" onClick={() => navigate('/batch?operation=media-organize')}>
@@ -86,9 +87,9 @@ export const DashboardPage: React.FC = () => {
             }
           />
         </div>
-        <img className="nfc-v2-hero-illustration" src={storageUnit} alt="" width={720} height={720}
-          decoding="async" />
       </section>
+
+      <DirectoryShelf />
 
       {summaryError && <div className="nfc-v2-error-note" role="alert">
         系统摘要暂时无法获取，请检查 API 连接或稍后刷新。
@@ -166,7 +167,7 @@ export const DashboardPage: React.FC = () => {
               )}
           </DataPanel>
 
-          <DataPanel title="后台任务" description="Worker 执行队列与最近任务状态"
+          <DataPanel title="最近活动" description="后台任务的进度和结果"
             action={<button type="button" className="nfc-v2-text-link" onClick={() => navigate('/tasks')}>
               任务中心 <ConsoleIcon name="arrow-right" size={15} />
             </button>}>
@@ -176,14 +177,15 @@ export const DashboardPage: React.FC = () => {
               : isMobile ? (
                 <div className="nfc-mobile-activity-list">
                   {taskItems.map(item => (
-                    <div key={item.id} className="nfc-mobile-activity-card">
-                      <div className="nfc-mobile-activity-topline"><strong>任务 #{item.id} · {item.job_type}</strong><StatusBadge status={item.status} /></div>
+                    <button key={item.id} type="button" className="nfc-mobile-activity-card"
+                      onClick={() => navigate('/tasks?task=' + encodeURIComponent(item.id))}>
+                      <div className="nfc-mobile-activity-topline"><strong>任务 #{item.id} · {taskTypeLabel(item.job_type)}</strong><StatusBadge status={item.status} /></div>
                       <div className="nfc-mobile-activity-grid">
                         <span>进度 <b>{item.progress.total > 0 ? item.progress.current + '/' + item.progress.total : '—'}</b></span>
                         <span>{taskStateLabel[item.status] || item.status}</span>
                       </div>
                       <span className="nfc-mobile-activity-meta">{formatDateTime(item.created_at)}</span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               ) : (
@@ -194,7 +196,8 @@ export const DashboardPage: React.FC = () => {
                       {taskItems.map(item => (
                         <tr key={item.id}>
                           <td><span className="nfc-v2-task-icon"><ConsoleIcon name="activity" size={17} /></span>
-                            <strong>#{item.id}</strong><span className="nfc-v2-task-kind">{item.job_type}</span></td>
+                            <button className="nfc-v2-row-link" type="button" aria-label={'查看任务 ' + item.id}
+                              onClick={() => navigate('/tasks?task=' + encodeURIComponent(item.id))}>#{item.id}</button><span className="nfc-v2-task-kind" title={item.job_type}>{taskTypeLabel(item.job_type)}</span></td>
                           <td><StatusBadge status={item.status} /></td>
                           <td className="nfc-v2-numeric">
                             {item.progress.total > 0 ? item.progress.current + ' / ' + item.progress.total : '—'}
@@ -244,7 +247,7 @@ export const DashboardPage: React.FC = () => {
               </div>
               <div className="nfc-v2-runtime-note">
                 <ConsoleIcon name="shield-check" size={17} />
-                <span>执行前请先核对 Preview、冻结和实时校验结果。安全模式不会被界面绕过。</span>
+                <span>执行计划的冻结、校验和执行进度可在计划详情中查看。</span>
               </div>
             </div>
           </DataPanel>

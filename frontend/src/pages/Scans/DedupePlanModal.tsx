@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import type { ScanId } from '../../types';
+import { sqliteIdText } from '../../utils/sqliteId';
 import { scansApi } from '../../api/domain';
 import { POLICY_OPTIONS } from '../../utils/constants';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
@@ -13,7 +15,7 @@ import {
 } from './classic_dedupe_form';
 
 interface Props {
-  scanId: number;
+  scanId: ScanId;
   open: boolean;
   onClose: () => void;
 }
@@ -71,7 +73,7 @@ export const DedupePlanModal: React.FC<Props> = ({ scanId, open, onClose }) => {
       setError(failure);
       return;
     }
-    if (!Number.isSafeInteger(scanId) || scanId <= 0) {
+    if (!sqliteIdText(scanId)) {
       setError('扫描任务 ID 无效');
       return;
     }

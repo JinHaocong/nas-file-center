@@ -130,8 +130,8 @@ export const SchedulerPage: React.FC = () => {
   const items: ScheduleItem[] = data?.items || [];
   return (
     <div className="nfc-operations-page nfc-scheduler-page nfc-page-layout-ledger nfc-v2-scheduler-page">
-      <PageHeader eyebrow="Automation" title="计划任务"
-        description="用 Cron + IANA 时区定时派发索引、扫描、媒体任务与固定版本的 Workflow Preview/Draft。"
+      <PageHeader title="计划任务"
+        description="按时区和触发规则安排索引、扫描、媒体任务或工作流。"
         actions={<ActionBar compact>
           {isAdmin && <ConsoleButton variant="primary" leadingIcon={<ConsoleIcon name="plus" size={17} />}
             onClick={() => setEditorSchedule(null)}>新建计划任务</ConsoleButton>}
@@ -153,9 +153,9 @@ export const SchedulerPage: React.FC = () => {
         </div>
       </div>}
 
-      <DataPanel title="Scheduler ledger"
-        description="Missed run = skip；同一 schedule 有活跃任务时 skip_if_active；Run now 同样写入 durable run history。"
-        action={<span className="nfc-panel-count">{data?.total ?? 0} schedules</span>}
+      <DataPanel title="触发安排"
+        description="错过的触发会跳过，手动运行和定时运行都记入历史。"
+        action={<span className="nfc-panel-count">{data?.total ?? 0} 个计划</span>}
         className="nfc-panel-flush" variant="dense">
         {!isError && isLoading && <div role="status" className="nfc-v2-scheduler-list-state">
           正在读取计划任务…
@@ -168,8 +168,8 @@ export const SchedulerPage: React.FC = () => {
               <table className="nfc-v2-scheduler-table">
                 <thead><tr>
                   <th scope="col">计划任务</th><th scope="col">状态</th>
-                  <th scope="col">目标</th><th scope="col">时间</th>
-                  <th scope="col">下次运行</th><th scope="col">上次触发</th>
+                  <th scope="col">目标</th><th scope="col">触发规则</th>
+                  <th scope="col">运行时间</th>
                   <th scope="col">操作</th>
                 </tr></thead>
                 <tbody>{items.map(row => (
@@ -186,8 +186,10 @@ export const SchedulerPage: React.FC = () => {
                     <td><div className="nfc-scheduler-time-cell">
                       <code>{row.cron_expression}</code><span>{row.timezone}</span>
                     </div></td>
-                    <td className="nfc-table-meta">{formatDateTime(row.next_scheduled_for_utc)}</td>
-                    <td className="nfc-table-meta">{formatDateTime(row.last_scheduled_for_utc)}</td>
+                    <td><div className="nfc-scheduler-occurrence">
+                      <span>下次 <time dateTime={row.next_scheduled_for_utc ?? undefined}>{formatDateTime(row.next_scheduled_for_utc)}</time></span>
+                      <small>上次 {formatDateTime(row.last_scheduled_for_utc)}</small>
+                    </div></td>
                     <td>{renderActions(row)}</td>
                   </tr>
                 ))}</tbody>

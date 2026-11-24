@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { settingsApi, dataLifecycleApi, auditApi, quarantineApi, resourcePolicyApi } from '../../api/domain';
 import { authApi } from '../../api/auth';
@@ -17,6 +18,7 @@ import {
 } from '../../components/settings/resource_policy';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
+import { ThumbnailSwitch } from '../../components/ui/MediaThumbnail';
 import { ActionBar } from '../../components/ui/ActionBar';
 import { ResponsiveDescriptions } from '../../components/ui/ResponsiveDescriptions';
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
@@ -39,6 +41,53 @@ const status = (tone: StatusTone, label: string) => (
 const failure = (error: unknown, fallback: string) =>
   getStructuredApiError(error).message || fallback;
 
+const settingsSections = [
+  { id: 'appearance', label: '界面显示' },
+  { id: 'safety', label: '安全状态' },
+  { id: 'retention', label: '保留策略' },
+  { id: 'resources', label: '资源设置' },
+  { id: 'sessions', label: '活动会话' },
+] as const;
+
+type SettingsSectionId = typeof settingsSections[number]['id'];
+
+/** 方向键切换设置分区，Home 和 End 分别跳到首尾标签。 */
+function handleSettingsTabKey(
+  event: React.KeyboardEvent<HTMLButtonElement>,
+  index: number,
+  sections: ReadonlyArray<typeof settingsSections[number]>,
+  onSelect: (id: SettingsSectionId) => void,
+) {
+  const last = sections.length - 1;
+  const next = event.key === 'ArrowRight' ? (index === last ? 0 : index + 1)
+    : event.key === 'ArrowLeft' ? (index === 0 ? last : index - 1)
+    : event.key === 'Home' ? 0 : event.key === 'End' ? last : -1;
+  if (next < 0) return;
+  event.preventDefault();
+  onSelect(sections[next].id);
+  event.currentTarget.closest('[role=tablist]')?.querySelectorAll<HTMLButtonElement>('[role=tab]')[next]?.focus();
+}
+
+function SettingsSectionNav({ sections, active, onSelect }: {
+  sections: ReadonlyArray<typeof settingsSections[number]>;
+  active: SettingsSectionId;
+  onSelect: (id: SettingsSectionId) => void;
+}) {
+  return (
+    <div className="nfc-settings-section-nav" role="tablist" aria-label="设置分区">
+      {sections.map((section, index) => (
+        <button key={section.id} id={'settings-tab-' + section.id} type="button" role="tab"
+          aria-selected={active === section.id} aria-controls="nfc-settings-active-panel"
+          tabIndex={active === section.id ? 0 : -1}
+          onClick={() => onSelect(section.id)}
+          onKeyDown={event => handleSettingsTabKey(event, index, sections, onSelect)}>
+          {section.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Environment-authoritative security flags; no Web UI action can enable mutation or deletion. */
 export const SettingsPage: React.FC = () => {
   useTitle('系统设置');
@@ -46,6 +95,15 @@ export const SettingsPage: React.FC = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const { pathname, search, hash } = useLocation();
+  const navigate = useNavigate();
+  const visibleSections = settingsSections.filter(section => section.id !== 'resources' || isAdmin);
+  const activeSection = visibleSections.find(section => hash === '#' + section.id)?.id ?? 'appearance';
+
+  /** 使用同一页面的 URL 片段保存当前标签，支持直达和浏览器前进后退。 */
+  const selectSection = (id: SettingsSectionId) => {
+    if (id !== activeSection) navigate({ pathname, search, hash: '#' + id });
+  };
 
   const [retentionDaysInput, setRetentionDaysInput] = useState<number | null>(0);
   const [quarantineDaysInput, setQuarantineDaysInput] = useState(0);
@@ -342,8 +400,16 @@ export const SettingsPage: React.FC = () => {
         </ActionBar>}
       />
 
-      <div className="nfc-settings-grid">
-        <DataPanel title="全局文件安全运行参数"
+      <SettingsSectionNav sections={visibleSections} active={activeSection} onSelect={selectSection} />
+      <div className="nfc-settings-grid" id="nfc-settings-active-panel"
+        role="tabpanel" aria-labelledby={'settings-tab-' + activeSection} tabIndex={0}>
+        {activeSection === 'appearance' && <DataPanel id="appearance" title="界面显示" className="nfc-settings-appearance">
+          <div className="nfc-thumbnail-settings-row">
+            <ThumbnailSwitch />
+            <p>在当前浏览器记住偏好，用于媒体、目录选择和整理预览。</p>
+          </div>
+        </DataPanel>}
+        {activeSection === 'safety' && <DataPanel title="全局文件安全运行参数" id="safety"
           description="这些开关来自服务端运行环境，Web UI 只读展示，防止误触扩大文件修改权限。"
           className="nfc-panel-flush nfc-settings-panel-runtime">
           <div className="nfc-settings-panel-body">
@@ -369,9 +435,9 @@ export const SettingsPage: React.FC = () => {
                 {settings?.allowed_roots.map((root, idx) => <CodePath value={root} key={idx} />)}
               </div> },
           ]} />
-        </DataPanel>
+        </DataPanel>}
 
-        <DataPanel title="数据生命周期与审计保留策略"
+        {activeSection === 'retention' && <DataPanel title="数据生命周期与审计保留策略" id="retention"
           description="保存策略不会自动删除数据；审计清理始终需要重新获取最新预览并显式确认。"
           className="nfc-settings-panel-lifecycle"
           action={<ActionBar compact>
@@ -477,10 +543,10 @@ export const SettingsPage: React.FC = () => {
               ]} />
             </section>
           </div>
-        </DataPanel>
+        </DataPanel>}
 
-        {isAdmin && (
-          <DataPanel title="资源控制" className="nfc-settings-panel-resource"
+        {activeSection === 'resources' && isAdmin && (
+          <DataPanel title="资源控制" id="resources" className="nfc-settings-panel-resource"
             description="控制扫描/哈希并发和时间窗口；不会改变文件安全与变动任务的优先安全语义。"
             action={<ActionBar compact>
               <ConsoleButton loading={policyLoading} size="sm"
@@ -595,7 +661,7 @@ export const SettingsPage: React.FC = () => {
           </DataPanel>
         )}
 
-        <DataPanel title="管理员活动会话"
+        {activeSection === 'sessions' && <DataPanel title="管理员活动会话" id="sessions"
           description="当前设备不可在此强制注销；其他会话可由管理员显式下线。"
           action={<span className="nfc-panel-count">{sessions.length} sessions</span>}
           className="nfc-panel-flush nfc-settings-panel-sessions" variant="dense">
@@ -642,7 +708,7 @@ export const SettingsPage: React.FC = () => {
                     ))}
                   </div>}
                 />}
-        </DataPanel>
+        </DataPanel>}
       </div>
 
       <ConsoleConfirmDialog open={confirmation !== null}

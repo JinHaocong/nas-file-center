@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { filesystemApi } from '../../api/filesystem';
+import { directoryHistoryKey, filesystemApi } from '../../api/filesystem';
+import { useAuth } from '../../contexts/AuthContext';
 import { DirectoryPickerModalProps } from './types';
 import { PathBreadcrumb } from './PathBreadcrumb';
 import { nextDirectoryTab, type DirectoryTab } from './tab_navigation';
@@ -9,6 +10,7 @@ import { formatDateTime } from '../../utils/format';
 import { useResponsive } from '../../hooks/useResponsive';
 import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
+import { MediaThumbnail } from '../ui/MediaThumbnail';
 import { ConsoleEmpty } from '../ui/ConsoleEmpty';
 import { ConsolePagination } from '../ui/ConsolePagination';
 import { ConsoleConfirmDialog } from '../ui/ConsoleConfirmDialog';
@@ -25,6 +27,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   open, onCancel, onConfirm, multiple = false, initialPath, selectedValues,
   returnFocusTo, disabled = false,
 }) => {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
   const { isMobile } = useResponsive();
@@ -54,7 +57,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     if (!open) return;
     const initial = initialDirectorySelection(selectedValues, multiple);
     setSelectedPaths(initial);
-    setCurrentPath(initialPath?.trim() || initial[0] || '');
+    setCurrentPath(initialPath || initial[0] || '');
     setSearchQuery('');
     setPage(1);
     setIsAddingFavorite(false);
@@ -80,13 +83,13 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   }, [open, dirData?.path, currentPath]);
 
   const { data: favData, isError: isFavError, refetch: refetchFav } = useQuery({
-    queryKey: ['filesystem', 'favorites'],
+    queryKey: directoryHistoryKey('favorites', user?.id),
     queryFn: () => filesystemApi.listFavorites(),
     enabled: open,
     staleTime: 10000,
   });
   const { data: recentData, isError: isRecentError, refetch: refetchRecent } = useQuery({
-    queryKey: ['filesystem', 'recent'],
+    queryKey: directoryHistoryKey('recent', user?.id, 20),
     queryFn: () => filesystemApi.listRecent(20),
     enabled: open,
     staleTime: 10000,
@@ -99,7 +102,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
       toast.success('已添加到收藏');
       setIsAddingFavorite(false);
       setFavoriteLabel('');
-      queryClient.invalidateQueries({ queryKey: ['filesystem', 'favorites'] });
+      queryClient.invalidateQueries({ queryKey: directoryHistoryKey('favorites', user?.id) });
     },
     onError: (err: Error) => toast.error(err.message || '添加收藏失败'),
   });
@@ -108,7 +111,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     onSuccess: () => {
       toast.success('已删除收藏');
       setConfirmFavoriteId(null);
-      queryClient.invalidateQueries({ queryKey: ['filesystem', 'favorites'] });
+      queryClient.invalidateQueries({ queryKey: directoryHistoryKey('favorites', user?.id) });
     },
     onError: (err: Error) => toast.error(err.message || '删除收藏失败'),
   });
@@ -310,7 +313,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                               <button type="button" className="nfc-v2-directory-open"
                                 disabled={busy} onClick={() => handleNavigate(item.path)}
                                 aria-label={'进入目录 ' + item.name}>
-                                <ConsoleIcon name="folder" size={18} />
+                                <MediaThumbnail path={item.path} kind="directory" />
                                 <span><strong>{item.name}</strong><small>{item.path}</small></span>
                               </button>
                               {multiple ? (
@@ -355,7 +358,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                     <ul className="nfc-v2-directory-list">
                       {favData.items.map(fav => (
                         <li className={fav.exists ? '' : 'is-missing'} key={fav.id}>
-                          <ConsoleIcon name="star" size={18} />
+                          {fav.exists ? <MediaThumbnail path={fav.path} kind="directory" /> : <ConsoleIcon name="star" size={18} />}
                           <div className="nfc-v2-directory-item-copy">
                             <strong>{fav.label || fav.path}</strong>
                             <small>{fav.path}{!fav.exists && ' · 路径不存在'}</small>
@@ -385,7 +388,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                     <ul className="nfc-v2-directory-list">
                       {recentData.items.map(rec => (
                         <li className={rec.exists ? '' : 'is-missing'} key={rec.id}>
-                          <ConsoleIcon name="history" size={18} />
+                          {rec.exists ? <MediaThumbnail path={rec.path} kind="directory" /> : <ConsoleIcon name="history" size={18} />}
                           <div className="nfc-v2-directory-item-copy">
                             <strong>{rec.path}</strong>
                             <small>最近使用时间：{formatDateTime(rec.last_used_at)}

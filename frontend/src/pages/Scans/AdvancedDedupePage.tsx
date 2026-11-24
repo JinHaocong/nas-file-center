@@ -1,4 +1,4 @@
-import React, { useReducer, useRef, useState } from 'react';
+import React, { useEffect, useReducer, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
@@ -32,6 +32,7 @@ import {
   DedupeStorageActionPanel,
 } from '../../components/dedupe';
 import { formatBytes } from '../../utils/format';
+import { isSqliteId } from '../../utils/sqliteId';
 import { shouldAcceptDirectResponse } from '../../utils/hotfix2Helpers';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
@@ -49,8 +50,12 @@ const parentDirectory = (path: string): string => {
 };
 
 export const AdvancedDedupePage: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
-  const scanId = parseInt(id || '0', 10);
+  const { id: scanId = '' } = useParams<{ id: string }>();
+  return <ScanDedupeWorkspace key={scanId} scanId={scanId} />;
+};
+
+/** A scan change starts a fresh scoring session and clears its previous preview authority. */
+const ScanDedupeWorkspace: React.FC<{ scanId: string }> = ({ scanId }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -67,6 +72,14 @@ export const AdvancedDedupePage: React.FC = () => {
   const [storageAction, setStorageAction] = useState<DedupeStorageAction>('quarantine');
   const [previewedStorageAction, setPreviewedStorageAction] = useState<DedupeStorageAction | null>(null);
   const [previewData, setPreviewData] = useState<DirectDedupePreviewResponse | null>(null);
+  const resultRegion = useRef<HTMLElement>(null);
+  const revealAcceptedPreview = useRef(false);
+  useEffect(() => {
+    if (!previewData || !revealAcceptedPreview.current) return;
+    revealAcceptedPreview.current = false;
+    resultRegion.current?.focus({ preventScroll: true });
+    resultRegion.current?.scrollIntoView({ block: 'start' });
+  }, [previewData]);
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(50);
   const [selectedMember, setSelectedMember] = useState<DedupePreviewMemberRow | null>(null);
@@ -79,7 +92,7 @@ export const AdvancedDedupePage: React.FC = () => {
   } = useQuery({
     queryKey: ['scanDetail', scanId],
     queryFn: () => scansApi.getScanDetail(scanId),
-    enabled: !!scanId,
+    enabled: isSqliteId(scanId),
   });
 
   const diagnosticRow =
@@ -135,6 +148,7 @@ export const AdvancedDedupePage: React.FC = () => {
     page: number;
     pageSize: number;
     storageAction: DedupeStorageAction;
+    revealResult?: boolean;
   }
 
   const previewMutation = useMutation({
@@ -156,6 +170,7 @@ export const AdvancedDedupePage: React.FC = () => {
       }
       setPage(variables.page);
       setPageSize(variables.pageSize);
+      revealAcceptedPreview.current = Boolean(variables.revealResult);
       setPreviewData(data);
       setPreviewedConfig(JSON.parse(JSON.stringify(variables.cfg)));
       setPreviewedStorageAction(variables.storageAction);
@@ -241,6 +256,7 @@ export const AdvancedDedupePage: React.FC = () => {
       page: 1,
       pageSize,
       storageAction,
+      revealResult: true,
     });
   };
 
@@ -297,7 +313,7 @@ export const AdvancedDedupePage: React.FC = () => {
     setExplainOpen(true);
   };
 
-  if (scanLoading) {
+  if (isSqliteId(scanId) && scanLoading) {
     return (
       <div className="nfc-v2-dedupe-page-state" role="status" aria-live="polite">
         <span className="nfc-console-spinner" aria-hidden="true" />
@@ -371,7 +387,7 @@ export const AdvancedDedupePage: React.FC = () => {
         }
       />
 
-      <div className="nfc-dedupe-cockpit">
+      <div id="dedupe-settings" tabIndex={-1} className="nfc-dedupe-cockpit nfc-dedupe-location">
         <div className="nfc-dedupe-context-rail">
           <DataPanel
         title="扫描上下文"
@@ -392,7 +408,7 @@ export const AdvancedDedupePage: React.FC = () => {
 
         <div className="nfc-dedupe-strategy-stage">
           <DataPanel
-            title="1. 存储动作"
+            title="存储动作"
             description="Quarantine 保持默认；Hardlink / Reflink 需要显式选择，且任何动作变化都会使已有 Preview 失效。"
           >
             <DedupeStorageActionPanel
@@ -409,16 +425,14 @@ export const AdvancedDedupePage: React.FC = () => {
           </DataPanel>
 
           <DataPanel
-        title="2. 评分策略与偏好配置"
-        description="所有配置变化都会使已接受的 preview digest 失效，必须重新 Preview。"
+        title="评分策略与偏好配置"
+        description="调整评分策略后，需要重新生成预览。"
       >
-        <div className="nfc-dedupe-editor-wrap">
-          <DedupeScorerConfigEditor
-            value={scorerConfig}
-            onChange={handleConfigChange}
-            disabled={previewMutation.isPending || generateMutation.isPending}
-          />
-        </div>
+        <DedupeScorerConfigEditor
+          value={scorerConfig}
+          onChange={handleConfigChange}
+          disabled={previewMutation.isPending || generateMutation.isPending}
+        />
 
         <ActionBar className="nfc-dedupe-config-actions">
           <ActionBar compact>
@@ -444,22 +458,13 @@ export const AdvancedDedupePage: React.FC = () => {
       </div>
 
       {previewData && (
-        <>
-          <DedupeIdentitySafetyPanel
-            authorityDigest={previewData.preview_digest}
-            authorityType="preview_digest"
-            previewSource={previewData.preview_source}
-            liveFilesystemVerified={previewData.live_filesystem_verified}
-            scorerConfigDigest={previewData.scorer_config_digest}
-            sourceSnapshotDigest={previewData.source_snapshot_digest}
-            decisionDigest={previewData.decision_digest}
-            engineVersion={previewData.dedupe_engine_version}
-            effectiveSafetyPolicy={
-              previewData.effective_safety_policy ||
-              previewData.summary?.effective_safety_policy
-            }
-          />
-
+        <section ref={resultRegion} tabIndex={-1} role="region" aria-label="高级去重预览结果"
+          className="nfc-dedupe-reviewed-results nfc-dedupe-location">
+          <nav className="nfc-dedupe-evidence-navigation" aria-label="预览位置">
+            <a href="#dedupe-members">查看候选文件</a>
+            <a href="#dedupe-proof">核对校验依据</a>
+            <a href="#dedupe-settings">返回配置</a>
+          </nav>
           <DedupePreviewSummaryPanel
             summary={{
               ...(previewData.summary || previewData),
@@ -477,7 +482,7 @@ export const AdvancedDedupePage: React.FC = () => {
           >
             <ActionBar>
               <div className="nfc-dedupe-plan-copy">
-                <strong>3. 确认并生成执行计划草案</strong>
+                <strong>确认并生成执行计划草案</strong>
                 <span>
                   {isDirty
                     ? '当前 preview_digest 对应旧配置；必须重新 Preview 后才能生成计划。'
@@ -507,8 +512,9 @@ export const AdvancedDedupePage: React.FC = () => {
             </ActionBar>
           </section>
 
+          <div id="dedupe-members" tabIndex={-1} className="nfc-dedupe-location">
           <DataPanel
-            title="去重候选与 Storage Action 决策"
+            title="候选文件与处置依据"
             description="每个成员的 KEEP / QUARANTINE / HARDLINK / REFLINK、metadata eligibility 与阻断原因都可追溯解释。"
             action={<span className="nfc-panel-count">{previewData.total_rows} candidates</span>}
             className="nfc-panel-flush"
@@ -527,7 +533,24 @@ export const AdvancedDedupePage: React.FC = () => {
               }}
             />
           </DataPanel>
-        </>
+          </div>
+          <div id="dedupe-proof" tabIndex={-1} className="nfc-dedupe-location">
+          <DedupeIdentitySafetyPanel
+            authorityDigest={previewData.preview_digest}
+            authorityType="preview_digest"
+            previewSource={previewData.preview_source}
+            liveFilesystemVerified={previewData.live_filesystem_verified}
+            scorerConfigDigest={previewData.scorer_config_digest}
+            sourceSnapshotDigest={previewData.source_snapshot_digest}
+            decisionDigest={previewData.decision_digest}
+            engineVersion={previewData.dedupe_engine_version}
+            effectiveSafetyPolicy={
+              previewData.effective_safety_policy ||
+              previewData.summary?.effective_safety_policy
+            }
+          />
+          </div>
+        </section>
       )}
 
       <DedupeExplainDrawer

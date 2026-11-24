@@ -26,8 +26,7 @@ export const ScheduleHistoryDrawer: React.FC<Props> = ({ schedule, onClose }) =>
   return (
     <ConsoleSheet open={Boolean(schedule)} onClose={onClose}
       title={schedule ? schedule.name + ' · 运行历史' : '运行历史'}
-      description="持久运行记录、版本快照及 Task 跳转"
-      eyebrow="RUN HISTORY" className="nfc-scheduler-history-drawer nfc-v2-scheduler-history">
+      description="持久运行记录、版本快照及 Task 跳转" className="nfc-scheduler-history-drawer nfc-v2-scheduler-history">
       {isLoading ? (
         <div className="nfc-scheduler-history-loading" role="status">正在读取运行记录…</div>
       ) : isError ? (

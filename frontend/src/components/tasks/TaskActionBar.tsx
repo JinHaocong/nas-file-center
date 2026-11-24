@@ -113,19 +113,19 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
 
   return (
     <div className="nfc-task-action-bar nfc-v2-task-actions">
-      <span title={!pauseAvail.enabled ? pauseAvail.reason || undefined : undefined}>
+      {(pauseAvail.enabled || activeAction === 'pause') && (
         <ConsoleButton disabled={!pauseAvail.enabled || isAnyPending}
           loading={activeAction === 'pause'} onClick={() => dispatch('pause', () => pauseMutation.mutateAsync())}>
           暂停
         </ConsoleButton>
-      </span>
-      <span title={!resumeAvail.enabled ? resumeAvail.reason || undefined : undefined}>
+      )}
+      {(resumeAvail.enabled || activeAction === 'resume') && (
         <ConsoleButton disabled={!resumeAvail.enabled || isAnyPending}
           loading={activeAction === 'resume'} onClick={() => dispatch('resume', () => resumeMutation.mutateAsync())}>
           恢复
         </ConsoleButton>
-      </span>
-      <span title={!cancelAvail.enabled ? cancelAvail.reason || undefined : undefined}>
+      )}
+      {(cancelAvail.enabled || activeAction === 'cancel') && (
         <ConsoleButton variant="danger"
           leadingIcon={<ConsoleIcon name="x" size={15} />}
           disabled={!cancelAvail.enabled || isAnyPending}
@@ -133,8 +133,8 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
           onClick={() => { if (cancelAvail.enabled && !isAnyPending && !actionInFlight.current) setConfirmAction('cancel'); }}>
           取消
         </ConsoleButton>
-      </span>
-      <span title={!retryAvail.enabled ? retryAvail.reason || undefined : undefined}>
+      )}
+      {(retryAvail.enabled || activeAction === 'retry') && (
         <ConsoleButton variant="primary"
           leadingIcon={<ConsoleIcon name="refresh" size={15} />}
           disabled={!retryAvail.enabled || isAnyPending}
@@ -142,7 +142,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
           onClick={() => { if (retryAvail.enabled && !isAnyPending && !actionInFlight.current) setConfirmAction('retry'); }}>
           重试
         </ConsoleButton>
-      </span>
+      )}
       {createdRetryId !== null && (
         <div className="nfc-v2-retry-result" role="status">
           已为任务 #{task.id} 创建重试任务 #{createdRetryId}

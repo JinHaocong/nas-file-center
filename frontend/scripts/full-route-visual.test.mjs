@@ -59,6 +59,8 @@ test('download verification actual 390px form/table defect has owned responsive 
     'nfc-download-verify-table-scroll',
     'aria-label="校验历史"',
     'aria-label="校验明细"',
+    'nfc-dv-mobile-history',
+    'nfc-dv-mobile-items',
   ]) assert.ok(page.includes(phrase), 'missing actual Download Verification UI hook ' + phrase);
   assert.match(css, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
   assert.match(css, /@media \(max-width: 767px\)/);
@@ -70,7 +72,8 @@ test('download verification actual 390px form/table defect has owned responsive 
   assert.ok(browser.includes("field?.querySelector('label')"));
   assert.ok(browser.includes("Download verification remote folder field is missing"));
   assert.ok(browser.includes("'-selected-detail.png'"));
-  assert.ok(browser.includes("'Mobile six-column history should scroll within its panel'"));
+  assert.ok(browser.includes("'Mobile download history must display records without a horizontal table'"));
+  assert.ok(browser.includes("'Mobile download evidence must open from its record summary'"));
   assert.ok(browser.includes("path === '/api/plans/legacy/summary'"));
 });
 
@@ -132,7 +135,7 @@ test('real 360px visual regression keeps mobile route title on one line without 
   assert.match(css, /@media \(max-width: 380px\)/);
   assert.doesNotMatch(css, /nfc-header-status\s*\{[^}]*display:\s*none/s,
     'Mobile repair may not hide the authoritative Safe Mode / Worker status');
-  assert.ok(header.includes('navLabel(location.pathname)'));
+  assert.ok(header.includes('navLabel(location.pathname, location.search)'));
   for (const phrase of [
     "width <= 768 && !item.public",
     "h.identityWrap !== 'nowrap'",
@@ -322,8 +325,7 @@ test('mobile advanced-dedupe disabled scorer cards pack by content, with live Ch
   const mobile = css.slice(css.indexOf('@media (max-width: 767px)'));
   assert.match(mobile, /\.nfc-v2-scorer-editor\s*\{\s*grid-auto-rows:\s*max-content;\s*align-content:\s*start;/);
   assert.match(mobile, /\.nfc-v2-scorer-card\s*\{\s*align-self:\s*start;/);
-  assert.match(mobile, /\.nfc-v2-scorer-heading h3\s*\{\s*flex:\s*0 0 auto;/);
-  assert.match(css, /\.nfc-v2-scorer-heading h3\s*\{\s*flex:\s*1 1 180px;/);
+  assert.match(css, /\.nfc-v2-scorer-heading\s*\{[^}]*flex-direction:\s*row;/);
   assert.ok(editor.includes('nfc-dedupe-config-card nfc-v2-scorer-card'));
   assert.ok(editor.includes('nfc-v2-scorer-weight'));
   for (const phrase of [
@@ -331,8 +333,8 @@ test('mobile advanced-dedupe disabled scorer cards pack by content, with live Ch
     'audit.scorerMobileGeometry = geometry',
     "geometry.gridAutoRows !== 'max-content'",
     "geometry.alignContent !== 'start'",
-    "card.height > 270 || card.gapToWeight > 90",
-    'Mobile inactive dedupe scorer card has excessive whitespace:',
+    "card.height > 88 || card.hasWeight",
+    'Mobile inactive dedupe scorer must only show its heading and switch:',
     'assert.deepEqual(failures, []',
   ]) assert.ok(browser.includes(phrase), 'Missing real mounted scorer geometry audit: ' + phrase);
 });

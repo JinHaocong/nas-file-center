@@ -1,11 +1,12 @@
 import React, { useRef, useState } from 'react';
+import type { ScanId } from '../../types';
 import { getScanDeleteAvailability } from './scan_cleanup';
 import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleConfirmDialog } from '../ui/ConsoleConfirmDialog';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
 
 export interface ScanDeleteButtonProps {
-  scan: { id: number; status: string; has_dependent_plan?: boolean };
+  scan: { id: ScanId; status: string; has_dependent_plan?: boolean };
   onDelete: () => void | Promise<unknown>;
   loading?: boolean;
   size?: 'small' | 'middle' | 'large';

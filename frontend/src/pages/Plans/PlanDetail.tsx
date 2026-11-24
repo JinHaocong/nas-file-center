@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { isSqliteId, sqliteIdText } from '../../utils/sqliteId';
 import { OperationJournalDrawer } from './OperationJournalDrawer';
 import { StaleRebuildDrawer } from '../../components/plans/StaleRebuildDrawer';
 import { isWorkflowPlanMetadata, WorkflowPlanMetadata } from '../../types/workflow';
@@ -11,11 +12,11 @@ import { getStructuredApiError } from '../../api/errors';
 import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
-import type { PlanItem } from '../../types';
+import type { PlanItem, PlanStatus } from '../../types';
 import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
 import { invalidatePlanDeleteFailure, getPlanDetailRenderState, getPlanDetailView } from '../../components/plans/plan_cleanup';
-import { canPlanLifecycleAction, planConfirmationSnapshot, samePlanConfirmation, type PlanConfirmationSnapshot } from '../../utils/planDetailActions';
-import { isSqliteId } from '../../utils/sqliteId';
+import { canPlanLifecycleAction, getPlanPrimaryAction, planConfirmationSnapshot, samePlanConfirmation, type PlanConfirmationSnapshot } from '../../utils/planDetailActions';
+
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
@@ -37,6 +38,19 @@ const lifecycleSteps = [
   { key: 'execute', label: 'Execute', caption: '任务执行' },
 ];
 
+/** Explain the immediate review action using the server's lifecycle state. */
+const reviewGuidance: Record<PlanStatus, string> = {
+  draft: '核对下方操作范围后，冻结这份草稿。',
+  frozen: '参数已冻结，可以校验文件当前状态。',
+  validating: '校验进行中，请查看任务进度。',
+  ready: '校验已通过，可以核对范围并确认执行。',
+  stale: '文件状态已变化，请核对失效项再处理。',
+  executing: '执行进行中，后台任务记录了实时进度。',
+  completed: '执行已完成，可在操作日志中核对实际变更。',
+  partial: '部分操作已完成，请先核对逐项结果和操作日志。',
+  failed: '任务执行失败，请查看逐项结果和操作日志。',
+};
+
 const getLifecycleIndex = (status: string) => {
   if (status === 'draft') return 0;
   if (status === 'frozen' || status === 'validating') return 1;
@@ -49,6 +63,13 @@ export const PlanDetailPage: React.FC = () => {
   const { id: planId = '' } = useParams<{ id: string }>();
   const validPlanId = isSqliteId(planId);
   const navigate = useNavigate();
+  const { state } = useLocation();
+
+  /** Return to the previous paginated list when it was the detail opener. */
+  function returnToList() {
+    if (state?.fromPlanList === true) navigate(-1);
+    else navigate('/plans');
+  }
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
   const actionInFlight = useRef(false);
@@ -201,7 +222,7 @@ export const PlanDetailPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
       queryClient.invalidateQueries({ queryKey: ['scansList'] });
-      navigate('/plans');
+      returnToList();
     },
     onError: (err: any) => {
       toast.error(err.message || '删除计划失败');
@@ -231,13 +252,20 @@ export const PlanDetailPage: React.FC = () => {
           error instanceof Error ? error.message : '获取计划详情失败，请检查网络或稍后重试'}</p>
       </div>
       <ConsoleButton onClick={() => {
-        if (missing) navigate('/plans'); else void refetch();
+        if (missing) returnToList(); else void refetch();
       }}>{missing ? '返回计划列表' : '重试'}</ConsoleButton>
     </div>;
   }
 
   const isSafeMode = !settings?.allow_mutation;
   const hasActiveJob = Boolean(plan.active_work_job_id);
+  const liveTask = sqliteIdText(plan.active_work_job_id) || (stageActive ? sqliteIdText(stageJob?.job_id) : null);
+  const submittedTask = sqliteIdText(executeMutation.data?.plan_id) === planId
+    ? sqliteIdText(executeMutation.data?.work_job_id) : null;
+  const relatedTask = liveTask || submittedTask;
+  const guidance = hasActiveJob || stageActive ? '后台任务正在处理这份计划。'
+    : isSafeMode && plan.status === 'ready' ? '校验已通过。当前为只读模式，可核对文件和操作日志。'
+    : reviewGuidance[plan.status] || '核对计划的操作项和任务记录。';
 
   const journalTotal = !isJournalLoading && !isJournalError ? (journalData?.total ?? 0) : 0;
   const isWorkflowPlan = Boolean(isWorkflowPlanMetadata(plan.metadata));
@@ -272,6 +300,13 @@ export const PlanDetailPage: React.FC = () => {
   const canValidate = canPlanLifecycleAction('validate', actionContext);
   const canExecute = canPlanLifecycleAction('execute', actionContext);
   const canUndo = canPlanLifecycleAction('undo', actionContext);
+  const recoveryAction = isStaleWorkflowPlan ? 'rebuild'
+    : isStaleDedupePlan ? (workflowMeta ? 'workflow' : 'scan') : undefined;
+  const primaryAction = getPlanPrimaryAction(plan.status, {
+    allowMutation: !isSafeMode, hasBackgroundTask: Boolean(relatedTask), recovery: recoveryAction,
+  });
+  const actionVariant = (action: typeof primaryAction) =>
+    primaryAction === action ? 'primary' : 'secondary';
   const currentConfirmation = confirmation
     ? planConfirmationSnapshot(confirmation.action, actionContext) : null;
   const confirmationValid = samePlanConfirmation(confirmation, currentConfirmation);
@@ -329,6 +364,65 @@ export const PlanDetailPage: React.FC = () => {
       <div className="nfc-v2-plan-notice-description">{description}</div></div>
     {action && <div className="nfc-v2-plan-notice-actions">{action}</div>}
   </div>;
+
+  const actions: Record<typeof primaryAction | 'undo', React.ReactNode> = {
+    background: relatedTask && <Link
+      className="nfc-console-button nfc-console-button-primary nfc-console-button-md nfc-plan-task-link"
+      to={'/tasks?task=' + relatedTask}>
+      <ConsoleIcon name="activity" size={16} /><span>查看后台任务 #{relatedTask}</span>
+    </Link>,
+    freeze: plan.status === 'draft' && (
+      <ConsoleButton variant={actionVariant('freeze')} leadingIcon={<ConsoleIcon name="lock" size={16} />}
+        onClick={() => beginAction('freeze')} disabled={!canFreeze}
+        loading={freezeMutation.isPending || freezeStageMutation.isPending}>
+        冻结计划 (Freeze)
+      </ConsoleButton>
+    ),
+    validate: ['frozen', 'ready', 'partial', 'stale'].includes(plan.status) && (
+      <ConsoleButton variant={actionVariant('validate')} leadingIcon={<ConsoleIcon name="check-circle" size={16} />}
+        title={hasActiveJob ? '后台任务进行中，暂时不能校验' : undefined}
+        disabled={!canValidate} loading={validateMutation.isPending || validateStageMutation.isPending}
+        onClick={() => beginAction('validate')}>
+        SHA256 实时校验 (Validate)
+      </ConsoleButton>
+    ),
+    execute: ['ready', 'partial'].includes(plan.status) && (
+      <ConsoleButton variant={actionVariant('execute')} leadingIcon={<ConsoleIcon name="play" size={16} />}
+        title={isSafeMode ? '只读安全模式下无法执行' : hasActiveJob ? '后台任务进行中，暂时不能执行' : undefined}
+        disabled={!canExecute} loading={executeMutation.isPending}
+        onClick={() => openConfirmation('execute')}>
+        执行计划 (Execute)
+      </ConsoleButton>
+    ),
+    journal: <ConsoleButton variant={actionVariant('journal')} leadingIcon={<ConsoleIcon name="history" size={16} />}
+      onClick={() => { void refetchJournal(); setJournalDrawerOpen(true); }}>
+      操作日志 {journalTotal > 0 ? '(' + journalTotal + ')' : ''}
+    </ConsoleButton>,
+    undo: ['completed', 'partial'].includes(plan.status) && journalTotal > 0 && (
+      <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
+        title={hasActiveJob ? '后台任务进行中，暂时不能撤销' : undefined}
+        loading={undoPlanMutation.isPending} disabled={!canUndo}
+        onClick={() => openConfirmation('undo')}>
+        生成撤销计划 (Undo)
+      </ConsoleButton>
+    ),
+    rebuild: isStaleWorkflowPlan && (
+      <ConsoleButton variant={actionVariant('rebuild')} leadingIcon={<ConsoleIcon name="layers" size={16} />}
+        onClick={() => setRebuildDrawerOpen(true)}>
+        重建工作流计划 (Rebuild Plan)
+      </ConsoleButton>
+    ),
+    workflow: isStaleDedupePlan && workflowMeta && (
+      <ConsoleButton variant={actionVariant('workflow')} leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
+        onClick={() => navigate('/workflows/' + workflowMeta.workflow_id)}>
+        返回关联工作流
+      </ConsoleButton>
+    ),
+    scan: isStaleDedupePlan && (
+      <ConsoleButton variant={actionVariant('scan')} leadingIcon={<ConsoleIcon name="folder-open" size={16} />}
+        onClick={() => navigate('/scans')}>前往扫描任务</ConsoleButton>
+    ),
+  };
 
   const summaryItems = [
     { label: '计划 ID', value: <span className="nfc-mono">#{planId}</span> },
@@ -410,13 +504,13 @@ export const PlanDetailPage: React.FC = () => {
     <div className="nfc-operations-page nfc-plan-detail-page nfc-page-layout-detail">
       <PageHeader title={plan.name}
         description={<div className="nfc-plan-header-meta">
-          <span className="nfc-mono">Plan #{planId}</span>
+          <span className="nfc-mono">计划 #{planId}</span>
           <span className="nfc-kind-badge">{plan.kind}</span>
           <StatusBadge status={plan.status} />
         </div>}
         actions={<ActionBar compact>
           <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
-            onClick={() => navigate('/plans')}>返回列表</ConsoleButton>
+            onClick={returnToList}>返回列表</ConsoleButton>
           <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
             onClick={() => { void refetch(); }} loading={isFetching}>刷新</ConsoleButton>
         </ActionBar>}
@@ -445,7 +539,7 @@ export const PlanDetailPage: React.FC = () => {
                 ? 'nfc-lifecycle-step-active'
                 : '';
           return (
-            <div className={`nfc-lifecycle-step ${stateClass}`.trim()} key={step.key}>
+            <div className={`nfc-lifecycle-step ${stateClass}`.trim()} key={step.key} aria-current={index === lifecycleIndex ? 'step' : undefined}>
               <span className="nfc-lifecycle-step-index">{index + 1}</span>
               <span className="nfc-lifecycle-step-copy">
                 <strong>{step.label}</strong>
@@ -456,9 +550,29 @@ export const PlanDetailPage: React.FC = () => {
         })}
       </div>
 
+      <section className="nfc-plan-action-surface nfc-v2-plan-actions" aria-label="计划安全操作">
+        <div className="nfc-plan-action-guidance">
+          <strong>{guidance}</strong>
+        </div>
+        <ActionBar className="nfc-plan-next">
+          {actions[primaryAction]}
+          {Object.entries(actions).map(([action, control]) =>
+            action !== primaryAction && control ? <React.Fragment key={action}>{control}</React.Fragment> : null)}
+        </ActionBar>
+        <details className="nfc-v2-plan-more" key={planId}>
+          <summary><ConsoleIcon name="chevron-right" size={15} />更多操作</summary>
+          <PlanDeleteButton plan={{ ...plan, id: planId }}
+            onDelete={() => deleteMutation.mutateAsync()}
+            loading={deleteMutation.isPending}
+            type="text" size="middle" buttonText="删除计划" />
+        </details>
+      </section>
+
       {isMediaSortPlan && stageJob && (
         <DataPanel title={stageJob.stage === 'freeze' ? '冻结进度（Freeze）' : '实时校验进度（Validate）'}
-          description={`Worker 任务 #${stageJob.job_id}，可在任务中心继续查看。`}
+          description={`后台任务 #${stageJob.job_id}`}
+          action={sqliteIdText(stageJob.job_id) && <Link className="nfc-plan-task-link"
+            to={'/tasks?task=' + stageJob.job_id}>查看阶段日志</Link>}
           className="nfc-v2-plan-stage-progress">
           <TaskProgress status={stageJob.status}
             progress={{
@@ -484,69 +598,6 @@ export const PlanDetailPage: React.FC = () => {
           ) : <p role="status" className="nfc-form-note">正在获取 Worker 执行进度…</p>}
         </DataPanel>
       )}
-
-      <section className="nfc-plan-action-surface nfc-v2-plan-actions" aria-label="计划安全操作">
-        <ActionBar>
-          {plan.status === 'draft' && (
-            <ConsoleButton leadingIcon={<ConsoleIcon name="lock" size={16} />}
-              onClick={() => beginAction('freeze')} disabled={!canFreeze}
-              loading={freezeMutation.isPending || freezeStageMutation.isPending}>
-              冻结计划 (Freeze)
-            </ConsoleButton>
-          )}
-          {['frozen', 'ready', 'partial', 'stale'].includes(plan.status) && (
-            <span title={hasActiveJob ?
-              '该计划当前已有执行任务进行中 (任务 #' + plan.active_work_job_id + ')' : undefined}>
-              <ConsoleButton leadingIcon={<ConsoleIcon name="check-circle" size={16} />}
-                disabled={!canValidate} loading={validateMutation.isPending || validateStageMutation.isPending}
-                onClick={() => beginAction('validate')}>
-                SHA256 实时校验 (Validate)
-              </ConsoleButton>
-            </span>
-          )}
-          {['ready', 'partial'].includes(plan.status) && (
-            <span title={isSafeMode ?
-              '当前处于只读安全模式 (ALLOW_MUTATION=false)，执行按钮已锁定。' :
-              hasActiveJob ? '当前存在执行任务 #' + plan.active_work_job_id : undefined}>
-              <ConsoleButton variant="danger" leadingIcon={<ConsoleIcon name="play" size={16} />}
-                disabled={!canExecute} loading={executeMutation.isPending}
-                onClick={() => openConfirmation('execute')}>
-                执行计划 (Execute)
-              </ConsoleButton>
-            </span>
-          )}
-          <ConsoleButton leadingIcon={<ConsoleIcon name="history" size={16} />}
-            onClick={() => { void refetchJournal(); setJournalDrawerOpen(true); }}>
-            操作日志 {journalTotal > 0 ? '(' + journalTotal + ')' : ''}
-          </ConsoleButton>
-          {['completed', 'partial'].includes(plan.status) && journalTotal > 0 && (
-            <span title={hasActiveJob ?
-              '该计划当前已有执行任务进行中 (任务 #' + plan.active_work_job_id + ')' : undefined}>
-              <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
-                loading={undoPlanMutation.isPending} disabled={!canUndo}
-                onClick={() => openConfirmation('undo')}>
-                生成撤销计划 (Undo)
-              </ConsoleButton>
-            </span>
-          )}
-          {isStaleWorkflowPlan && (
-            <ConsoleButton leadingIcon={<ConsoleIcon name="layers" size={16} />}
-              onClick={() => setRebuildDrawerOpen(true)}>
-              重建工作流计划 (Rebuild Plan)
-            </ConsoleButton>
-          )}
-          {isStaleDedupePlan && workflowMeta && (
-            <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
-              onClick={() => navigate('/workflows/' + workflowMeta.workflow_id)}>
-              返回关联工作流
-            </ConsoleButton>
-          )}
-          <PlanDeleteButton plan={{ ...plan, id: planId }}
-            onDelete={() => deleteMutation.mutateAsync()}
-            loading={deleteMutation.isPending}
-            type="default" size="middle" />
-        </ActionBar>
-      </section>
 
       <div className="nfc-plan-alert-stack nfc-v2-plan-alerts">
         {(plan.kind === 'undo' || plan.metadata?.is_undo) &&
@@ -584,18 +635,6 @@ export const PlanDetailPage: React.FC = () => {
             ? '计划中的源文件已被外部修改、移动、删除或替换。计划已锁定。可基于原工作流历史版本与快照参数重新构建全新草稿。'
             : '计划中的源文件已被外部修改、移动、删除或替换。计划已锁定，严禁执行。如需继续操作，请删除此计划并重新生成。',
           'error',
-          isStaleDedupePlan
-            ? <ActionBar compact>
-                {workflowMeta && <ConsoleButton variant="primary" size="sm"
-                  onClick={() => navigate('/workflows/' + workflowMeta.workflow_id)}>
-                  返回关联工作流
-                </ConsoleButton>}
-                <ConsoleButton size="sm" onClick={() => navigate('/scans')}>前往扫描任务</ConsoleButton>
-              </ActionBar>
-            : isStaleWorkflowPlan
-              ? <ConsoleButton size="sm" variant="primary"
-                  onClick={() => setRebuildDrawerOpen(true)}>重建计划预览</ConsoleButton>
-              : undefined,
         )}
         {isSafeMode && notice('只读安全保护模式生效中',
           '系统当前以 ALLOW_MUTATION=false 运行。可安全生成 Dry Run 与 SHA256 校验，但不能直接触发 Execute。')}

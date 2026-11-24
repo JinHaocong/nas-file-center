@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
+import { CodePath } from '../../components/ui/CodePath';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
@@ -93,11 +94,11 @@ export const DownloadSourcesPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-page-layout-workbench nfc-download-verify nfc-dv-source-page">
       <PageHeader title="下载校验来源"
-        description="集中管理 AList / OpenList 连接。每个来源可自定义名称、地址与只读账号，不需要把地址写进代码或 Compose。"
+        description="为云端文件核对配置服务地址和只读账号。"
         actions={<ConsoleButton onClick={() => navigate('/download-verification')}
           leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}>返回下载校验</ConsoleButton>} />
 
-      <DataPanel title="已配置来源" description="来源只供只读目录浏览和核对使用；停用来源不会删除历史校验报告。"
+      <DataPanel title="已配置来源" description="停用来源后仍可查阅已有校验记录。"
         action={<ConsoleButton variant="primary" onClick={add}
           leadingIcon={<ConsoleIcon name="plus" size={16} />}>新增来源</ConsoleButton>}>
         {list.isLoading && <p className="nfc-dv-muted">正在读取来源…</p>}
@@ -117,8 +118,8 @@ export const DownloadSourcesPage: React.FC = () => {
             <div className="nfc-dv-source-symbol"><ConsoleIcon name="database" size={19} /></div>
             <div className="nfc-dv-source-info">
               <strong>{source.name}</strong>
-              <span>{source.provider === 'alist' ? 'AList' : 'OpenList'} · {source.base_url}</span>
-              <small>{source.username ? '服务账号：' + source.username : '公开目录访问'} · {source.has_password ? '已配置密码' : '无需密码'}</small>
+              <CodePath value={source.base_url} />
+              <small>{source.provider === 'alist' ? 'AList' : 'OpenList'} · {source.username || '公开目录访问'} · {source.has_password ? '已配置密码' : '无需密码'}</small>
             </div>
             <div className="nfc-dv-source-buttons">
               {source.username && <ConsoleButton size="sm" onClick={() => {
@@ -140,7 +141,8 @@ export const DownloadSourcesPage: React.FC = () => {
           setError('');
           save.mutate();
         }}>
-          <div className="nfc-dv-manager-grid">
+          <fieldset className="nfc-dv-manager-grid nfc-dv-source-fields">
+            <legend>服务连接</legend>
             <label>来源名称
               <input aria-label="来源名称" required maxLength={120} value={draft.name}
                 onChange={event => setDraft(x => ({ ...x, name: event.target.value }))} placeholder="例如：客厅的 OpenList" />
@@ -156,6 +158,9 @@ export const DownloadSourcesPage: React.FC = () => {
                 onChange={event => setDraft(x => ({ ...x, base_url: event.target.value }))}
                 placeholder="http://openlist:5244" />
             </label>
+          </fieldset>
+          <fieldset className="nfc-dv-manager-grid nfc-dv-source-fields">
+            <legend>访问凭据</legend>
             <label>服务只读账号（公开目录可不填）
               <input aria-label="服务只读账号" autoComplete="off" value={draft.username}
                 onChange={event => setDraft(x => ({ ...x, username: event.target.value }))} />
@@ -165,7 +170,7 @@ export const DownloadSourcesPage: React.FC = () => {
                 value={draft.password || ''}
                 onChange={event => setDraft(x => ({ ...x, password: event.target.value }))} />
             </label>
-          </div>
+          </fieldset>
           <p className="nfc-dv-muted">连接凭据仅保存在服务端受保护的配置文件中，不会回显。建议在 AList/OpenList 创建专用只读账号。</p>
           <div className="nfc-dv-actions">
             <ConsoleButton type="submit" variant="primary" loading={save.isPending}>保存来源</ConsoleButton>

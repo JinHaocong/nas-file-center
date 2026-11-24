@@ -1,5 +1,5 @@
 /* Native Stale Plan Rebuild preview: digest-authority read-only card + Draft-only control. */
-.nfc-v2-stale-rebuild.nfc-v2-sheet { width:min(940px,100vw); }
+.nfc-v2-stale-rebuild.nfc-v2-sheet { width:min(940px,calc(100vw - 24px)); }
 .nfc-v2-stale-rebuild .nfc-v2-sheet-header { gap:18px; }
 .nfc-v2-stale-rebuild .nfc-v2-sheet-title-row { display:flex;align-items:center;
   justify-content:space-between;gap:10px;flex-wrap:wrap; }

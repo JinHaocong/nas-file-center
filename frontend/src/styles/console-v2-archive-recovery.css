@@ -8,25 +8,6 @@
   gap: 20px;
   color: var(--v2-text);
 }
-.nfc-v2-shell .nfc-archive-recovery-intro {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: -6px;
-}
-.nfc-v2-shell .nfc-archive-recovery-intro span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 29px;
-  padding: 5px 11px;
-  border: 1px solid var(--v2-line);
-  border-radius: 7px;
-  background: var(--v2-paper);
-  color: var(--v2-muted);
-  font-size: 11px;
-  font-weight: 570;
-  line-height: 1.5;
-}
 .nfc-v2-shell .nfc-archive-recovery-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.07fr) minmax(0, .93fr);
@@ -263,10 +244,36 @@
   .nfc-v2-shell .nfc-archive-recovery-layout { gap: 13px; }
   .nfc-v2-shell .nfc-archive-recovery-page .nfc-data-panel-header { padding: 16px 15px 14px !important; }
   .nfc-v2-shell .nfc-archive-recovery-page .nfc-data-panel-body { padding: 16px 15px 18px !important; }
-  .nfc-v2-shell .nfc-archive-recovery-intro { gap: 6px; }
-  .nfc-v2-shell .nfc-archive-recovery-intro span { padding: 4px 8px; }
   .nfc-v2-shell .nfc-archive-recovery-file-list { max-height: 280px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .nfc-v2-shell .nfc-archive-recovery-file { transition: none !important; }
+}
+
+.nfc-archive-source-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-radius-control);
+  background: var(--studio-ground);
+}
+.nfc-archive-source-summary > svg { flex: none; color: var(--nfc-tint); }
+.nfc-archive-source-summary > div { display: grid; gap: 5px; min-width: 0; }
+.nfc-archive-source-summary strong { color: var(--studio-ink); font-size: 13px; }
+.nfc-archive-source-summary span { color: var(--studio-muted); font-size: 12px; }
+.nfc-archive-recovery-limits { border-block: 1px solid var(--studio-line); padding-block: 5px; }
+.nfc-archive-recovery-limits summary {
+  min-height: 34px;
+  align-content: center;
+  color: var(--nfc-tint);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.nfc-archive-recovery-limits summary:focus-visible { outline: 2px solid var(--nfc-tint); outline-offset: 2px; }
+@media (max-width: 767px) {
+  .nfc-archive-recovery-limits summary { min-height: 44px; }
 }

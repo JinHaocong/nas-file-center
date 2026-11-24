@@ -13,6 +13,7 @@ import { DataPanel } from '../../components/ui/DataPanel';
 import { MetricCard } from '../../components/ui/MetricCard';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { MediaThumbnail } from '../../components/ui/MediaThumbnail';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
@@ -329,7 +330,7 @@ export const MediaPage: React.FC = () => {
 
   const renderPath = (record: MediaAsset) => (
     <div className="nfc-v2-media-file">
-      <ConsoleIcon name={record.media_kind === 'image' ? 'file-search' : 'file-check'} size={18} />
+      <MediaThumbnail key={`${record.path}:${record.mtime_ns}:${record.size}`} path={record.path} kind={record.media_kind} />
       <div><CodePath value={record.path} /><span>{formatBytes(record.size)}</span></div>
     </div>
   );
@@ -345,7 +346,7 @@ export const MediaPage: React.FC = () => {
 
   return (
     <div className="nfc-operations-page nfc-media-page nfc-page-layout-ledger nfc-v2-media-page">
-      <PageHeader eyebrow="Media metadata + integrity" title="媒体完整性"
+      <PageHeader title="媒体完整性"
         description="独立分析图片/视频元数据，并建立 SHA256 基线复核内容变化；媒体探测与哈希校验不会修改源文件。"
         actions={<ActionBar compact>
           <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}

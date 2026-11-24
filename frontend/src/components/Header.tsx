@@ -1,97 +1,127 @@
-import React, { useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import React, { useEffect, useRef, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { SafeModeBadge } from './SafeModeBadge';
 import { WorkerStatusBadge } from './WorkerStatusBadge';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { ConsoleIcon } from './ui/ConsoleIcon';
-import { navLabel } from './layout/navItems';
+import { currentDestination, navLabel, primaryDestinations } from './layout/navItems';
 
 interface Props {
-  collapsed: boolean;
-  onToggle: () => void;
-  isMobile?: boolean;
-  navigationOpen?: boolean;
-  onOpenNavigation?: () => void;
+  isMobile: boolean;
+  navigationOpen: boolean;
+  onOpenNavigation: React.MouseEventHandler<HTMLButtonElement>;
 }
 
-export const Header: React.FC<Props> = ({
-  collapsed, onToggle, isMobile = false, navigationOpen = false, onOpenNavigation,
-}) => {
+/** Close a native disclosure and return keyboard focus to its visible trigger. */
+function dismissMenu(menu: HTMLDetailsElement | null, restoreFocus = false) {
+  if (!menu?.open) return;
+  menu.open = false;
+  if (restoreFocus) menu.querySelector('summary')?.focus();
+}
+
+/** Global workspace navigation, session controls and live safety indicators. */
+export const Header: React.FC<Props> = ({ isMobile, navigationOpen, onOpenNavigation }) => {
   const { user, logout } = useAuth();
   const { mode, setMode } = useTheme();
   const location = useLocation();
+  const selected = currentDestination(location.pathname, location.search);
+  const tabIndex = primaryDestinations.findIndex(item => item.path === selected);
+  const tabStyle = { '--studio-active': Math.max(0, tabIndex) } as React.CSSProperties;
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const header = useRef<HTMLElement>(null);
 
-  const toggleNav = () => isMobile ? onOpenNavigation?.() : onToggle();
-  return (
-    <>
-      <header className="nfc-header nfc-v2-header">
-        <div className="nfc-header-left nfc-v2-header-left">
-          <button type="button" className="nfc-v2-icon-button nfc-header-nav-toggle"
-            onClick={toggleNav}
-            aria-haspopup={isMobile ? 'dialog' : undefined}
-            aria-expanded={isMobile ? navigationOpen : !collapsed}
-            aria-label={isMobile ? '打开导航菜单' : collapsed ? '展开侧边导航' : '收起侧边导航'}>
-            <ConsoleIcon name="menu" size={20} />
-          </button>
-          <div className="nfc-v2-breadcrumb">
-            <span>工作台</span><ConsoleIcon name="chevron-right" size={14} />
-            <strong>{navLabel(location.pathname)}</strong>
-          </div>
+  useEffect(() => {
+    if (navigationOpen) header.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(menu => dismissMenu(menu));
+  }, [navigationOpen]);
+
+  useEffect(() => {
+    const menus = header.current?.querySelectorAll('details');
+    const pointer = (event: PointerEvent) => menus?.forEach(menu => {
+      if (event.target instanceof Node && !menu.contains(event.target)) dismissMenu(menu);
+    });
+    const disclosure = (event: Event) => {
+      if (event.target instanceof HTMLDetailsElement && event.target.open) {
+        menus?.forEach(menu => { if (menu !== event.target) dismissMenu(menu); });
+      }
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented && header.current?.contains(document.activeElement)) {
+        menus?.forEach(menu => dismissMenu(menu, true));
+      }
+    };
+    menus?.forEach(menu => menu.addEventListener('toggle', disclosure));
+    document.addEventListener('pointerdown', pointer);
+    document.addEventListener('keydown', escape);
+    return () => {
+      menus?.forEach(menu => menu.removeEventListener('toggle', disclosure));
+      document.removeEventListener('pointerdown', pointer);
+      document.removeEventListener('keydown', escape);
+    };
+  }, []);
+
+  return <>
+    <header className="nfc-header nfc-v2-header" ref={header}>
+      <div className="nfc-header-left nfc-v2-header-left">
+        <Link className="nfc-studio-brand" to="/dashboard" aria-label="NAS File Center 文件空间">
+          <span className="nfc-studio-mark"><ConsoleIcon name="hard-drive" size={18} /></span>
+          <strong>NAS File Center</strong>
+        </Link>
+        <div className="nfc-v2-breadcrumb">
+          <span>文件空间</span><ConsoleIcon name="chevron-right" size={13} />
+          <strong>{navLabel(location.pathname, location.search)}</strong>
         </div>
-        <div className="nfc-header-command-cluster">
-          <div className="nfc-header-status" aria-label="系统安全与任务状态">
-            <SafeModeBadge />
-            <WorkerStatusBadge />
-          </div>
-          <div className="nfc-v2-header-divider" aria-hidden="true" />
-          <details className="nfc-v2-dropdown">
-            <summary className="nfc-v2-icon-button" aria-label="切换界面主题" title="切换主题">
-              <ConsoleIcon name={mode === 'dark' ? 'moon' : 'sun'} size={19} />
-            </summary>
-            <div className="nfc-v2-menu">
-              {([
-                ['light', '浅色模式', 'sun'],
-                ['dark', '深色模式', 'moon'],
-                ['system', '跟随系统', 'settings'],
-              ] as const).map(([key, label, icon]) => (
-                <button type="button" key={key}
-                  aria-pressed={mode === key}
-                  onClick={event => {
-                    setMode(key);
-                    event.currentTarget.closest('details')?.removeAttribute('open');
-                  }}>
-                  <ConsoleIcon name={icon} size={16} />{label}
-                  {mode === key && <ConsoleIcon className="nfc-v2-selected-check" name="check" size={15} />}
-                </button>
-              ))}
-            </div>
-          </details>
-          <details className="nfc-v2-dropdown nfc-v2-user-dropdown">
-            <summary className="nfc-v2-user-button" aria-label="打开管理员菜单">
-              <span className="nfc-v2-avatar"><ConsoleIcon name="user" size={18} /></span>
-              {!isMobile && <strong>{user?.username || 'Admin'}</strong>}
-              <ConsoleIcon name="chevron-down" size={14} />
-            </summary>
-            <div className="nfc-v2-menu">
-              <div className="nfc-v2-menu-identity">
-                <strong>{user?.username || 'Admin'}</strong>
-                <span>角色：{user?.role || '管理员'}</span>
-              </div>
-              <button type="button" onClick={event => {
-                setPasswordModalOpen(true);
-                event.currentTarget.closest('details')?.removeAttribute('open');
-              }}><ConsoleIcon name="lock" size={16} /> 修改密码</button>
-              <button type="button" className="nfc-v2-menu-danger" onClick={() => logout()}>
-                <ConsoleIcon name="log-out" size={16} /> 退出登录
-              </button>
-            </div>
-          </details>
+      </div>
+      <nav className="nfc-studio-shortcuts" aria-label="常用页面" data-selected={tabIndex >= 0} style={tabStyle}>
+        {primaryDestinations.map(item => <Link key={item.path} to={item.path}
+          aria-current={selected === item.path ? 'page' : undefined}>{item.label}</Link>)}
+      </nav>
+      <div className="nfc-header-command-cluster">
+        <div className="nfc-header-status" aria-label="系统安全与任务状态">
+          <SafeModeBadge /><WorkerStatusBadge />
         </div>
-      </header>
-      <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
-    </>
-  );
+        <button type="button" className="nfc-v2-icon-button nfc-header-nav-toggle" onClick={onOpenNavigation}
+          aria-label="打开导航菜单" aria-haspopup="dialog" aria-expanded={navigationOpen} aria-keyshortcuts="Control+K Meta+K" title="所有工具">
+          <ConsoleIcon name="menu" size={17} /><span>工具</span><kbd aria-hidden="true">{typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd>
+        </button>
+        <details className="nfc-v2-dropdown">
+          <summary className="nfc-v2-icon-button" aria-label="切换界面主题" title="切换主题">
+            <ConsoleIcon name={mode === 'dark' ? 'moon' : 'sun'} size={17} />
+          </summary>
+          <div className="nfc-v2-menu">
+            {([['light', '浅色模式', 'sun'], ['dark', '深色模式', 'moon'],
+              ['system', '跟随系统', 'settings']] as const).map(([key, label, icon]) =>
+              <button type="button" key={key} aria-pressed={mode === key} onClick={event => {
+                setMode(key);
+                dismissMenu(event.currentTarget.closest('details'), true);
+              }}>
+                <ConsoleIcon name={icon} size={16} />{label}
+                {mode === key && <ConsoleIcon className="nfc-v2-selected-check" name="check" size={15} />}
+              </button>)}
+          </div>
+        </details>
+        <details className="nfc-v2-dropdown nfc-v2-user-dropdown">
+          <summary className="nfc-v2-user-button" aria-label="打开管理员菜单">
+            <span className="nfc-v2-avatar"><ConsoleIcon name="user" size={17} /></span>
+            {!isMobile && <strong>{user?.username || 'Admin'}</strong>}
+            <ConsoleIcon name="chevron-down" size={13} />
+          </summary>
+          <div className="nfc-v2-menu">
+            <div className="nfc-v2-menu-identity"><strong>{user?.username || 'Admin'}</strong>
+              <span>{user?.role || '管理员'}</span></div>
+            <Link to="/settings" onClick={event => dismissMenu(event.currentTarget.closest('details'))}>
+              <ConsoleIcon name="settings" size={16} />系统设置</Link>
+            <button type="button" onClick={event => {
+              dismissMenu(event.currentTarget.closest('details'), true);
+              setPasswordModalOpen(true);
+            }}><ConsoleIcon name="lock" size={16} /> 修改密码</button>
+            <button type="button" className="nfc-v2-menu-danger" onClick={() => logout()}>
+              <ConsoleIcon name="log-out" size={16} /> 退出登录</button>
+          </div>
+        </details>
+      </div>
+    </header>
+    <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
+  </>;
 };

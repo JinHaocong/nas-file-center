@@ -163,7 +163,7 @@ export const ImmediateRenameEditor: React.FC<Props> = ({ kind }) => {
           <div className="nfc-v2-immediate-field">
             <span>当前目录</span>
             <DirectoryPicker multiple={false} value={draft.parent} disabled={readonly}
-              placeholder={isFile ? '选择需要批量重命名直接文件的目录' : '选择需要批量重命名其子文件夹的目录'}
+              placeholder="请选择目录"
               onChange={path => { if (typeof path === 'string') patch('parent', path); }} />
             <small>{isFile
               ? '只处理当前目录的直接普通文件；子文件夹内的文件不参与。'

@@ -1,3 +1,4 @@
+import type { ScanId } from '../../types';
 export interface DedupePairValues {
   pathA: string;
   pathB: string;
@@ -10,7 +11,7 @@ export function validateDedupePair(values: DedupePairValues): string | null {
   return null;
 }
 
-export function toDedupePairPayload(values: DedupePairValues, scanJobId?: number | null) {
+export function toDedupePairPayload(values: DedupePairValues, scanJobId?: ScanId | null) {
   return {
     path_a: values.pathA.trim(),
     path_b: values.pathB.trim(),

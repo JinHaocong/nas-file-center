@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any, Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -36,6 +36,7 @@ from app.media.catalog import (
     list_media_assets,
     media_summary,
 )
+from app.media.thumbnails import ThumbnailBusy, ThumbnailUnavailable, load_thumbnail
 from app.media.corrupt_delete import build_corrupt_delete_preview, create_corrupt_delete_plan
 from app.path_safety import UnsafePathError
 from app.scanners.diagnostics import diagnose_duplicate_pair
@@ -750,6 +751,30 @@ def list_media(
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/media/thumbnail", response_class=Response, responses={200: {"content": {"image/jpeg": {}}}})
+def get_media_thumbnail(
+    request: Request,
+    path: str = Query(min_length=1, max_length=8192),
+    kind: Literal["file", "directory"] = "file",
+):
+    """Serve a small authenticated JPEG or revalidate a private browser copy."""
+    try:
+        content, etag = load_thumbnail(path, kind == "directory", request.app.state.settings)
+    except UnsafePathError as exc:
+        raise HTTPException(403, "无权预览此路径") from exc
+    except ThumbnailBusy as exc:
+        raise HTTPException(503, "缩略图正在生成，请稍后重试", headers={"Retry-After": "1"}) from exc
+    except (ThumbnailUnavailable, OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(404, "没有可用的缩略图") from exc
+
+    headers = {"Cache-Control": "private, no-cache", "ETag": etag, "Vary": "Cookie",
+               "Cross-Origin-Resource-Policy": "same-origin", "X-Content-Type-Options": "nosniff"}
+    validators = [item.strip().removeprefix("W/") for item in request.headers.get("If-None-Match", "").split(",")]
+    if etag in validators or "*" in validators:
+        return Response(status_code=304, headers=headers)
+    return Response(content=content, media_type="image/jpeg", headers=headers)
 
 
 @router.get("/media/summary")

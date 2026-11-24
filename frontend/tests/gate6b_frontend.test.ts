@@ -95,12 +95,12 @@ describe('Gate6-B Recursive Directory Balance frontend contract', () => {
     }
   });
   test('selection labels distinguish scan-root balance from recursive directory balance', () => {
-    assert.match(dedupeEditorSource, /Balanced by Scan Root/);
-    assert.match(dedupeEditorSource, /Recursive Directory Balanced by Bytes/);
+    assert.match(dedupeEditorSource, /按扫描根平衡释放空间/);
+    assert.match(dedupeEditorSource, /按目录递归平衡释放空间/);
     assert.match(dedupeEditorSource, /recursive_directory_balanced_by_bytes/);
   });
   test('recursive last-file protection is presented as mandatory with no disable transport', () => {
-    assert.match(dedupeEditorSource, /Recursive Last-File Protection/);
+    assert.match(dedupeEditorSource, /目录最后一个文件保护/);
     assert.match(dedupeEditorSource, /强制|mandatory/i);
     assert.doesNotMatch(dedupeEditorSource, /recursive_last_file_protection_enabled/);
   });

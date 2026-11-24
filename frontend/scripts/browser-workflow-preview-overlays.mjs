@@ -10,6 +10,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { waitForInteractivePortal } from './interactive-portal.mjs';
 
 const BASE_URL = 'http://127.0.0.1:4184';
 const OUT = resolve(process.cwd(), 'artifacts/browser-workflow-preview');
@@ -122,6 +123,7 @@ function previewFixture(id, data) {
 }
 
 async function assertPortal(page, effectiveTheme, width, label) {
+  await waitForInteractivePortal(page, '.nfc-v2-confirm-dialog[data-state="open"]');
   const problems = await page.evaluate(({ effectiveTheme, width }) => {
     const dialog = document.querySelector('.nfc-v2-confirm-dialog[data-state="open"]');
     const overlay = document.querySelector('.nfc-v2-confirm-overlay[data-state="open"]');

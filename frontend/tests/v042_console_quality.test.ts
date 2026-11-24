@@ -57,11 +57,11 @@ describe('v0.4.2 console quality gate', () => {
     assert.ok(css.includes('animation: none'));
   });
 
-  test('representative page eyebrows read as product context instead of all-caps labels', () => {
+  test('representative pages name their task in the page title', () => {
     const plans = read('src/pages/Plans/index.tsx');
     const workflows = read('src/pages/Workflows/WorkflowList.tsx');
-    assert.match(plans, /eyebrow=["']Execution control["']/);
-    assert.match(workflows, /eyebrow=["']Automation workflows["']/);
+    assert.match(plans, /title=["']执行计划["']/);
+    assert.match(workflows, /title=["']工作流[^"']*["']/);
     assert.doesNotMatch(plans, /eyebrow=["']EXECUTION["']/);
     assert.doesNotMatch(workflows, /eyebrow=["']AUTOMATION["']/);
   });

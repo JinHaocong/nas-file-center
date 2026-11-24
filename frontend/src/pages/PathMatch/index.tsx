@@ -184,20 +184,19 @@ export const PathMatchPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-path-match-page nfc-page-layout-workbench nfc-v2-path-match">
       <PageHeader title="跨目录路径匹配"
-        description="按相对路径、basename、stem 或正则归一化跨根目录匹配；Preview 只读，生成 Plan 后仍需完整生命周期校验。" />
-      <DataPanel title="匹配规则"
-        description="至少选择两个根目录；路径必须位于 ALLOWED_ROOTS。"
+        description="在多个目录间查找同名或同路径文件，再核对每组保留项。" />
+      <DataPanel title="目录与匹配规则"
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
         <div className="nfc-path-match-form">
-          <div className="nfc-v2-path-match-field">
-            <label id="nfc-path-match-roots-label">比对根目录（至少 2 个）</label>
+          <div className="nfc-v2-path-match-field nfc-v2-path-match-scope">
+            <label id="nfc-path-match-roots-label"><ConsoleIcon name="folders" size={18} />比对目录 <small>{roots.length ? `已选 ${roots.length} 个` : '至少选择 2 个'}</small></label>
             <div aria-labelledby="nfc-path-match-roots-label">
               <DirectoryPicker multiple value={roots} disabled={planLoading}
                 placeholder="点击选择或添加待比对根目录（至少 2 个）"
                 onChange={value => changeRoots(value)} />
             </div>
           </div>
-          <div className="nfc-v2-path-match-field">
+          <div className="nfc-v2-path-match-field nfc-v2-path-match-mode">
             <label htmlFor="nfc-path-match-mode">匹配模式</label>
             <select id="nfc-path-match-mode" value={mode} disabled={planLoading}
               onChange={event => changeMode(event.target.value as PathMatchMode)}>
@@ -208,7 +207,7 @@ export const PathMatchPage: React.FC = () => {
             </select>
           </div>
           {mode === 'normalized' && (
-            <div className="nfc-form-grid">
+            <div className="nfc-form-grid nfc-v2-path-match-patterns">
               <div className="nfc-v2-path-match-field">
                 <label htmlFor="nfc-path-match-pattern">归一化正则查找</label>
                 <input id="nfc-path-match-pattern" value={normalizePattern}
@@ -247,10 +246,10 @@ export const PathMatchPage: React.FC = () => {
         </div>
       </div>
       {report && (
-        <DataPanel title="路径匹配 Preview" variant="dense"
+        <DataPanel title="匹配预览" variant="dense"
           className="nfc-panel-flush nfc-file-tool-result-panel"
           description="每组第一个成员作为 keep，后续成员作为 Quarantine Plan 候选；此处尚未修改文件。"
-          action={<span className="nfc-panel-count">{groups.length} groups</span>}>
+          action={<span className="nfc-panel-count">{groups.length} 组</span>}>
           {groups.length === 0 ? (
             <ConsoleEmpty title="未发现匹配组"
               description="可以调整根目录或匹配规则，再执行只读比对。" />

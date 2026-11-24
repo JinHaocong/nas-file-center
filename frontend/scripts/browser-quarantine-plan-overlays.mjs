@@ -9,6 +9,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { waitForInteractivePortal } from './interactive-portal.mjs';
 import { computedContrastRatio } from './computed-contrast.mjs';
 import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs';
 
@@ -94,25 +95,6 @@ async function inspect(page, theme, width, selector) {
 }
 
 /**
- * Wait for Radix's closing Restore scrim to relinquish pointer ownership
- * before examining the newly visible Purge dialog. Visibility alone does
- * not mean a portal transition has finished (notably at 1920px dark).
- * Fail closed: a persistent mask/dialog stacking defect still times out.
- */
-async function waitForInteractivePortal(page, selector) {
-  await page.waitForFunction(sel => {
-    const dialog = document.querySelector(sel);
-    if (!dialog || getComputedStyle(dialog).visibility !== 'visible' ||
-        dialog.getAttribute('data-state') !== 'open') return false;
-    const box = dialog.getBoundingClientRect();
-    if (box.width <= 0 || box.height <= 0) return false;
-    const x = Math.max(1, Math.min(innerWidth - 1, box.left + box.width / 2));
-    const y = Math.max(1, Math.min(innerHeight - 1, box.top + Math.min(box.height / 2, 100)));
-    return Boolean(document.elementFromPoint(x, y)?.closest(sel));
-  }, selector, { timeout: 3500, polling: 50 });
-}
-
-/**
  * Real Quarantine GET-503 alert/Retry keyboard audit. Browser computed colors
  * are decoded with the independently tested strict RGB/sRGB/Oklab parser.
  */
@@ -140,6 +122,12 @@ async function inspectQuarantineListErrorPaint(page, theme, width) {
         retryBox.right > innerWidth + 2 || retryBox.top < -2 ||
         retryBox.bottom > innerHeight + 2)
       throw Error('Quarantine list Retry escapes the visible viewport');
+    const retryHit = document.elementFromPoint(
+      retryBox.left + retryBox.width / 2, retryBox.top + retryBox.height / 2);
+    if (!retry.contains(retryHit))
+      throw Error('Quarantine list Retry covered by another control');
+    if (document.querySelector('.nfc-v2-quarantine-bulk-actions'))
+      throw Error('Stale batch actions must wait for the list to recover');
     const ring = getComputedStyle(retry);
     const ringWidth = Number.parseFloat(ring.outlineWidth);
     const ringOffset = Number.parseFloat(ring.outlineOffset);
@@ -264,6 +252,7 @@ try {
         await page.getByRole('button', { name: '恢复', exact: true }).first().click({ timeout: 15000 });
         const restore = page.locator('.nfc-v2-quarantine-dialog');
         await restore.waitFor({ state: 'visible' });
+        await waitForInteractivePortal(page, '.nfc-v2-quarantine-dialog');
         let errors = await inspect(page, theme.effective, width, '.nfc-v2-quarantine-dialog');
         assert.deepEqual(errors, [], 'Restore ' + label + ': ' + errors.join('; '));
         const choices = restore.locator('input[name="restore-conflict-policy"]');
@@ -315,6 +304,7 @@ try {
         await page.getByRole('button', { name: '清理计划历史' }).click({ timeout: 15000 });
         const plan = page.locator('.nfc-v2-plan-history-dialog');
         await plan.waitFor({ state: 'visible' });
+        await waitForInteractivePortal(page, '.nfc-v2-plan-history-dialog');
         errors = await inspect(page, theme.effective, width, '.nfc-v2-plan-history-dialog');
         assert.deepEqual(errors, [], 'Plan cleanup ' + label + ': ' + errors.join('; '));
         const planChoices = plan.locator('input[type="checkbox"]');

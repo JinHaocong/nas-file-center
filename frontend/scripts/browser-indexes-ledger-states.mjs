@@ -9,6 +9,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { waitForInteractivePortal } from './interactive-portal.mjs';
 import { computedContrastRatio } from './computed-contrast.mjs';
 import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs';
 import { visualAdminFixture, visualSafeSettingsFixture,
@@ -62,6 +63,10 @@ function fixture(url) {
   return { items: [], total: 0, page: 1, page_size: 20 };
 }
 async function inspect(page, theme, width, state) {
+  if (state === 'create' || state === 'confirm') {
+    const selector = state === 'create' ? '.nfc-v2-index-create-dialog' : '.nfc-v2-confirm-dialog';
+    await waitForInteractivePortal(page, selector, 'viewport');
+  }
   const failures = await page.evaluate(({ theme, width, state }) => {
     const failures = [];
     const check = (ok, why) => { if (!ok) failures.push(why); };
@@ -336,6 +341,7 @@ try {
         await create.getByRole('button', { name: '选择目录', exact: true }).click();
         const picker = page.locator('.nfc-v2-directory-dialog');
         await picker.waitFor({ state: 'visible' });
+        await waitForInteractivePortal(page, '.nfc-v2-directory-dialog', 'picker');
         const nested = await page.evaluate(() => {
           const create = document.querySelector('.nfc-v2-index-create-dialog');
           const createOverlay = document.querySelector(

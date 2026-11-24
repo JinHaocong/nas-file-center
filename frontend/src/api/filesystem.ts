@@ -1,5 +1,11 @@
 import { api } from './client';
-import { DirectoryListResponse, FavoritePath, RecentPath } from '../types';
+import { DirectoryListResponse, FavoritePath, RecentPath, User } from '../types';
+
+/** Directory history belongs to the signed-in account; each recent list also has its own limit. */
+export function directoryHistoryKey(kind: 'favorites' | 'recent', userId: User['id'] | undefined, limit?: number) {
+  const owner = ['filesystem', kind, userId ?? null] as const;
+  return limit === undefined ? owner : [...owner, limit] as const;
+}
 
 export const filesystemApi = {
   listDirectory: (
@@ -11,7 +17,7 @@ export const filesystemApi = {
   ) => {
     const params = new URLSearchParams();
     if (path && path.trim()) {
-      params.append('path', path.trim());
+      params.append('path', path);
     }
     params.append('directories_only', String(directoriesOnly));
     params.append('page', String(page));

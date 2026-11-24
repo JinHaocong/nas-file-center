@@ -1,17 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+
 import { DirectoryPicker } from '../../components/DirectoryPicker';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
-import { useTitle } from '../../hooks/useTitle';
-import { downloadVerificationApi } from '../../api/downloadVerification';
-import type { DownloadVerificationRun } from '../../api/downloadVerification';
-import { getStructuredApiError } from '../../api/errors';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { StatusBadge } from '../../components/ui/StatusBadge';
 import { RemoteDirectoryPicker } from './RemoteDirectoryPicker';
+
+import { downloadVerificationApi, type DownloadVerificationItem, type DownloadVerificationRun } from '../../api/downloadVerification';
+import { getStructuredApiError } from '../../api/errors';
+
+import { useTitle } from '../../hooks/useTitle';
 
 const verdict: Record<string, string> = {
   METADATA_IDENTICAL: '快速清单一致（未校验内容）',
@@ -27,7 +31,26 @@ const verdict: Record<string, string> = {
   SIZE_MISMATCH: '大小不同',
   TYPE_MISMATCH: '类型不同',
   DIRECTORY_MATCH: '目录一致',
+  PENDING_SHA256: '待校验 SHA256',
 };
+const matchedItems = new Set(['METADATA_MATCH', 'VERIFIED_MATCH', 'DIRECTORY_MATCH']);
+const missingItems = new Set(['ONLY_LOCAL', 'ONLY_REMOTE']);
+const mismatchedItems = new Set(['SIZE_MISMATCH', 'TYPE_MISMATCH', 'HASH_MISMATCH']);
+
+/** 用统一的色义区分匹配、缺失和内容差异。 */
+function verificationItemTone(status: string) {
+  if (matchedItems.has(status)) return 'completed';
+  if (missingItems.has(status)) return 'partial';
+  if (mismatchedItems.has(status)) return 'failed';
+  return 'queued';
+}
+
+/** 仅在两端均生成摘要后判断 SHA256 是否一致。 */
+function hashComparison(item: DownloadVerificationItem) {
+  if (!item.remote_sha256 || !item.local_sha256) return '未检查';
+  return item.remote_sha256 === item.local_sha256 ? '一致' : '不一致';
+}
+
 const formatBytes = (n: number | null) =>
   n === null ? '—' : n >= 1073741824 ? (n / 1073741824).toFixed(2) + ' GiB'
     : n >= 1048576 ? (n / 1048576).toFixed(2) + ' MiB'
@@ -47,6 +70,7 @@ export const DownloadVerificationPage: React.FC = () => {
   const [localRoot, setLocalRoot] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const opener = useRef<HTMLButtonElement | null>(null);
+  const reportOpener = useRef<HTMLButtonElement | null>(null);
   const [mode, setMode] = useState<'metadata' | 'strict_sha256'>('metadata');
   const [selected, setSelected] = useState<number | null>(null);
   const [page, setPage] = useState(1);
@@ -58,6 +82,14 @@ export const DownloadVerificationPage: React.FC = () => {
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState('');
   const [feedback, setFeedback] = useState('');
+
+  /** 转到已打开的报告，适配工作区和手机页面的滚动容器。 */
+  const revealReport = () => {
+    const panel = document.getElementById('nfc-download-report');
+    panel?.focus({ preventScroll: true });
+    panel?.scrollIntoView({ block: 'start', behavior: 'instant' });
+  };
+  useEffect(() => { if (selected !== null && reportOpener.current) revealReport(); }, [selected]);
 
   const sources = useQuery({
     queryKey: ['download-verify-sources'], queryFn: downloadVerificationApi.sources,
@@ -79,6 +111,7 @@ export const DownloadVerificationPage: React.FC = () => {
   const start = useMutation({
     mutationFn: () => downloadVerificationApi.start(remoteRoot, localRoot, chosenId!, mode),
     onSuccess: run => {
+      reportOpener.current = null;
       setError('');
       setFeedback('已提交只读校验任务 #' + run.id + '，可在历史记录中查看进度');
       setSelected(run.id);
@@ -143,20 +176,62 @@ export const DownloadVerificationPage: React.FC = () => {
     }
   });
 
+  const historyRows = runs.data?.items ?? [];
+  const detailRows = details.data?.items ?? [];
+  const historyEmpty = '暂无校验历史，完成第一次核对后将显示在这里。';
+  const detailEmpty = abnormalOnly ? '没有发现异常条目' : '暂无校验条目';
+
+  /** 两种布局共用选中状态与服务端返回的删除权限。 */
+  const renderReportCheckbox = (run: DownloadVerificationRun) => (
+    <input type="checkbox" aria-label={'选择校验报告 #' + run.id}
+      checked={selectedDeletableIds.includes(run.id)}
+      disabled={!run.can_delete || bulkRemove.isPending}
+      onChange={event => {
+        const checked = event.target.checked;
+        setSelectedReportIds(ids => checked ? [...new Set([...ids, run.id])] : ids.filter(id => id !== run.id));
+      }} />
+  );
+
+  /** 桌面与手机显示同一组报告操作。 */
+  const renderReportActions = (run: DownloadVerificationRun) => (
+    <div className="nfc-dv-row-actions">
+      <ConsoleButton size="sm" onClick={event => {
+        reportOpener.current = event.currentTarget;
+        setSelected(run.id); setPage(1); setAbnormalOnly(false);
+        if (selected === run.id) revealReport();
+      }}>查看条目</ConsoleButton>
+      <ConsoleButton size="sm" variant="secondary"
+        leadingIcon={<ConsoleIcon name="activity" size={14} />}
+        onClick={() => navigate('/tasks?task=' + run.work_job_id)}>任务中心</ConsoleButton>
+      <ConsoleButton size="sm" variant="ghost"
+        title={run.can_delete ? '删除校验报告' : '任务尚未结束，不可删除报告'}
+        disabled={!run.can_delete}
+        leadingIcon={<ConsoleIcon name="trash" size={14} />}
+        onClick={() => setDeleteTarget(run)}>删除</ConsoleButton>
+    </div>
+  );
+
+  /** 任务报告的目录名称在两种版式中使用一致的回退文案。 */
+  const sourceName = (run: DownloadVerificationRun) => sourceList.find(source => source.id === run.source_id)?.name
+    || (run.source_id ? '已停用来源' : '旧版 WebDAV');
+
   return (
     <div className="nfc-operations-page nfc-page-layout-workbench nfc-download-verify nfc-download-verify-page">
       <PageHeader title="下载完整性校验"
-        description="核对 AList / OpenList 云端清单与 NAS 下载目录。默认只比较路径、文件名和文件大小，不会再次下载文件。"
+        description="核对 AList 或 OpenList 的来源清单与 NAS 下载目录。"
         actions={<ConsoleButton leadingIcon={<ConsoleIcon name="settings" size={16} />}
           onClick={() => navigate('/download-sources')}>管理来源</ConsoleButton>} />
 
-      <DataPanel title="新建下载核对" description="选择一个来源、对应的两个目录和比较方式，整个过程只读。">
+      <DataPanel title="新建下载核对">
         <div className="nfc-dv-workspace">
           <div className="nfc-dv-field nfc-dv-source">
-            <label htmlFor="nfc-dv-source">1 · 选择来源</label>
+            <label htmlFor="nfc-dv-source">校验来源</label>
             <div className="nfc-dv-control-row">
               <select id="nfc-dv-source" value={chosenId ?? ''}
-                onChange={event => changeSource(Number(event.target.value))}
+                onChange={event => {
+                  const source = sourceList.find(item => String(item.id) === event.target.value);
+                  if (source) changeSource(source.id);
+                }}
                 disabled={sourceList.length === 0}>
                 {sourceList.length === 0 && <option value="">尚未添加来源</option>}
                 {sourceList.map(source => <option key={source.id} value={source.id}>
@@ -175,7 +250,7 @@ export const DownloadVerificationPage: React.FC = () => {
             <div className="nfc-dv-pair-card">
               <div className="nfc-dv-pair-heading">
                 <ConsoleIcon name="folder-open" size={17} />
-                <span>2 · 来源文件夹</span>
+                <span>来源文件夹</span>
               </div>
               <div className="nfc-dv-field nfc-download-verify-field">
                 <label htmlFor="nfc-dv-remote-path">远端目录</label>
@@ -192,10 +267,11 @@ export const DownloadVerificationPage: React.FC = () => {
                 <small>从已挂载的云端目录中选择；留空表示来源根目录</small>
               </div>
             </div>
+            <ConsoleIcon className="nfc-dv-pair-connector" name="git-compare" size={18} />
             <div className="nfc-dv-pair-card">
               <div className="nfc-dv-pair-heading">
                 <ConsoleIcon name="hard-drive" size={17} />
-                <span>3 · NAS 下载文件夹</span>
+                <span>NAS 下载文件夹</span>
               </div>
               <div className="nfc-dv-field">
                 <label>本地目录</label>
@@ -208,7 +284,7 @@ export const DownloadVerificationPage: React.FC = () => {
           </div>
 
           <fieldset className="nfc-dv-modes">
-            <legend>4 · 比较方式</legend>
+            <legend>比较方式</legend>
             <label className={mode === 'metadata' ? 'is-selected' : ''}>
               <input type="radio" name="verify-mode" checked={mode === 'metadata'}
                 onChange={() => setMode('metadata')} />
@@ -237,7 +313,15 @@ export const DownloadVerificationPage: React.FC = () => {
       <DataPanel title="校验历史" description="记录各次核对结果；删除报告不会删除 NAS 文件，也不会清除任务中心日志。">
         {runs.isError && <p role="alert" className="nfc-dv-error">读取校验历史失败</p>}
         <div className="nfc-dv-bulk-toolbar">
-          <span aria-live="polite">当前页可删除 {deletableRunIds.length} 项，已选 {selectedDeletableIds.length} 项</span>
+          <div className="nfc-dv-bulk-selection">
+            <label className="nfc-dv-selection">
+              <input ref={selectAllRef} type="checkbox" aria-label="全选当前页可删除的校验报告"
+                checked={allDeletableSelected} disabled={deletableRunIds.length === 0 || bulkRemove.isPending}
+                onChange={event => setSelectedReportIds(event.target.checked ? deletableRunIds : [])} />
+              <span>全选本页可删除项</span>
+            </label>
+            <span aria-live="polite">已选 {selectedDeletableIds.length} / {deletableRunIds.length} 项</span>
+          </div>
           <div className="nfc-dv-bulk-actions">
             <ConsoleButton size="sm" variant="ghost"
               disabled={selectedDeletableIds.length === 0 || bulkRemove.isPending}
@@ -250,27 +334,16 @@ export const DownloadVerificationPage: React.FC = () => {
             </ConsoleButton>
           </div>
         </div>
-        <div className="nfc-dv-table-scroll nfc-download-verify-table-scroll">
+        <ResponsiveDataView desktop={<div className="nfc-dv-table-scroll nfc-download-verify-table-scroll">
           <table className="nfc-dv-table nfc-download-verify-table" aria-label="校验历史">
-            <thead><tr><th className="nfc-dv-select-cell">
-              <input ref={selectAllRef} type="checkbox" aria-label="全选当前页可删除的校验报告"
-                checked={allDeletableSelected} disabled={deletableRunIds.length === 0 || bulkRemove.isPending}
-                onChange={event => setSelectedReportIds(event.target.checked ? deletableRunIds : [])} />
-            </th><th>任务</th><th>来源 / NAS</th><th>模式</th><th>结果</th><th>进度</th><th>操作</th></tr></thead>
+            <thead><tr><th className="nfc-dv-select-cell">选择</th><th>任务</th><th>来源 / NAS</th>
+              <th>模式</th><th>结果</th><th>进度</th><th>操作</th></tr></thead>
             <tbody>
-              {(runs.data?.items || []).map(run => <tr key={run.id}>
-                <td className="nfc-dv-select-cell">
-                  <input type="checkbox" aria-label={'选择校验报告 #' + run.id}
-                    checked={selectedDeletableIds.includes(run.id)}
-                    disabled={!run.can_delete || bulkRemove.isPending}
-                    onChange={event => setSelectedReportIds(ids => event.target.checked
-                      ? [...ids.filter(id => id !== run.id), run.id]
-                      : ids.filter(id => id !== run.id))} />
-                </td>
+              {historyRows.map(run => <tr key={run.id}>
+                <td className="nfc-dv-select-cell">{renderReportCheckbox(run)}</td>
                 <td className="nfc-dv-id">#{run.id}</td>
                 <td><div className="nfc-dv-path">
-                  <strong>{sourceList.find(source => source.id === run.source_id)?.name
-                    || (run.source_id ? '已停用来源' : '旧版 WebDAV')}</strong>
+                  <strong>{sourceName(run)}</strong>
                   <span className="nfc-dv-remote-path">{run.remote_root ? '/' + run.remote_root : '来源根目录 /'}</span>
                 </div><small className="nfc-dv-local-path">NAS：{run.local_root}</small></td>
                 <td>{run.mode === 'metadata' ? '快速核对' : 'SHA256'}</td>
@@ -279,23 +352,41 @@ export const DownloadVerificationPage: React.FC = () => {
                   {verdict[run.result] || run.result}</span>
                   <small>{displayJob(run.job_status)}{run.error_code ? ' · ' + run.error_code : ''}</small></td>
                 <td>{run.checked}/{run.total}</td>
-                <td><div className="nfc-dv-row-actions">
-                  <ConsoleButton size="sm" onClick={() => { setSelected(run.id); setPage(1); setAbnormalOnly(false); }}>查看条目</ConsoleButton>
-                  <ConsoleButton size="sm" variant="secondary"
-                    leadingIcon={<ConsoleIcon name="activity" size={14} />}
-                    onClick={() => navigate('/tasks?task=' + run.work_job_id)}>任务中心</ConsoleButton>
-                  <ConsoleButton size="sm" variant="ghost"
-                    title={run.can_delete ? '删除校验报告' : '任务尚未结束，不可删除报告'}
-                    disabled={!run.can_delete}
-                    leadingIcon={<ConsoleIcon name="trash" size={14} />}
-                    onClick={() => setDeleteTarget(run)}>删除</ConsoleButton>
-                </div></td>
+                <td>{renderReportActions(run)}</td>
               </tr>)}
-              {!runs.isLoading && runs.data?.items.length === 0 &&
-                <tr><td colSpan={7} className="nfc-dv-no-rows">暂无校验历史，完成第一次核对后将显示在这里。</td></tr>}
+              {runs.isSuccess && historyRows.length === 0 &&
+                <tr><td colSpan={7} className="nfc-dv-no-rows">{historyEmpty}</td></tr>}
             </tbody>
           </table>
-        </div>
+        </div>} mobile={
+          <ul className="nfc-dv-mobile-history" role="list" aria-label="校验历史">
+            {historyRows.map(run => (
+              <li key={run.id} className="nfc-dv-mobile-run" role="listitem">
+                <div className="nfc-dv-mobile-run-heading">
+                  <label className="nfc-dv-selection">
+                    {renderReportCheckbox(run)}
+                    <strong>报告 #{run.id}</strong>
+                  </label>
+                  <StatusBadge status={run.job_status} label={displayJob(run.job_status)} />
+                </div>
+                <div className="nfc-dv-mobile-run-result">
+                  <strong>{verdict[run.result] || run.result}</strong>
+                  <span>{run.mode === 'metadata' ? '快速核对' : '严格 SHA256'} · {run.checked}/{run.total} 项</span>
+                  {run.error_code && <small className="nfc-dv-error">{run.error_code}</small>}
+                </div>
+                {renderReportActions(run)}
+                <details className="nfc-dv-mobile-run-paths">
+                  <summary>校验目录 <ConsoleIcon name="chevron-down" size={14} /></summary>
+                  <dl>
+                    <div><dt>{sourceName(run)}</dt><dd>{run.remote_root ? '/' + run.remote_root : '来源根目录 /'}</dd></div>
+                    <div><dt>NAS</dt><dd>{run.local_root}</dd></div>
+                  </dl>
+                </details>
+              </li>
+            ))}
+            {runs.isSuccess && historyRows.length === 0 && <li className="nfc-dv-no-rows">{historyEmpty}</li>}
+          </ul>
+        } />
         {totalRuns > 50 && <div className="nfc-dv-pagination">
           <ConsoleButton size="sm" disabled={historyPage <= 1} onClick={() => setHistoryPage(x => Math.max(1, x - 1))}>上一页</ConsoleButton>
           <span>第 {historyPage}/{lastHistoryPage} 页 · 共 {totalRuns} 项</span>
@@ -303,8 +394,12 @@ export const DownloadVerificationPage: React.FC = () => {
         </div>}
       </DataPanel>
 
-      {selected !== null && <DataPanel title={'校验明细 #' + selected}
-        action={<ConsoleButton size="sm" onClick={() => setSelected(null)}>关闭</ConsoleButton>}
+      {selected !== null && <DataPanel id="nfc-download-report" title={'校验明细 #' + selected}
+        action={<ConsoleButton size="sm" onClick={() => {
+          setSelected(null);
+          reportOpener.current?.focus();
+          reportOpener.current = null;
+        }}>关闭</ConsoleButton>}
         description="逐条查看相对路径与文件大小差异。快速核对不会声称内容 SHA256 一致。">
         <div className="nfc-dv-detail-toolbar">
           <label className="nfc-dv-detail-filter">
@@ -319,23 +414,42 @@ export const DownloadVerificationPage: React.FC = () => {
           </span>
         </div>
         {details.isError && <p role="alert" className="nfc-dv-error">读取明细失败，请稍后重试</p>}
-        <div className="nfc-dv-table-scroll nfc-download-verify-table-scroll">
+        <ResponsiveDataView desktop={<div className="nfc-dv-table-scroll nfc-download-verify-table-scroll">
           <table className="nfc-dv-table nfc-download-verify-table" aria-label="校验明细">
             <thead><tr><th>相对路径</th><th>结果</th><th>云端大小</th><th>NAS 大小</th><th>内容 SHA256</th></tr></thead>
-            <tbody>{(details.data?.items || []).map(item => <tr key={item.relative_path}>
+            <tbody>{detailRows.map(item => <tr key={item.relative_path}>
               <td className="nfc-dv-path">{item.relative_path}</td>
               <td>{verdict[item.status] || item.status}</td>
               <td>{formatBytes(item.remote_size)}</td><td>{formatBytes(item.local_size)}</td>
-              <td>{item.remote_sha256 && item.local_sha256
-                ? item.remote_sha256 === item.local_sha256 ? '一致' : '不一致' : '未检查'}</td>
+              <td>{hashComparison(item)}</td>
             </tr>)}
-              {details.isSuccess && details.data.items.length === 0 &&
-                <tr><td colSpan={5} className="nfc-dv-no-rows">
-                  {abnormalOnly ? '没有发现异常条目' : '暂无校验条目'}
-                </td></tr>}
+              {details.isSuccess && detailRows.length === 0 &&
+                <tr><td colSpan={5} className="nfc-dv-no-rows">{detailEmpty}</td></tr>}
             </tbody>
           </table>
-        </div>
+        </div>} mobile={
+          <ul className="nfc-dv-mobile-items" role="list" aria-label="校验明细">
+            {detailRows.map(item => (
+              <li key={item.relative_path} className="nfc-dv-mobile-item" role="listitem">
+                <details>
+                  <summary>
+                    <strong>{item.relative_path}</strong>
+                    <StatusBadge status={verificationItemTone(item.status)} label={verdict[item.status] || item.status} />
+                    <ConsoleIcon name="chevron-down" size={14} />
+                  </summary>
+                  <dl>
+                    <div><dt>云端大小</dt><dd>{formatBytes(item.remote_size)}</dd></div>
+                    <div><dt>NAS 大小</dt><dd>{formatBytes(item.local_size)}</dd></div>
+                    <div><dt>内容 SHA256</dt><dd>{hashComparison(item)}</dd></div>
+                    {item.remote_sha256 && <div><dt>云端 SHA256</dt><dd><code>{item.remote_sha256}</code></dd></div>}
+                    {item.local_sha256 && <div><dt>NAS SHA256</dt><dd><code>{item.local_sha256}</code></dd></div>}
+                  </dl>
+                </details>
+              </li>
+            ))}
+            {details.isSuccess && detailRows.length === 0 && <li className="nfc-dv-no-rows">{detailEmpty}</li>}
+          </ul>
+        } />
         <div className="nfc-dv-pagination">
           <ConsoleButton size="sm" disabled={page <= 1}
             onClick={() => setPage(x => Math.max(1, x - 1))}>上一页</ConsoleButton>

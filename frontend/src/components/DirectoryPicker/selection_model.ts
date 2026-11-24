@@ -12,11 +12,12 @@ export function isWithinDirectoryRoots(path: string, allowedRoots: readonly stri
   });
 }
 
+/** Keep literal absolute paths distinct when the browser reopens a selection. */
 export function initialDirectorySelection(
   selected: string | string[] | undefined, multiple: boolean,
 ): string[] {
   const values = (Array.isArray(selected) ? selected : selected ? [selected] : [])
-    .map(value => value.trim()).filter(Boolean);
+    .map(value => value.startsWith('/') ? value : value.trim()).filter(Boolean);
   return multiple ? [...new Set(values)] : values.slice(0, 1);
 }
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  canPlanLifecycleAction, planConfirmationSnapshot, samePlanConfirmation,
+  canPlanLifecycleAction, getPlanPrimaryAction, planConfirmationSnapshot, samePlanConfirmation,
 } from '../src/utils/planDetailActions';
 import type { Plan } from '../src/types';
 
@@ -13,6 +13,19 @@ const context = (status: Plan['status'], overrides: Record<string, unknown> = {}
   allowMutation:true,journalTotal:12,journalReady:true,pending:false,...overrides,
 });
 describe('Console v2 Plan Detail lifecycle safety and native UX', () => {
+  test('the next plan action follows its phase and gives a live task precedence', () => {
+    assert.equal(getPlanPrimaryAction('draft', { allowMutation: true }), 'freeze');
+    assert.equal(getPlanPrimaryAction('frozen', { allowMutation: false }), 'validate');
+    assert.equal(getPlanPrimaryAction('ready', { allowMutation: true }), 'execute');
+    assert.equal(getPlanPrimaryAction('ready', { allowMutation: false }), 'validate');
+    assert.equal(getPlanPrimaryAction('partial', { allowMutation: false }), 'journal');
+    assert.equal(getPlanPrimaryAction('stale', { allowMutation: false, recovery: 'rebuild' }), 'rebuild');
+    assert.equal(getPlanPrimaryAction('stale', { allowMutation: true, recovery: 'scan' }), 'scan');
+    assert.equal(getPlanPrimaryAction('stale', { allowMutation: true }), 'journal');
+    assert.equal(getPlanPrimaryAction('completed', { allowMutation: true }), 'journal');
+    assert.equal(getPlanPrimaryAction('ready', { allowMutation: true, hasBackgroundTask: true }), 'background');
+  });
+
   test('Freeze only accepts draft, Validate only accepted frozen/ready/partial/stale', () => {
     for(const status of ['draft','frozen','validating','ready','executing',
       'completed','partial','failed','stale'] as Plan['status'][]) {

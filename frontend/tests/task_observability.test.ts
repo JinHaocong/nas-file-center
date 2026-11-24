@@ -17,6 +17,9 @@ import {
   formatElapsed,
   formatHeartbeatAge,
 } from '../src/utils/format';
+import { taskSourceLink } from '../src/components/tasks/taskRecordLinks';
+import { sqliteIdText } from '../src/utils/sqliteId';
+import { scansApi } from '../src/api/domain';
 import { tasksApi } from '../src/api/tasks';
 import { api } from '../src/api/client';
 import { TaskStatus } from '../src/types/task';
@@ -469,5 +472,38 @@ describe('Task ETA Estimation & Deterministic Rules', () => {
     assert.strictEqual(checkE.isUnknown, false);
     assert.strictEqual(checkE.text, '1m 0s');
     assert.strictEqual(checkE.etaSeconds, 60);
+  });
+});
+
+describe('Task and scan record navigation', () => {
+  const largeId = '9223372036854775807';
+
+  test('links use the source ID from the corresponding backend task type', () => {
+    assert.equal(taskSourceLink({ id: '44', job_type: 'batch-plan-execute', payload: { plan_id: largeId } })?.href, '/plans/' + largeId);
+    assert.equal(taskSourceLink({ id: 43, job_type: 'fclones-scan', payload: { scan_job_id: largeId } })?.href, '/scans/' + largeId);
+    assert.equal(taskSourceLink({ id: largeId, job_type: 'media-organizer-preview', payload: {} })?.href,
+      '/batch?operation=media-organize&preview=' + largeId);
+    assert.equal(taskSourceLink({ id: 32, job_type: 'unrelated', payload: { plan_id: largeId } }), null);
+  });
+
+  test('invalid or imprecise IDs do not create paths to unrelated records', () => {
+    for (const invalid of ['0', '1.5', '1/../settings', '9223372036854775808', Number.MAX_SAFE_INTEGER + 1]) {
+      assert.equal(sqliteIdText(invalid), null);
+      assert.equal(taskSourceLink({ id: 1, job_type: 'fclones-scan', payload: { scan_job_id: invalid } }), null);
+    }
+    assert.equal(sqliteIdText(42), '42');
+  });
+
+  test('scan detail and group requests keep the exact route identifier', async () => {
+    const urls: string[] = [];
+    const originalGet = api.get;
+    api.get = async <T>(url: string) => { urls.push(url); return {} as T; };
+    try {
+      await scansApi.getScanDetail(largeId);
+      await scansApi.getScanGroups(largeId, 2, 20);
+      assert.deepEqual(urls, ['/api/scans/' + largeId, '/api/scans/' + largeId + '/groups?page=2&page_size=20']);
+    } finally {
+      api.get = originalGet;
+    }
   });
 });

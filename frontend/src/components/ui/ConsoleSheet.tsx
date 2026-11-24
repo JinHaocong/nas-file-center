@@ -6,17 +6,16 @@ interface Props {
   open: boolean;
   onClose: () => void;
   title: string;
-  description: string;
+  description?: string;
   children: React.ReactNode;
   className?: string;
-  eyebrow?: string;
   titleAside?: React.ReactNode;
 }
 
 /** Right-aligned Radix sheet with controlled close and accessible focus behavior. */
 export const ConsoleSheet: React.FC<Props> = ({
   open, onClose, title, description, children, className = '',
-  eyebrow = 'INSPECTOR', titleAside,
+  titleAside,
 }) => {
   // Controlled Sheets have no Dialog.Trigger, so remember the active launcher
   // before the portal moves keyboard focus into the inspector.
@@ -27,6 +26,7 @@ export const ConsoleSheet: React.FC<Props> = ({
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-sheet-overlay" />
         <Dialog.Content
           className={'nfc-v2-sheet nfc-overlay-drawer ' + className}
+          {...(description ? {} : { 'aria-describedby': undefined })}
           onOpenAutoFocus={() => {
             const active = document.activeElement;
             returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
@@ -46,14 +46,13 @@ export const ConsoleSheet: React.FC<Props> = ({
         >
           <header className="nfc-v2-sheet-header">
             <div className="nfc-v2-sheet-heading">
-              <span className="nfc-v2-sheet-eyebrow">{eyebrow}</span>
               <div className="nfc-v2-sheet-title-row">
                 <Dialog.Title>{title}</Dialog.Title>
                 {titleAside}
               </div>
-              <Dialog.Description className="nfc-v2-sheet-description">
+              {description && <Dialog.Description className="nfc-v2-sheet-description">
                 {description}
-              </Dialog.Description>
+              </Dialog.Description>}
             </div>
             <Dialog.Close asChild>
               <button type="button" className="nfc-v2-dialog-close"

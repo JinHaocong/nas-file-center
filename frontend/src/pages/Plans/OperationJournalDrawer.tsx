@@ -90,7 +90,6 @@ export const OperationJournalDrawer: React.FC<Props> = ({ planId, open, onClose 
       open={open}
       onClose={onClose}
       className="nfc-v2-operation-journal"
-      eyebrow="FILESYSTEM EVIDENCE"
       title={'计划 #' + planId + ' 操作日志'}
       description="Worker 真实文件系统变更的只读审计证据；Undo Plan 根据这些记录逆向生成。"
       titleAside={

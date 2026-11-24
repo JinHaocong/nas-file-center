@@ -191,7 +191,7 @@ export const ScheduleEditorModal: React.FC<Props> = ({ open, schedule, onClose }
   return (
     <Dialog.Root open={open} onOpenChange={next => { if (!next) closeSafely(); }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
+        <Dialog.Overlay className="nfc-v2-dialog-overlay" />
         <Dialog.Content className="nfc-v2-dialog nfc-overlay-modal nfc-scheduler-editor nfc-v2-scheduler-editor"
           onEscapeKeyDown={event => { if (busy || inFlight.current) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
@@ -199,165 +199,167 @@ export const ScheduleEditorModal: React.FC<Props> = ({ open, schedule, onClose }
             <span className="nfc-v2-dialog-icon"><ConsoleIcon name="calendar" size={20} /></span>
             <div>
               <Dialog.Title>{schedule ? '编辑计划任务 #' + schedule.id : '新建计划任务'}</Dialog.Title>
-              <Dialog.Description>编辑 Cron、IANA 时区与固定目标；权限和有效性由服务端最终裁决。</Dialog.Description>
+              <Dialog.Description>指定要运行的任务，并按所选时区设置触发时间。</Dialog.Description>
             </div>
             <button type="button" className="nfc-v2-dialog-close" disabled={busy}
               aria-label="关闭编辑窗口" onClick={closeSafely}><ConsoleIcon name="x" size={18} /></button>
           </header>
           <form className="nfc-v2-scheduler-form" onSubmit={event => { event.preventDefault(); void onSubmit(); }}>
-            <div className="nfc-scheduler-form-grid">
-              <label className="nfc-v2-scheduler-field">名称
-                <input value={draft.name} onChange={event => update('name', event.target.value)}
-                  maxLength={128} required placeholder="例如：每天凌晨重新索引照片库" />
+            <div className="nfc-v2-scheduler-form-body">
+              <div className="nfc-scheduler-form-grid">
+                <label className="nfc-v2-scheduler-field">名称
+                  <input value={draft.name} onChange={event => update('name', event.target.value)}
+                    maxLength={128} required placeholder="例如：每天凌晨重新索引照片库" />
+                </label>
+                <label className="nfc-v2-scheduler-toggle">启用
+                  <input type="checkbox" checked={draft.enabled}
+                    onChange={event => update('enabled', event.target.checked)} />
+                </label>
+              </div>
+              <label className="nfc-v2-scheduler-field">说明
+                <textarea rows={2} maxLength={2000} value={draft.description}
+                  onChange={event => update('description', event.target.value)} />
               </label>
-              <label className="nfc-v2-scheduler-toggle">启用
-                <input type="checkbox" checked={draft.enabled}
-                  onChange={event => update('enabled', event.target.checked)} />
-              </label>
-            </div>
-            <label className="nfc-v2-scheduler-field">说明
-              <textarea rows={2} maxLength={2000} value={draft.description}
-                onChange={event => update('description', event.target.value)} />
-            </label>
 
-            <div className="nfc-v2-scheduler-section-label">目标</div>
-            <label className="nfc-v2-scheduler-field">任务类型
-              <select value={draft.targetType} onChange={event => {
-                const next = event.target.value as ScheduleTargetType;
-                workflowEpoch.current += 1;
-                setWorkflowMode(null);
-                setWorkflowLoading(false);
-                update('targetType', next);
-              }}>
-                {Object.entries(TARGET_LABELS).map(([value, label]) =>
-                  <option key={value} value={value}>{label}</option>)}
-              </select>
-            </label>
-
-            {draft.targetType === 'index_root' && (
-              <label className="nfc-v2-scheduler-field">索引根目录
-                <select required value={draft.indexRootId}
-                  onChange={event => update('indexRootId', event.target.value)}>
-                  <option value="">请选择索引根目录</option>
-                  {rootIdOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+              <div className="nfc-v2-scheduler-section-label">目标</div>
+              <label className="nfc-v2-scheduler-field">任务类型
+                <select value={draft.targetType} onChange={event => {
+                  const next = event.target.value as ScheduleTargetType;
+                  workflowEpoch.current += 1;
+                  setWorkflowMode(null);
+                  setWorkflowLoading(false);
+                  update('targetType', next);
+                }}>
+                  {Object.entries(TARGET_LABELS).map(([value, label]) =>
+                    <option key={value} value={value}>{label}</option>)}
                 </select>
               </label>
-            )}
-            {draft.targetType === 'fclones_scan' && (
-              <>
-                <MultiOptions label="扫描目录（至少一个）" value={draft.scanRoots}
-                  options={rootOptions} onChange={value => update('scanRoots', value)} />
-                <div className="nfc-scheduler-form-grid">
-                  <label className="nfc-v2-scheduler-toggle">隔离扫描
-                    <input type="checkbox" checked={draft.scanIsolate}
-                      onChange={event => update('scanIsolate', event.target.checked)} />
-                  </label>
-                  <label className="nfc-v2-scheduler-field">最小文件大小
-                    <input value={draft.scanMinSize} placeholder="例如 10M；留空表示不限制"
-                      onChange={event => update('scanMinSize', event.target.value)} />
-                  </label>
-                </div>
-                <div className="nfc-scheduler-form-grid">
-                  <label className="nfc-v2-scheduler-field">文件名模式（逗号或换行分隔）
-                    <textarea rows={2} value={draft.scanNamePatterns} placeholder="例如 *.mkv"
-                      onChange={event => update('scanNamePatterns', event.target.value)} />
-                  </label>
-                  <label className="nfc-v2-scheduler-field">排除模式（逗号或换行分隔）
-                    <textarea rows={2} value={draft.scanExcludePatterns} placeholder="例如 sample*"
-                      onChange={event => update('scanExcludePatterns', event.target.value)} />
-                  </label>
-                </div>
-              </>
-            )}
-            {(draft.targetType === 'media_analysis' ||
-              draft.targetType === 'media_integrity_verification') && (
-              <MultiOptions label="媒体根目录（至少一个）" value={draft.mediaRootKeys}
-                options={rootOptions} onChange={value => update('mediaRootKeys', value)} />
-            )}
-            {draft.targetType === 'workflow' && (
-              <>
-                <label className="nfc-v2-scheduler-field">工作流
-                  <select required value={draft.workflowId}
-                    onChange={event => { void bindWorkflowCurrent(event.target.value); }}>
-                    <option value="">请选择工作流</option>
-                    {(workflows || []).map(item => (
-                      <option key={item.id} value={String(item.id)}>
-                        #{item.id} · {item.name} · {item.mode}
-                      </option>
-                    ))}
-                    {draft.workflowId && !(workflows || []).some(item => String(item.id) === draft.workflowId) &&
-                      <option value={draft.workflowId}>已固定工作流 #{draft.workflowId}</option>}
+
+              {draft.targetType === 'index_root' && (
+                <label className="nfc-v2-scheduler-field">索引根目录
+                  <select required value={draft.indexRootId}
+                    onChange={event => update('indexRootId', event.target.value)}>
+                    <option value="">请选择索引根目录</option>
+                    {rootIdOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                 </label>
-                <div className="nfc-scheduler-pin-panel" aria-live="polite">
-                  <div><span>固定版本</span><b>r{draft.workflowRevision || '—'}</b></div>
-                  <div><span>Definition SHA</span><code>{draft.workflowSha || '—'}</code></div>
-                </div>
-                {workflowLoading && <p role="status">正在核验工作流固定版本…</p>}
-                <label className="nfc-v2-scheduler-field">动作
-                  <select value={draft.workflowAction} disabled={workflowLoading}
-                    onChange={event => update('workflowAction', event.target.value as 'preview' | 'draft')}>
-                    <option value="preview">Preview（只读预览）</option>
-                    <option value="draft" disabled={workflowMode === 'utility'}>
-                      Draft（生成草稿 Plan）
-                    </option>
-                  </select>
-                  <small>{workflowMode === 'utility'
-                    ? 'Utility 工作流在 Scheduler S3/S4 中仅允许 Preview。'
-                    : 'Draft 只生成草稿 Plan，不会自动 Freeze / Validate / Execute。'}</small>
-                </label>
-                {workflowMode === 'dedupe' && (
-                  <label className="nfc-v2-scheduler-field">固定完成扫描
-                    <select required value={draft.workflowScanJobId}
-                      onChange={event => update('workflowScanJobId', event.target.value)}>
-                      <option value="">请选择 completed ScanJob</option>
-                      {completedScans.map(scan => <option key={scan.id} value={String(scan.id)}>
-                        #{scan.id} · {scan.name}
-                      </option>)}
+              )}
+              {draft.targetType === 'fclones_scan' && (
+                <>
+                  <MultiOptions label="扫描目录（至少一个）" value={draft.scanRoots}
+                    options={rootOptions} onChange={value => update('scanRoots', value)} />
+                  <div className="nfc-scheduler-form-grid">
+                    <label className="nfc-v2-scheduler-toggle">隔离扫描
+                      <input type="checkbox" checked={draft.scanIsolate}
+                        onChange={event => update('scanIsolate', event.target.checked)} />
+                    </label>
+                    <label className="nfc-v2-scheduler-field">最小文件大小
+                      <input value={draft.scanMinSize} placeholder="例如 10M；留空表示不限制"
+                        onChange={event => update('scanMinSize', event.target.value)} />
+                    </label>
+                  </div>
+                  <div className="nfc-scheduler-form-grid">
+                    <label className="nfc-v2-scheduler-field">文件名模式（逗号或换行分隔）
+                      <textarea rows={2} value={draft.scanNamePatterns} placeholder="例如 *.mkv"
+                        onChange={event => update('scanNamePatterns', event.target.value)} />
+                    </label>
+                    <label className="nfc-v2-scheduler-field">排除模式（逗号或换行分隔）
+                      <textarea rows={2} value={draft.scanExcludePatterns} placeholder="例如 sample*"
+                        onChange={event => update('scanExcludePatterns', event.target.value)} />
+                    </label>
+                  </div>
+                </>
+              )}
+              {(draft.targetType === 'media_analysis' ||
+                draft.targetType === 'media_integrity_verification') && (
+                <MultiOptions label="媒体根目录（至少一个）" value={draft.mediaRootKeys}
+                  options={rootOptions} onChange={value => update('mediaRootKeys', value)} />
+              )}
+              {draft.targetType === 'workflow' && (
+                <>
+                  <label className="nfc-v2-scheduler-field">工作流
+                    <select required value={draft.workflowId}
+                      onChange={event => { void bindWorkflowCurrent(event.target.value); }}>
+                      <option value="">请选择工作流</option>
+                      {(workflows || []).map(item => (
+                        <option key={item.id} value={String(item.id)}>
+                          #{item.id} · {item.name} · {item.mode}
+                        </option>
+                      ))}
+                      {draft.workflowId && !(workflows || []).some(item => String(item.id) === draft.workflowId) &&
+                        <option value={draft.workflowId}>已固定工作流 #{draft.workflowId}</option>}
                     </select>
                   </label>
-                )}
-                {(workflowMode === 'file' || workflowMode === 'organizer') && (
-                  <MultiOptions label="运行时根目录覆盖（可选）" value={draft.workflowRootIds}
-                    options={rootIdOptions} onChange={value => update('workflowRootIds', value)} />
-                )}
-                {draft.workflowAction === 'draft' &&
-                  <div className="nfc-scheduler-boundary-alert nfc-v2-scheduler-note" role="note">
-                    <ConsoleIcon name="info" size={17} />
-                    <span><strong>Draft 权限边界。</strong>定时执行只会完成 Preview → Generate Draft。
-                      不会自动 Freeze、Validate 或 Execute。</span>
-                  </div>}
-              </>
-            )}
+                  <div className="nfc-scheduler-pin-panel" aria-live="polite">
+                    <div><span>固定版本</span><b>r{draft.workflowRevision || '—'}</b></div>
+                    <div><span>Definition SHA</span><code>{draft.workflowSha || '—'}</code></div>
+                  </div>
+                  {workflowLoading && <p role="status">正在核验工作流固定版本…</p>}
+                  <label className="nfc-v2-scheduler-field">动作
+                    <select value={draft.workflowAction} disabled={workflowLoading}
+                      onChange={event => update('workflowAction', event.target.value as 'preview' | 'draft')}>
+                      <option value="preview">Preview（只读预览）</option>
+                      <option value="draft" disabled={workflowMode === 'utility'}>
+                        Draft（生成草稿 Plan）
+                      </option>
+                    </select>
+                    <small>{workflowMode === 'utility'
+                      ? 'Utility 工作流在 Scheduler S3/S4 中仅允许 Preview。'
+                      : 'Draft 只生成草稿 Plan，不会自动 Freeze / Validate / Execute。'}</small>
+                  </label>
+                  {workflowMode === 'dedupe' && (
+                    <label className="nfc-v2-scheduler-field">固定完成扫描
+                      <select required value={draft.workflowScanJobId}
+                        onChange={event => update('workflowScanJobId', event.target.value)}>
+                        <option value="">请选择 completed ScanJob</option>
+                        {completedScans.map(scan => <option key={scan.id} value={String(scan.id)}>
+                          #{scan.id} · {scan.name}
+                        </option>)}
+                      </select>
+                    </label>
+                  )}
+                  {(workflowMode === 'file' || workflowMode === 'organizer') && (
+                    <MultiOptions label="运行时根目录覆盖（可选）" value={draft.workflowRootIds}
+                      options={rootIdOptions} onChange={value => update('workflowRootIds', value)} />
+                  )}
+                  {draft.workflowAction === 'draft' &&
+                    <div className="nfc-scheduler-boundary-alert nfc-v2-scheduler-note" role="note">
+                      <ConsoleIcon name="info" size={17} />
+                      <span><strong>Draft 权限边界。</strong>定时执行只会完成 Preview → Generate Draft。
+                        不会自动 Freeze、Validate 或 Execute。</span>
+                    </div>}
+                </>
+              )}
 
-            <div className="nfc-v2-scheduler-section-label">时间</div>
-            <div className="nfc-scheduler-form-grid">
-              <label className="nfc-v2-scheduler-field">Cron
-                <input required value={draft.cron} placeholder="0 2 * * *"
-                  onChange={event => { update('cron', event.target.value); invalidatePreview(); }} />
-                <small>格式：minute hour day-of-month month day-of-week</small>
-              </label>
-              <label className="nfc-v2-scheduler-field">IANA 时区
-                <input required value={draft.timezone} list="scheduler-common-timezones"
-                  onChange={event => { update('timezone', event.target.value); invalidatePreview(); }}
-                  placeholder="例如 Asia/Shanghai" />
-                <datalist id="scheduler-common-timezones">
-                  {COMMON_TIMEZONES.map(zone => <option value={zone} key={zone} />)}
-                </datalist>
-              </label>
+              <div className="nfc-v2-scheduler-section-label">时间</div>
+              <div className="nfc-scheduler-form-grid">
+                <label className="nfc-v2-scheduler-field">Cron
+                  <input required value={draft.cron} placeholder="0 2 * * *"
+                    onChange={event => { update('cron', event.target.value); invalidatePreview(); }} />
+                  <small>格式：minute hour day-of-month month day-of-week</small>
+                </label>
+                <label className="nfc-v2-scheduler-field">IANA 时区
+                  <input required value={draft.timezone} list="scheduler-common-timezones"
+                    onChange={event => { update('timezone', event.target.value); invalidatePreview(); }}
+                    placeholder="例如 Asia/Shanghai" />
+                  <datalist id="scheduler-common-timezones">
+                    {COMMON_TIMEZONES.map(zone => <option value={zone} key={zone} />)}
+                  </datalist>
+                </label>
+              </div>
+              <div className="nfc-scheduler-time-preview">
+                <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="clock" size={15} />}
+                  disabled={!draft.cron.trim() || !draft.timezone.trim()}
+                  loading={previewLoading} onClick={() => { void previewRecurrence(); }}>
+                  验证并预览未来 5 次
+                </ConsoleButton>
+                {previewError && <span role="alert" className="nfc-scheduler-preview-error">{previewError}</span>}
+                {previewTimes.length > 0 && <div className="nfc-scheduler-occurrences">
+                  {previewTimes.map((time, i) => <code key={time + i}>{formatDateTime(time)}</code>)}
+                </div>}
+              </div>
             </div>
-            <div className="nfc-scheduler-time-preview">
-              <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="clock" size={15} />}
-                disabled={!draft.cron.trim() || !draft.timezone.trim()}
-                loading={previewLoading} onClick={() => { void previewRecurrence(); }}>
-                验证并预览未来 5 次
-              </ConsoleButton>
-              {previewError && <span role="alert" className="nfc-scheduler-preview-error">{previewError}</span>}
-              {previewTimes.length > 0 && <div className="nfc-scheduler-occurrences">
-                {previewTimes.map((time, i) => <code key={time + i}>{formatDateTime(time)}</code>)}
-              </div>}
-            </div>
-            <div className="nfc-v2-confirm-actions">
+            <div className="nfc-v2-scheduler-form-actions">
               <ConsoleButton disabled={busy} onClick={closeSafely}>取消</ConsoleButton>
               <ConsoleButton type="submit" variant="primary" loading={busy}
                 disabled={workflowLoading || previewLoading ||

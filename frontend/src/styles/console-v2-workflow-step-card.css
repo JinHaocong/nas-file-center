@@ -1,72 +1,148 @@
 /* Native Workflow StepCard & simple editor fields; inherits Console v2 tokens. */
-.nfc-workflow-step-card.nfc-v2-step-card {
-  --nfc-info-soft: var(--nfc-accent-soft);
-  box-sizing: border-box; display: block; min-width: 0;
-  color: var(--nfc-text); background: var(--nfc-surface-1);
+.nfc-workflow-builder-page .nfc-workflow-pipeline-canvas .nfc-v2-step-card {
+  --nfc-info-soft: var(--nfc-tint-soft);
+  min-width: 0;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  color: var(--studio-ink);
+  background: transparent !important;
+  box-shadow: none !important;
+  position: relative;
+  overflow: visible;
+  transition: border-color 150ms ease, background-color 150ms ease;
 }
-.nfc-workflow-step-card.nfc-v2-step-card:focus-within { border-color: var(--nfc-hairline-strong); }
-.nfc-v2-step-card > .nfc-v2-step-heading {
-  display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap;
+.nfc-v2-step-card.is-collapsed + .nfc-v2-step-card.is-collapsed::before {
+  content: "";
+  position: absolute;
+  inset: -3px 13px auto 86px;
+  height: 1px;
+  background: var(--studio-line);
+  pointer-events: none;
+}
+.nfc-workflow-builder-page .nfc-workflow-pipeline-canvas .nfc-v2-step-card:focus-within {
+  border-color: var(--nfc-tint-line) !important;
+}
+.nfc-workflow-builder-page .nfc-workflow-pipeline-canvas .nfc-v2-step-card.is-expanded {
+  border-color: var(--nfc-tint-line) !important;
+  background: var(--studio-paper) !important;
+}
+.nfc-workflow-builder-page .nfc-v2-step-card > .nfc-v2-step-heading {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  border: 0;
   background: transparent;
 }
 .nfc-v2-step-heading > .nfc-v2-step-toggle {
-  display: grid; place-items: center; width: 34px; height: 34px; padding: 0;
-  flex: 0 0 auto; border: 1px solid var(--nfc-hairline); border-radius: 8px;
-  background: var(--nfc-surface-1); color: var(--nfc-text);
+  display: grid;
+  grid-template-columns: 25px 37px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 11px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 64px;
+  padding: 9px 13px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--studio-ink);
   cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background-color 150ms ease;
 }
-.nfc-v2-step-heading > .nfc-step-index {
-  flex: 0 0 auto; font-size: 12px; font-weight: 700; color: var(--nfc-text-subtle);
+.nfc-v2-step-toggle:hover { background: var(--studio-ground); }
+.nfc-v2-step-toggle[aria-expanded='true'] {
+  background: var(--nfc-tint-soft);
+  border-radius: 9px 9px 0 0;
 }
-.nfc-v2-step-heading > .nfc-step-heading-copy { flex: 1 1 180px; min-width: 0; }
-.nfc-v2-step-heading .nfc-step-title-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; }
-.nfc-v2-step-heading .nfc-step-summary { display: block; min-width: 0; overflow-wrap: anywhere; color: var(--nfc-text-muted); font-size: 11px; line-height: 1.6; margin-top: 4px; }
+.nfc-workflow-builder-page .nfc-v2-step-toggle > .nfc-step-index {
+  display: block;
+  width: auto;
+  color: var(--studio-muted);
+  font-size: 11px;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
 .nfc-v2-step-type {
-  display: inline-flex; align-items: center; gap: 5px;
-  border-radius: 6px; padding: 3px 7px; border: 1px solid var(--nfc-hairline);
-  background: var(--nfc-surface-2); color: var(--nfc-text-muted);
-  font-size: 10px; letter-spacing: .025em; font-weight: 750;
+  display: grid;
+  place-items: center;
+  width: 37px;
+  height: 37px;
+  border-radius: 9px;
+  background: var(--studio-soft);
+  color: var(--studio-muted);
 }
-.nfc-v2-step-type.is-quarantine, .nfc-v2-step-type.is-utility {
-  background: var(--nfc-surface-2);
-  color: var(--nfc-text);
+.nfc-v2-step-toggle[aria-expanded='true'] .nfc-v2-step-type {
+  background: var(--nfc-tint-fill);
+  color: var(--nfc-tint-on-fill);
 }
-.nfc-v2-step-type.is-dedupe, .nfc-v2-step-type.is-organize {
-  background: var(--nfc-surface-2);
-  color: var(--nfc-text);
+.nfc-v2-step-heading .nfc-step-heading-copy { display: grid; gap: 2px; min-width: 0; }
+.nfc-step-heading-copy strong { font-size: 14px; font-weight: 730; overflow-wrap: anywhere; }
+.nfc-workflow-builder-page .nfc-v2-step-heading .nfc-step-summary {
+  display: block;
+  max-width: none;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--studio-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
-.nfc-v2-step-readonly {
-  color: var(--nfc-text-muted); background: var(--nfc-surface-2);
-  border: 1px solid var(--nfc-hairline); border-radius: 6px;
-  font-size: 10px; padding: 3px 6px;
+.nfc-v2-step-chevron { color: var(--studio-muted); transition: transform 150ms var(--nfc-motion-ease); }
+.nfc-v2-step-toggle[aria-expanded='true'] .nfc-v2-step-chevron {
+  color: var(--nfc-tint);
+  transform: rotate(90deg);
 }
-.nfc-v2-step-heading .nfc-v2-step-actions {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 3px; margin-left: auto;
-  max-width: none; overflow: visible;
+.nfc-workflow-builder-page .nfc-v2-step-card > .nfc-v2-step-editor {
+  min-width: 0;
+  padding: 16px 16px 18px clamp(16px, 5.6vw, 86px);
+  border-top: 1px solid var(--nfc-tint-line);
+  border-radius: 0 0 9px 9px;
+  background: var(--studio-paper);
+  animation: nfc-workflow-step-open 155ms var(--nfc-motion-ease) both;
 }
-.nfc-v2-step-heading .nfc-v2-step-actions .nfc-console-button {
-  display: inline-flex; align-items: center; gap: 5px;
-  min-height: 34px; padding: 0 8px; flex: 0 0 auto;
-}
-.nfc-v2-step-heading .nfc-v2-step-actions .nfc-console-button-danger {
-  color: #b53f58; background: transparent; border-color: transparent;
+@keyframes nfc-workflow-step-open {
+  from { opacity: .55; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .nfc-v2-step-card > .nfc-v2-step-editor[hidden] { display: none; }
-.nfc-v2-step-card :is(button, input):focus-visible {
-  outline: 2px solid var(--nfc-accent); outline-offset: 2px;
+.nfc-v2-step-card .nfc-v2-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: none;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--studio-line);
+  overflow: visible;
 }
+.nfc-v2-step-actions .nfc-console-button { min-height: 36px; }
+.nfc-v2-step-actions .nfc-console-button-danger {
+  color: var(--studio-danger-ink);
+  background: transparent;
+  border-color: transparent;
+}
+.nfc-v2-step-actions .nfc-console-button-danger:hover { background: var(--studio-danger-soft); }
+.nfc-v2-step-card :is(button, input):focus-visible {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: 2px;
+}
+.nfc-v2-step-heading .nfc-v2-step-toggle:focus-visible { outline-offset: -3px; }
 .nfc-v2-simple-step-form {
   min-width: 0; margin: 0; padding: 0; border: 0; display: grid; gap: 14px;
 }
 .nfc-v2-simple-step-form:disabled { opacity: .75; }
 .nfc-v2-step-field { display: flex; flex-direction: column; min-width: 0; gap: 6px; }
 .nfc-v2-step-field label { font-size: 12px; font-weight: 670; color: var(--nfc-text); }
-.nfc-v2-step-field label span { color: #b63552; }
+.nfc-v2-step-field label > span[aria-hidden='true'] { color: var(--studio-danger-ink); }
 .nfc-v2-step-field p { font-size: 11px; color: var(--nfc-text-muted); margin: 0 0 2px; line-height: 1.6; }
-.nfc-v2-step-field input {
+.nfc-v2-step-field input:not([type='checkbox'], [type='radio']) {
   box-sizing: border-box; width: 100%; min-height: 42px;
-  border: 1px solid var(--nfc-hairline); border-radius: 9px;
-  background: var(--nfc-surface-1); color: var(--nfc-text);
+  border: 1px solid var(--studio-line); border-radius: 9px;
+  background: var(--studio-paper); color: var(--studio-ink);
   font: inherit; font-size: 12px; padding: 9px 12px;
 }
 .nfc-v2-step-field input:disabled { opacity: .7; cursor: not-allowed; }
@@ -79,16 +155,23 @@
 .nfc-v2-step-notice svg { flex: 0 0 auto; color: var(--nfc-accent); }
 .nfc-v2-step-notice strong { display: block; font-weight: 730; }
 .nfc-v2-step-notice p { margin: 4px 0 0; color: var(--nfc-text-muted); }
-[data-theme='dark'] .nfc-v2-step-card .nfc-v2-step-toggle,
 [data-theme='dark'] .nfc-v2-step-field input {
-  background: var(--nfc-surface-1); color: var(--nfc-text); border-color: var(--nfc-hairline);
+  color-scheme: dark;
 }
 @media (max-width: 767px) {
-  .nfc-v2-step-heading > .nfc-v2-step-toggle { width: 44px; height: 44px; }
-  .nfc-v2-step-heading .nfc-v2-step-actions { width: 100%; justify-content: flex-start; margin-left: 0; }
-  .nfc-v2-step-heading .nfc-v2-step-actions .nfc-console-button { min-height: 44px; }
-  .nfc-v2-step-field input { min-height: 44px; }
+  .nfc-v2-step-heading > .nfc-v2-step-toggle {
+    grid-template-columns: 20px 34px minmax(0, 1fr) 18px;
+    gap: 9px;
+    padding-inline: 9px;
+  }
+  .nfc-v2-step-type { width: 34px; height: 34px; }
+  .nfc-v2-step-card.is-collapsed + .nfc-v2-step-card.is-collapsed::before { inset-inline: 81px 9px; }
+  .nfc-workflow-builder-page .nfc-v2-step-card > .nfc-v2-step-editor { padding: 12px 10px 14px; }
+  .nfc-v2-step-actions .nfc-console-button { min-height: 44px; }
+  .nfc-v2-step-field input:not([type='checkbox'], [type='radio']) { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .nfc-workflow-builder-page .nfc-v2-step-card,
+  .nfc-workflow-builder-page .nfc-v2-step-card > .nfc-v2-step-editor,
   .nfc-v2-step-card *, .nfc-v2-step-notice { animation: none; transition: none; }
 }

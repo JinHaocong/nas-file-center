@@ -17,7 +17,7 @@ const OUT = resolve(process.cwd(), 'artifacts/browser-workspace-cascade');
 const WIDTHS = visualViewports; // 360, 390, 430, 768, 1024, 1280, 1440, 1920
 const THEMES = visualThemes; // mode: 'system', system: 'dark', effective: 'dark'
 const PAGES = [
-  { path: '/dashboard', id: 'dashboard', heading: 'NAS File Center', selector: '.nfc-dashboard-page' },
+  { path: '/dashboard', id: 'dashboard', heading: '文件空间', selector: '.nfc-dashboard-page' },
   { path: '/plans', id: 'plans', heading: '执行计划', selector: '.nfc-plans-page' },
   { path: '/tasks', id: 'tasks', heading: '任务中心', selector: '.nfc-tasks-page' },
   { path: '/indexes', id: 'indexes', heading: '文件索引', selector: '.nfc-indexes-page' },
@@ -509,7 +509,7 @@ async function selectWorkspaceTheme(page, mode, effective) {
     // CSS intentionally hides the cramped Header dropdown at phone widths.
     // Exercise its accessible equivalent in the actual mobile navigation drawer.
     await page.getByRole('button', { name: '打开导航菜单' }).click();
-    const dialog = page.getByRole('dialog', { name: 'NAS File Center 主导航' });
+    const dialog = page.getByRole('dialog', { name: '所有工具' });
     await dialog.getByRole('group', { name: '界面主题' })
       .getByRole('button', { name: providerModeLabels[mode] }).click();
     await dialog.waitFor({ state: 'hidden' });
@@ -743,19 +743,14 @@ async function auditProviderMetricTheme(page, item, width, theme, motion = 'redu
 }
 
 
-// Verify that the product image sits beside the readable copy and that the
+// Verify that the directory shelf sits below the readable copy and that the
 // hero text has AA contrast on its actual solid surface in both themes.
 async function auditDashboardHeroPaint(page, width, theme) {
   const result = await page.evaluate(async () => {
-    const illustration = document.querySelector('.nfc-v2-hero-illustration');
-    const copy = document.querySelector('.nfc-v2-hero-copy');
-    if (!illustration || !copy) throw Error('Missing Dashboard hero copy or image');
-    const illustrationVisible = getComputedStyle(illustration).display !== 'none';
-    if (illustrationVisible) {
-      await illustration.decode();
-      if (illustration.getBoundingClientRect().left < copy.getBoundingClientRect().right - 1)
-        throw Error('Dashboard artwork overlaps the readable copy');
-    }
+    const heading = document.querySelector('.nfc-v2-dashboard-hero');
+    const shelf = document.querySelector('.nfc-studio-shelf');
+    if (!heading || !shelf) throw Error('Missing workspace title or directory shelf');
+    const shelfBelowHeading = shelf.getBoundingClientRect().top >= heading.getBoundingClientRect().bottom - 1;
     const parse = value => {
       const rgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d*\.?\d+)(?:\s*,\s*(\d*\.?\d+))?\s*\)$/.exec(value);
       const srgb = /^color\(srgb\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?\s*\)$/.exec(value);
@@ -800,9 +795,9 @@ async function auditDashboardHeroPaint(page, width, theme) {
           v * (1 - layer.alpha));
       return { name, foreground: rgb(ink.channels), background: rgb(surface) };
     });
-    return { illustrationVisible, pairs };
+    return { shelfBelowHeading, pairs };
   });
-  assert.equal(result.illustrationVisible, width >= 768, 'Dashboard artwork visibility must follow viewport');
+  assert.ok(result.shelfBelowHeading, 'Workspace title must not overlap the directory shelf');
   for (const pair of result.pairs) {
     const contrast = computedContrastRatio(pair.foreground, pair.background);
     pair.contrast = Number(contrast.toFixed(3));
@@ -843,8 +838,8 @@ async function auditNativeHeaderOwnership(page, item, width, theme) {
   const label = item.id + '/' + width + '/' + theme.mode + '-' + theme.system;
   assert.equal(measured.effective, theme.effective, label + ': wrong theme');
   const expected = theme.effective === 'dark'
-    ? { background: measured.solid ? 'rgb(37, 43, 54)' : 'rgba(35, 41, 52, 0.86)', bottomColor: 'rgb(56, 56, 52)' }
-    : { background: measured.solid ? 'rgb(245, 248, 253)' : 'rgba(249, 251, 255, 0.82)', bottomColor: 'rgb(234, 234, 231)' };
+    ? { background: 'rgb(32, 35, 31)', bottomColor: 'rgb(56, 56, 52)' }
+    : { background: 'rgb(251, 250, 246)', bottomColor: 'rgb(234, 234, 231)' };
   assert.equal(measured.background, expected.background,
     label + ': native navigation material lost in the cascade');
   assert.equal(measured.bottomColor, expected.bottomColor,
@@ -854,7 +849,7 @@ async function auditNativeHeaderOwnership(page, item, width, theme) {
     label + ': native bottom-only separator lost to historic floating border');
   assert.equal(measured.radius, '0px', label + ': historical floating corner returned');
   assert.equal(measured.shadow, 'none', label + ': historical floating shadow returned');
-  assert.equal(measured.backdrop, measured.solid ? 'none' : 'blur(20px) saturate(1.45)',
+  assert.equal(measured.backdrop, 'none',
     label + ': wrong navigation material filter');
   nativeHeaderOwnerAudit.push({
     route: item.path, width, mode: theme.mode, system: theme.system,
@@ -1295,17 +1290,17 @@ try {
     ' route/theme/width cases; actual transparent headers and bottom hairlines.');
 
   assert.equal(dashboardHeroPaintAudit.length, WIDTHS.length * THEMES.length,
-    'Dashboard artwork and title contrast must pass every viewport/theme');
+    'Dashboard shelf and title contrast must pass every viewport/theme');
   assert.ok(dashboardHeroPaintAudit.every(c =>
-    c.illustrationVisible === (c.width >= 768) && c.pairs.length === 2 &&
+    c.shelfBelowHeading && c.pairs.length === 2 &&
     c.pairs.every(p => p.contrast >= 4.5)),
   'Hero title and description must have opaque-painted AA contrast');
   writeFileSync(resolve(OUT, 'dashboard-hero-gradient-isolation-audit.json'),
     JSON.stringify({ cases: dashboardHeroPaintAudit, total: dashboardHeroPaintAudit.length,
       paintedTextPairs: dashboardHeroPaintAudit.length * 2,
-      audited: 'rendered Dashboard hero contrast and separated product image' }, null, 2));
+      audited: 'rendered Dashboard hero contrast and directory shelf geometry' }, null, 2));
   console.log('[WORKSPACE HERO PAINT] 32/32 visible hero cases; ' +
-    '64/64 text pairs >= 4.5:1 and responsive artwork without copy overlap.');
+    '64/64 text pairs >= 4.5:1 and a directory shelf below the heading.');
   assert.equal(w2ThemeAudit.length, WIDTHS.length * THEMES.length * PAGES.length,
     'All six real rendered routes must audit computed w2 palette at every width/theme');
   assert.ok(w2ThemeAudit.every(item => item.compared === 12 && item.minimumContrast >= 4.5),

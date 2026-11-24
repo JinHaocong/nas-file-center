@@ -7,7 +7,6 @@ import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme, type ThemeMode } from '../../contexts/ThemeContext';
 import { useTitle } from '../../hooks/useTitle';
-import storageUnit from '../../assets/storage-unit.webp';
 
 export const LoginPage: React.FC = () => {
   useTitle('用户登录');
@@ -67,12 +66,8 @@ export const LoginPage: React.FC = () => {
       </header>
 
       <div className="nfc-v2-login-layout">
-        <div className="nfc-v2-login-showcase" aria-hidden="true">
-          <img src={storageUnit} alt="" width={720} height={720} loading="lazy" />
-        </div>
-
         <section className="nfc-login-panel" aria-labelledby="nfc-login-title">
-          <h1 id="nfc-login-title" className="nfc-v2-login-heading">登录工作台</h1>
+          <h1 id="nfc-login-title" className="nfc-v2-login-heading">登录文件空间</h1>
 
           {errorMessage && (
             <div className="nfc-login-alert nfc-v2-login-alert" role="alert">
@@ -116,7 +111,7 @@ export const LoginPage: React.FC = () => {
         </section>
       </div>
 
-      <footer className="nfc-login-footer">NAS File Center v1.7.12</footer>
+      <footer className="nfc-login-footer">NAS File Center v1.8.0</footer>
     </main>
   );
 };

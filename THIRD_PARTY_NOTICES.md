@@ -2,6 +2,7 @@
 
 NAS File Center bundles the following libraries locally in the frontend package and runtime image so the web interface works on an offline/LAN NAS without any runtime CDN access.
 
+- **Manrope** is distributed under the SIL Open Font License 1.1. [License](frontend/public/licenses/Manrope.txt)
 - **React / React DOM** — MIT License — https://react.dev/
 - **Ant Design (antd)** — MIT License — https://ant.design/
 - **@ant-design/icons** — MIT License — https://github.com/ant-design/ant-design-icons

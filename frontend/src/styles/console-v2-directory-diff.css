@@ -76,3 +76,30 @@
 @media (prefers-reduced-motion:reduce) {
   .nfc-v2-directory-diff * { transition:none;animation:none;scroll-behavior:auto; }
 }
+
+.nfc-v2-directory-diff-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+.nfc-v2-directory-diff-pair .nfc-v2-directory-diff-field {
+  padding: 16px;
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-panel-radius);
+  background: var(--studio-ground);
+}
+.nfc-v2-directory-diff-pair .nfc-v2-directory-diff-field:last-child {
+  background: color-mix(in srgb, var(--nfc-tint-soft) 55%, var(--studio-paper));
+}
+.nfc-v2-directory-diff-label { display: flex; align-items: center; gap: 8px; }
+.nfc-v2-directory-diff-label svg, .nfc-v2-directory-diff-connector { color: var(--nfc-tint); }
+.nfc-v2-directory-diff .nfc-v2-directory-diff-roots > div {
+  border-inline-start: 3px solid var(--nfc-tint-line);
+  padding-inline-start: 11px;
+}
+@media (max-width: 767px) {
+  .nfc-v2-directory-diff-pair { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .nfc-v2-directory-diff-connector { display: none; }
+  .nfc-v2-directory-diff-pair .nfc-v2-directory-diff-field { padding: 12px; }
+}

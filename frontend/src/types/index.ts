@@ -55,6 +55,8 @@ export interface IndexRoot {
   can_remove: boolean;
 }
 
+export type ScanId = string | number;
+
 export interface ScanJob {
   id: number;
   name: string;

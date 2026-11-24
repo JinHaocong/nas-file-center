@@ -65,6 +65,7 @@ import './styles/console-v2-download-verification.css';
 import './styles/console-v2-download-verify.css';
 import './styles/console-v2-mobile-header.css';
 import './styles/console-v2-keyboard-navigation.css';
+import './styles/console-v2-studio.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

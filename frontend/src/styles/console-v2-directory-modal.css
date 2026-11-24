@@ -157,7 +157,14 @@
 .nfc-v2-directory-dialog .nfc-console-page-buttons button { background: var(--nfc-dialog-paper); color: var(--nfc-dialog-text); border: 1px solid var(--nfc-dialog-line); border-radius: 6px; cursor: pointer; }
 .nfc-v2-directory-dialog .nfc-console-page-size { display: none; }
 @media (max-width: 767px) {
-  .nfc-v2-directory-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .nfc-v2-directory-dialog.nfc-overlay-modal { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); margin: 0; }
+  .nfc-v2-directory-dialog .nfc-directory-browser-toolbar { flex: none; }
+  .nfc-v2-directory-dialog .nfc-directory-browser-row {
+    display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; padding: 0;
+  }
+  .nfc-v2-directory-dialog .nfc-v2-directory-toolbar-actions {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .nfc-v2-directory-dialog .nfc-v2-directory-dialog-header,
   .nfc-v2-directory-dialog .nfc-directory-picker-body,
   .nfc-v2-directory-dialog .nfc-directory-picker-footer { padding-left: 14px; padding-right: 14px; }

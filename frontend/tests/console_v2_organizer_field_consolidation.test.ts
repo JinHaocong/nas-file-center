@@ -31,7 +31,8 @@ describe('Console v2 native Organizer field authority', () => {
       'hydrateWorkflowOrganizerSnapshot(value)', 'patchWorkflowOrganizerAdvancedRule(',
       'validateWorkflowOrganizerSnapshot(snapshot)', 'role="tablist"',
       'aria-expanded={expandedRules.includes(key)}', '<DirectoryPicker multiple={false}',
-      'renderTemplate(', 'Stage A', 'Stage B', 'MOVE → rmdir_empty',
+      'renderTemplate(', '目录结构整理完成后，重新生成预览，再生成命名计划',
+      '外层只有一个真实子目录时，计划才会提层并清理空目录',
     ]) assert.ok(editor.includes(marker), marker);
     assert.equal(existsSync(resolve(process.cwd(),
       'src/components/workflows/OrganizerProfileFields.tsx')), false);

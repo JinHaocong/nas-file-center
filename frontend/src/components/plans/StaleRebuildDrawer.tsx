@@ -153,7 +153,6 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
   return (
     <ConsoleSheet open={open} onClose={closeSafely}
       title={'过期计划 #' + planId}
-      eyebrow="REBUILD PREVIEW"
       description="基于权威 Workflow Lineage 和快照重新生成草稿；不自动执行或修改源文件。"
       className="nfc-stale-rebuild-drawer nfc-v2-stale-rebuild"
       titleAside={<div className="nfc-v2-rebuild-actions">

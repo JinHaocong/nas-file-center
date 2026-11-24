@@ -49,7 +49,7 @@ describe('Console v2 StepList native add menu and topology safety', () => {
       "if (readOnly || index < 0 || index >= steps.length) return",
       "canMoveUp={canMoveStep(", "canMoveDown={canMoveStep(",
       "canDelete={canDeleteStep(", "readOnly={readOnly}",
-      "mode !== 'dedupe' && mode !== 'utility'",
+      "mode === 'file' && menuItems.length > 0",
     ]) assert.ok(s.includes(token), token);
   });
 
@@ -59,8 +59,8 @@ describe('Console v2 StepList native add menu and topology safety', () => {
       '<ConsoleButton', '<ConsoleIcon', 'nfc-v2-step-menu',
       'aria-haspopup="menu"', 'aria-expanded={menuOpen}',
       'aria-controls=', 'role="menu"', 'role="menuitem"',
-      'disabled={!allowedInsertions.includes(item.key)}',
-      'disabled={!canOpenMenu}', 'menuRef.current?.querySelectorAll',
+      'fileChoices.filter(item => allowedInsertions.includes(item.key))',
+      'menuRef.current?.querySelectorAll',
       "event.key === 'Escape'", 'onBlur={(event) => {', 'event.relatedTarget',
       "'ArrowDown', 'ArrowUp', 'Home', 'End'",
       "document.addEventListener('pointerdown', handleOutside)",
