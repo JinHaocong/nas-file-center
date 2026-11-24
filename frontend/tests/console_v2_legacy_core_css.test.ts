@@ -51,7 +51,7 @@ describe('Console v2 reviewed v047 foundational CSS retirement', () => {
     const dialog = read('src/styles/console-v2.css');
     assert.doesNotMatch(sheet, /\{[^}]*\}/);
     assert.match(native, /\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{[^}]*background:\s*var\(--v2-paper\);/);
-    assert.match(native, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{\s*width:\s*100vw;/);
+    assert.match(native, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{[^}]*inset:\s*auto 0 0;[^}]*width:\s*100%;/);
     assert.match(dialog, /\.nfc-v2-dialog:focus-visible\s*\{[^}]*outline:/);
     const entry = read('src/styles/v047.css');
     const imports = legacy.map(name => entry.indexOf("@import './" + name + "';"));

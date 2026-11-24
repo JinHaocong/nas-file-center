@@ -60,8 +60,15 @@ function fixture(url) {
   };
   return { items: [], total: 0, safe_mode: true };
 }
+/** Audit the mounted dialog after Radix registers its pointer layer. */
 async function inspect(page, theme, width, mode) {
-  return page.evaluate(({ theme, width, mode }) => {
+  // Radix mounts visible content before its dismissable layer enables pointer hits.
+  const target = mode === 'nested' ? '.nfc-v2-confirm-dialog' : '.nfc-v2-history-dialog';
+  await page.waitForFunction(({ target, width }) => {
+    const hit = document.elementFromPoint(width / 2, innerHeight / 2);
+    return Boolean(hit?.closest(target));
+  }, { target, width }, { timeout: 5000 });
+  return page.evaluate(({ theme, width, mode, target }) => {
     const read = selector => {
       const node = document.querySelector(selector);
       if (!node) throw Error('Missing actual Radix DOM element: ' + selector);
@@ -102,10 +109,9 @@ async function inspect(page, theme, width, mode) {
       }
     }
     const element = document.elementFromPoint(width / 2, innerHeight / 2);
-    const target = mode === 'nested' ? '.nfc-v2-confirm-dialog' : '.nfc-v2-history-dialog';
     check(Boolean(element?.closest(target)), 'Top-most dialog does not receive pointer hit');
     return errors;
-  }, { theme, width, mode });
+  }, { theme, width, mode, target });
 }
 
 /**
@@ -116,10 +122,11 @@ async function inspect(page, theme, width, mode) {
  * before screenshots and keep the request fixture completely read-only.
  */
 async function auditMountedOverlaySectionOwnership(page, theme, width, phase) {
-  const result = await page.evaluate(({ theme, width, phase }) => {
+  const sectionsSelector = '.nfc-v2-sheet.nfc-task-detail-drawer .nfc-v2-task-inspector .nfc-overlay-section';
+  await page.locator(sectionsSelector).nth(3).waitFor({ state: 'attached', timeout: 5000 });
+  const result = await page.evaluate(({ theme, width, phase, sectionsSelector }) => {
     const sheet = document.querySelector('.nfc-v2-sheet.nfc-task-detail-drawer');
-    const sections = [...document.querySelectorAll(
-      '.nfc-v2-sheet.nfc-task-detail-drawer .nfc-v2-task-inspector .nfc-overlay-section')];
+    const sections = [...document.querySelectorAll(sectionsSelector)];
     if (!sheet || sections.length < 4)
       throw Error('Missing real mounted Task Inspector overlay sections: ' + sections.length);
     const samples = sections.map((section, index) => {
@@ -157,7 +164,7 @@ async function auditMountedOverlaySectionOwnership(page, theme, width, phase) {
         expected: { background, radius }, actual };
     });
     return { theme, width, phase, sections: samples };
-  }, { theme, width, phase });
+  }, { theme, width, phase, sectionsSelector });
   overlaySectionOwnerAudit.push(result);
 }
 

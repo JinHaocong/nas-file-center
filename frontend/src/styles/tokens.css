@@ -1,4 +1,4 @@
-/* Pure White v2.1 — canonical neutral workspace tokens and semantic status colors. */
+/* Shared workspace, navigation materials and interaction tokens. */
 :root {
   --nfc-accent: #252525;
   --nfc-accent-soft: #f1f1ef;
@@ -13,6 +13,23 @@
   --nfc-text-muted: #696965;
   /* 4.5:1+ WCAG AA across paper, neutral and accent-soft backgrounds. */
   --nfc-text-subtle: #6b6b66;
+
+  --nfc-tint: #2355b9;
+  --nfc-tint-fill: #245ad0;
+  --nfc-tint-hover: #1b4bb5;
+  --nfc-tint-on-fill: #ffffff;
+  --nfc-tint-soft: #ebf2ff;
+  --nfc-tint-line: #d0dfff;
+  --nfc-material-solid: #f5f8fd;
+  --nfc-material-bg: rgb(249 251 255 / .82);
+  --nfc-material-line: rgb(104 127 164 / .24);
+  --nfc-material-highlight: rgb(255 255 255 / .84);
+  --nfc-material-filter: blur(20px) saturate(145%);
+  --nfc-material-shadow: 0 12px 32px rgb(35 64 114 / .12), inset 0 1px var(--nfc-material-highlight);
+  --nfc-hero-from: #edf3ff;
+  --nfc-motion-ease: cubic-bezier(.22, .7, .28, 1);
+  --nfc-panel-radius: 18px;
+  --nfc-overlay-radius: 24px;
 
   --nfc-canvas-tint-a: rgba(32, 32, 31, 0.015);
   --nfc-canvas-tint-b: rgba(32, 32, 31, 0.008);
@@ -40,7 +57,7 @@
   --nfc-radius-shell: 12px;
   --nfc-radius-workspace: 10px;
   --nfc-radius-inner: 8px;
-  --nfc-radius-control: 8px;
+  --nfc-radius-control: 12px;
   --nfc-radius-pill: 999px;
 
   --nfc-space-1: 4px;
@@ -95,6 +112,19 @@
   /* Preserve AA on raised and accent-soft dark surfaces, not just canvas. */
   --nfc-text-subtle: #9d9d97;
 
+  --nfc-tint: #a9c4ff;
+  --nfc-tint-fill: #a9c4ff;
+  --nfc-tint-hover: #c1d4ff;
+  --nfc-tint-on-fill: #152b52;
+  --nfc-tint-soft: #263753;
+  --nfc-tint-line: #465a7c;
+  --nfc-material-solid: #252b36;
+  --nfc-material-bg: rgb(35 41 52 / .86);
+  --nfc-material-line: rgb(165 189 230 / .21);
+  --nfc-material-highlight: rgb(219 233 255 / .14);
+  --nfc-material-shadow: 0 12px 32px rgb(0 0 0 / .28), inset 0 1px var(--nfc-material-highlight);
+  --nfc-hero-from: #242a35;
+
   --nfc-canvas-tint-a: rgba(245, 245, 242, 0.018);
   --nfc-canvas-tint-b: rgba(245, 245, 242, 0.008);
 
@@ -118,5 +148,17 @@
     --nfc-overlay-surface-bg: var(--nfc-surface-raised);
     --nfc-blur-shell: 0px;
     --nfc-blur-overlay: 0px;
+  }
+
+  :root, [data-theme='dark'] {
+    --nfc-material-bg: var(--nfc-material-solid);
+    --nfc-material-filter: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root, [data-theme='dark'] {
+    --nfc-material-bg: var(--nfc-material-solid);
+    --nfc-material-filter: none;
   }
 }

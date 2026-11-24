@@ -9,8 +9,8 @@ const tokens = read('src/styles/tokens.css');
 const phase2 = read('src/styles/console-v2-phase2.css');
 const overlays = read('src/styles/console-v2-task-overlays.css');
 
-describe('Pure White v2.1 visual foundation and details', () => {
-  test('canonical light palette uses white, charcoal and neutral hairlines', () => {
+describe('Console surfaces, navigation materials and controls', () => {
+  test('content retains solid white surfaces and readable neutral text', () => {
     assert.match(tokens, /--nfc-accent:\s*#252525;/);
     assert.match(tokens, /--nfc-canvas:\s*#ffffff;/);
     assert.match(tokens, /--nfc-nav-surface:\s*#fbfbfa;/);
@@ -20,39 +20,36 @@ describe('Pure White v2.1 visual foundation and details', () => {
     assert.doesNotMatch(tokens, /#1769e0|#64a7ff|#e9f1ff/);
   });
 
-  test('dark mode is separately tuned with legible neutral foreground and active navigation', () => {
+  test('dark mode supplies a separate material and active navigation palette', () => {
     assert.match(tokens, /\[data-theme='dark'\]\s*\{[^}]*--nfc-canvas:\s*#171716;/);
     assert.match(tokens, /\[data-theme='dark'\]\s*\{[^}]*--nfc-accent:\s*#e9e9e6;/);
     assert.match(shell, /\[data-theme='dark'\] \.nfc-v2-shell\s*\{[^}]*--v2-sidebar:\s*#1e1e1c;/);
-    assert.match(shell, /\[data-theme='dark'\] \.nfc-v2-nav-item\.is-active\s*\{\s*background:\s*#343431;\s*color:\s*#f5f5f2;/);
-    assert.match(shell, /\[data-theme='dark'\] \.nfc-v2-nav-item\.is-active::before\s*\{\s*background:\s*#f5f5f2;/);
+    assert.match(tokens, /\[data-theme='dark'\]\s*\{[^}]*--nfc-material-bg:[^;]+;[^}]*--nfc-material-shadow:/);
+    assert.match(shell, /\.nfc-v2-nav-item\.is-active\s*\{[^}]*background:\s*var\(--nfc-tint-soft\);[^}]*color:\s*var\(--nfc-tint\);/);
   });
 
-  test('sidebar has a 248px white workspace, quiet active state and no gradients', () => {
-    assert.match(shell, /\.nfc-v2-shell \.nfc-v2-sidebar\s*\{[^}]*width:\s*248px;[^}]*background:\s*var\(--v2-sidebar\);/);
-    assert.match(shell, /\.nfc-v2-brand-icon\s*\{[^}]*background:\s*#262625;/);
-    assert.match(shell, /\.nfc-v2-nav-item\.is-active\s*\{[^}]*background:\s*#eeefed;[^}]*box-shadow:\s*none;/);
+  test('sidebar uses an inset navigation surface and retains current-page semantics', () => {
+    assert.match(shell, /\.nfc-v2-shell \.nfc-v2-sidebar\s*\{[^}]*position:\s*sticky;[^}]*background:\s*var\(--nfc-material-bg\);[^}]*border-radius:\s*var\(--nfc-overlay-radius\);/);
+    assert.match(shell, /\.nfc-v2-brand-icon\s*\{[^}]*background:\s*var\(--nfc-tint-fill\);/);
     assert.match(shell, /\.nfc-v2-nav-item\.is-active::before\s*\{[^}]*width:\s*2px;[^}]*height:\s*18px;/);
     assert.doesNotMatch(shell, /linear-gradient\(100deg,\s*#1c4c91/);
     const sidebar = read('src/components/Sidebar.tsx');
     assert.match(sidebar, /aria-current=\{selectedKey === item\.path \? 'page' : undefined\}/);
-    assert.ok(sidebar.includes('PRIVATE FILE WORKSPACE'));
     const productVersion = JSON.parse(read('package.json')).version as string;
     assert.ok(sidebar.includes(`className="nfc-v2-release-version">v${productVersion}</small>`));
     assert.doesNotMatch(sidebar, /SECURE FILE OPERATIONS · v[0-9]/);
   });
 
-  test('header is truly white with one-pixel divider and accessible focus', () => {
-    assert.match(shell, /\.nfc-v2-shell \.nfc-v2-header\.nfc-header\s*\{[^}]*border-bottom:\s*1px solid var\(--v2-line\) !important;[^}]*background:\s*var\(--v2-paper\) !important;/);
-    assert.match(shell, /\.nfc-v2-shell button:focus-visible,\s*\.nfc-v2-shell summary:focus-visible\s*\{\s*outline:\s*2px solid #777771;/);
-    assert.match(shell, /\[data-theme='dark'\] \.nfc-v2-shell button:focus-visible,[^}]*outline-color:\s*#e9e9e6;/);
-    assert.match(shell, /\.nfc-v2-avatar\s*\{[^}]*background:\s*#292928;/);
+  test('header uses a consistent material with a divider and visible focus', () => {
+    assert.match(shell, /\.nfc-v2-shell \.nfc-v2-header\.nfc-header\s*\{[^}]*border-bottom:\s*1px solid var\(--v2-line\) !important;[^}]*background:\s*var\(--nfc-material-bg\) !important;[^}]*backdrop-filter:\s*var\(--nfc-material-filter\);/);
+    assert.match(shell, /\.nfc-v2-shell button:focus-visible,\s*\.nfc-v2-shell summary:focus-visible\s*\{\s*outline:\s*2px solid var\(--nfc-tint\);/);
+    assert.match(shell, /\.nfc-v2-avatar\s*\{[^}]*background:\s*var\(--nfc-tint-soft\);/);
   });
 
-  test('Dashboard favors actual live data over decorative hardware artwork', () => {
-    assert.match(shell, /\.nfc-v2-dashboard-hero\s*\{[^}]*min-height:\s*0;[^}]*border:\s*0;[^}]*background:\s*transparent;/);
-    assert.match(shell, /\.nfc-v2-hero-illustration\s*\{\s*display:\s*none;/);
-    assert.match(shell, /\.nfc-v2-dashboard \.nfc-metric-card\s*\{[^}]*border-radius:\s*12px !important;[^}]*box-shadow:\s*var\(--v2-shadow\) !important;/);
+  test('Dashboard keeps live data and separates product art from text', () => {
+    assert.match(shell, /\.nfc-v2-dashboard-hero\s*\{[^}]*background:\s*var\(--nfc-hero-from\);/);
+    assert.match(shell, /\.nfc-v2-hero-illustration\s*\{[^}]*object-fit:\s*contain;/);
+    assert.match(shell, /\.nfc-v2-dashboard \.nfc-metric-card\s*\{[^}]*border-radius:\s*var\(--nfc-panel-radius\) !important;[^}]*box-shadow:\s*var\(--v2-shadow\) !important;/);
     assert.match(shell, /\.nfc-v2-data-table tbody tr:hover,\s*\.nfc-v2-data-table tbody tr:focus-within\s*\{\s*background:\s*var\(--v2-indigo-soft\);/);
     const dashboard = read('src/pages/Dashboard/index.tsx');
     assert.ok(dashboard.includes('dashboardApi'));
@@ -62,27 +59,27 @@ describe('Pure White v2.1 visual foundation and details', () => {
     assert.ok(dashboard.includes('<DataPanel'));
   });
 
-  test('primary controls use charcoal while dangerous actions keep red semantics', () => {
-    assert.match(phase2, /\.nfc-v2-shell \.nfc-console-button-primary\s*\{[^}]*background:\s*#262625;[^}]*border-color:\s*#262625;/);
-    assert.match(phase2, /\[data-theme='dark'\] \.nfc-v2-shell \.nfc-console-button-primary\s*\{[^}]*background:\s*#e9e9e6;[^}]*color:\s*#20201f;/);
+  test('primary controls share the theme tint while dangerous actions keep red semantics', () => {
+    assert.match(phase2, /\.nfc-v2-shell \.nfc-console-button-primary\s*\{[^}]*color:\s*var\(--nfc-tint-on-fill\);[^}]*background:\s*var\(--nfc-tint-fill\);[^}]*border-color:\s*var\(--nfc-tint-fill\);/);
+    assert.match(overlays, /\.nfc-v2-history-dialog \.nfc-console-button-primary\s*\{[^}]*color:\s*var\(--nfc-tint-on-fill\);[^}]*background:\s*var\(--nfc-tint-fill\);/);
     assert.ok(phase2.includes('.nfc-v2-shell .nfc-console-button-danger'));
-    assert.doesNotMatch(phase2, /#2878ef|#236bda/);
+    assert.match(overlays, /\.nfc-v2-history-dialog \.nfc-console-button-danger\s*\{[^}]*background:\s*#b9344f;/);
   });
 
   test('native portal dialogs and sheets match the shell in both themes', () => {
     assert.match(tokens, /--v2-paper:\s*var\(--nfc-surface-1\);/);
     assert.match(overlays, /\.nfc-v2-sheet, \.nfc-v2-confirm-dialog, \.nfc-v2-history-dialog\s*\{[^}]*--v2-indigo:\s*#252525;/);
     assert.match(overlays, /\[data-theme='dark'\] \.nfc-v2-sheet,[\s\S]*?\.nfc-v2-history-dialog\s*\{[^}]*--v2-indigo:\s*#e9e9e6;/);
-    assert.match(shell, /\.nfc-v2-dialog:focus-visible\s*\{\s*outline:\s*3px solid #858580;/);
-    assert.match(shell, /\.nfc-v2-dialog \.nfc-console-button-primary\s*\{[^}]*background:\s*var\(--v2-indigo, #262625\);/);
+    assert.match(shell, /\.nfc-v2-dialog:focus-visible\s*\{\s*outline:\s*3px solid var\(--nfc-tint\);/);
+    assert.match(shell, /\.nfc-v2-dialog \.nfc-console-button-primary\s*\{[^}]*background:\s*var\(--nfc-tint-fill\);/);
     assert.doesNotMatch(overlays, /#2878ef|#2875e9/);
   });
 
-  test('mobile drawer and dock are white instead of deep-blue', () => {
-    assert.match(shell, /\.nfc-v2-mobile-nav-dialog\s*\{[^}]*background:\s*var\(--v2-sidebar\);/);
-    assert.match(shell, /\.nfc-v2-mobile-nav-close\s*\{[^}]*background:\s*var\(--v2-indigo-soft\);/);
-    assert.match(shell, /\.nfc-v2-mobile-dock \.nfc-mobile-dock-surface\s*\{[^}]*background:\s*var\(--v2-paper\) !important;/);
-    assert.match(shell, /\.nfc-v2-mobile-dock \.nfc-mobile-dock-item\.is-active\s*\{[^}]*background:\s*var\(--v2-indigo-soft\);/);
+  test('mobile menu uses solid paper above the floating dock', () => {
+    assert.match(shell, /\.nfc-v2-mobile-nav-dialog\s*\{[^}]*background:\s*var\(--v2-paper\);/);
+    assert.match(shell, /\.nfc-v2-mobile-nav-close\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px;/);
+    assert.match(shell, /\.nfc-v2-mobile-dock \.nfc-mobile-dock-surface\s*\{[^}]*background:\s*var\(--nfc-material-bg\) !important;/);
+    assert.match(shell, /\.nfc-mobile-dock-surface::before\s*\{[^}]*pointer-events:\s*none;/);
     assert.doesNotMatch(shell, /#121f31|#293e59/);
   });
 

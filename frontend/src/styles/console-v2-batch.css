@@ -140,7 +140,108 @@
   max-width:350px;overflow-wrap:anywhere;white-space:normal;
   font-size:12px;color:var(--nfc-batch-text);
 }
+.nfc-v2-batch-organizer-focus-region {
+  min-width: 0;
+  scroll-margin-block-start: 12px;
+  border-radius: var(--nfc-panel-radius, 18px);
+}
+.nfc-v2-batch-organizer-focus-region:focus-visible {
+  outline: 2px solid var(--nfc-tint, var(--nfc-batch-accent));
+  outline-offset: 3px;
+}
 @media (max-width:767px) {
   .nfc-v2-batch-media-filter { padding:10px 12px; }
   .nfc-v2-batch-media-conflict-notice { margin:10px 12px; }
+
+  .nfc-v2-batch-organizer-records {
+    min-width: 0;
+    margin: 12px;
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--nfc-batch-line);
+    border-radius: var(--nfc-panel-radius, 18px);
+    background: var(--nfc-batch-paper);
+    color: var(--nfc-batch-text);
+  }
+
+  .nfc-v2-batch-organizer-records > li {
+    display: grid;
+    min-width: 0;
+    gap: 10px;
+    padding: 14px;
+    overflow-wrap: anywhere;
+  }
+
+  .nfc-v2-batch-organizer-records > li + li {
+    border-block-start: 1px solid var(--nfc-batch-line);
+  }
+
+  .nfc-v2-batch-organizer-record-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .nfc-v2-batch-organizer-record-heading,
+  .nfc-v2-batch-organizer-facts,
+  .nfc-v2-batch-organizer-paths dt {
+    color: var(--nfc-batch-muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .nfc-v2-batch-organizer-facts,
+  .nfc-v2-batch-organizer-paths,
+  .nfc-v2-batch-organizer-records .nfc-v2-batch-organizer-unit-detail,
+  .nfc-v2-batch-organizer-unit-detail > :is(div, .nfc-v2-batch-error) {
+    display: grid;
+    gap: 8px;
+  }
+
+  .nfc-v2-batch-organizer-kind {
+    padding: 4px 8px;
+    border-radius: var(--nfc-radius-control, 12px);
+    background: var(--nfc-tint-soft, var(--nfc-batch-soft));
+    color: var(--nfc-batch-text);
+  }
+
+  .nfc-v2-batch-organizer-paths,
+  .nfc-v2-batch-organizer-records p { margin: 0; }
+
+  .nfc-v2-batch-organizer-paths dd { margin: 4px 0 0; }
+
+  .nfc-v2-batch-organizer-records .nfc-v2-code-path {
+    --nfc-path-paper: var(--nfc-batch-soft);
+    --nfc-path-border: var(--nfc-batch-line);
+    --nfc-path-text: var(--nfc-batch-text);
+    --nfc-path-accent: var(--nfc-tint, var(--nfc-batch-accent));
+    width: 100%;
+    align-items: flex-start;
+    font-size: 12px;
+  }
+
+  .nfc-v2-batch-organizer-records .nfc-v2-code-path .nfc-v2-code-path-value {
+    flex: 1 1 auto;
+    padding: 10px;
+    border-radius: var(--nfc-radius-control, 12px);
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: pre-wrap;
+  }
+
+  .nfc-v2-batch-organizer-records .nfc-v2-batch-organizer-unit-detail > button {
+    justify-self: start;
+  }
+
+  .nfc-v2-batch-organizer-report :is(.nfc-console-button, .nfc-v2-code-path-copy, .nfc-console-pagination button, select) {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .nfc-v2-batch-organizer-report :is(button, select):focus-visible {
+    outline: 2px solid var(--nfc-tint, var(--nfc-batch-accent));
+    outline-offset: 2px;
+  }
 }

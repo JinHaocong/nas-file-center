@@ -121,11 +121,21 @@ async function assertBounds(page, theme, width, mode) {
           'operator-review-required')), 'Full expanded diagnostic unavailable');
       }
       check(Number(getComputedStyle(overlay).zIndex) === 1100, 'Sheet overlay z-index');
-      check(Number(getComputedStyle(sheet).zIndex) === 1101, 'Sheet content z-index');
+      const sheetStyle = getComputedStyle(sheet);
+      check(Number(sheetStyle.zIndex) === 1101, 'Sheet content z-index');
       check(getComputedStyle(overlay).backdropFilter === 'none', 'Unexpected sheet blur');
+      check(sheetStyle.borderTopLeftRadius === sheetStyle.getPropertyValue('--nfc-overlay-radius').trim(),
+        'Sheet should use the shared overlay corner radius');
       const r = sheet?.getBoundingClientRect();
       check(Boolean(r && r.top >= -2 && r.bottom <= innerHeight + 2),
         'Sheet vertical bounds');
+      if (width < 768) {
+        const close = sheet?.querySelector('.nfc-v2-dialog-close');
+        check(Boolean(r && r.top >= 12 && r.bottom >= innerHeight - 2), 'Mobile sheet should sit at the bottom');
+        check(Boolean(close && close.offsetWidth >= 44 && close.offsetHeight >= 44), 'Sheet close button touch target');
+      } else {
+        check(Boolean(r && r.top >= 8 && r.right <= width - 2), 'Desktop sheet should be inset');
+      }
     }
     if (mode === 'pagination') {
       const nav = document.querySelector('.nfc-console-pagination');

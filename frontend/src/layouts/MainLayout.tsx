@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Header } from '../components/Header';
@@ -12,6 +12,7 @@ export const MainLayout: React.FC = () => {
   const { isMobile } = useResponsive();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const closeMobileNavigation = useCallback(() => setMobileNavOpen(false), []);
 
   if (loading) {
     return (
@@ -29,7 +30,7 @@ export const MainLayout: React.FC = () => {
       <ResponsiveNav
         isMobile={isMobile}
         mobileOpen={mobileNavOpen}
-        onMobileClose={() => setMobileNavOpen(false)}
+        onMobileClose={closeMobileNavigation}
         collapsed={collapsed}
         onCollapse={setCollapsed}
       />
@@ -38,12 +39,13 @@ export const MainLayout: React.FC = () => {
           collapsed={collapsed}
           onToggle={() => setCollapsed(!collapsed)}
           isMobile={isMobile}
+          navigationOpen={mobileNavOpen}
           onOpenNavigation={() => setMobileNavOpen(true)}
         />
         <main className="nfc-page-content nfc-v2-page-content" id="main-content" tabIndex={-1}>
           <Outlet />
         </main>
-        {isMobile && <MobileDock onMore={() => setMobileNavOpen(true)} />}
+        {isMobile && <MobileDock moreOpen={mobileNavOpen} onMore={() => setMobileNavOpen(true)} />}
       </div>
     </div>
   );

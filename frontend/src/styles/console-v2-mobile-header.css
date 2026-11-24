@@ -102,26 +102,33 @@
 .nfc-v2-mobile-theme-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid var(--v2-sidebar-line);
+  border-radius: var(--nfc-radius-control);
+  background: var(--v2-sidebar-surface);
 }
 .nfc-v2-mobile-theme-options > button {
   min-width: 0;
   min-height: 44px;
   padding: 8px 2px;
-  border: 1px solid var(--v2-sidebar-line);
+  border: 1px solid transparent;
   border-radius: 9px;
-  background: var(--v2-sidebar-surface);
-  color: var(--v2-text);
+  background: transparent;
+  color: var(--v2-muted);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  transition: background var(--nfc-motion-fast) var(--nfc-motion-ease),
+    color var(--nfc-motion-fast) var(--nfc-motion-ease);
 }
 .nfc-v2-mobile-theme-options > button.is-selected {
-  background: var(--v2-indigo-soft);
-  border-color: var(--v2-text);
+  background: var(--v2-paper);
+  border-color: var(--nfc-tint-line);
+  color: var(--nfc-tint);
   font-weight: 750;
 }
 .nfc-v2-mobile-theme-options > button:focus-visible {
-  outline: 3px solid var(--v2-text);
+  outline: 2px solid var(--nfc-tint);
   outline-offset: 2px;
 }

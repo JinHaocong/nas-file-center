@@ -6,12 +6,14 @@ import { tasksApi } from '../../api/tasks';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { MetricCard } from '../../components/ui/MetricCard';
 import { DataPanel } from '../../components/ui/DataPanel';
+import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import type { ConsoleIconName } from '../../components/ui/ConsoleIcon';
 import { useResponsive } from '../../hooks/useResponsive';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
+import storageUnit from '../../assets/storage-unit.webp';
 
 interface QuickAction {
   title: string;
@@ -69,34 +71,23 @@ export const DashboardPage: React.FC = () => {
     <div className="nfc-dashboard nfc-dashboard-page nfc-operations-page nfc-page-layout-dashboard nfc-v2-dashboard">
       <section className="nfc-v2-dashboard-hero" aria-label="NAS File Center 工作台">
         <div className="nfc-v2-hero-copy">
-          <div className="nfc-v2-hero-eyebrow">
-            <span className="nfc-v2-hero-dot" /> FILE OPERATIONS CONTROL CENTER
-          </div>
           <PageHeader
             title="NAS File Center"
-            description="安全、透明地管理大规模 NAS 文件。先预览、再确认，每一步都可追溯。"
+            description="管理文件索引、去重扫描和媒体整理"
             actions={
-              <button type="button" className="nfc-v2-secondary-button"
-                onClick={() => refetchSummary()} disabled={summaryLoading}>
-                <ConsoleIcon name="refresh" size={16} /> 刷新数据
-              </button>
+              <>
+                <ConsoleButton variant="primary" onClick={() => navigate('/batch?operation=media-organize')}>
+                  <ConsoleIcon name="folders" size={17} /> 智能媒体整理
+                </ConsoleButton>
+                <ConsoleButton onClick={() => refetchSummary()} disabled={summaryLoading}>
+                  <ConsoleIcon name="refresh" size={16} /> 刷新数据
+                </ConsoleButton>
+              </>
             }
           />
-          <div className="nfc-v2-hero-caption">
-            <ConsoleIcon name="shield-check" size={16} />
-            所有文件变更均通过执行计划校验与安全执行
-          </div>
         </div>
-        <div className="nfc-v2-hero-illustration" aria-hidden="true">
-          <div className="nfc-v2-device">
-            {[0, 1, 2, 3].map(index => (
-              <div className="nfc-v2-device-bay" key={index}>
-                <span /><i /><i />
-              </div>
-            ))}
-          </div>
-          <div className="nfc-v2-device-shadow" />
-        </div>
+        <img className="nfc-v2-hero-illustration" src={storageUnit} alt="" width={720} height={720}
+          decoding="async" />
       </section>
 
       {summaryError && <div className="nfc-v2-error-note" role="alert">

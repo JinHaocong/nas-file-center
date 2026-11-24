@@ -81,6 +81,10 @@ test('canonical shared token palette matches shell and portal contrast in both t
       '--nfc-accent-soft'];
     requireAA(mode + ' canonical shared text', subtle,
       surfaceNames.map(name => [name, token(values, name)]));
+    requireAA(mode + ' selected navigation and focus tint', token(values, '--nfc-tint'),
+      ['--nfc-tint-soft', '--nfc-material-solid', '--nfc-surface-1'].map(name => [name, token(values, name)]));
+    requireAA(mode + ' primary action label', token(values, '--nfc-tint-on-fill'),
+      ['--nfc-tint-fill', '--nfc-tint-hover'].map(name => [name, token(values, name)]));
   }
   assert.match(canonical, /--v2-subtle:\s*var\(--nfc-text-subtle\)/,
     'compatibility alias must inherit the canonical accessible value');

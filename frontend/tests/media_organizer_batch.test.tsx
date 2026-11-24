@@ -63,7 +63,8 @@ test.beforeEach(() => {
 test.afterEach(() => { Reflect.deleteProperty(globalThis, 'document'); });
 
 /** Render a real route with a fresh query client. */
-async function openBatch(location: string, page = <BatchPage />) {
+async function openBatch(location: string, page = <BatchPage />,
+  createNodeMock?: (element: React.ReactElement) => unknown) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   let view!: ReactTestRenderer;
   await act(async () => {
@@ -71,7 +72,7 @@ async function openBatch(location: string, page = <BatchPage />) {
       <QueryClientProvider client={client}>
         <ConsoleToastProvider>{page}</ConsoleToastProvider>
       </QueryClientProvider>
-    </MemoryRouter>);
+    </MemoryRouter>, { createNodeMock });
     await settle();
   });
   return { view, dispose: () => { view.unmount(); client.clear(); } };
@@ -166,6 +167,78 @@ test('preview filtering and complete source-to-target mapping request the right 
   assert.match(JSON.stringify(view.toJSON()), /last.jpg/);
   assert.ok(requests.some(url => url.endsWith('/mappings/preview-mapping?page=2&page_size=50')));
 });
+
+for (const width of [767, 768]) {
+  test(`organizer reports use one readable layout with working details at ${width}px`, async t => {
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { innerWidth: width, setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {} },
+    });
+    let disposeView: (() => void) | undefined;
+    t.after(async () => {
+      await act(async () => { disposeView?.(); });
+      Reflect.deleteProperty(globalThis, 'window');
+    });
+
+    const skippedUnit = {
+      ...readyUnit, unit: selection + '/skipped', status: 'skipped',
+      mapping_id: null, reason: '当前目录没有待整理文件',
+    };
+    const source = selection + '/ready/' + '相册'.repeat(40) + '.jpg';
+    const target = selection + '/ready/001.jpg';
+    t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+      assert.equal(options.method, 'GET');
+      if (url.includes('/mappings/')) return Response.json({
+        page: 1, page_size: 50, total_moves: 1, moves: [{ source, target, kind: 'P', bytes: 20 }],
+      });
+      if (url.includes('/batches/')) return Response.json({
+        ...report,
+        items: [...report.items, { unit: skippedUnit.unit, status: 'skipped', reason: '执行时跳过该目录' }],
+      });
+      return Response.json({ ...preview, units: [...preview.units, skippedUnit] });
+    });
+
+    let focusedMapping = false;
+    const { view, dispose } = await openBatch(`/batch?operation=media-organize&preview=${previewId}&batch=${batchId}`,
+      <BatchPage />, element => element.props['aria-label'] === '完整源 → 目标映射' ? {
+        focus() { focusedMapping = true; },
+      } : null);
+    disposeView = dispose;
+    await waitForRenderedText(view, '整理预览');
+    await waitForRenderedText(view, '整理结果');
+    const openMapping = view.root.findAllByType('button').find(button =>
+      button.findAllByType('span').some(span => span.children.join('').includes('查看完整映射')));
+    assert.ok(openMapping);
+    let returnedFocus = false;
+    const opener = { focus() { returnedFocus = true; } };
+    await act(async () => { openMapping.props.onClick({ currentTarget: opener }); });
+    await waitForRenderedText(view, source);
+    assert.equal(focusedMapping, true, 'opening the mapping must bring keyboard focus into the report');
+
+    const captions = ['逐目录整理预览', '各整理单元结果', '媒体文件位置调整明细'];
+    if (width < 768) {
+      assert.equal(view.root.findAllByType('table').length, 0);
+      for (const caption of captions) {
+        const list = view.root.findByProps({ role: 'list', 'aria-label': caption });
+        assert.ok(list.findAllByType('li').length > 0);
+      }
+      await waitForRenderedText(view, '当前目录没有待整理文件');
+    } else {
+      assert.deepEqual(view.root.findAllByType('caption').map(caption => caption.children.join('')).sort(),
+        captions.sort());
+    }
+    assert.ok(view.root.findAllByType('code').some(code => code.props.title === source));
+    assert.ok(view.root.findAllByType('code').some(code => code.props.title === target));
+    await waitForRenderedText(view, '目标路径已存在');
+    await waitForRenderedText(view, '执行时跳过该目录');
+    const closeMapping = view.root.findAllByType('button').find(button =>
+      button.findAllByType('span').some(span => span.children.join('') === '关闭'));
+    assert.ok(closeMapping);
+    act(() => closeMapping.props.onClick());
+    assert.equal(returnedFocus, true);
+    assert.equal(view.root.findAllByProps({ 'aria-label': '列表分页' }).length, 2);
+  });
+}
 
 
 test('a legacy execution URL opens directory selection without a historical execution request', async t => {

@@ -65,7 +65,7 @@ describe('v0.4.4 UI audit polish', () => {
     assert.doesNotMatch(utility, /style=\{\{/);
     assert.doesNotMatch(nav, /styles=\{\{/);
     const native = read('src/styles/console-v2-task-overlays.css');
-    assert.match(native, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{\s*width:\s*100vw;/);
+    assert.match(native, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{[^}]*inset:\s*auto 0 0;[^}]*width:\s*100%;/);
     assert.doesNotMatch(css, /\.(?:ant-[a-z][\w-]*|anticon\b)/);
   });
 

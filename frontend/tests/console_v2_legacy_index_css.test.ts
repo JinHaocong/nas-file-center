@@ -109,7 +109,7 @@ describe('Console v2 reviewed historical index.css retirement', () => {
     assert.match(shell, /\.nfc-v2-shell button:focus-visible/);
     assert.match(shell, /\.nfc-v2-dialog-form input:focus-visible/);
     assert.match(sheet, /\.nfc-v2-sheet\.nfc-overlay-drawer/);
-    assert.match(sheet, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{\s*width:\s*100vw;/);
+    assert.match(sheet, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{[^}]*inset:\s*auto 0 0;[^}]*width:\s*100%;/);
   });
 
   test('older visual regressions now verify real native controls rather than AntD DOM', () => {

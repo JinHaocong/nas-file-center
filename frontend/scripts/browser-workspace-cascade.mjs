@@ -743,15 +743,19 @@ async function auditProviderMetricTheme(page, item, width, theme, motion = 'redu
 }
 
 
-// Decorative dashboard gradients must remain isolated from readable hero
-// copy. Refuse any actual gradient/background image behind those text roles;
-// then compare computed ink over alpha-composited real ancestor solid paint.
+// Verify that the product image sits beside the readable copy and that the
+// hero text has AA contrast on its actual solid surface in both themes.
 async function auditDashboardHeroPaint(page, width, theme) {
-  const result = await page.evaluate(() => {
+  const result = await page.evaluate(async () => {
     const illustration = document.querySelector('.nfc-v2-hero-illustration');
-    if (!illustration || getComputedStyle(illustration).display !== 'none' ||
-        illustration.getClientRects().length !== 0)
-      throw Error('Decorative hero gradient must not overlap readable text');
+    const copy = document.querySelector('.nfc-v2-hero-copy');
+    if (!illustration || !copy) throw Error('Missing Dashboard hero copy or image');
+    const illustrationVisible = getComputedStyle(illustration).display !== 'none';
+    if (illustrationVisible) {
+      await illustration.decode();
+      if (illustration.getBoundingClientRect().left < copy.getBoundingClientRect().right - 1)
+        throw Error('Dashboard artwork overlaps the readable copy');
+    }
     const parse = value => {
       const rgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d*\.?\d+)(?:\s*,\s*(\d*\.?\d+))?\s*\)$/.exec(value);
       const srgb = /^color\(srgb\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?\s*\)$/.exec(value);
@@ -766,10 +770,8 @@ async function auditDashboardHeroPaint(page, width, theme) {
     };
     const rgb = x => 'rgb(' + x.map(Math.round).join(', ') + ')';
     const pairs = [
-      ['eyebrow', '.nfc-v2-dashboard-hero .nfc-v2-hero-eyebrow'],
       ['heading', '.nfc-v2-dashboard-hero .nfc-page-title'],
       ['description', '.nfc-v2-dashboard-hero .nfc-page-description'],
-      ['caption', '.nfc-v2-dashboard-hero .nfc-v2-hero-caption'],
     ].map(([name, selector]) => {
       const element = document.querySelector(selector);
       if (!element || !element.textContent?.trim() ||
@@ -798,8 +800,9 @@ async function auditDashboardHeroPaint(page, width, theme) {
           v * (1 - layer.alpha));
       return { name, foreground: rgb(ink.channels), background: rgb(surface) };
     });
-    return { gradientIllustrationHidden: true, pairs };
+    return { illustrationVisible, pairs };
   });
+  assert.equal(result.illustrationVisible, width >= 768, 'Dashboard artwork visibility must follow viewport');
   for (const pair of result.pairs) {
     const contrast = computedContrastRatio(pair.foreground, pair.background);
     pair.contrast = Number(contrast.toFixed(3));
@@ -813,11 +816,8 @@ async function auditDashboardHeroPaint(page, width, theme) {
   });
 }
 
-// Stage 70: sample the ACTUAL mounted native Header, not legacy CSS source
-// text. v049 contains historical !important borders/glass background and
-// v056 later tries ordinary rules; only the higher-specificity Console v2
-// owner can decide the final paint on the modern app shell. Fail closed if
-// any theme/viewport/route falls back to that historical floating header.
+// Validate the mounted Header after the full stylesheet cascade. The current
+// material is theme-aware and keeps the sticky rail's bottom-only separator.
 async function auditNativeHeaderOwnership(page, item, width, theme) {
   const measured = await page.evaluate(() => {
     const header = document.querySelector(
@@ -836,15 +836,17 @@ async function auditNativeHeaderOwnership(page, item, width, theme) {
       radius: style.borderTopLeftRadius,
       shadow: style.boxShadow,
       backdrop: style.backdropFilter,
+      solid: matchMedia('(prefers-reduced-transparency: reduce)').matches ||
+        !CSS.supports('backdrop-filter: blur(1px)'),
     };
   });
   const label = item.id + '/' + width + '/' + theme.mode + '-' + theme.system;
   assert.equal(measured.effective, theme.effective, label + ': wrong theme');
   const expected = theme.effective === 'dark'
-    ? { background: 'rgb(36, 36, 34)', bottomColor: 'rgb(56, 56, 52)' }
-    : { background: 'rgb(255, 255, 255)', bottomColor: 'rgb(234, 234, 231)' };
+    ? { background: measured.solid ? 'rgb(37, 43, 54)' : 'rgba(35, 41, 52, 0.86)', bottomColor: 'rgb(56, 56, 52)' }
+    : { background: measured.solid ? 'rgb(245, 248, 253)' : 'rgba(249, 251, 255, 0.82)', bottomColor: 'rgb(234, 234, 231)' };
   assert.equal(measured.background, expected.background,
-    label + ': native paper background lost to historic !important glass');
+    label + ': native navigation material lost in the cascade');
   assert.equal(measured.bottomColor, expected.bottomColor,
     label + ': native semantic hairline lost to historic border');
   assert.deepEqual([measured.top, measured.right, measured.bottom, measured.left],
@@ -852,7 +854,8 @@ async function auditNativeHeaderOwnership(page, item, width, theme) {
     label + ': native bottom-only separator lost to historic floating border');
   assert.equal(measured.radius, '0px', label + ': historical floating corner returned');
   assert.equal(measured.shadow, 'none', label + ': historical floating shadow returned');
-  assert.equal(measured.backdrop, 'none', label + ': historical glass blur returned');
+  assert.equal(measured.backdrop, measured.solid ? 'none' : 'blur(20px) saturate(1.45)',
+    label + ': wrong navigation material filter');
   nativeHeaderOwnerAudit.push({
     route: item.path, width, mode: theme.mode, system: theme.system,
     ...measured, expectedOwner: 'console-v2.css/native-header',
@@ -1267,7 +1270,7 @@ try {
       scope: 'computed-mounted-header-only; historical-important-barriers-source-guarded',
     }, null, 2));
   console.log('[NATIVE HEADER CASCADE] ' + nativeHeaderOwnerAudit.length +
-    ' mounted six-route/header cases; bottom-only border, native paper and no historic glass.');
+    ' mounted header cases; bottom separator and theme-aware navigation material.');
 
   assert.equal(nativePanelHeaderOwnerAudit.length,
     WIDTHS.length * THEMES.length * PAGES.length,
@@ -1292,17 +1295,17 @@ try {
     ' route/theme/width cases; actual transparent headers and bottom hairlines.');
 
   assert.equal(dashboardHeroPaintAudit.length, WIDTHS.length * THEMES.length,
-    'Dashboard hero gradients must stay hidden and text must pass every viewport/theme');
+    'Dashboard artwork and title contrast must pass every viewport/theme');
   assert.ok(dashboardHeroPaintAudit.every(c =>
-    c.gradientIllustrationHidden && c.pairs.length === 4 &&
+    c.illustrationVisible === (c.width >= 768) && c.pairs.length === 2 &&
     c.pairs.every(p => p.contrast >= 4.5)),
-  'Hero eyebrow/title/description/caption must have opaque-painted AA contrast');
+  'Hero title and description must have opaque-painted AA contrast');
   writeFileSync(resolve(OUT, 'dashboard-hero-gradient-isolation-audit.json'),
     JSON.stringify({ cases: dashboardHeroPaintAudit, total: dashboardHeroPaintAudit.length,
-      paintedTextPairs: dashboardHeroPaintAudit.length * 4,
-      audited: 'rendered-Dashboard-hero-solid-composited-paint-hidden-decorative-gradient' }, null, 2));
-  console.log('[WORKSPACE HERO GRADIENT ISOLATION] 32/32 visible hero cases; ' +
-    '128/128 computed opaque-painted hero text pairs >= 4.5:1; decorative gradient hidden.');
+      paintedTextPairs: dashboardHeroPaintAudit.length * 2,
+      audited: 'rendered Dashboard hero contrast and separated product image' }, null, 2));
+  console.log('[WORKSPACE HERO PAINT] 32/32 visible hero cases; ' +
+    '64/64 text pairs >= 4.5:1 and responsive artwork without copy overlap.');
   assert.equal(w2ThemeAudit.length, WIDTHS.length * THEMES.length * PAGES.length,
     'All six real rendered routes must audit computed w2 palette at every width/theme');
   assert.ok(w2ThemeAudit.every(item => item.compared === 12 && item.minimumContrast >= 4.5),

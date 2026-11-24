@@ -13,11 +13,11 @@ describe('v0.4.4 deep UI detail and mobile system', () => {
     assert.match(css, /\.nfc-sidebar-menu\s*\{[^}]*overflow-y:\s*auto/s);
   });
 
-  test('native overlays retain a mobile full-screen sheet and bounded dialog', () => {
+  test('native overlays retain a full-width mobile bottom sheet and bounded dialog', () => {
     const sheets = read('src/styles/console-v2-task-overlays.css');
     const dialogs = read('src/styles/console-v2.css');
     assert.match(sheets, /\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{/);
-    assert.match(sheets, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{\s*width:\s*100vw;/);
+    assert.match(sheets, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{[^}]*inset:\s*auto 0 0;[^}]*width:\s*100%;/);
     assert.match(dialogs, /\.nfc-v2-dialog\s*\{[^}]*width:\s*min\(440px, calc\(100vw - 28px\)\)/);
     assert.match(dialogs, /\.nfc-v2-dialog:focus-visible\s*\{[^}]*outline:/);
   });

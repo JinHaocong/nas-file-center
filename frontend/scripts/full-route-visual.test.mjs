@@ -219,7 +219,6 @@ test('tablet Dashboard column header cancels the inherited historical 620px flex
   const css = readFileSync('src/styles/console-v2.css', 'utf8');
   const legacy = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');
   assert.match(legacy, /\.nfc-app-main \.nfc-page-header-copy\s*\{\s*flex:\s*1 1 620px/);
-  assert.match(css, /@media \(min-width: 768px\) and \(max-width: 1199px\)/);
   assert.match(css, /\.nfc-v2-shell \.nfc-v2-dashboard-hero \.nfc-page-header-copy\s*\{\s*flex:\s*0 1 auto/);
   for (const phrase of [
     "if (item.id === 'dashboard')", 'const style = getComputedStyle(copy)',

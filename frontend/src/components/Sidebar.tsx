@@ -40,7 +40,6 @@ export const Sidebar: React.FC<Props> = ({
         {!compact && (
           <span className="nfc-v2-brand-copy">
             <strong>NAS File Center</strong>
-            <span>PRIVATE FILE WORKSPACE</span>
           </span>
         )}
       </button>
@@ -85,9 +84,8 @@ export const Sidebar: React.FC<Props> = ({
         </div>
       )}
       <div className="nfc-v2-sidebar-footer">
-        <span className="nfc-v2-sidebar-footer-icon"><ConsoleIcon name="shield-check" size={17} /></span>
         {!compact && (
-          <span><strong>安全操作优先</strong><small>Preview → Plan → Execute</small><small className="nfc-v2-release-version">v1.7.11</small></span>
+          <small className="nfc-v2-release-version">v1.7.11</small>
         )}
       </div>
       {!embedded && (

@@ -184,7 +184,7 @@ test('real Chromium matrix pins native header computed winner over legacy import
   }
   const native = read('src/styles/console-v2.css');
   assert.match(native,
-    /\.nfc-v2-shell \.nfc-v2-header\.nfc-header\s*\{[^}]*border: 0 !important;[^}]*border-bottom: 1px solid var\(--v2-line\) !important;[^}]*background: var\(--v2-paper\) !important;/,
+    /\.nfc-v2-shell \.nfc-v2-header\.nfc-header\s*\{[^}]*border: 0 !important;[^}]*border-bottom: 1px solid var\(--v2-line\) !important;[^}]*background: var\(--nfc-material-bg\) !important;/,
     'Native shell must keep a higher-specificity important header owner');
   const ci = read('../.github/workflows/ui-v044-validation.yml');
   assert.ok(ci.includes('node scripts/browser-workspace-cascade.mjs'),

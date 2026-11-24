@@ -12,11 +12,12 @@ interface Props {
   collapsed: boolean;
   onToggle: () => void;
   isMobile?: boolean;
+  navigationOpen?: boolean;
   onOpenNavigation?: () => void;
 }
 
 export const Header: React.FC<Props> = ({
-  collapsed, onToggle, isMobile = false, onOpenNavigation,
+  collapsed, onToggle, isMobile = false, navigationOpen = false, onOpenNavigation,
 }) => {
   const { user, logout } = useAuth();
   const { mode, setMode } = useTheme();
@@ -30,6 +31,8 @@ export const Header: React.FC<Props> = ({
         <div className="nfc-header-left nfc-v2-header-left">
           <button type="button" className="nfc-v2-icon-button nfc-header-nav-toggle"
             onClick={toggleNav}
+            aria-haspopup={isMobile ? 'dialog' : undefined}
+            aria-expanded={isMobile ? navigationOpen : !collapsed}
             aria-label={isMobile ? '打开导航菜单' : collapsed ? '展开侧边导航' : '收起侧边导航'}>
             <ConsoleIcon name="menu" size={20} />
           </button>

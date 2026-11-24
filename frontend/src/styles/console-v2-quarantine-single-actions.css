@@ -1,8 +1,6 @@
-/* Console v2 / Gate 6A-2 single-item quarantine confirmations.
-/* Single-item Restore/Purge Portal uses the shared confirm scrim (1300).
-   Keep content above it; the default dialog layer (1101) was underneath. */
+/* Single-item Restore/Purge uses the shared confirm scrim (1300).
+   Radix mounts this dialog outside the shell. Keep the content above the scrim. */
 .nfc-v2-quarantine-dialog.nfc-v2-dialog[data-state='open'] { z-index:1301; }
-   The Radix portal is outside .nfc-v2-shell: each selector is dialog-owned. */
 .nfc-v2-quarantine-dialog {
   --nfc-q-paper:var(--nfc-surface-1,#fff);
   --nfc-q-soft:var(--nfc-surface-2,#f5f5f3);

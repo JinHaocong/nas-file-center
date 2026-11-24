@@ -87,7 +87,7 @@ describe('v0.4.0 C6B overlay consistency contract', () => {
     const dialogs = read('src/styles/console-v2.css');
     const legacy = read('src/index.css');
     assert.match(sheets, /\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{/);
-    assert.match(sheets, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{\s*width:\s*100vw;/);
+    assert.match(sheets, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{[^}]*inset:\s*auto 0 0;[^}]*width:\s*100%;/);
     assert.match(dialogs, /\.nfc-v2-dialog-overlay\s*\{/);
     assert.match(dialogs, /\.nfc-v2-dialog\s*\{[^}]*width:\s*min\(440px/);
     assert.ok(legacy.includes('.nfc-overlay-modal'));

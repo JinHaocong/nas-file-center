@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { TaskProgress } from '../../components/tasks/TaskProgress';
@@ -7,6 +7,7 @@ import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { DataPanel } from '../../components/ui/DataPanel';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 
 import { getStructuredApiError } from '../../api/errors';
@@ -17,7 +18,7 @@ import {
 
 import { formatBytes } from '../../utils/format';
 
-const panelClass = 'nfc-v2-batch-media-panel';
+const panelClass = 'nfc-v2-batch-media-panel nfc-v2-batch-organizer-report';
 const previewLabels = {
   ready: '待整理', blocked: '冲突', skipped: '无需处理', already_organized: '已整理',
   needs_assignment: '待确认归属',
@@ -35,11 +36,51 @@ const outcomes = {
   failed: { label: '失败', tone: 'failed' },
 } satisfies Record<MediaBatchOutcome, { label: string; tone: string }>;
 const resultStatuses: readonly MediaBatchOutcome[] = ['success', 'skipped', 'conflict', 'failed'];
+const mappingKindLabels = { P: '图片', V: '视频', Other: '其他' };
+
+type OpenUnitDetails = (row: MediaBatchPreviewUnit, opener: HTMLButtonElement) => void;
+
+/** Render each unit's destinations, reasons and detail actions in either layout. */
+function PreviewUnitDetails({ row, onDetails }: { row: MediaBatchPreviewUnit; onDetails: OpenUnitDetails }) {
+  const reason = ['blocked', 'needs_assignment', 'skipped'].includes(row.status) ? row.reason : null;
+  if (!row.groups.length && !row.conflicts.length && !reason && !row.loose_id && !row.mapping_id) return null;
+
+  return (
+    <div className="nfc-v2-batch-organizer-unit-detail">
+      {row.groups.map(group => (
+        <div key={group.destination}>
+          <CodePath value={group.name} />{' '}
+          <small>{group.count} 个 · {formatBytes(group.bytes)}</small>
+        </div>
+      ))}
+      {row.conflicts.length > 0 ? row.conflicts.map((conflict, index) => {
+        const target = conflict.target ?? conflict.directory;
+        return (
+          <p className="nfc-v2-batch-error" key={index}>
+            <span>{conflictLabels[conflict.reason] ?? conflict.reason}</span>
+            {target && <> <CodePath value={target} /></>}
+            {!!conflict.existing?.length && <> <small>{conflict.existing.join('、')}</small></>}
+          </p>
+        );
+      }) : reason && <p>{reason}</p>}
+      {row.loose_id && (
+        <ConsoleButton size="sm" variant="secondary" onClick={event => onDetails(row, event.currentTarget)}>
+          查看散件并选择归属
+        </ConsoleButton>
+      )}
+      {row.mapping_id && (
+        <ConsoleButton size="sm" variant="secondary" onClick={event => onDetails(row, event.currentTarget)}>
+          查看完整映射（{row.total_proposals.toLocaleString()}）
+        </ConsoleButton>
+      )}
+    </div>
+  );
+}
 
 /** Display a preview's aggregated totals and the current page of independent units. */
 export function MediaOrganizerPreviewReport({ preview, onDetails, action, children, footer }: {
   preview: MediaBatchPreview;
-  onDetails: (row: MediaBatchPreviewUnit, opener: HTMLButtonElement) => void;
+  onDetails: OpenUnitDetails;
   action: React.ReactNode;
   children: React.ReactNode;
   footer: React.ReactNode;
@@ -70,53 +111,48 @@ export function MediaOrganizerPreviewReport({ preview, onDetails, action, childr
       </div>
       {children}
       {preview.units.length > 0 ? (
-        <div className="nfc-v2-batch-media-scroll">
-          <table className="nfc-v2-batch-media-table">
-            <caption className="nfc-v2-batch-media-sr-only">逐目录整理预览</caption>
-            <thead>
-              <tr><th scope="col">整理单元</th><th scope="col">状态</th><th scope="col">文件</th>
-                <th scope="col">预计调整</th><th scope="col">目标与冲突</th></tr>
-            </thead>
-            <tbody>{preview.units.map(row => (
-              <tr key={row.unit}>
-                <td><CodePath value={row.unit} /></td>
-                <td><StatusBadge status={row.status} label={previewLabels[row.status]} /></td>
-                <td>{row.totals.P}P / {row.totals.V}V / {row.totals.Other} Other
-                  {row.total_bytes !== undefined && <small>{formatBytes(row.total_bytes)}</small>}
-                </td>
-                <td>移动 {row.needed_moves.toLocaleString()} · 改名 {row.renamed_count.toLocaleString()}
-                  {row.wrapper_cleanup_count !== undefined && <small>清空旧分类 {row.wrapper_cleanup_count}</small>}
-                </td>
-                <td className="nfc-v2-batch-media-reason">
-                  {row.groups.map(group => (
-                    <div key={group.destination}><CodePath value={group.name} />
-                      <small> · {group.count} 个 · {formatBytes(group.bytes)}</small></div>
-                  ))}
-                  {row.conflicts.length > 0 ? row.conflicts.map((conflict, index) => {
-                    const target = conflict.target ?? conflict.directory;
-                    return (
-                      <p className="nfc-v2-batch-error" key={index}>
-                        {conflictLabels[conflict.reason] ?? conflict.reason}
-                        {target && <> · <CodePath value={target} /></>}
-                        {conflict.existing?.length ? <> · {conflict.existing.join('、')}</> : null}
-                      </p>
-                    );
-                  }) : row.reason && (row.status === 'blocked' || row.status === 'needs_assignment') && <p>{row.reason}</p>}
-                  {row.loose_id && (
-                    <ConsoleButton size="sm" variant="secondary" onClick={event => onDetails(row, event.currentTarget)}>
-                      查看散件并选择归属
-                    </ConsoleButton>
-                  )}
-                  {row.mapping_id && (
-                    <ConsoleButton size="sm" variant="secondary" onClick={event => onDetails(row, event.currentTarget)}>
-                      查看完整映射（{row.total_proposals.toLocaleString()}）
-                    </ConsoleButton>
-                  )}
-                </td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
+        <ResponsiveDataView
+          desktop={<div className="nfc-v2-batch-media-scroll">
+            <table className="nfc-v2-batch-media-table">
+              <caption className="nfc-v2-batch-media-sr-only">逐目录整理预览</caption>
+              <thead>
+                <tr><th scope="col">整理单元</th><th scope="col">状态</th><th scope="col">文件</th>
+                  <th scope="col">预计调整</th><th scope="col">目标与冲突</th></tr>
+              </thead>
+              <tbody>{preview.units.map(row => (
+                <tr key={row.unit}>
+                  <td><CodePath value={row.unit} /></td>
+                  <td><StatusBadge status={row.status} label={previewLabels[row.status]} /></td>
+                  <td>{row.totals.P}P / {row.totals.V}V / {row.totals.Other} Other
+                    {row.total_bytes !== undefined && <small>{formatBytes(row.total_bytes)}</small>}
+                  </td>
+                  <td>移动 {row.needed_moves.toLocaleString()} · 改名 {row.renamed_count.toLocaleString()}
+                    {row.wrapper_cleanup_count !== undefined && <small>清空旧分类 {row.wrapper_cleanup_count}</small>}
+                  </td>
+                  <td className="nfc-v2-batch-media-reason"><PreviewUnitDetails row={row} onDetails={onDetails} /></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>}
+          mobile={<ul className="nfc-v2-batch-organizer-records" role="list" aria-label="逐目录整理预览">
+            {preview.units.map(row => (
+              <li key={row.unit}>
+                <div className="nfc-v2-batch-organizer-record-heading">
+                  <StatusBadge status={row.status} label={previewLabels[row.status]} />
+                  {row.total_bytes !== undefined && <span>{formatBytes(row.total_bytes)}</span>}
+                </div>
+                <CodePath value={row.unit} />
+                <div className="nfc-v2-batch-organizer-facts">
+                  <span>图片 {row.totals.P} · 视频 {row.totals.V} · 其他 {row.totals.Other}</span>
+                  <span>移动 {row.needed_moves.toLocaleString()} · 改名 {row.renamed_count.toLocaleString()}
+                    {row.wrapper_cleanup_count !== undefined && <> · 清空旧分类 {row.wrapper_cleanup_count}</>}
+                  </span>
+                </div>
+                <PreviewUnitDetails row={row} onDetails={onDetails} />
+              </li>
+            ))}
+          </ul>}
+        />
       ) : <ConsoleEmpty title="当前筛选没有整理单元" />}
       {footer}
     </DataPanel>
@@ -132,36 +168,62 @@ export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClos
 }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const reportRef = useRef<HTMLDivElement>(null);
   const { data, error, isError } = useQuery({
     queryKey: ['mediaOrganizerMapping', previewId, mappingId, page, pageSize],
     queryFn: () => mediaOrganizerBatchApi.getMapping(previewId, mappingId, page, pageSize),
   });
+
+  useEffect(() => {
+    reportRef.current?.focus({ preventScroll: true });
+    reportRef.current?.scrollIntoView?.({ block: 'start' });
+  }, []);
+
   return (
-    <DataPanel title="完整源 → 目标映射" variant="dense" className={panelClass}
-      description={<CodePath value={unit} />}
-      action={<ConsoleButton size="sm" variant="ghost" onClick={onClose}>关闭</ConsoleButton>}>
-      {isError ? (
-        <p className="nfc-v2-batch-error" role="alert">{getStructuredApiError(error).message || '无法读取完整映射'}</p>
-      ) : data ? (
-        <>
-          <div className="nfc-v2-batch-media-scroll">
-            <table className="nfc-v2-batch-media-table">
-              <caption className="nfc-v2-batch-media-sr-only">媒体文件位置调整明细</caption>
-              <thead><tr><th scope="col">类型</th><th scope="col">源路径</th>
-                <th scope="col">目标路径</th><th scope="col">大小</th></tr></thead>
-              <tbody>{data.moves.map(move => (
-                <tr key={move.source}>
-                  <td>{move.kind}</td><td><CodePath value={move.source} /></td>
-                  <td><CodePath value={move.target} /></td><td>{formatBytes(move.bytes)}</td>
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
-          <ConsolePagination page={page} pageSize={pageSize} total={data.total_moves}
-            pageSizes={[25, 50, 100]} onChange={(next, size) => { setPage(next); setPageSize(size); }} />
-        </>
-      ) : <p role="status">正在读取映射…</p>}
-    </DataPanel>
+    <div className="nfc-v2-batch-organizer-focus-region" ref={reportRef} tabIndex={-1}
+      role="region" aria-label="完整源 → 目标映射">
+      <DataPanel title="完整源 → 目标映射" variant="dense" className={panelClass}
+        description={<CodePath value={unit} />}
+        action={<ConsoleButton size="sm" variant="ghost" onClick={onClose}>关闭</ConsoleButton>}>
+        {isError ? (
+          <p className="nfc-v2-batch-error" role="alert">{getStructuredApiError(error).message || '无法读取完整映射'}</p>
+        ) : data ? (
+          <>
+            <ResponsiveDataView
+              desktop={<div className="nfc-v2-batch-media-scroll">
+                <table className="nfc-v2-batch-media-table">
+                  <caption className="nfc-v2-batch-media-sr-only">媒体文件位置调整明细</caption>
+                  <thead><tr><th scope="col">类型</th><th scope="col">源路径</th>
+                    <th scope="col">目标路径</th><th scope="col">大小</th></tr></thead>
+                  <tbody>{data.moves.map(move => (
+                    <tr key={move.source}>
+                      <td>{move.kind}</td><td><CodePath value={move.source} /></td>
+                      <td><CodePath value={move.target} /></td><td>{formatBytes(move.bytes)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>}
+              mobile={<ul className="nfc-v2-batch-organizer-records" role="list" aria-label="媒体文件位置调整明细">
+                {data.moves.map(move => (
+                  <li key={move.source}>
+                    <div className="nfc-v2-batch-organizer-record-heading">
+                      <strong className="nfc-v2-batch-organizer-kind">{mappingKindLabels[move.kind]}</strong>
+                      <span>{formatBytes(move.bytes)}</span>
+                    </div>
+                    <dl className="nfc-v2-batch-organizer-paths">
+                      <div><dt>源路径</dt><dd><CodePath value={move.source} /></dd></div>
+                      <div><dt>目标路径</dt><dd><CodePath value={move.target} /></dd></div>
+                    </dl>
+                  </li>
+                ))}
+              </ul>}
+            />
+            <ConsolePagination page={page} pageSize={pageSize} total={data.total_moves}
+              pageSizes={[25, 50, 100]} onChange={(next, size) => { setPage(next); setPageSize(size); }} />
+          </>
+        ) : <p role="status">正在读取映射…</p>}
+      </DataPanel>
+    </div>
   );
 }
 
@@ -180,19 +242,30 @@ export function MediaOrganizerResultReport({ report, children }: {
         ))}
       </div>
       {report.items.length > 0 && (
-        <div className="nfc-v2-batch-media-scroll">
-          <table className="nfc-v2-batch-media-table">
-            <caption className="nfc-v2-batch-media-sr-only">各整理单元结果</caption>
-            <thead><tr><th scope="col">整理单元</th><th scope="col">状态</th><th scope="col">说明</th></tr></thead>
-            <tbody>{report.items.map(row => (
-              <tr key={row.unit}>
-                <td><CodePath value={row.unit} /></td>
-                <td><StatusBadge status={outcomes[row.status].tone} label={outcomes[row.status].label} /></td>
-                <td>{row.reason || '—'}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
+        <ResponsiveDataView
+          desktop={<div className="nfc-v2-batch-media-scroll">
+            <table className="nfc-v2-batch-media-table">
+              <caption className="nfc-v2-batch-media-sr-only">各整理单元结果</caption>
+              <thead><tr><th scope="col">整理单元</th><th scope="col">状态</th><th scope="col">说明</th></tr></thead>
+              <tbody>{report.items.map(row => (
+                <tr key={row.unit}>
+                  <td><CodePath value={row.unit} /></td>
+                  <td><StatusBadge status={outcomes[row.status].tone} label={outcomes[row.status].label} /></td>
+                  <td>{row.reason || '—'}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>}
+          mobile={<ul className="nfc-v2-batch-organizer-records" role="list" aria-label="各整理单元结果">
+            {report.items.map(row => (
+              <li key={row.unit}>
+                <div><StatusBadge status={outcomes[row.status].tone} label={outcomes[row.status].label} /></div>
+                <CodePath value={row.unit} />
+                {row.reason && <p>{row.reason}</p>}
+              </li>
+            ))}
+          </ul>}
+        />
       )}
       {children}
     </DataPanel>

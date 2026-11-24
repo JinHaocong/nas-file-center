@@ -68,7 +68,12 @@ function mockResponse(url) {
   return { items: [], total: 0, status: 'ok', safe_mode: true };
 }
 
+/** Audit the nested picker after Radix registers it as the active pointer layer. */
 async function inspect(page, theme, width) {
+  await page.waitForFunction(viewportWidth => {
+    const hit = document.elementFromPoint(viewportWidth / 2, innerHeight / 2);
+    return Boolean(hit?.closest('.nfc-v2-directory-dialog'));
+  }, width, { timeout: 5000 });
   return page.evaluate(({ theme, width }) => {
     const css = selector => {
       const element = document.querySelector(selector);

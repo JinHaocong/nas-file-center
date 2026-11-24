@@ -28,23 +28,27 @@
 .nfc-v2-sheet-overlay { z-index: 1100; }
 .nfc-v2-sheet.nfc-overlay-drawer {
   position: fixed;
-  inset: 0 0 0 auto;
+  inset: 12px 12px 12px auto;
   z-index: 1101;
   box-sizing: border-box;
-  width: min(760px, 100vw);
-  height: 100dvh;
+  width: min(760px, calc(100vw - 24px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--v2-paper);
-  border-left: 1px solid var(--v2-line);
-  box-shadow: -25px 0 75px rgba(5,20,40,.22);
+  border: 1px solid var(--v2-line);
+  border-radius: var(--nfc-overlay-radius);
+  box-shadow: var(--nfc-shadow-overlay);
   padding: 0;
-  animation: nfc-v2-sheet-enter .17s ease-out;
+  animation: nfc-v2-sheet-enter var(--nfc-motion-normal) var(--nfc-motion-ease);
 }
 @keyframes nfc-v2-sheet-enter {
-  from { transform: translateX(24px); opacity: .75; }
+  from { transform: translateX(8px); opacity: .74; }
   to { transform: translateX(0); opacity: 1; }
+}
+@keyframes nfc-v2-sheet-enter-bottom {
+  from { transform: scale(.98); opacity: .74; }
+  to { transform: scale(1); opacity: 1; }
 }
 .nfc-v2-sheet-header {
   display: flex;
@@ -69,6 +73,13 @@
 .nfc-v2-task-id { padding: 4px 8px; background: var(--v2-canvas); border: 1px solid var(--v2-line); border-radius: 7px; font-size: 11px; color: var(--v2-muted); font-weight: 650; }
 .nfc-v2-sheet-description { margin: 0; color: var(--v2-muted); font-size: 11.5px; line-height: 1.6; }
 .nfc-v2-sheet-header .nfc-v2-dialog-close { flex: 0 0 auto; }
+:is(.nfc-v2-sheet, .nfc-v2-confirm-dialog, .nfc-v2-history-dialog) .nfc-v2-dialog-close {
+  border-radius: 50%;
+}
+:is(.nfc-v2-sheet, .nfc-v2-confirm-dialog, .nfc-v2-history-dialog) .nfc-v2-dialog-close:focus-visible {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: 3px;
+}
 .nfc-v2-sheet-body { flex: 1; min-height: 0; padding: 22px 29px 38px; overflow-y: auto; overscroll-behavior: contain; color: var(--v2-text); }
 .nfc-v2-task-inspector { display: flex; flex-direction: column; gap: 19px; }
 .nfc-v2-task-inspector .nfc-overlay-section {
@@ -166,7 +177,6 @@
   min-height: 37px;
   padding: 0 13px;
   border: 1px solid var(--v2-line);
-  border-radius: 9px;
   background: var(--v2-paper);
   color: var(--v2-text);
   font: inherit;
@@ -178,13 +188,24 @@
 .nfc-v2-confirm-dialog .nfc-console-button:disabled,
 .nfc-v2-history-dialog .nfc-console-button:disabled { opacity: .48; cursor: not-allowed; }
 .nfc-v2-sheet .nfc-console-button-sm { min-height: 32px; padding: 0 9px; }
-.nfc-v2-sheet .nfc-console-button-ghost { border-color: transparent; color: var(--v2-indigo); background: transparent; }
+.nfc-v2-sheet .nfc-console-button-ghost { border-color: transparent; color: var(--nfc-tint); background: transparent; box-shadow: none; }
 .nfc-v2-sheet .nfc-console-button-primary,
 .nfc-v2-confirm-dialog .nfc-console-button-primary,
-.nfc-v2-history-dialog .nfc-console-button-primary { background: var(--v2-indigo); border-color: var(--v2-indigo); color: var(--v2-canvas); }
+.nfc-v2-history-dialog .nfc-console-button-primary {
+  color: var(--nfc-tint-on-fill);
+  background: var(--nfc-tint-fill);
+  border-color: var(--nfc-tint-fill);
+  box-shadow: inset 0 1px rgb(255 255 255 / .22);
+}
 .nfc-v2-sheet .nfc-console-button-danger,
 .nfc-v2-confirm-dialog .nfc-console-button-danger,
 .nfc-v2-history-dialog .nfc-console-button-danger { background: #b9344f; border-color: #b9344f; color: #fff; }
+@media (hover: hover) {
+  :is(.nfc-v2-sheet, .nfc-v2-confirm-dialog, .nfc-v2-history-dialog) .nfc-console-button-danger:hover:not(:disabled) {
+    background: #a62d45;
+    border-color: #a62d45;
+  }
+}
 .nfc-v2-sheet .nfc-console-spinner,
 .nfc-v2-confirm-dialog .nfc-console-spinner,
 .nfc-v2-history-dialog .nfc-console-spinner {
@@ -200,6 +221,14 @@
 /* Nested task confirm dialogs must sit above the inspector sheet and its scrim. */
 .nfc-v2-confirm-overlay { z-index: 1300 !important; }
 .nfc-v2-confirm-dialog.nfc-v2-dialog[data-state='open'] { z-index: 1301 !important; width: min(460px, calc(100vw - 24px)); }
+:is(.nfc-v2-confirm-dialog, .nfc-v2-history-dialog).nfc-v2-dialog[data-state='open'] {
+  border-radius: var(--nfc-overlay-radius);
+  animation: nfc-v2-confirm-enter var(--nfc-motion-normal) var(--nfc-motion-ease);
+}
+@keyframes nfc-v2-confirm-enter {
+  from { transform: translate(-50%, calc(-50% + 6px)) scale(.98); opacity: .74; }
+  to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
 .nfc-v2-confirm-dialog .nfc-v2-dialog-icon.is-danger,
 .nfc-v2-history-dialog .nfc-v2-dialog-icon.is-danger { background: #fff0f2; color: #bc3553; }
 .nfc-v2-confirm-description { padding: 20px 24px; color: var(--v2-muted); line-height: 1.7; font-size: 12px; }
@@ -260,9 +289,17 @@
 .nfc-v2-sheet .nfc-v2-progress-percent { color: var(--v2-muted); font-size: 11px; }
 .nfc-v2-sheet .nfc-task-progress-message { display: block; margin-top: 6px; color: var(--v2-muted); font-size: 11px; overflow-wrap: anywhere; }
 @media (max-width: 767px) {
-  .nfc-v2-sheet.nfc-overlay-drawer { width: 100vw; border-left: 0; }
+  .nfc-v2-sheet.nfc-overlay-drawer {
+    inset: auto 0 0;
+    width: 100%;
+    height: min(92dvh, calc(100dvh - max(16px, env(safe-area-inset-top))));
+    border-width: 1px 0 0;
+    border-radius: var(--nfc-overlay-radius) var(--nfc-overlay-radius) 0 0;
+    transform-origin: bottom center;
+    animation-name: nfc-v2-sheet-enter-bottom;
+  }
   .nfc-v2-sheet-header { padding: 19px 17px 16px; }
-  .nfc-v2-sheet-body { padding: 16px 13px 44px; }
+  .nfc-v2-sheet-body { padding: 16px 13px max(24px, env(safe-area-inset-bottom)); }
   .nfc-v2-task-inspector .nfc-overlay-section { padding: 14px; }
   .nfc-v2-task-facts { grid-template-columns: minmax(0,1fr); }
   .nfc-v2-task-inspector .nfc-v2-task-facts { grid-template-columns: minmax(0,1fr); }
@@ -270,7 +307,15 @@
   .nfc-v2-history-body { padding: 17px; }
   .nfc-v2-confirm-actions { padding: 15px 17px 19px; }
 }
+@media (max-width: 767px), (pointer: coarse) {
+  :is(.nfc-v2-sheet, .nfc-v2-confirm-dialog, .nfc-v2-history-dialog)
+    :is(.nfc-console-button, .nfc-v2-dialog-close, .nfc-console-page-buttons button) {
+    min-width: var(--nfc-control-height-touch);
+    min-height: var(--nfc-control-height-touch);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
-  .nfc-v2-sheet.nfc-overlay-drawer { animation: none; }
+  .nfc-v2-sheet.nfc-overlay-drawer,
+  :is(.nfc-v2-confirm-dialog, .nfc-v2-history-dialog).nfc-v2-dialog[data-state='open'] { animation: none; }
   .nfc-v2-sheet .nfc-v2-progress-spinner, .nfc-console-spinner { animation: none; }
 }
