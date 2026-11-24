@@ -34,6 +34,7 @@ LIFT_LUOLCY_BUCKETS = "lift_luolcy_buckets"
 _MONTH = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])$")
 _DAY = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])$")
 _AUTHOR_CLASSIFICATION = re.compile(r"([pv])(?:_?[1-9]\d*)?", re.I)
+_LUOLCY_SHORT_VIDEO_FOLDER = "短视频"
 _AUTHOR_DEFAULT_FOLDER = re.compile(r"(?:新建文件夹|未命名文件夹|new folder)(?:\s*\(\d+\))?", re.I)
 _AUTHOR_MEDIA_COUNT = re.compile(r"(?:[\u3400-\u9fff]{1,6}\s*)?\d+\s*(?:[pv]|张(?:图)?|个视频)", re.I)
 _AUTHOR_BATCH_LABEL = re.compile(
@@ -577,7 +578,16 @@ def _luolcy_author_inventory(
             return rows, siblings, nested
 
     direct_kinds = {row["kind"] for row in rows}
-    inspect_leaves = bool(direct_kinds) and (
+    short_videos = None
+    # Leave any existing video classification to the original author rules.
+    if (direct_kinds and _LUOLCY_SHORT_VIDEO_FOLDER in children
+            and not any(_luolcy_classification_kind(name) in {"V", "PV"} for name in children)):
+        short_videos = _luolcy_classification_inventory(
+            author / _LUOLCY_SHORT_VIDEO_FOLDER, device, "V", check_cancelled, flat_only=True,
+        )
+    # An eligible short-video leaf confirms its own folder only. For other
+    # structures, keep the preexisting classification and leaf inference.
+    inspect_leaves = bool(direct_kinds) and not short_videos and (
         len(children) == 1 or (len(children) == 2 and any(_luolcy_leaf_hint(name) for name in children))
     )
     classifications = {}
@@ -592,18 +602,20 @@ def _luolcy_author_inventory(
     for name in children:
         folder = author / name
         label = _luolcy_classification_kind(name)
+        is_short_video = name == _LUOLCY_SHORT_VIDEO_FOLDER and short_videos is not None
         if preserve_other_buckets and _luolcy_bucket_slot(name) and label not in direct_kinds:
             continue
-        if label is None and not inspect_leaves:
+        if label is None and not inspect_leaves and not is_short_video:
             continue
-        media = _luolcy_classification_inventory(folder, device, label or "PV", check_cancelled,
-                                                 flat_only=label is None)
+        media = (short_videos if is_short_video else _luolcy_classification_inventory(
+            folder, device, label or "PV", check_cancelled, flat_only=label is None,
+        ))
         if not media:
             continue
         scanned_files += len(media)
         if scanned_files > MAX_PACKAGE_FILES:
             raise ValueError("Too many Luolcy author files")
-        if label is not None:
+        if label is not None or is_short_video:
             classifications[name] = media
         if inspect_leaves and all(Path(row["path"]).parent == folder for row in media):
             leaves[name] = {row["kind"] for row in media}
@@ -836,7 +848,9 @@ def plan_media_layout(
     # Avoid reordering when readdir() order changes. Only metadata, never
     # data file bytes, are read. Bounded to one package, not the whole library.
     if organizer_mode:
-        items.sort(key=lambda row: (row["kind"], media_source_sort_key(row["path"], source)))
+        items.sort(key=lambda row: (
+            row["kind"], row.get("photo_range_start", 0), media_source_sort_key(row["path"], source),
+        ))
     else:
         items.sort(key=lambda x: (x["kind"], os.path.relpath(x["path"], source).casefold(),
                                   os.path.relpath(x["path"], source)))

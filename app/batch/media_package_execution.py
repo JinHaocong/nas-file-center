@@ -21,7 +21,8 @@ from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_package_naming import organizer_extension
 from app.batch.media_package_organizer import (
     APPEND_SINGLE_VIDEO, APPEND_VIDEO_OPERATIONS, LIFT_LUOLCY_BUCKETS, MAX_FILES_PER_GROUP,
-    PROMOTE_NUMBERED_PHOTO_GROUPS, _author_media_row, _classify, _input_fingerprint,
+    PROMOTE_NUMBERED_PHOTO_GROUPS, _LUOLCY_SHORT_VIDEO_FOLDER,
+    _author_media_row, _classify, _input_fingerprint,
     _luolcy_batch_boundary, _luolcy_bucket_slot, _luolcy_classification_kind, _luolcy_leaf_promotion,
     _luolcy_verified_bucket, _open_luolcy_author, _package_path, _size_label, _walk_package,
     preview_media_package_package,
@@ -1405,6 +1406,7 @@ def _validate_luolcy_sources(manifest: dict, package: Path) -> None:
     leaf_origins: set[Path] = set()
     nested_buckets: dict[Path, list[dict]] = {}
     has_unlabelled_origin = False
+    has_short_video_origin = False
     moving_names = {group["final"].casefold() for group in manifest["groups"]}
     lifting = manifest["operation"] == LIFT_LUOLCY_BUCKETS
     lift_slots = _validate_luolcy_lift_groups(manifest) if lifting else set()
@@ -1431,6 +1433,11 @@ def _validate_luolcy_sources(manifest: dict, package: Path) -> None:
             direct_kinds.add(kind)
             continue
         classification = _luolcy_classification_kind(top)
+        # Short videos are an explicit flat V input. Legacy manifests with
+        # other contents still have to pass the existing unlabelled-leaf check.
+        if top == _LUOLCY_SHORT_VIDEO_FOLDER and kind == "V" and len(children) == 1:
+            classification = "V"
+            has_short_video_origin = True
         if (classification not in {None, kind, "PV"} or len(children) > 2
                 or top.casefold().startswith(".nfc-") or "\x00" in top):
             raise MediaPackageExecutionConflict("Invalid frozen Luolcy classification path")
@@ -1456,6 +1463,8 @@ def _validate_luolcy_sources(manifest: dict, package: Path) -> None:
         raise MediaPackageExecutionConflict("Invalid frozen Luolcy nested bucket contents")
     if origins.keys() != expected_origins:
         raise MediaPackageExecutionConflict("Frozen Luolcy origins differ from its media sources")
+    if has_short_video_origin and not direct_kinds:
+        raise MediaPackageExecutionConflict("Frozen Luolcy short-video folder requires direct author media")
     # Promotion requires every author child to be an immediate media leaf.
     if has_unlabelled_origin and (siblings or len(expected_origins) != len(child_kinds)
                                   or not _luolcy_leaf_promotion(direct_kinds, child_kinds)):
