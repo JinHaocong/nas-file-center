@@ -79,6 +79,12 @@ _DATED_WORK_ALIAS = re.compile(
     r"(?P<date>[0-9]{2}\.\d{2}\.\d{2})\s*(?P<title>[^()\[\]【】]+?)"
     r"\s*(?:\((?P<round>[^()]+)\)|【(?P<wide>[^【】]+)】|\[(?P<square>[^\[\]]+)\])\s*[★☆]?",
 )
+_PUBLISHED_WORK_DATE = re.compile(r"[0-9]{2}\.(?:0[1-9]|1[0-2])\.(?:0[1-9]|[12][0-9]|3[01])(?![0-9])")
+_PUBLISHED_WORK_COUNTS = re.compile(
+    r"(?<![0-9a-z])" + _SPLIT_WORK_TOTAL.pattern + r"(?=$|\s|[()】\]])", re.I,
+)
+_PUBLISHED_WORK_TRAILER = re.compile(r"\s*(?:\([^()\[\]【】]+\))?\s*[★☆]?\s*")
+_WORK_COUNT_BRACKETS = {"(": ")", "【": "】", "[": "]"}
 _WORK_VARIANT_LABEL = re.compile(
     r"原版|原档|压缩|水印|无修|無修|未修|修复版|精华版|完整版|加长版|短版|长版"
     r"|版(?:本)?(?=$|[\s\]】）)_-])"
@@ -924,12 +930,96 @@ def _dated_alias_sources(
     return _OwnedMediaSources({name}, totals) if totals == expected else None
 
 
+def _same_published_work_title(unit: Path, alias: str, title: str) -> bool:
+    """Accept an exact title, optionally preceded by a credit or the owning author's alias."""
+    without_credit = re.sub(r"^\[[^\[\]]+\]\s*", "", alias)
+    wanted = _normalized_work_title(title)
+    if len(wanted) < 3:
+        return False
+    if _normalized_work_title(without_credit) == wanted:
+        return True
+    prefix, separator, tail = without_credit.partition("-")
+    if not separator or _normalized_work_title(tail) != wanted:
+        return False
+    author = next((parent for parent in unit.parents if _calendar_author_layer(parent)), None)
+    return author is not None and _normalized_work_title(prefix) in {
+        _normalized_work_title(name) for name in re.split(r"[()（）]", author.name) if name.strip()
+    }
+
+
+def _published_alias_expected(unit: Path, alias: str, date: str) -> Counter[str] | None:
+    """Read a single P/V declaration and bind the alias to the full date or exact title."""
+    dated_name = unit.name[len(date):]
+    matches = list(_PUBLISHED_WORK_COUNTS.finditer(dated_name))
+    if len(matches) != 1:
+        return None
+    counts = matches[0]
+    prefix = dated_name[:counts.start()].strip()
+    title = prefix.rstrip("([【").rstrip()
+    tail = dated_name[counts.end():].strip()
+    same_date = re.fullmatch(r"[^\W\d_]{1,12}\s*" + re.escape(date), alias) is not None
+    close = _WORK_COUNT_BRACKETS.get(prefix[-1:]) if title != prefix else None
+    if close is not None:
+        if tail.startswith(close):
+            tail = tail[1:].strip()
+        elif tail or not same_date:
+            # A truncated declaration is acceptable only with an independently matching full date.
+            return None
+    if (not title or not _PUBLISHED_WORK_TRAILER.fullmatch(tail)
+            or not (same_date or _same_published_work_title(unit, alias, title))):
+        return None
+    totals = Counter(P=int(counts[1]), V=int(counts[2]))
+    return totals if all(0 < total <= MAX_FILES_PER_GROUP for total in totals.values()) else None
+
+
+def _published_alias_sources(
+    unit: Path, entries: _DirectoryEntries, device: int, protected_roots: tuple[Path, ...],
+) -> _OwnedMediaSources | None:
+    """Lift the exact numbered P and V buckets of one proven alias to the work root."""
+    date = _PUBLISHED_WORK_DATE.match(unit.name)
+    if date is None or len(entries) != 1:
+        return None
+    alias, info = entries[0]
+    folder = unit / alias
+    if (not stat.S_ISDIR(info.st_mode) or info.st_dev != device or _protected(folder, protected_roots)
+            or is_reserved_workspace(folder) or _append_calendar_boundary(alias)
+            or alias.casefold() in _VERSION_NAMES or _WORK_VARIANT_LABEL.search(alias)):
+        return None
+    expected = _published_alias_expected(unit, alias, date[0])
+    if expected is None:
+        return None
+    try:
+        buckets = _entries(folder, device)
+    except (OSError, ValueError):
+        return None
+    if len(buckets) != 2:
+        return None
+    totals: Counter[str] = Counter()
+    for name, info in buckets:
+        path = folder / name
+        if not stat.S_ISDIR(info.st_mode) or info.st_dev != device or _protected(path, protected_roots):
+            return None
+        kind = name[:1]
+        if kind not in expected or kind in totals:
+            return None
+        files = _regular_media_entries(path, device)
+        size = sum(info.st_size for _, info in files)
+        if (len(files) != expected[kind] or name != f"{kind} [{len(files)} {_size_label(size)}]"
+                or any(_classify(filename) != kind or _protected(path / filename, protected_roots)
+                       or filename != numbered_name(index, filename)
+                       for index, (filename, _) in enumerate(files, 1))):
+            return None
+        totals[kind] = len(files)
+    return _OwnedMediaSources({alias}, totals)
+
+
 def _semantic_branch_sources(
     unit: Path, entries: _DirectoryEntries, device: int, protected_roots: tuple[Path, ...],
 ) -> _OwnedMediaSources | None:
     """Use the same proven branch ownership for discovery, preview and execution."""
     owned = (_fantia_post_bucket_sources(unit, entries, device, protected_roots)
-             or _split_work_sources(unit, entries, device, protected_roots))
+             or _split_work_sources(unit, entries, device, protected_roots)
+             or _published_alias_sources(unit, entries, device, protected_roots))
     if owned is not None:
         return owned
     if _SAME_ISSUE_TITLE.fullmatch(unit.name) or _NUMBERED_WORK_CODE.fullmatch(unit.name):
