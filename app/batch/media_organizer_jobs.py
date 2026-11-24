@@ -18,7 +18,7 @@ from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_archive import PROMOTE_ARCHIVE_CHILDREN
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_organizer_planner import is_reserved_workspace
-from app.batch.media_package_organizer import APPEND_VIDEO_OPERATIONS, _validate_scope
+from app.batch.media_package_organizer import APPEND_MEDIA_OPERATIONS, _validate_scope
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.config import Settings
 from app.execution.luolcy_assignment import LUOLCY_ASSIGNMENT_KIND
@@ -377,7 +377,7 @@ def get_batch(session_factory, job_id: int, *, page: int, page_size: int) -> dic
 
 def _preview_row(record: dict, report: Path) -> dict:
     mapping = record.get("_mapping_items", []) if record["status"] == "ready" else []
-    if record.get("operation") in APPEND_VIDEO_OPERATIONS:
+    if record.get("operation") in APPEND_MEDIA_OPERATIONS:
         mapping = [move for move in mapping if move["source"] != move["target"]]
     mapping_id = hashlib.sha256(record["unit"].encode()).hexdigest() if mapping else None
     if mapping_id is not None:

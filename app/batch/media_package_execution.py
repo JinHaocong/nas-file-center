@@ -20,7 +20,8 @@ from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_package_naming import organizer_extension
 from app.batch.media_package_organizer import (
-    APPEND_SINGLE_VIDEO, APPEND_VIDEO_OPERATIONS, LIFT_LUOLCY_BUCKETS, MAX_FILES_PER_GROUP,
+    APPEND_MEDIA_OPERATIONS, APPEND_MEDIA_WRAPPER, APPEND_SINGLE_VIDEO, APPEND_VIDEO_OPERATIONS,
+    LIFT_LUOLCY_BUCKETS, MAX_FILES_PER_GROUP,
     PROMOTE_NUMBERED_PHOTO_GROUPS, _LUOLCY_SHORT_VIDEO_FOLDER,
     _author_media_row, _classify, _input_fingerprint,
     _luolcy_batch_boundary, _luolcy_bucket_slot, _luolcy_classification_kind, _luolcy_leaf_promotion,
@@ -35,7 +36,7 @@ class MediaPackageExecutionConflict(ValueError):
 
 
 MANIFEST_VERSION = 2
-_FLAT_OPERATIONS = APPEND_VIDEO_OPERATIONS | {"flatten_pure_media"}
+_FLAT_OPERATIONS = APPEND_MEDIA_OPERATIONS | {"flatten_pure_media"}
 
 
 def _is_luolcy_author(manifest: dict) -> bool:
@@ -204,7 +205,7 @@ def _freeze_layout(source: Path, fresh: dict, *, media_package_root: Path | None
     _validate_frozen_paths(manifest)
     if (len(_flat_rows(manifest)) if is_flat else len(moves)) != fresh["needed_moves"]:
         raise MediaPackageExecutionConflict("Frozen move count differs from reviewed preview")
-    if fresh["operation"] in APPEND_VIDEO_OPERATIONS and len(moves) != len(items):
+    if fresh["operation"] in APPEND_MEDIA_OPERATIONS and len(moves) != len(items):
         raise MediaPackageExecutionConflict("Frozen append is missing numbered inputs")
     return manifest
 
@@ -1072,7 +1073,7 @@ _ROOT_READY_MARKER = ".nfc-publish-ready"
 
 
 def _flat_rows(manifest: dict) -> list[dict]:
-    if manifest["operation"] in APPEND_VIDEO_OPERATIONS:
+    if manifest["operation"] in APPEND_MEDIA_OPERATIONS:
         return [row for row in manifest["moves"] if row["source"] != row["final"]]
     return manifest["moves"]
 
@@ -1271,8 +1272,8 @@ def _remove_flat_stage(manifest: dict, stage: Path,
 
 
 def _verify_append_scope(manifest: dict, package: Path) -> None:
-    """Check the approved author layout before staging or resuming publication."""
-    if manifest["operation"] not in APPEND_VIDEO_OPERATIONS:
+    """Check the approved numbered files before staging or resuming publication."""
+    if manifest["operation"] not in APPEND_MEDIA_OPERATIONS:
         return
     incoming = _flat_rows(manifest)
     source_folder = Path(incoming[0]["source"]).parent
@@ -1285,8 +1286,14 @@ def _verify_append_scope(manifest: dict, package: Path) -> None:
             live = {entry.name: entry.stat(follow_symlinks=False) for entry in entries}
     finally:
         os.close(package_fd)
-    if live.keys() - allowed:
-        raise MediaPackageExecutionConflict("Video append has unreviewed entries in the author root")
+    siblings = live.keys() - allowed
+    if manifest["operation"] == APPEND_MEDIA_WRAPPER and manifest.get("local_scope") is not None:
+        # A local classification append can coexist with independent named works.
+        occupied = {name.casefold() for name in allowed}
+        siblings = {name for name in siblings if name.casefold() in occupied or name.casefold().startswith(".nfc-")
+                    or not stat.S_ISDIR(live[name].st_mode) or live[name].st_dev != manifest["package_dev"]}
+    if siblings:
+        raise MediaPackageExecutionConflict("Media append has unreviewed entries in its root")
     for name, row in expected.items():
         if row["source"] == row["final"] or name in live:
             _check_file(live.get(name), row["identity"], package / name)
@@ -1308,7 +1315,7 @@ def _verify_append_scope(manifest: dict, package: Path) -> None:
 
 def _verify_append_file_bindings(manifest: dict, *, publishing: bool) -> None:
     """Check every incoming video before proceeding with the current phase."""
-    if manifest["operation"] not in APPEND_VIDEO_OPERATIONS:
+    if manifest["operation"] not in APPEND_MEDIA_OPERATIONS:
         return
     for row in _flat_rows(manifest):
         staged = Path(row["target"])
@@ -1601,14 +1608,18 @@ def _validate_frozen_paths(manifest: dict) -> None:
         if (len(rows) > MAX_FILES_PER_GROUP or any(row["group"] is not None for row in rows)
                 or len({row["target_name"].casefold() for row in rows}) != len(rows)):
             raise MediaPackageExecutionConflict("Flat frozen numbering is inconsistent")
-        if manifest["operation"] in APPEND_VIDEO_OPERATIONS:
+        if manifest["operation"] in APPEND_MEDIA_OPERATIONS:
             moving = _flat_rows(manifest)
             source_folders = {Path(row["source"]).parent for row in moving}
-            single = manifest["operation"] == APPEND_SINGLE_VIDEO
+            invalid_count = (manifest["operation"] in APPEND_VIDEO_OPERATIONS
+                             and (manifest["operation"] == APPEND_SINGLE_VIDEO) != (len(moving) == 1))
             if (not moving or len(moving) == len(rows) or len(source_folders) != 1
                     or any(folder.parent != package for folder in source_folders)
-                    or single != (len(moving) == 1)):
-                raise MediaPackageExecutionConflict("Invalid frozen author video append")
+                    or invalid_count):
+                raise MediaPackageExecutionConflict("Invalid frozen media append")
+            if (manifest["operation"] == APPEND_MEDIA_WRAPPER
+                    and (manifest.get("organizer_mode") != "semantic" or manifest.get("whole_author"))):
+                raise MediaPackageExecutionConflict("Invalid frozen wrapper append scope")
     else:
         covered = sum(group["count"] for group in manifest["groups"])
         if covered != len(rows):

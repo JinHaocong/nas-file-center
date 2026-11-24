@@ -6,6 +6,7 @@ import re
 import stat
 from collections import Counter, OrderedDict
 from contextvars import ContextVar
+from datetime import date
 from itertools import islice
 from pathlib import Path
 from typing import Callable, Iterator, NamedTuple
@@ -80,6 +81,8 @@ _DATED_WORK_ALIAS = re.compile(
     r"\s*(?:\((?P<round>[^()]+)\)|【(?P<wide>[^【】]+)】|\[(?P<square>[^\[\]]+)\])\s*[★☆]?",
 )
 _PUBLISHED_WORK_DATE = re.compile(r"[0-9]{2}\.(?:0[1-9]|1[0-2])\.(?:0[1-9]|[12][0-9]|3[01])(?![0-9])")
+_PUBLISHED_ARCHIVE_MONTH = re.compile(r"(?P<month>(?:19|20)[0-9]{2}\.[0-9]{2})(?:【[^【】\[\]]+】|\[[^【】\[\]]+\])")
+_PUBLISHED_MONTH_DAY_ALIAS = re.compile(r"(?P<credit>[^\W\d_]{2,12})\s*(?P<stamp>[0-9]{2}\.[0-9]{2})")
 _PUBLISHED_WORK_COUNTS = re.compile(
     r"(?<![0-9a-z])" + _SPLIT_WORK_TOTAL.pattern + r"(?=$|\s|[()】\]])", re.I,
 )
@@ -100,6 +103,8 @@ _PHOTO_ALIASES = frozenset({
     "图片", "图", "照片", "photo", "photos", "image", "images", "picture", "pictures", "pic",
 })
 _ALIASES = _PHOTO_ALIASES | {"视频", "video", "videos"}
+_VIDEO_WRAPPER_ALIASES = frozenset({"视频", "video", "videos"})
+_NUMBERED_TITLED_WORK = re.compile(r"[1-9][0-9]{0,2}\s*(?P<title>[^\W\d_][\w ]+)")
 _JPEG_LABELS = frozenset({"jpg", "jpeg"})
 _JPEG_EXTENSIONS = frozenset({".jpg", ".jpeg", ".jfif"})
 _TYPED_WRAPPER_KINDS = {"movie": "V", "img": "P", "gif": "P", "selfies": "P", "jpg": "P", "jpeg": "P"}
@@ -438,6 +443,10 @@ def _direct_media_selection(
         kind = _scoped_bucket_kind(unit / name, device, protected_roots)
         if kind and (wrapper is None or kind == wrapper):
             buckets[name] = kind
+    if wrapper == "V" and not buckets and kinds == {"V"}:
+        incoming = _video_wrapper_append_source(unit, entries, children, device, protected_roots)
+        if incoming is not None:
+            buckets[incoming] = "V"
     # A numbered work can own one pure, explicitly complementary media leaf,
     # such as 024's Video alongside direct photos. Leave other roles independent.
     if numbered and len(children) == len(kinds) == 1 and not buckets:
@@ -672,6 +681,37 @@ def _regular_media_entries(path: Path, device: int) -> list[tuple[str, os.stat_r
     ):
         return []
     return entries
+
+
+def _numbered_media_leaf(folder: Path, files: _DirectoryEntries, kind: str, device: int,
+                         protected_roots: tuple[Path, ...]) -> bool:
+    """Verify the existing one-based sequence before preserving its numbers."""
+    return bool(files) and all(
+        stat.S_ISREG(info.st_mode) and info.st_dev == device and not _protected(folder / name, protected_roots)
+        and _classify(name) == kind and name == numbered_name(index, name)
+        for index, (name, info) in enumerate(files, 1)
+    )
+
+
+def _video_wrapper_append_source(unit: Path, entries: _DirectoryEntries, children: list[str], device: int,
+                                 protected_roots: tuple[Path, ...]) -> str | None:
+    """Recognize one redundant video label beside the numbered files of V."""
+    candidates = [name for name in children if name.casefold() in _VIDEO_WRAPPER_ALIASES]
+    if (unit.name.casefold() != "v" or len(candidates) != 1
+            or any(name != candidates[0] and _is_wrapper(unit, name, device=device, protected_roots=protected_roots)
+                   for name in children)):
+        return None
+    name, = candidates
+    branch = unit / name
+    if _protected(branch, protected_roots):
+        return None
+    outer = [(name, info) for name, info in entries if stat.S_ISREG(info.st_mode)]
+    files = _regular_media_entries(branch, device)
+    if (len(outer) + len(files) > MAX_FILES_PER_GROUP
+            or not _numbered_media_leaf(unit, outer, "V", device, protected_roots)
+            or not _numbered_media_leaf(branch, files, "V", device, protected_roots)):
+        return None
+    return name
 
 
 def _direct_leaf_kinds(path: Path, device: int) -> set[str]:
@@ -941,15 +981,53 @@ def _same_published_work_title(unit: Path, alias: str, title: str) -> bool:
     prefix, separator, tail = without_credit.partition("-")
     if not separator or _normalized_work_title(tail) != wanted:
         return False
+    return _matches_published_author_credit(unit, prefix)
+
+
+def _matches_published_author_credit(unit: Path, credit: str, *, allow_prefix: bool = False) -> bool:
+    """Match a declared author name or an unambiguous Chinese alias abbreviation."""
     author = next((parent for parent in unit.parents if _calendar_author_layer(parent)), None)
-    return author is not None and _normalized_work_title(prefix) in {
+    if author is None:
+        return False
+    wanted = _normalized_work_title(credit)
+    if wanted in {
         _normalized_work_title(name) for name in re.split(r"[()（）]", author.name) if name.strip()
-    }
+    }:
+        return True
+    if (not allow_prefix or len(wanted) < 2
+            or not all(unicode_name(char, "").startswith("CJK UNIFIED IDEOGRAPH-") for char in wanted)):
+        return False
+    aliases = {_normalized_work_title(name) for name in re.findall(r"\(([^()]+)\)", normalize("NFKC", author.name))}
+    return sum(alias.startswith(wanted) for alias in aliases) == 1
 
 
-def _published_alias_expected(unit: Path, alias: str, date: str) -> Counter[str] | None:
-    """Read a single P/V declaration and bind the alias to the full date or exact title."""
-    dated_name = unit.name[len(date):]
+def _same_published_work_month_day(unit: Path, alias: str, stamp: str, device: int) -> bool:
+    """Resolve a short date against its archive month, author and unique release date."""
+    short = _PUBLISHED_MONTH_DAY_ALIAS.fullmatch(alias)
+    archive = _PUBLISHED_ARCHIVE_MONTH.fullmatch(unit.parent.name)
+    if (short is None or archive is None or short["stamp"] != stamp[3:]
+            or archive["month"][2:] != stamp[:5]
+            or not _matches_published_author_credit(unit, short["credit"], allow_prefix=True)):
+        return False
+    try:
+        release = date.fromisoformat((archive["month"][:2] + stamp).replace(".", "-"))
+        siblings = _entries(unit.parent, device)
+    except (OSError, ValueError):
+        return False
+    # The missing year is resolved only within one archive. Any second release
+    # with the same complete date keeps the short alias independent.
+    month = f"0?{release.month}" if release.month < 10 else str(release.month)
+    day = f"0?{release.day}" if release.day < 10 else str(release.day)
+    peer_date = re.compile(
+        rf"\s*[【\[(（]?(?:{release.year}|{stamp[:2]})"
+        rf"(?:[._-]{month}[._-]{day}|{release:%m%d}|年{month}月{day}日)(?![0-9])"
+    )
+    return not any(name != unit.name and peer_date.match(name) for name, _ in siblings)
+
+
+def _published_alias_expected(unit: Path, alias: str, stamp: str, device: int) -> Counter[str] | None:
+    """Read a single P/V declaration and verify the alias's title or date."""
+    dated_name = unit.name[len(stamp):]
     matches = list(_PUBLISHED_WORK_COUNTS.finditer(dated_name))
     if len(matches) != 1:
         return None
@@ -957,7 +1035,7 @@ def _published_alias_expected(unit: Path, alias: str, date: str) -> Counter[str]
     prefix = dated_name[:counts.start()].strip()
     title = prefix.rstrip("([【").rstrip()
     tail = dated_name[counts.end():].strip()
-    same_date = re.fullmatch(r"[^\W\d_]{1,12}\s*" + re.escape(date), alias) is not None
+    same_date = re.fullmatch(r"[^\W\d_]{1,12}\s*" + re.escape(stamp), alias) is not None
     close = _WORK_COUNT_BRACKETS.get(prefix[-1:]) if title != prefix else None
     if close is not None:
         if tail.startswith(close):
@@ -966,7 +1044,8 @@ def _published_alias_expected(unit: Path, alias: str, date: str) -> Counter[str]
             # A truncated declaration is acceptable only with an independently matching full date.
             return None
     if (not title or not _PUBLISHED_WORK_TRAILER.fullmatch(tail)
-            or not (same_date or _same_published_work_title(unit, alias, title))):
+            or not (same_date or _same_published_work_title(unit, alias, title)
+                    or _same_published_work_month_day(unit, alias, stamp, device))):
         return None
     totals = Counter(P=int(counts[1]), V=int(counts[2]))
     return totals if all(0 < total <= MAX_FILES_PER_GROUP for total in totals.values()) else None
@@ -976,8 +1055,8 @@ def _published_alias_sources(
     unit: Path, entries: _DirectoryEntries, device: int, protected_roots: tuple[Path, ...],
 ) -> _OwnedMediaSources | None:
     """Lift the exact numbered P and V buckets of one proven alias to the work root."""
-    date = _PUBLISHED_WORK_DATE.match(unit.name)
-    if date is None or len(entries) != 1:
+    stamp = _PUBLISHED_WORK_DATE.match(unit.name)
+    if stamp is None or len(entries) != 1:
         return None
     alias, info = entries[0]
     folder = unit / alias
@@ -985,7 +1064,7 @@ def _published_alias_sources(
             or is_reserved_workspace(folder) or _append_calendar_boundary(alias)
             or alias.casefold() in _VERSION_NAMES or _WORK_VARIANT_LABEL.search(alias)):
         return None
-    expected = _published_alias_expected(unit, alias, date[0])
+    expected = _published_alias_expected(unit, alias, stamp[0], device)
     if expected is None:
         return None
     try:
@@ -1013,13 +1092,81 @@ def _published_alias_sources(
     return _OwnedMediaSources({alias}, totals)
 
 
+def _dated_default_photo_sources(unit: Path, entries: _DirectoryEntries, device: int,
+                                 protected_roots: tuple[Path, ...]) -> _OwnedMediaSources | None:
+    """Join a default photo leaf to the numbered photos of a clearly named work."""
+    date = _PUBLISHED_WORK_DATE.match(unit.name)
+    if date is None or _author_layer(unit):
+        return None
+    title = unit.name[date.end():].strip()
+    if len(_normalized_work_title(title)) < 2 or _has_work_edition(title) or _COLLECTION_CONTEXT.search(title):
+        return None
+    directories = [(name, info) for name, info in entries if stat.S_ISDIR(info.st_mode)]
+    if len(directories) != 1:
+        return None
+    (name, info), = directories
+    branch = unit / name
+    if not _DEFAULT_FOLDER.fullmatch(name) or info.st_dev != device or _protected(branch, protected_roots):
+        return None
+    outer = [(entry, info) for entry, info in entries if entry != name]
+    files = _regular_media_entries(branch, device)
+    count = len(outer) + len(files)
+    if (count > MAX_FILES_PER_GROUP or not _numbered_media_leaf(unit, outer, "P", device, protected_roots)
+            or not _numbered_media_leaf(branch, files, "P", device, protected_roots)):
+        return None
+    return _OwnedMediaSources({name}, Counter(P=count))
+
+
+def _titled_photo_bucket_sources(unit: Path, entries: _DirectoryEntries, device: int,
+                                 protected_roots: tuple[Path, ...]) -> _OwnedMediaSources | None:
+    """Lift intact, consecutive picture buckets paired with the work's direct videos."""
+    work = _NUMBERED_TITLED_WORK.fullmatch(unit.name)
+    if work is None or _author_layer(unit) or _has_work_edition(work["title"]):
+        return None
+    name = next((name for name, info in entries if stat.S_ISDIR(info.st_mode)
+                 and normalize("NFC", name).casefold() == normalize("NFC", work["title"] + "图").casefold()), None)
+    if name is None or _protected(unit / name, protected_roots):
+        return None
+    videos = [(entry, info) for entry, info in entries if entry != name]
+    if (len(videos) > MAX_FILES_PER_GROUP
+            or not _numbered_media_leaf(unit, videos, "V", device, protected_roots)):
+        return None
+    branch = unit / name
+    try:
+        buckets = _entries(branch, device)
+    except (OSError, ValueError):
+        return None
+    if len(buckets) < 2:
+        return None
+    counts = {}
+    for bucket, info in buckets:
+        label = MEDIA_BUCKET_PATTERN.fullmatch(bucket)
+        folder = branch / bucket
+        if (label is None or label["kind"] != "P" or not stat.S_ISDIR(info.st_mode)
+                or info.st_dev != device or _protected(folder, protected_roots)):
+            return None
+        index = int(label["index"] or "0")
+        if index >= len(buckets) or index in counts:
+            return None
+        files = _regular_media_entries(folder, device)
+        size = sum(file_info.st_size for _, file_info in files)
+        if (len(files) > MAX_FILES_PER_GROUP or (index < len(buckets) - 1 and len(files) != MAX_FILES_PER_GROUP)
+                or label["label"] != f"[{len(files)} {_size_label(size)}]"
+                or not _numbered_media_leaf(folder, files, "P", device, protected_roots)):
+            return None
+        counts[index] = len(files)
+    return _OwnedMediaSources({name}, Counter(P=sum(counts.values()), V=len(videos)))
+
+
 def _semantic_branch_sources(
     unit: Path, entries: _DirectoryEntries, device: int, protected_roots: tuple[Path, ...],
 ) -> _OwnedMediaSources | None:
     """Use the same proven branch ownership for discovery, preview and execution."""
     owned = (_fantia_post_bucket_sources(unit, entries, device, protected_roots)
              or _split_work_sources(unit, entries, device, protected_roots)
-             or _published_alias_sources(unit, entries, device, protected_roots))
+             or _published_alias_sources(unit, entries, device, protected_roots)
+             or _dated_default_photo_sources(unit, entries, device, protected_roots)
+             or _titled_photo_bucket_sources(unit, entries, device, protected_roots))
     if owned is not None:
         return owned
     if _SAME_ISSUE_TITLE.fullmatch(unit.name) or _NUMBERED_WORK_CODE.fullmatch(unit.name):
@@ -1604,6 +1751,13 @@ def preview_organizing_unit(
             unit = _package_path(unit, media_package_root, allowed_roots, quarantine_root)
     elif mode != "semantic" or _protected(unit, protected):
         raise ValueError("Invalid unit or mode")
+    if (mode == "semantic" and not whole_author and local_scope is None
+            and local_media_kinds is None and unit.name.casefold() == "v"):
+        # A direct selection of V must use the same ownership as a recursive scan.
+        device = os.lstat(unit).st_dev
+        kinds, children = _direct_media_selection(unit, _entries(unit, device), device, protected)
+        if any(name.casefold() in _VIDEO_WRAPPER_ALIASES for name in children):
+            local_scope, local_media_kinds = DIRECT_MEDIA_SCOPE, kinds
     retained_bytes = 0
     retained_count = 0
     if local_scope == DIRECT_MEDIA_SCOPE:
@@ -1668,6 +1822,15 @@ def preview_organizing_unit(
             origin_dirs.add(parent)
             parent = parent.parent
     if plan is None:
+        append_wrapper = False
+        if mode == "semantic" and not whole_author and len(origin_dirs) == 1:
+            branch, = origin_dirs
+            append_wrapper = bool(
+                (local_scope == DIRECT_MEDIA_SCOPE and unit.name.casefold() == "v"
+                 and branch.name.casefold() in _VIDEO_WRAPPER_ALIASES)
+                or (local_scope is None and _DEFAULT_FOLDER.fullmatch(branch.name)
+                    and _PUBLISHED_WORK_DATE.match(unit.name))
+            )
         plan = plan_media_layout(
             unit, items, max_rows=max_rows,
             include_items=include_items, include_mapping=include_mapping, organizer_mode=True,
@@ -1675,6 +1838,7 @@ def preview_organizing_unit(
                                          and (photo_groups is not None or local_media_kinds
                                               or _CALENDAR_DIRECTORY.fullmatch(unit.name))),
             append_videos=append_videos,
+            append_wrapper=append_wrapper,
             numbered_photo_groups=photo_groups is not None,
         )
     if mode == "semantic" and plan["status"] == "ready" and not (local_media_kinds or whole_author):

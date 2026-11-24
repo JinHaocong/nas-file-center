@@ -56,6 +56,70 @@ def test_published_alias_buckets_move_to_the_work_root_within_its_volume(tmp_pat
     assert again["summary"]["ready_count"] == again["summary"]["blocked_count"] == 0, again
 
 
+def test_month_day_alias_keeps_the_work_buckets_and_volume(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    volume = settings.data_mount / "Else/2610/261008/示例作者(青岚少女)/网盘/WJJ-10"
+    archive = volume / "2018.12【来源】"
+    work = archive / "18.12.31会员福利(2P+1V)★"
+    alias = work / "青岚 12.31"
+    put_files(alias, _BUCKETS)
+    peer = archive / "18.12.30 独立作品"
+    put_files(peer, {"001.jpg": b"peer"})
+
+    preview = _preview(client, settings, volume)
+    assert [(row["unit"], row["renamed_count"]) for row in preview["units"] if row["status"] == "ready"] == [
+        (str(work), 0),
+    ]
+    batch = _batch(client, preview)
+    assert _run_next(settings, batch)
+    report = client.get(f"/api/media-organizer/batches/{batch}").json()
+    assert report["summary"]["success_count"] == 1, report
+    assert {path.relative_to(work).as_posix(): path.read_bytes()
+            for path in work.rglob("*") if path.is_file()} == _BUCKETS
+    assert not alias.exists()
+    assert set(volume.iterdir()) == {archive}
+    assert (peer / "001.jpg").read_bytes() == b"peer"
+    again = _preview(client, settings, volume)
+    assert again["summary"]["ready_count"] == again["summary"]["blocked_count"] == 0, again
+
+
+@pytest.mark.parametrize(("archive", "title", "alias"), [
+    ("2019.12【来源】", "18.12.31会员福利(2P+1V)★", "青岚 12.31"),
+    ("2018.11【来源】", "18.12.31会员福利(2P+1V)★", "青岚 12.31"),
+    ("2018.12【来源】", "18.12.31会员福利(2P+1V)★", "青岚 12.30"),
+    ("2018.02【来源】", "18.02.31会员福利(2P+1V)★", "青岚 02.31"),
+    ("2018.12【来源】", "18.12.31会员福利(2P+1V)★", "陌生 12.31"),
+    ("2018.12【来源】", "18.12.31会员福利(2P+1V)★", "青 12.31"),
+    ("2018.12【来源】", "18.12.31会员福利(2P+2V)★", "青岚 12.31"),
+    ("2018.12【来源】", "18.12.31会员福利【2P1V", "青岚 12.31"),
+])
+def test_month_day_alias_requires_matching_context_and_buckets(tmp_path, archive, title, alias):
+    work = tmp_path / "2610/261008/示例作者(青岚少女)/网盘/WJJ-10" / archive / title
+    put_files(work / alias, _BUCKETS)
+    rows = list(iter_organizing_previews(work, allowed_roots=[tmp_path]))
+    assert all(row["unit"] != str(work) for row in rows)
+
+
+@pytest.mark.parametrize("other_release", ["18.12.31", "2018.12.31", "【2018-12-31】"])
+def test_month_day_alias_revalidates_unique_work_date_at_confirmation(tmp_path, other_release):
+    client, settings, _ = _fixture(tmp_path)
+    archive = settings.data_mount / "Else/2610/261008/示例作者(青岚少女)/网盘/WJJ-10/2018.12【来源】"
+    work = archive / "18.12.31会员福利(2P+1V)★"
+    alias = work / "青岚 12.31"
+    put_files(alias, _BUCKETS)
+    preview = _preview(client, settings, work)
+    assert preview["summary"]["ready_count"] == 1
+
+    competing = archive / f"{other_release}另一发布(2P+1V)"
+    put_files(competing, _BUCKETS)
+    batch = _batch(client, preview)
+    assert _run_next(settings, batch)
+    report = client.get(f"/api/media-organizer/batches/{batch}").json()
+    assert report["summary"]["conflict_count"] == 1, report
+    assert {path.relative_to(alias).as_posix(): path.read_bytes()
+            for path in alias.rglob("*") if path.is_file()} == _BUCKETS
+
+
 @pytest.mark.parametrize(("title", "alias", "override"), [
     ("18.12.31 新年合集(2P+1V)★", "昵称 12.31", {}),
     ("18.12.31 海边小屋(2P+1V)", "海边小屋 压缩版", {}),

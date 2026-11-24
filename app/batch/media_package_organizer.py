@@ -29,6 +29,8 @@ MAX_DEPTH = 64
 APPEND_SINGLE_VIDEO = "append_single_video"
 APPEND_AUTHOR_VIDEOS = "append_author_videos"
 APPEND_VIDEO_OPERATIONS = frozenset({APPEND_SINGLE_VIDEO, APPEND_AUTHOR_VIDEOS})
+APPEND_MEDIA_WRAPPER = "append_media_wrapper"
+APPEND_MEDIA_OPERATIONS = APPEND_VIDEO_OPERATIONS | {APPEND_MEDIA_WRAPPER}
 PROMOTE_NUMBERED_PHOTO_GROUPS = "promote_numbered_photo_groups"
 LIFT_LUOLCY_BUCKETS = "lift_luolcy_buckets"
 _MONTH = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])$")
@@ -765,7 +767,7 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
 def plan_media_layout(
     source: Path, items: list[dict], *, max_rows: int = 100, include_items: bool = False,
     include_mapping: bool = False, organizer_mode: bool = False,
-    legacy_bucket_conflicts: bool = True, append_videos: bool = False,
+    legacy_bucket_conflicts: bool = True, append_videos: bool = False, append_wrapper: bool = False,
     numbered_photo_groups: bool = False,
 ) -> dict:
     """Plan the same final media layout from a mode-specific bounded inventory."""
@@ -790,9 +792,10 @@ def plan_media_layout(
     # every file before publishing any numbered basename.
     if (not numbered_photo_groups and len(items) <= MAX_FILES_PER_GROUP and totals["Other"] == 0
             and (totals["P"] == 0 or totals["V"] == 0)):
+        append = append_videos or append_wrapper
         relative_items = ((os.path.relpath(row["path"], source), row) for row in items)
         mapping_order = sorted(relative_items, key=lambda pair: (
-            append_videos and Path(pair[1]["path"]).parent != source, pair[0].casefold(), pair[0],
+            append and Path(pair[1]["path"]).parent != source, pair[0].casefold(), pair[0],
         ))
         ordered = [row for _, row in mapping_order]
         new_names, _ = allocate_names(ordered, kind="flat")
@@ -807,12 +810,14 @@ def plan_media_layout(
         targets = [str(source / name) for name in new_names]
         actual_moves = sum(row["path"] != target for row, target in zip(ordered, targets))
         source_paths = {row["path"] for row in ordered}
+        occupied = {name.casefold() for name in os.listdir(source)} if append_wrapper and organizer_mode else set()
         conflicts = [
             {"reason": "target_path_exists", "target": target}
-            for target in targets if target not in source_paths and os.path.lexists(target)
+            for target, name in zip(targets, new_names)
+            if target not in source_paths and (name.casefold() in occupied or os.path.lexists(target))
         ] if organizer_mode else []
         # Retain the complete final map for freezing and result verification.
-        # The append operation needs only the changed row in its preview.
+        # An append publishes only the incoming files and verifies the existing numbers.
         mapping = [
             {"source": row["path"], "target": target,
              "source_name": row["name"], "target_name": name,
@@ -820,11 +825,11 @@ def plan_media_layout(
              "bytes": row["bytes"], "kind": row["kind"]}
             for (relative, row), target, name in zip(mapping_order, targets, new_names)
         ] if actual_moves or include_mapping else []
-        planned = [
-            row for row in mapping if not append_videos or row["source"] != row["target"]
-        ] if actual_moves else []
+        planned = [row for row in mapping if not append or row["source"] != row["target"]] if actual_moves else []
         operation = "flatten_pure_media"
-        if append_videos:
+        if append_wrapper:
+            operation = APPEND_MEDIA_WRAPPER
+        elif append_videos:
             operation = APPEND_SINGLE_VIDEO if actual_moves == 1 else APPEND_AUTHOR_VIDEOS
         return {
             "package": str(source),

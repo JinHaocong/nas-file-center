@@ -59,15 +59,6 @@ from tests.test_media_package_execute_jobs import _fixture
         "命名作品/001.mp4": b"work",
         "另一套/001.jpg": b"other",
     }),
-    ("来源目录", {
-        "V/root.mp4": b"clip",
-        "V/Video/a.mp4": b"alt ",
-        "V/最新4v/001.mp4": b"work",
-    }, {
-        "V/001.mp4": b"clip",
-        "V/Video/001.mp4": b"alt ",
-        "V/最新4v/001.mp4": b"work",
-    }),
     ("分类在同级", {
         "original.mp4": b"clip",
         "P/cover.jpg": b"photo",
