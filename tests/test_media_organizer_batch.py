@@ -1082,6 +1082,39 @@ def test_batch_groups_leaf_photo_packs_and_author_date_categories(tmp_path):
         "$2500_静止画/cover.JPG": ("P [1 4B]/001.JPG", b"phot"),
         "$2500_動画/clip.MP4": ("V [1 4B]/001.MP4", b"clip"),
     }),
+    ("Fantia 合集/2023-12-28 帖子", {
+        "無料&封面/001.jpg": ("001.jpg", b"free"),
+        "無料&封面/002.jpg": ("002.jpg", b"cover"),
+    }),
+    ("Fantia 合集/20231228 帖子", {
+        "無料＆封面/001.jpg": ("001.jpg", b"cover"),
+    }),
+    ("Fantia 合集/20220108 帖子 [2P1V-12B]", {
+        "P [1 4B]/001.png": ("P [2 8B]/001.png", b"phot"),
+        "V [1 4B]/001.mp4": ("V [1 4B]/001.mp4", b"clip"),
+        "鐒℃枡/001.png": ("P [2 8B]/002.png", b"free"),
+    }),
+    ("Fantia 合集/2022-10-31 帖子", {
+        "001.jpeg": ("001.jpeg", b"phot"),
+        "鐒℃枡/001.jpeg": ("002.jpeg", b"free"),
+    }),
+    ("Fantia 合集/20220202 春の温泉♨️ [4P-16B]", {
+        "春の温泉♨️_写真♨️ (1)/001.png": ("001.png", b"part"),
+        "春の温泉♨️_写真♨️/001.png": ("002.png", b"phot"),
+        "無料/001.png": ("003.png", b"free"),
+        "無料/002.png": ("004.png", b"last"),
+    }),
+    ("Fantia 合集/20220311 帖子 [4P-16B]", {
+        "写真1/001.jpeg": ("001.jpeg", b"phot"),
+        "写真2/001.jpeg": ("002.jpeg", b"part"),
+        "無料/001.jpeg": ("003.jpeg", b"free"),
+        "無料/002.jpeg": ("004.jpeg", b"last"),
+    }),
+    ("Fantia 合集/20220312 帖子 [2P1V-12B]", {
+        "写真1/001.jpeg": ("P [2 8B]/001.jpeg", b"phot"),
+        "写真2/001.jpeg": ("P [2 8B]/002.jpeg", b"part"),
+        "001.mp4": ("V [1 4B]/001.mp4", b"clip"),
+    }),
     ("NO.180 千夏", {
         "GIF/motion.GiF": ("P [2 8B]/001.GiF", b"anim"),
         "P [1 4B]/001.jpg": ("P [2 8B]/002.jpg", b"phot"),
@@ -1147,7 +1180,10 @@ def test_batch_absorbs_confirmed_media_wrappers_into_their_work(tmp_path, relati
     ("12_1900_帖子", "$0_🍑", False),
     ("02_2037_帖子", "$0_", True),
     ("20220319 帖子", "無料", True),
+    ("20220311 520", "無料", False),
     ("0709 帖子", "無料＆封面", True),
+    ("2022-10-06 帖子", "無料", True),
+    ("2023-06-29_2039_帖子", "$0_", False),
 ])
 def test_fantia_dated_post_merges_cover_and_all_tiers_at_the_post_root(tmp_path, post_name, free_folder, video):
     client, settings, _ = _fixture(tmp_path)
@@ -1187,26 +1223,65 @@ def test_fantia_dated_post_merges_cover_and_all_tiers_at_the_post_root(tmp_path,
     assert _preview(client, settings, collection)["summary"]["ready_count"] == 0
 
 
-def test_fantia_post_rejects_an_older_combined_plan_when_an_independent_post_appears(tmp_path):
+@pytest.mark.parametrize(("collection", "post_name", "sources"), [
+    ("Fantia 合集", "20220311 帖子 [4P-12B]", ("写真1/001.jpg", "写真2/001.jpg", "無料/001.jpg")),
+    ("Fantia 合集", "20220311 帖子 [3P-12B]", ("写真1/001.jpg", "写真3/001.jpg", "無料/001.jpg")),
+    ("Fantia 合集", "20220311 帖子 [3P-12B]", (
+        "原图无水印_写真/001.jpg", "原图无水印_写真 (1)/001.jpg", "無料/001.jpg",
+    )),
+    ("Fantia 合集", "20220311 帖子 [3P-12B]", (
+        "No.002 外拍_写真/001.jpg", "No.002 外拍_写真 (1)/001.jpg", "無料/001.jpg",
+    )),
+    ("Fantia 合集", "20220311 帖子 [2P-8B]", ("2022.03.10 写真/001.jpg", "2022.03.10 写真 (1)/001.jpg")),
+    ("Fantia 合集", "2022-10-31", ("無料/001.jpg", "$0_/001.jpg")),
+    ("Fantia 合集", "2022-10-31 [3P-12B]", ("写真1/001.jpg", "写真2/001.jpg", "無料/001.jpg")),
+    ("Fantia 合集", "2022-10-31_2039", ("無料/001.jpg", "$0_/001.jpg")),
+    ("Fantia 合集", "2022-10-31 20:39 [3P-12B]", ("写真1/001.jpg", "写真2/001.jpg", "無料/001.jpg")),
+    ("作品合集", "2022-10-31 帖子", ("無料/001.jpg", "$0_/001.jpg")),
+    ("Fantia 合集", "2022-10-31 帖子", ("鐒℃枡A/001.jpg", "001.jpg")),
+    ("Fantia 合集", "2023-12-28 帖子", ("無料&封面/001.mp4",)),
+    ("Fantia 合集", "2023-12-28 帖子 [1P1V-8B]", ("無料&封面/001.mp4", "001.jpg")),
+    ("Fantia 合集", "20220311 帖子 [1P1V-8B]", ("写真1/001.jpg", "001.mp4")),
+    ("Fantia 合集", "20220311 帖子 [1P1V-8B]", ("23_1936_独立帖/001.mp4", "001.jpg")),
+    ("Fantia 合集", "20220311 帖子 [2P2V-16B]", ("写真1/001.jpg", "写真2/001.jpg", "001.mp4")),
+])
+def test_fantia_keeps_unverified_folders_as_independent_units(tmp_path, collection, post_name, sources):
     client, settings, _ = _fixture(tmp_path)
-    post = settings.data_mount / "Else/Fantia 合集/17_2133_帖子"
-    for relative in ("$0_/001.jpg", "$1800_/001.jpg", "001.jpeg"):
+    collection = settings.data_mount / "Else" / collection
+    post = collection / post_name
+    for relative in sources:
+        path = post / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"test")
+    preview = _preview(client, settings, collection)
+    assert {(row["unit"], row["status"]) for row in preview["units"]} == {
+        (str((post / relative).parent), "already_organized") for relative in sources
+    }
+
+
+@pytest.mark.parametrize(("post_name", "sources", "late_source"), [
+    ("17_2133_帖子", ("$0_/001.jpg", "$1800_/001.jpg", "001.jpeg"), "23_1936_另一个帖子/001.jpg"),
+    ("20220311 帖子 [3P-15B]", ("写真1/001.jpg", "写真2/001.jpg", "無料/001.jpg"), "写真1/002.jpg"),
+])
+def test_fantia_post_rejects_an_older_combined_plan_when_ownership_changes(tmp_path, post_name, sources, late_source):
+    client, settings, _ = _fixture(tmp_path)
+    post = settings.data_mount / "Else/Fantia 合集" / post_name
+    for relative in sources:
         path = post / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"image")
     preview = _preview(client, settings, post)
     assert preview["summary"]["ready_count"] == 1
-    nested = post / "23_1936_另一个帖子"
-    nested.mkdir()
-    (nested / "001.jpg").write_bytes(b"separate")
+    added = post / late_source
+    added.parent.mkdir(parents=True, exist_ok=True)
+    added.write_bytes(b"added")
 
     batch_id = _batch(client, preview)
     assert _run_next(settings, batch_id)
     result = client.get(f"/api/media-organizer/batches/{batch_id}").json()
     assert result["summary"]["conflict_count"] == 1, result
-    assert {(path.relative_to(post).as_posix(), path.read_bytes()) for path in post.rglob("*") if path.is_file()} == {
-        ("$0_/001.jpg", b"image"), ("$1800_/001.jpg", b"image"), ("001.jpeg", b"image"),
-        ("23_1936_另一个帖子/001.jpg", b"separate"),
+    assert {path.relative_to(post).as_posix(): path.read_bytes() for path in post.rglob("*") if path.is_file()} == {
+        **dict.fromkeys(sources, b"image"), late_source: b"added",
     }
 
 

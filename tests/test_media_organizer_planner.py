@@ -346,6 +346,33 @@ def test_fantia_pair_keeps_independent_units_when_the_post_has_another_boundary(
     assert (str(movie) in rows) == (quarantine_root is None)
 
 
+@pytest.mark.parametrize("recursive", [False, True])
+def test_fantia_preview_rejects_photo_added_after_checking_the_count(tmp_path, monkeypatch, recursive):
+    from app.batch import media_organizer_planner as planner
+
+    post = tmp_path / "Fantia 合集/20220311 帖子 [3P-12B]"
+    first_part = post / "写真1"
+    late_file = first_part / "002.jpg"
+    put(first_part / "001.jpg")
+    put(post / "写真2/001.jpg")
+    put(post / "無料/001.jpg")
+    real_entries = planner._entries
+
+    def add_file_after_listing(folder, device):
+        entries = real_entries(folder, device)
+        if folder == first_part and not late_file.exists():
+            put(late_file)
+        return entries
+
+    monkeypatch.setattr(planner, "_entries", add_file_after_listing)
+    if recursive:
+        row, = iter_organizing_previews(post.parent, allowed_roots=[tmp_path])
+        assert (row["unit"], row["status"]) == (str(post), "blocked")
+    else:
+        with pytest.raises(ValueError, match="media count changed"):
+            preview_organizing_unit(post, mode="semantic", allowed_roots=[tmp_path])
+
+
 @pytest.mark.parametrize("boundary", ["missing-photo-bucket", "bad-photo-bucket", "mixed-selfies", "protected-bucket"])
 def test_selfies_requires_an_available_photo_bucket_and_a_pure_photo_leaf(tmp_path, boundary):
     work = tmp_path / "作者A/NO.032"

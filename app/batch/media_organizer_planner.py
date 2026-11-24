@@ -8,7 +8,7 @@ from collections import Counter, OrderedDict
 from contextvars import ContextVar
 from itertools import islice
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Callable, Iterator, NamedTuple
 from unicodedata import name as unicode_name
 
 from app.batch.file_rename import _open_directory_nofollow
@@ -51,9 +51,8 @@ _WORK_FOLDER_MARKER = re.compile(
 )
 _BRACKETED_LABEL = re.compile(r"[\[【]([^\]】]*)[\]】]")
 _MEDIA_COUNT_LABEL = re.compile(r"[0-9]+\s*(?:p|v|张|图|视频)", re.I)
-_PHOTO_PACK_TOTAL = re.compile(
-    r"\s*([0-9]+)\s*p(?:[\s/\-／]+[0-9]+(?:\.[0-9]+)?\s*(?:[kmgt]i?b|b|[kmgt]))?\s*", re.I,
-)
+_MEDIA_COUNT_SIZE_SUFFIX = r"(?:[\s/\-／]+[0-9]+(?:\.[0-9]+)?\s*(?:[kmgt]i?b|b|[kmgt]))?"
+_PHOTO_PACK_TOTAL = re.compile(r"\s*([0-9]+)\s*p" + _MEDIA_COUNT_SIZE_SUFFIX + r"\s*", re.I)
 _MIXED_WORK_TOTAL = re.compile(r"(?<![0-9a-z])([0-9]+)\s*p\s*(?:[+／/\-]\s*)?([0-9]+)\s*v(?![0-9a-z])", re.I)
 _ADDITIONAL_WORK_COUNT = re.compile(r"[0-9]+\s*(?:[pv](?![0-9a-z])|张(?:图)?|图|个视频|视频)", re.I)
 _WORK_SEQUENCE_LABEL = re.compile(r"(?<![0-9a-z])(?:exvol|vol|no)[.\s_-]*[0-9]+", re.I)
@@ -76,10 +75,19 @@ _TYPED_WRAPPER_KINDS = {"movie": "V", "img": "P", "gif": "P", "selfies": "P", "j
 _FANTIA_COLLECTION = re.compile(r"(?<![a-z0-9])fantia(?![a-z0-9])", re.I | re.ASCII)
 _FANTIA_TIER = re.compile(r"\$(?P<amount>[0-9]+)_.*")
 _FANTIA_POST_STAMP = re.compile(
-    r"(?:0[1-9]|[12][0-9]|3[01])_(?:[01][0-9]|2[0-3])[0-5][0-9]_.+"
-    r"|(?:(?:19|20)[0-9]{2})?(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])\s+.+",
+    r"(?:"
+    r"(?:0[1-9]|[12][0-9]|3[01])_(?:[01][0-9]|2[0-3])[0-5][0-9]_"
+    r"|(?:(?:19|20)[0-9]{2})?(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])\s+"
+    r"|(?P<iso_date>(?:19|20)[0-9]{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01]))"
+    r"(?:\s+|_(?:(?:[01][0-9]|2[0-3])[0-5][0-9]_)?)"
+    r")(?P<title>.+)",
 )
-_FANTIA_PREVIEW_NAMES = frozenset({"無料", "無料&封面", "無料＆封面", "封面", "cover"})
+_FANTIA_POST_CLOCK = re.compile(r"(?:[01][0-9]|2[0-3]):?[0-5][0-9](?::[0-5][0-9])?")
+_FANTIA_MIXED_POST_TOTAL = re.compile(r"\s*" + _MIXED_WORK_TOTAL.pattern + _MEDIA_COUNT_SIZE_SUFFIX + r"\s*", re.I)
+_FANTIA_FREE_COVER_NAMES = frozenset({"無料&封面", "無料＆封面"})
+_FANTIA_PREVIEW_NAMES = _FANTIA_FREE_COVER_NAMES | {"無料", "封面", "cover"}
+_FANTIA_NUMBERED_PHOTO_PART = re.compile(r"(?:写真|寫真)\s*([1-9][0-9]*)")
+_FANTIA_PHOTO_PART_LABEL = re.compile(r"(?:写真|寫真)[\W_]*")
 _PREVIEW_CACHE_DIRECTORIES = 128
 _PREVIEW_CACHE_ENTRIES = 16_384
 
@@ -88,8 +96,19 @@ def _fantia_collection(path: Path) -> bool:
     return _FANTIA_COLLECTION.search(path.name) is not None
 
 
-def _fantia_dated_post(path: Path) -> bool:
-    return bool(_FANTIA_POST_STAMP.fullmatch(path.name) and _fantia_collection(path.parent))
+def _fantia_post_title(path: Path) -> str | None:
+    """Read a post title while preserving date-only directories with media counts."""
+    if not _fantia_collection(path.parent):
+        return None
+    stamp = _FANTIA_POST_STAMP.fullmatch(path.name)
+    if stamp is None:
+        return None
+    title = _BRACKETED_LABEL.sub(
+        lambda match: "" if _MEDIA_COUNT_LABEL.search(match[1]) else match[0], stamp["title"],
+    ).strip().strip("_").strip()
+    if not title or (stamp["iso_date"] is not None and _FANTIA_POST_CLOCK.fullmatch(title)):
+        return None
+    return title
 
 
 def _is_wrapper(
@@ -144,6 +163,11 @@ def _checked_scope(unit: Path, allowed_roots: list[Path], quarantine_root: Path 
 
 
 _DirectoryEntries = list[tuple[str, os.stat_result]]
+
+
+class _FantiaPostSources(NamedTuple):
+    wrappers: set[str]
+    totals: Counter[str]
 
 
 def _directory_binding(info: os.stat_result) -> tuple[int, ...]:
@@ -364,6 +388,8 @@ def _semantic_inventory(
     device = os.lstat(unit).st_dev
     files = directory_count = 0
     repeated = None
+    post_sources = None
+    post_totals: Counter[str] = Counter()
     while folders:
         if check_cancelled is not None:
             check_cancelled()
@@ -375,7 +401,6 @@ def _semantic_inventory(
             directories.add(folder)
         children = []
         entries = _entries(folder, device)
-        post_sources = None
         if not depth and not (whole_author or local_media_kinds):
             post_sources = _fantia_post_bucket_sources(unit, entries, device, protected_roots)
             if post_sources is None:
@@ -402,7 +427,7 @@ def _semantic_inventory(
                 elif not depth and local_media_kinds:
                     if _labelled_bucket_kind(name) in local_media_kinds and _verified_bucket_kind(path, device):
                         children.append((path, depth + 1))
-                elif (post_sources is not None and name in post_sources
+                elif (not depth and post_sources is not None and name in post_sources.wrappers
                       or (repeated is not None and repeated.is_relative_to(path)) or name == work_component):
                     children.append((path, depth + 1))
                 elif _is_wrapper(folder, name, device=device, protected_roots=protected_roots):
@@ -414,6 +439,8 @@ def _semantic_inventory(
             if not stat.S_ISREG(info.st_mode) or info.st_dev != device:
                 raise ValueError(f"Unsupported or cross-device entry: {path}")
             kind = _classify(name)
+            if post_sources is not None:
+                post_totals[kind] += 1
             if depth and local_media_kinds and kind != _labelled_bucket_kind(folder.name):
                 raise ValueError("A local media bucket changed its file type")
             files += 1
@@ -425,6 +452,8 @@ def _semantic_inventory(
                 "ino": int(info.st_ino), "mtime_ns": int(info.st_mtime_ns),
             }
         folders.extend(reversed(children))
+    if post_sources is not None and post_totals != post_sources.totals:
+        raise ValueError(f"Fantia post media count changed during inventory: {unit}")
 
 
 def walk_organizing_unit(
@@ -566,6 +595,12 @@ def _work_media_component(
     if len(candidates) != 1:
         return None
     name, = candidates
+    # Fantia post and preview labels carry their own ownership rules.
+    if _fantia_post_title(parent) is not None and (
+        _fantia_preview_label(name) is not None or _FANTIA_POST_STAMP.fullmatch(name)
+        or _FANTIA_NUMBERED_PHOTO_PART.fullmatch(name) or _FANTIA_PHOTO_PART_LABEL.fullmatch(name)
+    ):
+        return None
     label = name.casefold()
     if (_protected(parent / name, protected_roots) or _is_wrapper(parent, name)
             or label in _TYPED_WRAPPER_KINDS or name == "图包" or _FANTIA_TIER.fullmatch(name)
@@ -695,43 +730,86 @@ def _fantia_tier_wrapper(post: Path, name: str, device: int, protected_roots: tu
     return {"P"} in kinds and {"V"} in kinds
 
 
+def _fantia_preview_label(name: str) -> str | None:
+    """Recognize a free or cover label, including UTF-8 read as GBK."""
+    label = name.casefold()
+    if label not in _FANTIA_PREVIEW_NAMES:
+        try:
+            label = name.encode("gbk").decode("utf-8")
+        except UnicodeError:
+            return None
+    return label if label in _FANTIA_PREVIEW_NAMES else None
+
+
+def _fantia_photo_parts(names: set[str], title: str) -> bool:
+    """Confirm consecutive photo parts or copies of an identically named photo folder."""
+    if len(names) < 2:
+        return False
+    ordinals = {match[1] for name in names if (match := _FANTIA_NUMBERED_PHOTO_PART.fullmatch(name))}
+    if ordinals == {str(index) for index in range(1, len(names) + 1)}:
+        return True
+    base = min(names, key=len)
+    label = base[len(title):].lstrip(" _") if base.startswith((title + "_", title + " ")) else base
+    if not _FANTIA_PHOTO_PART_LABEL.fullmatch(label) or _WORK_VARIANT_LABEL.search(base):
+        return False
+    return names - {base} == {f"{base} ({index})" for index in range(1, len(names))}
+
+
 def _fantia_post_bucket_sources(
     post: Path, entries: list[tuple[str, os.stat_result]], device: int, protected_roots: tuple[Path, ...],
-) -> set[str] | None:
+) -> _FantiaPostSources | None:
     """Recognize media wrappers belonging to one dated Fantia post."""
-    if not _fantia_dated_post(post):
+    title = _fantia_post_title(post)
+    if title is None:
         return None
-    direct_media = False
+    totals: Counter[str] = Counter()
     has_bucket = False
+    has_free_cover = False
     sources = []
+    photo_parts: set[str] = set()
     for name, info in entries:
         path = post / name
         if info.st_dev != device or _protected(path, protected_roots) or is_reserved_workspace(path):
             return None
-        if stat.S_ISREG(info.st_mode) and _classify(name) in {"P", "V"}:
-            direct_media = True
+        if stat.S_ISREG(info.st_mode):
+            kind = _classify(name)
+            if kind not in {"P", "V"}:
+                return None
+            totals[kind] += 1
             continue
         if not stat.S_ISDIR(info.st_mode):
             return None
         bucket = MEDIA_BUCKET_PATTERN.fullmatch(name) is not None
-        preview = name.casefold() in _FANTIA_PREVIEW_NAMES
-        if not (bucket or preview or _FANTIA_TIER.fullmatch(name)):
-            return None
+        tier = _FANTIA_TIER.fullmatch(name) is not None
+        label = _fantia_preview_label(name) if not (bucket or tier) else None
+        photo_part = not (bucket or tier or label)
+        if photo_part:
+            photo_parts.add(name)
         has_bucket |= bucket
-        sources.append((name, info, bucket, preview))
-    # The old one-folder layout remains valid for a post containing only that folder.
-    if not sources or not (direct_media or has_bucket or len(sources) > 1):
+        has_free_cover |= label in _FANTIA_FREE_COVER_NAMES
+        sources.append((name, info, bucket, label is not None or photo_part))
+    # A combined free and cover folder belongs at the post root even on its own.
+    if not sources or not (totals or has_bucket or has_free_cover or len(sources) > 1):
+        return None
+    expected = _declared_fantia_totals(post) if photo_parts else None
+    if photo_parts and (expected is None or expected["P"] < len(photo_parts) or totals - expected
+                        or not _fantia_photo_parts(photo_parts, title)):
         return None
     try:
-        for name, info, bucket, preview in sources:
+        for name, info, bucket, photo_only in sources:
             path = post / name
             folder, content = (post, [(name, info)]) if bucket else (path, _entries(path, device))
             counts = _work_media_counts(folder, content, device, protected_roots, allow_buckets=True)
-            if not counts or (preview and set(counts) != {"P"}):
+            if not counts or (photo_only and set(counts) != {"P"}):
+                return None
+            totals.update(counts)
+            if expected is not None and totals - expected:
                 return None
     except (OSError, ValueError):
         return None
-    return {name for name, _, _, _ in sources}
+    if expected is not None and totals != expected:
+        return None
+    return _FantiaPostSources({name for name, _, _, _ in sources}, totals)
 
 
 def _verified_bucket_kind(path: Path, device: int) -> str | None:
@@ -923,12 +1001,28 @@ def _whole_author_inventory(
     return (items, directories, append_videos) if {row["kind"] for row in items} == kinds else None
 
 
+def _declared_media_count_label(unit: Path) -> str | None:
+    """Read the sole bracketed media count label in a work title."""
+    labels = [label for label in _BRACKETED_LABEL.findall(unit.name) if _MEDIA_COUNT_LABEL.search(label)]
+    return labels[0] if len(labels) == 1 else None
+
+
+def _declared_fantia_totals(post: Path) -> Counter[str] | None:
+    """Read the declared photo count and any accompanying video count."""
+    label = _declared_media_count_label(post)
+    if label is None:
+        return None
+    photos = _PHOTO_PACK_TOTAL.fullmatch(label)
+    if photos is not None:
+        return Counter(P=int(photos[1]))
+    mixed = _FANTIA_MIXED_POST_TOTAL.fullmatch(label)
+    return Counter(P=int(mixed[1]), V=int(mixed[2])) if mixed is not None else None
+
+
 def _declared_photo_total(unit: Path) -> int | None:
     """Read a photo-only count from a work label such as [123P 396.2MB]."""
-    labels = [label for label in _BRACKETED_LABEL.findall(unit.name) if _MEDIA_COUNT_LABEL.search(label)]
-    if len(labels) != 1:
-        return None
-    match = _PHOTO_PACK_TOTAL.fullmatch(labels[0])
+    label = _declared_media_count_label(unit)
+    match = _PHOTO_PACK_TOTAL.fullmatch(label) if label is not None else None
     return int(match.group(1)) if match else None
 
 
@@ -1138,11 +1232,18 @@ def _semantic_previews(
                 yield photo_preview
                 continue
         numbered_containers = _continuous_numbered_directories(unit, entries, device, protected_roots) - numbered
+        post_sources = (_fantia_post_bucket_sources(unit, entries, device, protected_roots)
+                        if hold_reason is None else None)
+        if post_sources is not None:
+            row = preview(unit, "semantic", False)
+            if row["status"] != "blocked" and Counter(row["totals"]) != post_sources.totals:
+                # Discovery claimed the children. Surface a changing post so the batch can be rescanned.
+                row = _blocked(unit, "semantic", "Fantia post media count changed during preview")
+            yield row
+            continue
         repeated = _repeated_work_wrapper(unit, entries, device, protected_roots) if hold_reason is None else None
         work_component = (_work_media_component(unit, entries, device, protected_roots)
                           if hold_reason is None else None)
-        post_sources = (_fantia_post_bucket_sources(unit, entries, device, protected_roots)
-                        if hold_reason is None else None)
         has_pure_wrappers = False
         has_input = False
         for name, info in entries:
@@ -1152,8 +1253,7 @@ def _semantic_previews(
             if name.casefold().startswith(".nfc-") or info.st_dev != device:
                 yield _blocked(child, "semantic", "Reserved or cross-device entry")
             elif stat.S_ISDIR(info.st_mode):
-                if (post_sources is not None and name in post_sources
-                        or (repeated is not None and repeated.is_relative_to(child)) or name == work_component):
+                if (repeated is not None and repeated.is_relative_to(child)) or name == work_component:
                     has_pure_wrappers = True
                 elif _is_wrapper(unit, name, device=device, protected_roots=protected_roots):
                     if _pure_wrapper(child, device, protected_roots, check_cancelled):
