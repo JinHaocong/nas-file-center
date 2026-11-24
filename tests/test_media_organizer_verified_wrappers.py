@@ -17,6 +17,129 @@ def _execute(client, settings, preview):
     return client.get(f"/api/media-organizer/batches/{job}").json()["summary"]
 
 
+def test_legacy_counted_buckets_become_standard_within_each_work(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    scope = settings.data_mount / "Else/2610/261014/作者"
+    works = {
+        "030 冬日 [2P1V-3MB]": {"Pic [2P-2MB]/001.JPG": b"one", "Pic [2P-2MB]/002.png": b"two",
+                              "Video [1V-1MB]/001.mp4": b"film"},
+        "031 冬日 2 [1P1V-3MB]": {"Pic [1P-2MB]/001.jpg": b"next", "Video [1V-1MB]/001.MOV": b"video"},
+    }
+    for name, files in works.items():
+        put_files(scope / name, files)
+
+    preview = _preview(client, settings, scope)
+    assert preview["summary"]["ready_count"] == 2 and preview["summary"]["file_count"] == 5, preview
+    assert {row["unit"]: [group["name"] for group in row["groups"]] for row in preview["units"]} == {
+        str(scope / "030 冬日 [2P1V-3MB]"): ["P [2 6B]", "V [1 4B]"],
+        str(scope / "031 冬日 2 [1P1V-3MB]"): ["P [1 4B]", "V [1 5B]"],
+    }
+    assert all(row["renamed_count"] == 0 for row in preview["units"])
+    assert _execute(client, settings, preview)["success_count"] == 2
+    assert {path.relative_to(scope).as_posix(): path.read_bytes() for path in scope.rglob("*") if path.is_file()} == {
+        "030 冬日 [2P1V-3MB]/P [2 6B]/001.JPG": b"one",
+        "030 冬日 [2P1V-3MB]/P [2 6B]/002.png": b"two",
+        "030 冬日 [2P1V-3MB]/V [1 4B]/001.mp4": b"film",
+        "031 冬日 2 [1P1V-3MB]/P [1 4B]/001.jpg": b"next",
+        "031 冬日 2 [1P1V-3MB]/V [1 5B]/001.MOV": b"video",
+    }
+    assert all(not folder.name.startswith(("Pic [", "Video ["))
+               for folder in scope.rglob("*") if folder.is_dir())
+    again = _preview(client, settings, scope)
+    assert again["summary"]["ready_count"] == again["summary"]["blocked_count"] == 0, again
+
+
+@pytest.mark.parametrize(("title", "photo", "video", "extra"), [
+    ("030 冬日", "Pic [1P-2MB]/001.jpg", "Video [1V-1MB]/001.mp4", None),
+    ("030 冬日 [2P1V-3MB]", "Pic [1P-2MB]/001.jpg", "Video [1V-1MB]/001.mp4", None),
+    ("030 冬日 [1P1V-3MB]", "Pic [2P-2MB]/001.jpg", "Video [1V-1MB]/001.mp4", None),
+    ("030 冬日 [1P1V-3MB]", "Pic [1V-2MB]/001.jpg", "Video [1V-1MB]/001.mp4", None),
+    ("030 冬日 [1P1V-3MB]", "Pic [1P-2MB]/001.mp4", "Video [1V-1MB]/001.jpg", None),
+    ("030 冬日 [1P1V-3MB]", "Pic [1P-2MB]/002.jpg", "Video [1V-1MB]/001.mp4", None),
+    ("030 冬日 [1P1V-3MB]", "Pic [1P-2MB]/001.jpg", "Video [1V-1MB]/001.mp4", "4K/001.mp4"),
+])
+def test_legacy_counted_buckets_require_exact_work_scope(tmp_path, title, photo, video, extra):
+    work = tmp_path / "2610/261014/作者" / title
+    files = {photo: b"image", video: b"video"}
+    if extra is not None:
+        files[extra] = b"extra"
+    put_files(work, files)
+    rows = list(iter_organizing_previews(work, allowed_roots=[tmp_path]))
+    assert all(row["unit"] != str(work) for row in rows)
+
+
+def test_legacy_counted_buckets_keep_sources_when_a_target_appears_after_preview(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    work = settings.data_mount / "Else/2610/261014/作者/030 冬日 [1P1V-3MB]"
+    put_files(work, {"Pic [1P-2MB]/001.jpg": b"pic", "Video [1V-1MB]/001.mp4": b"film"})
+    preview = _preview(client, settings, work)
+    assert preview["summary"]["ready_count"] == 1
+    put_files(work, {"P [1 3B]/001.jpg": b"new"})
+
+    assert _execute(client, settings, preview)["conflict_count"] == 1
+    assert (work / "Pic [1P-2MB]/001.jpg").read_bytes() == b"pic"
+    assert (work / "Video [1V-1MB]/001.mp4").read_bytes() == b"film"
+    assert (work / "P [1 3B]/001.jpg").read_bytes() == b"new"
+
+
+@pytest.mark.parametrize(("name", "wrapper", "direct", "target"), [
+    ("17.12.07 会员更新2P1V", "2017-12-7-3BM28895V", "001.jpg", "P [2 7B]/001.jpg"),
+    ("2021-02-03 冬日 [1P2V]", "2021_02_03_Z12951X3", "001.MOV", "V [2 8B]/001.MOV"),
+    ("海边小屋2", "✅ 全部文件 第 1_2 页-14237579948279325", "001.MOV", "V [2 8B]/001.MOV"),
+])
+def test_verified_export_wrapper_is_rebuilt_only_in_its_work(tmp_path, name, wrapper, direct, target):
+    client, settings, _ = _fixture(tmp_path)
+    scope = settings.data_mount / "Else/2610/261014/作者/网盘/WJJ-07/2017.12【来源】"
+    work = scope / name
+    puts = {direct: b"root", f"{wrapper}/P [1 3B]/001.jpg": b"pic", f"{wrapper}/V [1 4B]/001.mp4": b"film"}
+    put_files(work, puts)
+    sibling = scope / "17.12.07 另一套作品"
+    put_files(sibling, {"001.mp4": b"peer"})
+
+    preview = _preview(client, settings, scope)
+    assert preview["summary"]["ready_count"] == 1 and preview["summary"]["file_count"] == 4, preview
+    row, = [row for row in preview["units"] if row["status"] == "ready"]
+    assert row["unit"] == str(work)
+    assert row["renamed_count"] == 1
+    assert any(move["source"] == str(work / direct) and move["target"] == str(work / target)
+               for move in row["sample_moves"])
+
+    assert _execute(client, settings, preview)["success_count"] == 1
+    expected = ("P [2 7B]/002.jpg", "V [1 4B]/001.mp4") if direct.endswith(".jpg") else (
+        "P [1 3B]/001.jpg", "V [2 8B]/002.mp4",
+    )
+    assert {path.relative_to(work).as_posix(): path.read_bytes() for path in work.rglob("*") if path.is_file()} == {
+        target: b"root", expected[0]: b"pic", expected[1]: b"film",
+    }
+    assert not (work / wrapper).exists()
+    assert (sibling / "001.mp4").read_bytes() == b"peer"
+    again = _preview(client, settings, scope)
+    assert again["summary"]["ready_count"] == again["summary"]["blocked_count"] == 0, again
+
+
+@pytest.mark.parametrize(("name", "wrapper", "extra", "has_direct"), [
+    ("17.12.07 更新2P1V", "2017-12-8-X812679", None, True),
+    ("17.12.07 更新3P1V", "2017-12-7-X812679", None, True),
+    ("19.02.29 更新2P1V", "2019-02-29-X812679", None, True),
+    ("海边小屋2", "✅ 全部文件 第 2_1 页-14237579948279325", None, True),
+    ("海边小屋2", "✅ 全部文件 第 1_2 页-14237579948279325", None, False),
+    ("海边小屋2", "✅ 全部文件 第 1_2 页-14237579948279325", "另一套作品/001.mp4", True),
+    ("海边小屋2 [1P2V]", "✅ 全部文件 第 1_2 页-14237579948279325", None, True),
+    ("海边小屋合集", "✅ 全部文件 第 1_2 页-14237579948279325", None, True),
+])
+def test_export_rule_does_not_claim_unverified_siblings_or_dates(tmp_path, name, wrapper, extra, has_direct):
+    work = tmp_path / "2610/261014/作者/网盘" / name
+    put_files(work, {f"{wrapper}/P [1 3B]/001.jpg": b"pic", f"{wrapper}/V [1 4B]/001.mp4": b"film"})
+    if has_direct:
+        put_files(work, {"001.jpg": b"root"})
+    if extra:
+        put_files(work, {extra: b"peer"})
+
+    rows = list(iter_organizing_previews(work, allowed_roots=[tmp_path], include_mapping=True))
+    assert all(row["status"] == "already_organized" for row in rows)
+    assert any(row["unit"] == str(work / wrapper) for row in rows)
+
+
 def test_default_photo_wrapper_appends_to_the_dated_work(tmp_path):
     client, settings, _ = _fixture(tmp_path)
     scope = settings.data_mount / "Else/2610/261008/作者/存档"

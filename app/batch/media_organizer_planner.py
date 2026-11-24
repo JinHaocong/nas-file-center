@@ -26,6 +26,10 @@ from app.batch.media_package_organizer import (
 from app.path_safety import require_allowed_path, require_unreserved_path
 
 _LEGACY_BUCKET = re.compile(r"(?:p|v)(?:_?[1-9]\d*)?|other", re.I)
+_LEGACY_COUNTED_BUCKET = re.compile(
+    r"(?P<label>pic|video)\s+\[(?P<count>[1-9][0-9]{0,2})\s*(?P<kind>[pv])\s*-\s*"
+    r"[0-9]+(?:\.[0-9]+)?\s*(?:[kmgt]i?b|b)\]", re.I,
+)
 _OTHER_BUCKET = re.compile(r"other \[\d+ [^/]+\]", re.I)
 _CALENDAR_DIRECTORY = re.compile(
     r"(?:19|20)\d{2}|(?:\d{2}|\d{4})(?:"
@@ -75,6 +79,14 @@ _NUMBERED_WORK_CODE = re.compile(r"[a-z][0-9]+-[0-9]+", re.I)
 _DATED_EXPORT_LABEL = re.compile(
     r"(?:0?[1-9]|1[0-2])[.月](?:0?[1-9]|[12][0-9]|3[01])号"
     r"【([1-9][0-9]*)v\s+([1-9][0-9]*)p" + _MEDIA_COUNT_SIZE_SUFFIX + r"】", re.I,
+)
+_EXPORT_MONTH_DAY = r"[-_.](?P<month>[0-9]{1,2})[-_.](?P<day>[0-9]{1,2})"
+_EXPORT_WORK_DATE = re.compile(r"(?P<year>(?:19|20)?[0-9]{2})" + _EXPORT_MONTH_DAY + r"(?![0-9])")
+_DATED_EXPORT_WRAPPER = re.compile(
+    r"(?P<year>(?:19|20)[0-9]{2})" + _EXPORT_MONTH_DAY + r"[-_ ]+(?=[a-z0-9]*[0-9])[a-z0-9]{6,32}", re.I,
+)
+_PAGED_EXPORT_WRAPPER = re.compile(
+    r"(?:✅\s*)?全部文件\s*第\s*(?P<first>[1-9][0-9]*)(?:[_-](?P<last>[1-9][0-9]*))?\s*页\s*[-－]\s*[0-9]{10,32}"
 )
 _DATED_WORK_ALIAS = re.compile(
     r"(?P<date>[0-9]{2}\.\d{2}\.\d{2})\s*(?P<title>[^()\[\]【】]+?)"
@@ -1051,6 +1063,31 @@ def _published_alias_expected(unit: Path, alias: str, stamp: str, device: int) -
     return totals if all(0 < total <= MAX_FILES_PER_GROUP for total in totals.values()) else None
 
 
+def _numbered_pv_bucket_counts(folder: Path, device: int, protected_roots: tuple[Path, ...]) -> Counter[str] | None:
+    """Verify the size, count and numbering of exactly one P and one V bucket."""
+    try:
+        buckets = _entries(folder, device)
+    except (OSError, ValueError):
+        return None
+    if len(buckets) != 2:
+        return None
+    totals: Counter[str] = Counter()
+    for name, info in buckets:
+        path = folder / name
+        if not stat.S_ISDIR(info.st_mode) or info.st_dev != device or _protected(path, protected_roots):
+            return None
+        kind = name[:1]
+        if kind not in {"P", "V"} or kind in totals:
+            return None
+        files = _regular_media_entries(path, device)
+        size = sum(info.st_size for _, info in files)
+        if (len(files) > MAX_FILES_PER_GROUP or name != f"{kind} [{len(files)} {_size_label(size)}]"
+                or not _numbered_media_leaf(path, files, kind, device, protected_roots)):
+            return None
+        totals[kind] = len(files)
+    return totals
+
+
 def _published_alias_sources(
     unit: Path, entries: _DirectoryEntries, device: int, protected_roots: tuple[Path, ...],
 ) -> _OwnedMediaSources | None:
@@ -1067,29 +1104,78 @@ def _published_alias_sources(
     expected = _published_alias_expected(unit, alias, stamp[0], device)
     if expected is None:
         return None
+    totals = _numbered_pv_bucket_counts(folder, device, protected_roots)
+    return _OwnedMediaSources({alias}, expected) if totals == expected else None
+
+
+def _same_export_date(work: re.Match[str], wrapper: re.Match[str]) -> bool:
+    """Validate the export date and resolve a two-digit work year from it."""
     try:
-        buckets = _entries(folder, device)
-    except (OSError, ValueError):
+        stamp = date(int(wrapper["year"]), int(wrapper["month"]), int(wrapper["day"]))
+    except ValueError:
+        return False
+    year = stamp.year % 100 if len(work["year"]) == 2 else stamp.year
+    return (year, stamp.month, stamp.day) == tuple(int(work[key]) for key in ("year", "month", "day"))
+
+
+def _export_title_matches_media(title: str, totals: Counter[str], *, require_counts: bool) -> bool:
+    """Verify any media declaration and require a title separate from the counts."""
+    matches = list(_PUBLISHED_WORK_COUNTS.finditer(title))
+    if not matches:
+        return (not require_counts and not _ADDITIONAL_WORK_COUNT.search(title)
+                and any(char.isalpha() for char in title))
+    if len(matches) != 1:
+        return False
+    counts, = matches
+    name, trail = title[:counts.start()], title[counts.end():]
+    return (any(char.isalpha() for char in name)
+            and not any(_ADDITIONAL_WORK_COUNT.search(part) for part in (name, trail))
+            and totals == Counter(P=int(counts[1]), V=int(counts[2])))
+
+
+def _work_export_sources(unit: Path, entries: _DirectoryEntries, device: int,
+                         protected_roots: tuple[Path, ...]) -> _OwnedMediaSources | None:
+    """Combine one generated export wrapper with the files already in its work root."""
+    if len(entries) < 2 or _author_layer(unit):
         return None
-    if len(buckets) != 2:
+    directories = [(name, info) for name, info in entries if stat.S_ISDIR(info.st_mode)]
+    if len(directories) != 1:
         return None
-    totals: Counter[str] = Counter()
-    for name, info in buckets:
-        path = folder / name
-        if not stat.S_ISDIR(info.st_mode) or info.st_dev != device or _protected(path, protected_roots):
+    (name, info), = directories
+    dated = _DATED_EXPORT_WRAPPER.fullmatch(name)
+    paged = _PAGED_EXPORT_WRAPPER.fullmatch(name)
+    if dated is None and paged is None:
+        return None
+    folder = unit / name
+    if (info.st_dev != device or _protected(folder, protected_roots) or _has_work_edition(unit.name)
+            or _append_calendar_boundary(unit.name) or _is_wrapper(unit.parent, unit.name)
+            or _fantia_collection(unit)):
+        return None
+    title = unit.name
+    if dated is not None:
+        stamp = _EXPORT_WORK_DATE.match(title)
+        if stamp is None or not _same_export_date(stamp, dated):
             return None
-        kind = name[:1]
-        if kind not in expected or kind in totals:
-            return None
-        files = _regular_media_entries(path, device)
-        size = sum(info.st_size for _, info in files)
-        if (len(files) != expected[kind] or name != f"{kind} [{len(files)} {_size_label(size)}]"
-                or any(_classify(filename) != kind or _protected(path / filename, protected_roots)
-                       or filename != numbered_name(index, filename)
-                       for index, (filename, _) in enumerate(files, 1))):
-            return None
-        totals[kind] = len(files)
-    return _OwnedMediaSources({alias}, totals)
+        title = title[stamp.end():]
+    elif (_COLLECTION_CONTEXT.search(title) or _PAGED_EXPORT_WRAPPER.fullmatch(title)
+          or _DATED_EXPORT_WRAPPER.fullmatch(title) or int(paged["first"]) > int(paged["last"] or paged["first"])):
+        return None
+
+    direct = [(entry, st) for entry, st in entries if entry != name]
+    kinds = {_classify(entry) for entry, _ in direct}
+    if kinds not in ({"P"}, {"V"}):
+        return None
+    kind, = kinds
+    if not _numbered_media_leaf(unit, direct, kind, device, protected_roots):
+        return None
+    totals = _numbered_pv_bucket_counts(folder, device, protected_roots)
+    if totals is None:
+        return None
+    totals[kind] += len(direct)
+    if (totals[kind] > MAX_FILES_PER_GROUP
+            or not _export_title_matches_media(title, totals, require_counts=dated is not None)):
+        return None
+    return _OwnedMediaSources({name}, totals)
 
 
 def _dated_default_photo_sources(unit: Path, entries: _DirectoryEntries, device: int,
@@ -1158,6 +1244,35 @@ def _titled_photo_bucket_sources(unit: Path, entries: _DirectoryEntries, device:
     return _OwnedMediaSources({name}, Counter(P=sum(counts.values()), V=len(videos)))
 
 
+def _legacy_counted_bucket_sources(unit: Path, entries: _DirectoryEntries, device: int,
+                                   protected_roots: tuple[Path, ...]) -> _OwnedMediaSources | None:
+    """Recognize an intact pair of old Pic/Video buckets belonging to one work."""
+    if len(entries) != 2 or _author_layer(unit):
+        return None
+    label = _declared_media_count_label(unit)
+    declared = _SPLIT_WORK_TOTAL.fullmatch(label) if label is not None else None
+    if declared is None:
+        return None
+    expected = Counter(P=int(declared[1]), V=int(declared[2]))
+    totals: Counter[str] = Counter()
+    for name, info in entries:
+        bucket = _LEGACY_COUNTED_BUCKET.fullmatch(name)
+        folder = unit / name
+        if (bucket is None or not stat.S_ISDIR(info.st_mode) or info.st_dev != device
+                or _protected(folder, protected_roots)):
+            return None
+        kind = "P" if bucket["label"].casefold() == "pic" else "V"
+        count = int(bucket["count"])
+        if kind != bucket["kind"].upper() or kind in totals or count != expected[kind] or count > MAX_FILES_PER_GROUP:
+            return None
+        files = _regular_media_entries(folder, device)
+        if len(files) != count or not _numbered_media_leaf(folder, files, kind, device, protected_roots):
+            return None
+        totals[kind] = count
+    # Let the standard planner label output sizes from actual bytes.
+    return _OwnedMediaSources({name for name, _ in entries}, totals)
+
+
 def _semantic_branch_sources(
     unit: Path, entries: _DirectoryEntries, device: int, protected_roots: tuple[Path, ...],
 ) -> _OwnedMediaSources | None:
@@ -1166,7 +1281,9 @@ def _semantic_branch_sources(
              or _split_work_sources(unit, entries, device, protected_roots)
              or _published_alias_sources(unit, entries, device, protected_roots)
              or _dated_default_photo_sources(unit, entries, device, protected_roots)
-             or _titled_photo_bucket_sources(unit, entries, device, protected_roots))
+             or _titled_photo_bucket_sources(unit, entries, device, protected_roots)
+             or _legacy_counted_bucket_sources(unit, entries, device, protected_roots)
+             or _work_export_sources(unit, entries, device, protected_roots))
     if owned is not None:
         return owned
     if _SAME_ISSUE_TITLE.fullmatch(unit.name) or _NUMBERED_WORK_CODE.fullmatch(unit.name):

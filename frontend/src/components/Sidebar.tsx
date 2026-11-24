@@ -57,6 +57,6 @@ export const Sidebar: React.FC<{ onNavigate: () => void }> = ({ onNavigate }) =>
             className={mode === key ? 'is-selected' : ''} onClick={() => { setMode(key); onNavigate(); }}>{label}</button>)}
       </div>
     </div>
-    <div className="nfc-v2-sidebar-footer"><small className="nfc-v2-release-version">v1.8.3</small></div>
+    <div className="nfc-v2-sidebar-footer"><small className="nfc-v2-release-version">v1.8.4</small></div>
   </div>;
 };
