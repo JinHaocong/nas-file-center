@@ -85,7 +85,7 @@ export const Sidebar: React.FC<Props> = ({
       )}
       <div className="nfc-v2-sidebar-footer">
         {!compact && (
-          <small className="nfc-v2-release-version">v1.7.11</small>
+          <small className="nfc-v2-release-version">v1.7.12</small>
         )}
       </div>
       {!embedded && (
