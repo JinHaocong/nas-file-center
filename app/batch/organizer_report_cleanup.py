@@ -62,6 +62,16 @@ def _json_field(column, path):
     return func.json_extract(case((func.json_valid(column), column), else_="{}"), path)
 
 
+def is_report_task(job):
+    """Identify the organizer workflow that owns the two managed report namespaces."""
+    return job.kind in KINDS and _object(job.state_json).get("organizer_flow") == FLOW
+
+
+def report_task_filter():
+    flow = func.coalesce(_json_field(WorkJob.state_json, "$.organizer_flow"), "")
+    return WorkJob.kind.in_(KINDS) & (flow == FLOW)
+
+
 def _has_references(session, preview_id, *, except_job=None):
     value = str(preview_id)
     jobs = select(WorkJob.id).where(cast(_json_field(WorkJob.state_json, "$.preview_job_id"), String) == value)
@@ -89,8 +99,7 @@ def _closed_counts(session, job):
 
 def _eligible(session, job):
     """Return the batch's preview or the standalone preview itself, with a summary."""
-    if (job.kind not in KINDS or job.status != "completed" or job.error_text or job.error_code
-            or _object(job.state_json).get("organizer_flow") != FLOW):
+    if not is_report_task(job) or job.status != "completed" or job.error_text or job.error_code:
         return None
     if job.kind == PREVIEW:
         return None if _has_references(session, job.id) else (job, {})

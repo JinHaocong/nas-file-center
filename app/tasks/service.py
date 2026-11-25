@@ -5,7 +5,9 @@ from typing import Any
 from sqlalchemy import Integer, delete, func, or_, select, text
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
-from app.batch.organizer_report_cleanup import KINDS as REPORT_TASK_KINDS, preview_unavailable, request_report_cleanup
+from app.batch.organizer_report_cleanup import (
+    is_report_task, preview_unavailable, report_task_filter, request_report_cleanup,
+)
 from app.config import Settings
 from app.exceptions import StateConflictError
 from app.models import BatchPlan, ScanJob, TaskEvent, WorkJob, WorkerState, utcnow
@@ -455,7 +457,7 @@ class TaskService:
         def _transition(session: Session, job: WorkJob, *args: Any):
             if job.status not in TERMINAL_STATES:
                 raise ValueError(f"Only terminal jobs can be deleted (current status is '{job.status}')")
-            if self.report_settings is not None and job.kind in REPORT_TASK_KINDS:
+            if self.report_settings is not None and is_report_task(job):
                 disposition = (request_report_cleanup(session, job, self.report_settings)
                                if reclaim_reports else "retained_count")
                 _dismiss_task(job)
@@ -493,7 +495,7 @@ class TaskService:
             report_dismissed = 0
             if self.report_settings is not None:
                 jobs = list(session.scalars(select(WorkJob).where(
-                    WorkJob.status.in_(target_statuses), WorkJob.kind.in_(REPORT_TASK_KINDS),
+                    WorkJob.status.in_(target_statuses), report_task_filter(),
                     func.coalesce(func.json_extract(WorkJob.checkpoint_json, "$._task_queue_dismissed"), 0) != 1,
                 ).order_by((WorkJob.kind == _ORGANIZER_BATCH).desc())))
                 report_dismissed = len(jobs)
@@ -505,7 +507,7 @@ class TaskService:
                     _dismiss_task(job)
             retain_stmt = select(WorkJob).where(WorkJob.status.in_(target_statuses), _preserved_organizer_history())
             if self.report_settings is not None:
-                retain_stmt = retain_stmt.where(WorkJob.kind.not_in(REPORT_TASK_KINDS))
+                retain_stmt = retain_stmt.where(~report_task_filter())
             retained = session.scalars(retain_stmt)
             dismissed = sum(_dismiss_task(job) for job in retained)
             del_stmt = delete(WorkJob).where(
@@ -515,7 +517,7 @@ class TaskService:
                 (WorkJob.status != "failed"),
             )
             if self.report_settings is not None:
-                del_stmt = del_stmt.where(WorkJob.kind.not_in(REPORT_TASK_KINDS))
+                del_stmt = del_stmt.where(~report_task_filter())
             # Failed media-package execution records retain the only durable
             # link between an interrupted stage and its frozen manifest.
             result = session.execute(del_stmt)
