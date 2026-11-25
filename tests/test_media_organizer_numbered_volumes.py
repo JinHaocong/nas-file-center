@@ -16,6 +16,50 @@ def _execute(client, settings, preview):
     return client.get(f"/api/media-organizer/batches/{job}").json()["summary"]
 
 
+@pytest.mark.parametrize("wrapper", ["1", "07"])
+def test_titled_work_lifts_its_only_numbered_pv_wrapper(tmp_path, wrapper):
+    client, settings, _ = _fixture(tmp_path)
+    scope = settings.data_mount / "Else/2609/260917/作者/网盘"
+    work = scope / "NO.148 同一作品 [2P1V 236MB]"
+    put_files(work, {
+        "001.jpg": b"base",
+        f"{wrapper}/P [1 5B]/001.png": b"extra",
+        f"{wrapper}/V [1 4B]/001.mp4": b"film",
+    })
+
+    preview = _preview(client, settings, scope)
+    assert preview["summary"]["ready_count"] == 1 and preview["summary"]["blocked_count"] == 0, preview
+    row, = [item for item in preview["units"] if item["status"] == "ready"]
+    assert row["unit"] == str(work)
+    assert [bucket["name"] for bucket in row["groups"]] == ["P [2 9B]", "V [1 4B]"]
+    assert _execute(client, settings, preview)["success_count"] == 1
+    assert {p.relative_to(work).as_posix(): p.read_bytes() for p in work.rglob("*") if p.is_file()} == {
+        "P [2 9B]/001.jpg": b"base", "P [2 9B]/002.png": b"extra", "V [1 4B]/001.mp4": b"film",
+    }
+    assert not (work / wrapper).exists()
+    fresh = _preview(client, settings, scope)
+    assert fresh["summary"]["ready_count"] == fresh["summary"]["blocked_count"] == 0
+
+
+@pytest.mark.parametrize(("title", "wrapper", "extra"), [
+    ("同一作品 [3P1V 236MB]", "1", {}),
+    ("同一作品 [2P1V 236MB]", "1", {"02/001.mp4": b"next volume"}),
+    ("同一作品 [2P1V 236MB]", "1", {"1/原图无水印/001.jpg": b"version"}),
+    ("同一作品 [2P1V 236MB]", "2025", {}),
+])
+def test_numbered_wrapper_keeps_separate_volumes_dates_and_versions(tmp_path, title, wrapper, extra):
+    work = tmp_path / "2609/260917/作者/网盘" / title
+    put_files(work, {
+        "001.jpg": b"base",
+        f"{wrapper}/P [1 5B]/001.png": b"extra",
+        f"{wrapper}/V [1 4B]/001.mp4": b"film",
+        **extra,
+    })
+
+    rows = list(iter_organizing_previews(work, allowed_roots=[tmp_path], include_mapping=True))
+    assert not any(Path(row["unit"]) == work and row["status"] == "ready" for row in rows)
+
+
 def test_numbered_package_accepts_a_verified_legacy_p_and_v_pair(tmp_path):
     client, settings, _ = _fixture(tmp_path)
     archive = settings.data_mount / "Else/2609/260904/作者/归档"

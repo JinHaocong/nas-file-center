@@ -56,6 +56,44 @@ def test_counted_cover_photos_join_existing_work_bucket_and_leave_video_mapping(
     assert _preview(client, settings, work)["summary"]["ready_count"] == 0
 
 
+@pytest.mark.parametrize("label", ["私讯解锁", "私訊解鎖"])
+def test_counted_unlock_lifts_photos_and_video_to_the_work_root(tmp_path, label):
+    client, settings, _ = _fixture(tmp_path)
+    scope = settings.data_mount / "Else/2609/260917/作者/网盘"
+    work = scope / "NO.122 同一作品 [2P1V 211MB]"
+    put_files(work, {
+        "001.jpg": b"base",
+        f"{label}/P [1 5B]/001.png": b"extra",
+        f"{label}/V [1 4B]/001.mp4": b"film",
+    })
+
+    preview = _preview(client, settings, scope)
+    assert preview["summary"]["ready_count"] == 1 and preview["summary"]["blocked_count"] == 0, preview
+    row, = [item for item in preview["units"] if item["status"] == "ready"]
+    assert row["unit"] == str(work)
+    assert [bucket["name"] for bucket in row["groups"]] == ["P [2 9B]", "V [1 4B]"]
+    assert _execute(client, settings, preview)["success_count"] == 1
+    assert {p.relative_to(work).as_posix(): p.read_bytes() for p in work.rglob("*") if p.is_file()} == {
+        "P [2 9B]/001.jpg": b"base", "P [2 9B]/002.png": b"extra", "V [1 4B]/001.mp4": b"film",
+    }
+    assert not (work / label).exists()
+    fresh = _preview(client, settings, scope)
+    assert fresh["summary"]["ready_count"] == fresh["summary"]["blocked_count"] == 0
+
+
+@pytest.mark.parametrize(("label", "total", "extra"), [
+    ("私訊解鎖", "3P1V", {}),
+    ("封面圖", "2P1V", {}),
+    ("私訊解鎖", "3P1V", {"原圖無水印/001.jpg": b"variant"}),
+])
+def test_mixed_supplements_require_one_unlock_branch_and_matching_counts(tmp_path, label, total, extra):
+    work = tmp_path / "2609/260917/作者/网盘" / f"NO.122 同一作品 [{total}]"
+    put_files(work, {"001.jpg": b"base", f"{label}/001.png": b"extra", f"{label}/001.mp4": b"film", **extra})
+
+    rows = list(iter_organizing_previews(work, allowed_roots=[tmp_path], include_mapping=True))
+    assert not any(Path(row["unit"]) == work and row["status"] == "ready" for row in rows)
+
+
 @pytest.mark.parametrize(("title", "extra"), [
     ("NO.016 作品", {}),
     ("NO.016 作品 [3P 1GB]", {}),

@@ -118,7 +118,8 @@ _FINISH_REPEATED_ARCHIVE = "Finish repeated archive"
 _PHOTO_ALIASES = frozenset({
     "图片", "图", "照片", "photo", "photos", "image", "images", "picture", "pictures", "pic",
 })
-_COUNTED_PHOTO_SUPPLEMENTS = frozenset({"私讯", "私訊", "私讯解锁", "私訊解鎖", "封面", "封面图", "封面圖"})
+_PRIVATE_UNLOCK_SUPPLEMENTS = frozenset({"私讯解锁", "私訊解鎖"})
+_COUNTED_PHOTO_SUPPLEMENTS = _PRIVATE_UNLOCK_SUPPLEMENTS | {"私讯", "私訊", "封面", "封面图", "封面圖"}
 _ALIASES = _PHOTO_ALIASES | {"视频", "video", "videos"}
 _VIDEO_WRAPPER_ALIASES = frozenset({"视频", "video", "videos"})
 _NUMBERED_TITLED_WORK = re.compile(r"[1-9][0-9]{0,2}\s*(?P<title>[^\W\d_][\w ]+)")
@@ -1380,7 +1381,7 @@ def _legacy_counted_bucket_sources(unit: Path, entries: _DirectoryEntries, devic
 
 def _counted_photo_supplements(unit: Path, entries: _DirectoryEntries, device: int,
                                protected_roots: tuple[Path, ...]) -> _OwnedMediaSources | None:
-    """Collect cover and private-message photos only when the work totals prove ownership."""
+    """Collect supplemental photos or one mixed unlock when the work totals prove ownership."""
     branches = {name: info for name, info in entries if stat.S_ISDIR(info.st_mode)
                 and normalize("NFKC", name).strip() in _COUNTED_PHOTO_SUPPLEMENTS}
     if (not branches or _author_layer(unit) or _is_wrapper(unit.parent, unit.name)
@@ -1408,10 +1409,37 @@ def _counted_photo_supplements(unit: Path, entries: _DirectoryEntries, device: i
         except (OSError, ValueError):
             return None
         counts = _work_media_counts(folder, children, device, protected_roots, allow_buckets=True)
-        if not counts or counts.keys() != {"P"}:
+        if not counts:
+            return None
+        if "V" in counts and (mixed is None or len(branches) != 1 or "P" not in counts
+                              or normalize("NFKC", name).strip() not in _PRIVATE_UNLOCK_SUPPLEMENTS):
             return None
         totals.update(counts)
     return _OwnedMediaSources(set(branches), totals) if totals == expected else None
+
+
+def _single_numbered_work_sources(unit: Path, entries: _DirectoryEntries, device: int,
+                                  protected_roots: tuple[Path, ...]) -> _OwnedMediaSources | None:
+    """Join a work's direct media with its sole numeric wrapper of numbered P/V buckets."""
+    if len(entries) < 2:
+        return None
+    children = [name for name, info in entries if stat.S_ISDIR(info.st_mode)]
+    if (len(children) != 1 or not _NUMBERED_LEAF.fullmatch(children[0]) or _author_layer(unit)
+            or _is_wrapper(unit.parent, unit.name) or _FANTIA_POST_COLLECTION.search(unit.parent.name)
+            or _fantia_collection(unit)):
+        return None
+    label = _declared_media_count_label(unit)
+    mixed = _SPLIT_WORK_TOTAL.fullmatch(label) if label is not None else None
+    if mixed is None or not any(char.isalpha() for char in _BRACKETED_LABEL.sub("", unit.name)):
+        return None
+
+    name, = children
+    direct = _work_media_counts(unit, entries, device, protected_roots, exclude=name)
+    if not direct:
+        return None
+    nested = _numbered_pv_bucket_counts(unit / name, device, protected_roots)
+    expected = Counter(P=int(mixed[1]), V=int(mixed[2]))
+    return _OwnedMediaSources({name}, expected) if nested and direct + nested == expected else None
 
 
 def _semantic_branch_sources(
@@ -1425,6 +1453,7 @@ def _semantic_branch_sources(
              or _titled_photo_bucket_sources(unit, entries, device, protected_roots)
              or _legacy_counted_bucket_sources(unit, entries, device, protected_roots)
              or _counted_photo_supplements(unit, entries, device, protected_roots)
+             or _single_numbered_work_sources(unit, entries, device, protected_roots)
              or _work_export_sources(unit, entries, device, protected_roots))
     if owned is not None:
         return owned
