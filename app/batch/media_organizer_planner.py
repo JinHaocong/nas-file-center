@@ -19,7 +19,8 @@ from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, numbered_name
 from app.batch.media_package_organizer import (
     MAX_DEPTH, MAX_FILES_PER_GROUP, MAX_PACKAGE_DIRECTORIES, MAX_PACKAGE_FILES, MAX_SCOPE_ENTRIES_PER_DIRECTORY,
     LIFT_LUOLCY_BUCKETS, PROMOTE_NUMBERED_PHOTO_GROUPS,
-    _classify, _input_fingerprint, _luolcy_author_inventory, _package_path, _plan_luolcy_bucket_lift, _size_label,
+    _author_media_row, _classify, _input_fingerprint, _luolcy_author_inventory, _package_path, _plan_luolcy_bucket_lift,
+    _size_label,
     _walk_package,
     iter_media_package_discovery, plan_media_layout,
 )
@@ -117,6 +118,11 @@ _PHOTO_ALIASES = frozenset({
 _ALIASES = _PHOTO_ALIASES | {"视频", "video", "videos"}
 _VIDEO_WRAPPER_ALIASES = frozenset({"视频", "video", "videos"})
 _NUMBERED_TITLED_WORK = re.compile(r"[1-9][0-9]{0,2}\s*(?P<title>[^\W\d_][\w ]+)")
+_EPISODE_TITLE = re.compile(
+    r"(?:(?P<series>[^/]*?)第\s*)?(?P<ordinal>[0-9]{1,4}|[?？])弹(?:\s*[-－—_：:]\s*|\s+)\S.*"
+)
+_EPISODE_BOUNDARY = re.compile(r"(?:^|第)\s*[0-9]{1,4}\s*(?:弹|集|期|话|話)(?![0-9])")
+_EPISODE_ARCHIVES = frozenset({"old", "archive", "backup", "bak", "旧版", "备份"})
 _JPEG_LABELS = frozenset({"jpg", "jpeg"})
 _JPEG_EXTENSIONS = frozenset({".jpg", ".jpeg", ".jfif"})
 _TYPED_WRAPPER_KINDS = {"movie": "V", "img": "P", "gif": "P", "selfies": "P", "jpg": "P", "jpeg": "P"}
@@ -544,6 +550,13 @@ def _semantic_inventory(
             if live_kinds != local_media_kinds:
                 raise ValueError("Direct media scope changed since preview")
         if not depth and not (whole_author or local_media_kinds):
+            episode = _episode_inventory(unit, entries, device, protected_roots, check_cancelled)
+            if episode is not None:
+                items, episode_dirs = episode
+                if directories is not None:
+                    directories.update(episode_dirs)
+                yield from items
+                return
             owned_sources = _semantic_branch_sources(unit, entries, device, protected_roots)
             if owned_sources is None:
                 repeated = _repeated_work_wrapper(unit, entries, device, protected_roots)
@@ -693,6 +706,94 @@ def _regular_media_entries(path: Path, device: int) -> list[tuple[str, os.stat_r
     ):
         return []
     return entries
+
+
+def _episode_key(name: str) -> tuple[str, str] | None:
+    """Recognize the title and ordinal of an independent named episode."""
+    match = _EPISODE_TITLE.fullmatch(normalize("NFKC", name))
+    if match is None:
+        return None
+    return (match["series"] or "").strip().casefold(), match["ordinal"].lstrip("0") or "0"
+
+
+def _episode_has_peer(unit: Path, key: tuple[str, str], device: int,
+                      protected_roots: tuple[Path, ...]) -> bool:
+    """Require a numbered peer from the same series before using the full episode root."""
+    try:
+        siblings = _entries(unit.parent, device)
+    except (OSError, ValueError):
+        return False
+    series, ordinal = key
+    return any(
+        name != unit.name and info.st_dev == device and stat.S_ISDIR(info.st_mode)
+        and not _protected(unit.parent / name, protected_roots)
+        and (peer := _episode_key(name)) is not None and peer[0] == series
+        and peer[1].isdigit() and peer[1] != ordinal
+        for name, info in siblings
+    )
+
+
+def _keeps_episode_boundary(name: str) -> bool:
+    """Identify nested collections, versions and installments with their own scope."""
+    label = normalize("NFKC", name)
+    return bool(
+        _EPISODE_BOUNDARY.search(label) or _episode_key(label) or _NUMBERED_LEAF.fullmatch(label)
+        or _append_calendar_boundary(label) or _COLLECTION_CONTEXT.search(label) or _WORK_SEQUENCE_LABEL.search(label)
+        or _WORK_VARIANT_LABEL.search(label) or label.casefold() in _VERSION_NAMES | _EPISODE_ARCHIVES
+    )
+
+
+def _episode_inventory(
+    unit: Path, entries: _DirectoryEntries, device: int, protected_roots: tuple[Path, ...],
+    check_cancelled: Callable[[], None] | None,
+) -> tuple[list[dict], set[Path]] | None:
+    """Collect an episode with download metadata or photo supplements inside its own boundary."""
+    key = _episode_key(unit.name)
+    if (key is None or not any(stat.S_ISDIR(info.st_mode) for _, info in entries)
+            or not _episode_has_peer(unit, key, device, protected_roots)):
+        return None
+    items: list[dict] = []
+    directories: set[Path] = set()
+    pending = [(unit, 0, False)]
+    matches_download = False
+    direct_video = False
+    nested_kinds: set[str] = set()
+    try:
+        while pending:
+            if check_cancelled is not None:
+                check_cancelled()
+            folder, depth, in_cache = pending.pop()
+            if depth > MAX_DEPTH or len(directories) >= MAX_PACKAGE_DIRECTORIES:
+                return None
+            directories.add(folder)
+            for name, info in entries if depth == 0 else _entries(folder, device):
+                path = folder / name
+                if (info.st_dev != device or name.casefold().startswith(".nfc-")
+                        or _protected(path, protected_roots)):
+                    return None
+                if stat.S_ISDIR(info.st_mode):
+                    cache = in_cache or name.casefold() == "@eadir"
+                    if not cache and _keeps_episode_boundary(name):
+                        return None
+                    pending.append((path, depth + 1, cache))
+                    continue
+                if not stat.S_ISREG(info.st_mode) or len(items) >= MAX_PACKAGE_FILES:
+                    return None
+                kind = _classify(name)
+                if kind == "Other" and not in_cache:
+                    return None
+                if depth:
+                    nested_kinds.add(kind)
+                else:
+                    direct_video |= kind == "V"
+                matches_download |= in_cache
+                items.append(_author_media_row(path, info, kind))
+    except (OSError, ValueError):
+        return None
+    if (matches_download and any(row["kind"] in {"P", "V"} for row in items)
+            or direct_video and nested_kinds == {"P"}):
+        return items, directories
+    return None
 
 
 def _numbered_media_leaf(folder: Path, files: _DirectoryEntries, kind: str, device: int,
@@ -2026,6 +2127,15 @@ def _semantic_previews(
                 pending.extend((unit / name, depth + 1, None) for name, _ in reversed(entries))
                 continue
             hold_reason = _AMBIGUOUS_DIRECTORY_REASON
+        if hold_reason is None:
+            episode = _episode_inventory(unit, entries, device, protected_roots, check_cancelled)
+            if episode is not None:
+                row = preview(unit, "semantic", False)
+                if (row["status"] != "blocked"
+                        and row["input_fingerprint"] != _input_fingerprint(episode[0], unit)):
+                    row = _blocked(unit, "semantic", "Episode contents changed during preview")
+                yield row
+                continue
         author_preview = None
         if (hold_reason is None and _author_layer(unit)
                 and (_numbered_author_wrapper(entries) is not None or _author_numbered_video_child(entries) is not None)):
