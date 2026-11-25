@@ -567,6 +567,10 @@ def worker_loop(
 
     last_scheduler_tick_minute = None
     next_report_cleanup = 0.0
+    next_report_marker_prune = 0.0
+
+    def fence_reports():
+        renew_and_assert_worker_lease(SessionLocal, worker_id)
 
     try:
         while True:
@@ -619,12 +623,13 @@ def worker_loop(
                     last_scheduler_tick_minute = scheduler_minute
 
             if time.monotonic() >= next_report_cleanup:
-                from app.batch.organizer_report_cleanup import process_pending_reports
+                from app.batch.organizer_report_cleanup import process_pending_reports, prune_missing_report_markers
 
                 try:
-                    process_pending_reports(
-                        SessionLocal, settings, lambda: renew_and_assert_worker_lease(SessionLocal, worker_id),
-                    )
+                    process_pending_reports(SessionLocal, settings, fence_reports)
+                    if time.monotonic() >= next_report_marker_prune:
+                        next_report_marker_prune = time.monotonic() + 30
+                        prune_missing_report_markers(SessionLocal, settings, fence_reports)
                 except JobLeaseLost:
                     acquired = False
                     continue

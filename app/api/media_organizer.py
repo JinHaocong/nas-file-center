@@ -107,6 +107,7 @@ def start_batch(request: Request, job_id: int, _approval: BatchConfirmation):
 def read_batch(request: Request, job_id: int,
                page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100)):
     try:
-        return jobs.get_batch(request.app.state.service.SessionLocal, job_id, page=page, page_size=page_size)
+        service = request.app.state.service
+        return jobs.get_batch(service.SessionLocal, service.settings, job_id, page=page, page_size=page_size)
     except KeyError as exc:
         raise HTTPException(404, "找不到此整理任务") from exc

@@ -236,7 +236,7 @@ export function MediaOrganizerBatchEditor() {
 
       {currentResult ? (
         <MediaOrganizerResultReport report={currentResult}>
-          {currentResult.report_cleanup_status !== 'released' && <ConsolePagination page={resultPage.page} pageSize={resultPage.size}
+          {currentResult.filtered_total > 0 && <ConsolePagination page={resultPage.page} pageSize={resultPage.size}
             total={currentResult.filtered_total} pageSizes={pageSizes}
             onChange={(page, size) => setResultPage({ page, size })} />}
         </MediaOrganizerResultReport>

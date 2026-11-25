@@ -11,11 +11,12 @@ import re
 import stat
 import time
 
-from sqlalchemy import String, case, cast, delete, func, select, text
+from sqlalchemy import String, case, cast, func, select, text
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.models import BatchPlan, TaskEvent, WorkJob, utcnow
 from app.tasks.logging import sanitize_text
+from app.tasks.state_machine import TERMINAL_STATES
 
 PREVIEW = "media-organizer-preview"
 BATCH = "media-organizer-batch"
@@ -24,6 +25,8 @@ FLOW = "recursive-batch-v1"
 RESULT = "media_organizer_unit_result"
 KEY = "organizer_report_cleanup"
 KEY_BYTES = "reclaimed_bytes"
+_RECLAIMED_BYTES = "organizer_report_reclaimed_bytes"
+_ARCHIVED_SUMMARY = "organizer_archived_result"
 _NAMESPACES = {PREVIEW: "organizer-v1-previews", BATCH: "organizer-v1-executions"}
 _PREVIEW_FILE = re.compile(r"(?:summary\.json|units\.jsonl|(?:loose-)?[0-9a-f]{64}\.jsonl)")
 _EXECUTION_FILE = re.compile(r"(?:0|[1-9][0-9]*)\.(?:link\.)?json")
@@ -47,7 +50,31 @@ def report_state(job):
 def preview_unavailable(job):
     """A reserved preview cannot back a new batch or an assignment."""
     marker = report_state(job)
-    return job.kind == PREVIEW and (marker.get("status") in ("pending", "released") or marker.get("approved"))
+    return job.kind == PREVIEW and (marker.get("status") in ("pending", "released")
+                                   or marker.get("approved") or report_reclaimed(job))
+
+
+def report_reclaimed(job):
+    return (_RECLAIMED_BYTES in _object(job.checkpoint_json)
+            or report_state(job).get("status") == "released")
+
+
+def archived_result(job):
+    """Keep summaries from older versions that had already discarded result events."""
+    return (_object(job.checkpoint_json).get(_ARCHIVED_SUMMARY)
+            or report_state(job).get("summary"))
+
+
+def _forget_marker(job, *, reclaimed=None):
+    checkpoint = _object(job.checkpoint_json)
+    marker = checkpoint.pop(KEY, {})
+    if reclaimed is not None:
+        checkpoint[_RECLAIMED_BYTES] = reclaimed
+    elif marker.get("status") == "released":
+        checkpoint[_RECLAIMED_BYTES] = marker.get(KEY_BYTES, 0)
+        if job.kind == BATCH and marker.get("summary"):
+            checkpoint[_ARCHIVED_SUMMARY] = marker["summary"]
+    job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
 
 
 def _mark(job, state, *, hide=False):
@@ -72,11 +99,13 @@ def report_task_filter():
     return WorkJob.kind.in_(KINDS) & (flow == FLOW)
 
 
-def _has_references(session, preview_id, *, except_job=None):
+def _has_references(session, preview_id, *, except_job=None, active_only=False):
     value = str(preview_id)
     jobs = select(WorkJob.id).where(cast(_json_field(WorkJob.state_json, "$.preview_job_id"), String) == value)
     if except_job is not None:
         jobs = jobs.where(WorkJob.id != except_job)
+    if active_only:
+        jobs = jobs.where(WorkJob.status.not_in(TERMINAL_STATES))
     plans = select(BatchPlan.id).where(
         cast(_json_field(BatchPlan.metadata_json, "$.luolcy_assignment.preview_job_id"), String) == value,
     )
@@ -124,7 +153,7 @@ def _eligible(session, job):
 def request_report_cleanup(session, job, settings):
     """Reserve report ownership under the caller's BEGIN IMMEDIATE transaction."""
     marker = report_state(job)
-    if marker.get("status") in ("pending", "released"):
+    if marker.get("status") == "pending" or report_reclaimed(job):
         return None
     if marker.get("approved"):
         return "retained_count"
@@ -171,6 +200,20 @@ def _report_path(settings, kind, job_id):
     if not re.fullmatch(r"[1-9][0-9]*", job_id):
         raise ValueError("报告任务编号无效")
     return settings.reports_dir / _NAMESPACES[kind] / job_id
+
+
+def report_missing(settings, kind, job_id):
+    """Confirm absence or an empty directory. Unknown and inaccessible paths stay protected."""
+    try:
+        with _directory(settings.config_dir):
+            try:
+                with _directory(_report_path(settings, kind, str(job_id))) as fd:
+                    with os.scandir(fd) as entries:
+                        return next(entries, None) is None
+            except FileNotFoundError:
+                return True
+    except (OSError, ValueError):
+        return False
 
 
 def _snapshot(settings, kind, job_id, *, expected=None):
@@ -335,14 +378,15 @@ def _update_request(session_factory, job_id, old, new, *, per_report_bytes=None)
         # Refuse further deletion if a dependency appeared before approval.
         if new.get("plan") and not old.get("plan") and _eligible(session, job) is None:
             return False
-        _mark(job, {**new, **({KEY_BYTES: per_report_bytes.get(job.kind, 0)} if per_report_bytes else {})})
+        if new["status"] == "released":
+            _forget_marker(job, reclaimed=per_report_bytes.get(job.kind, 0))
+            if preview.id != job.id:
+                _forget_marker(preview, reclaimed=per_report_bytes.get(PREVIEW, 0))
+            return True
+        _mark(job, new)
         if preview.id != job.id:
             related = {key: val for key, val in new.items() if key not in ("plan", "summary")}
-            if per_report_bytes:
-                related[KEY_BYTES] = per_report_bytes.get(PREVIEW, 0)
             _mark(preview, related)
-        if new["status"] == "released" and job.kind == BATCH:
-            session.execute(delete(TaskEvent).where(TaskEvent.job_id == job.id))
         return True
 
 
@@ -415,12 +459,38 @@ def _hold_request(session_factory, job_id, marker, reason):
     _update_request(session_factory, job_id, marker, {**held, "status": "retained", "reason": reason})
 
 
+def prune_missing_report_markers(session_factory, settings, fence):
+    """Discard stale DB cleanup state only after all reports in a terminal group are gone."""
+    owner_field = _json_field(WorkJob.checkpoint_json, f"$.{KEY}.owner")
+    with session_factory() as session:
+        owners = list(session.scalars(select(owner_field).where(
+            report_task_filter(), owner_field.is_not(None),
+        ).distinct()))
+    for owner in owners:
+        fence()
+        with session_factory.begin() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            related = list(session.scalars(select(WorkJob).where(report_task_filter(), owner_field == owner)))
+            if not related or any(job.status not in TERMINAL_STATES for job in related):
+                continue
+            if any(not report_missing(settings, job.kind, job.id) for job in related):
+                continue
+            if any(job.kind == PREVIEW and _has_references(session, job.id, active_only=True)
+                   for job in related):
+                continue
+            for job in related:
+                _forget_marker(job)
+
+
 def inventory(session_factory, settings, *, page, page_size):
     """List only smart organizer report sizes and eligibility without modifying state."""
     items = []
     with session_factory() as session:
+        reclaimed = session.scalar(select(func.sum(func.coalesce(
+            _json_field(WorkJob.checkpoint_json, f"$.{_RECLAIMED_BYTES}"),
+            _json_field(WorkJob.checkpoint_json, f"$.{KEY}.{KEY_BYTES}"), 0,
+        ))).where(WorkJob.kind.in_(KINDS))) or 0
         for kind, namespace in _NAMESPACES.items():
-            found = set()
             try:
                 with _directory(settings.reports_dir / namespace) as parent:
                     names = sorted(os.listdir(parent))
@@ -429,7 +499,6 @@ def inventory(session_factory, settings, *, page, page_size):
             for job_id in names:
                 if not re.fullmatch(r"[1-9][0-9]*", job_id):
                     continue
-                found.add(job_id)
                 job = session.get(WorkJob, job_id)
                 if job is not None and job.kind != kind:
                     job = None
@@ -445,28 +514,22 @@ def inventory(session_factory, settings, *, page, page_size):
                        "status": status, "reason": marker.get("reason", _REASONS[status]), "bytes": 0, "files": 0}
                 try:
                     files = _snapshot(settings, kind, job_id)["files"]
+                except FileNotFoundError:
+                    continue
                 except (OSError, ValueError):
                     if status != "pending":
                         row.update(status="unknown", reason=_REASONS["unknown"])
                 else:
+                    if not files:
+                        continue
                     row.update(files=len(files), bytes=sum(file[2] for file in files.values()))
                 items.append(row)
-            marked = session.scalars(select(WorkJob).where(
-                WorkJob.kind == kind, _json_field(WorkJob.checkpoint_json, f"$.{KEY}.status").is_not(None),
-            ))
-            for job in marked:
-                marker = report_state(job)
-                status = marker.get("status")
-                if str(job.id) not in found and status in ("pending", "released", "retained"):
-                    items.append({"job_id": str(job.id), "kind": "preview" if kind == PREVIEW else "execution",
-                                  "status": status, "reason": marker.get("reason", _REASONS[status]),
-                                  "bytes": 0, "files": 0, "reclaimed_bytes": marker.get(KEY_BYTES, 0)})
     items.sort(key=lambda row: (len(row["job_id"]), row["job_id"]), reverse=True)
     start = (page - 1) * page_size
     return {"read_only": True, "items": items[start:start + page_size], "total": len(items),
             "page": page, "page_size": page_size, "pending_count": sum(r["status"] == "pending" for r in items),
             "total_bytes": sum(r["bytes"] for r in items),
-            "reclaimed_bytes": sum(r.get("reclaimed_bytes", 0) for r in items)}
+            "reclaimed_bytes": reclaimed}
 
 
 _REASONS = {

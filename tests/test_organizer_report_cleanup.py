@@ -1,6 +1,12 @@
 """Smart organizer report cleanup through the actual task and Worker interfaces."""
 
 from datetime import timedelta
+import json
+import shutil
+
+from sqlalchemy import delete
+
+from app.models import TaskEvent, WorkJob
 
 from tests.test_media_organizer_batch import _batch, _preview, _run_next
 from tests.test_media_organizer_split_work import put_files
@@ -31,7 +37,9 @@ def test_deleting_an_unconfirmed_preview_releases_reports_without_reusing_its_id
     assert _preview(client, settings, work)["job_id"] != preview
     inventory = client.get("/api/tasks/organizer-reports").json()
     assert inventory["reclaimed_bytes"] == size
-    assert any(row["job_id"] == preview and row["status"] == "released" for row in inventory["items"])
+    assert all(row["job_id"] != preview for row in inventory["items"])
+    with client.app.state.service.SessionLocal() as session:
+        assert "organizer_report_cleanup" not in session.get(WorkJob, preview).checkpoint_json
 
 
 def test_clearing_history_releases_closed_batch_and_keeps_its_summary(tmp_path):
@@ -51,7 +59,7 @@ def test_clearing_history_releases_closed_batch_and_keeps_its_summary(tmp_path):
     assert not (settings.reports_dir / "organizer-v1-previews" / preview["job_id"]).exists()
     assert not (settings.reports_dir / "organizer-v1-executions" / batch).exists()
     archived = client.get(f"/api/media-organizer/batches/{batch}").json()
-    assert archived["summary"] == original and archived["items"] == []
+    assert archived["summary"] == original and len(archived["items"]) == 1
     assert (work / "P [1 5B]/001.jpg").read_bytes() == b"photo"
 
 
@@ -121,6 +129,86 @@ def test_successful_batch_with_staging_residue_keeps_its_report(tmp_path):
     assert any(row["job_id"] == batch and row["status"] == "retained" for row in inventory["items"])
     assert (settings.reports_dir / "organizer-v1-executions" / batch / "0.json").exists()
     assert (stage / "001.jpg").read_bytes() == b"unfinished"
+
+
+def test_missing_reports_disappear_and_worker_discards_only_the_stale_cleanup_metadata(tmp_path):
+    from app.batch.organizer_report_cleanup import prune_missing_report_markers
+
+    client, settings, _ = _fixture(tmp_path)
+    work = settings.data_mount / "作品"
+    put_files(work, {"cover.jpg": b"photo"})
+    preview = _preview(client, settings, work)["job_id"]
+    batch = _batch(client, {"job_id": preview})
+    assert _run_next(settings, batch)
+    result_url = f"/api/media-organizer/batches/{batch}"
+    original = client.get(result_url).json()
+    reports = settings.reports_dir
+    # An unrecognized artifact makes the Worker retain both cleanup records.
+    put_files(reports / "organizer-v1-executions" / batch, {".DS_Store": b"foreign"})
+    assert client.delete(f"/api/tasks/{batch}").status_code == 200
+    _cleanup(client, settings)
+    sessions = client.app.state.service.SessionLocal
+    with sessions() as session:
+        assert all("organizer_report_cleanup" in session.get(WorkJob, job).checkpoint_json
+                   for job in (preview, batch))
+
+    shutil.rmtree(reports / "organizer-v1-executions" / batch)
+    prune_missing_report_markers(sessions, settings, lambda: None)
+    assert client.get("/api/tasks/organizer-reports").json()["total"] == 1
+    with sessions() as session:
+        assert all("organizer_report_cleanup" in session.get(WorkJob, job).checkpoint_json
+                   for job in (preview, batch))
+    shutil.rmtree(reports / "organizer-v1-previews" / preview)
+    assert client.get("/api/tasks/organizer-reports").json()["total"] == 0
+    prune_missing_report_markers(sessions, settings, lambda: None)
+    with sessions() as session:
+        for job in (preview, batch):
+            checkpoint = session.get(WorkJob, job).checkpoint_json
+            assert "organizer_report_cleanup" not in checkpoint
+            assert "_task_queue_dismissed" in checkpoint
+    result = client.get(result_url).json()
+    assert result["report_cleanup_status"] == "missing"
+    assert result["items"] == original["items"] and result["summary"] == original["summary"]
+    assert client.get(f"/api/tasks/{batch}/logs").json()["total"] > 0
+    assert client.get("/api/tasks").json()["items"] == []
+
+
+def test_pruning_legacy_released_marker_preserves_its_only_result_summary(tmp_path):
+    from app.batch.organizer_report_cleanup import prune_missing_report_markers
+
+    client, settings, _ = _fixture(tmp_path)
+    work = settings.data_mount / "作品"
+    put_files(work, {"cover.jpg": b"photo"})
+    preview = _preview(client, settings, work)["job_id"]
+    batch = _batch(client, {"job_id": preview})
+    assert _run_next(settings, batch)
+    result_url = f"/api/media-organizer/batches/{batch}"
+    summary = client.get(result_url).json()["summary"]
+    sessions = client.app.state.service.SessionLocal
+    with sessions.begin() as session:
+        for job in (preview, batch):
+            row = session.get(WorkJob, job)
+            checkpoint = json.loads(row.checkpoint_json)
+            checkpoint["_task_queue_dismissed"] = True
+            checkpoint["organizer_report_cleanup"] = {
+                "owner": batch, "preview_id": preview, "status": "released",
+                "summary": summary, "reclaimed_bytes": 200,
+            }
+            row.checkpoint_json = json.dumps(checkpoint)
+        session.execute(delete(TaskEvent).where(TaskEvent.job_id == batch))
+    shutil.rmtree(settings.reports_dir / "organizer-v1-executions" / batch)
+    empty_preview = settings.reports_dir / "organizer-v1-previews" / preview
+    for artifact in empty_preview.iterdir():
+        artifact.unlink()
+
+    prune_missing_report_markers(sessions, settings, lambda: None)
+    result = client.get(result_url).json()
+    assert result["report_cleanup_status"] == "released"
+    assert result["summary"] == summary
+    inventory = client.get("/api/tasks/organizer-reports").json()
+    assert inventory["total"] == 0 and inventory["reclaimed_bytes"] == 400
+    with sessions() as session:
+        assert "organizer_report_cleanup" not in session.get(WorkJob, batch).checkpoint_json
 
 
 def test_old_report_inventory_is_read_only_and_does_not_follow_links(tmp_path):

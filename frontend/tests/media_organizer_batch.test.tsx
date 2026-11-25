@@ -219,7 +219,8 @@ test('opening the batch result URL preserves the exact string job ID and loads t
 
 for (const [cleanup, message] of [
   ['pending', '报告明细已排队回收'],
-  ['released', '报告明细已回收'],
+  ['released', '报告文件已回收'],
+  ['missing', '报告文件已不存在'],
 ] as const) {
   test(`an organizer batch with ${cleanup} report cleanup skips its linked preview`, async t => {
     const requests: string[] = [];
