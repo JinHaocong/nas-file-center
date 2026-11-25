@@ -50,6 +50,9 @@ _RESOLUTION_NAME = re.compile(r"(?:[248]k|[0-9]{3,4}p)", re.I)
 _DEFAULT_FOLDER = re.compile(r"新建文件夹(?:\s*\(\d+\))?")
 _AMBIGUOUS = re.compile(r"\d{1,3}|" + _DEFAULT_FOLDER.pattern, re.I)
 _NUMBERED_LEAF = re.compile(r"[0-9]{1,3}")
+_PACK_VOLUME_WORK = re.compile(
+    r"(?P<series>.+?)(?:\s*[-–—]\s*|\s+)pack\s*(?:\((?P<bracketed>[0-9]+)\)|(?P<plain>[0-9]+))", re.I,
+)
 _COLLECTION_CONTEXT = re.compile(
     r"合集|全集|图包|作品|\b(?:collection|album)\b|\bno[.\s_-]*\d+\b|\b[a-z]+\d+-\d+\b",
     re.I,
@@ -1725,6 +1728,25 @@ def _default_folder_is_media_unit(path: Path, device: int, protected_roots: tupl
             in ({"P"}, {"V"}, {"P", "V"}))
 
 
+def _legacy_numbered_pv_pair(unit: Path, device: int, protected_roots: tuple[Path, ...]) -> bool:
+    """Verify a numbered package consisting only of two correctly typed legacy buckets."""
+    try:
+        entries = _entries(unit, device)
+    except (OSError, ValueError):
+        return False
+    if len(entries) != 2 or {name.upper() for name, _ in entries} != {"P", "V"}:
+        return False
+    for name, info in entries:
+        folder = unit / name
+        if not stat.S_ISDIR(info.st_mode) or info.st_dev != device or _protected(folder, protected_roots):
+            return False
+        files = _regular_media_entries(folder, device)
+        counts = _work_media_counts(folder, files, device, protected_roots)
+        if not counts or set(counts) != {name.upper()}:
+            return False
+    return True
+
+
 def _numbered_siblings(unit: Path, entries: list[tuple[str, os.stat_result]],
                        device: int, protected_roots: tuple[Path, ...]) -> set[str]:
     """Confirm independent leaf packages using a collection name or a complete ordinal series."""
@@ -1739,18 +1761,23 @@ def _numbered_siblings(unit: Path, entries: list[tuple[str, os.stat_result]],
     if not all(_NUMBERED_LEAF.fullmatch(name) and not _protected(unit / name, protected_roots) for name in names):
         return set()
     if ordinals == {str(index) for index in range(1, len(names) + 1)}:
-        return {name for name in names if _media_leaf_kinds(unit / name, device, protected_roots)
-                in ({"P"}, {"V"}, {"P", "V"})}
+        return {
+            name for name in names
+            if (_media_leaf_kinds(unit / name, device, protected_roots) in ({"P"}, {"V"}, {"P", "V"})
+                or _legacy_numbered_pv_pair(unit / name, device, protected_roots))
+        }
     if not _COLLECTION_CONTEXT.search(unit.name):
         return set()
     return set(names) if all(_media_leaf_kinds(unit / name, device) & {"P", "V"} for name in names) else set()
 
 
 def _continuous_numbered_directories(
-    unit: Path, entries: list[tuple[str, os.stat_result]], device: int, protected_roots: tuple[Path, ...],
+    unit: Path, entries: list[tuple[str, os.stat_result]], device: int, protected_roots: tuple[Path, ...], *,
+    allow_named_peers: bool = False,
 ) -> set[str]:
     """Identify a complete sibling directory series starting at 1."""
-    directories = [(name, info) for name, info in entries if stat.S_ISDIR(info.st_mode)]
+    directories = [(name, info) for name, info in entries if stat.S_ISDIR(info.st_mode)
+                   and (not allow_named_peers or _NUMBERED_LEAF.fullmatch(name))]
     if len(directories) < 2 or not all(
         _NUMBERED_LEAF.fullmatch(name) and info.st_dev == device and not _protected(unit / name, protected_roots)
         for name, info in directories
@@ -1771,6 +1798,37 @@ def _contains_only_named_works(
         and (_COLLECTION_CONTEXT.search(name) or _WORK_FOLDER_MARKER.search(name))
         and not _is_wrapper(unit, name, device=device, protected_roots=protected_roots)
         for name, info in entries
+    )
+
+
+def _contains_verified_pack_series(
+    unit: Path, entries: _DirectoryEntries, device: int, protected_roots: tuple[Path, ...],
+) -> bool:
+    """Keep a numbered volume when its children are independent packs of one series."""
+    if not _NUMBERED_LEAF.fullmatch(unit.name) or len(entries) < 2:
+        return False
+    series: set[str] = set()
+    ordinals: set[str] = set()
+    for name, info in entries:
+        match = _PACK_VOLUME_WORK.fullmatch(normalize("NFKC", name))
+        pack = unit / name
+        if (match is None or not stat.S_ISDIR(info.st_mode) or info.st_dev != device
+                or _protected(pack, protected_roots) or is_reserved_workspace(pack)):
+            return False
+        series.add(match["series"].strip().casefold())
+        ordinal = (match["bracketed"] or match["plain"]).lstrip("0")
+        if (not ordinal or ordinal in ordinals
+                or _media_leaf_kinds(pack, device, protected_roots) not in ({"P"}, {"V"}, {"P", "V"})):
+            return False
+        ordinals.add(ordinal)
+    if len(series) != 1 or "" in series:
+        return False
+    try:
+        peers = _entries(unit.parent, device)
+    except (OSError, ValueError):
+        return False
+    return unit.name in _continuous_numbered_directories(
+        unit.parent, peers, device, protected_roots, allow_named_peers=True,
     )
 
 
@@ -2121,8 +2179,10 @@ def _semantic_previews(
         except (OSError, ValueError) as exc:
             yield _blocked(unit, "semantic", str(exc))
             continue
-        if hold_reason == _NUMBERED_WORK_CONTAINER_CANDIDATE:
-            if _contains_only_named_works(unit, entries, device, protected_roots):
+        if hold_reason in {_NUMBERED_WORK_CONTAINER_CANDIDATE, _AMBIGUOUS_DIRECTORY_REASON}:
+            named_works = (hold_reason == _NUMBERED_WORK_CONTAINER_CANDIDATE
+                           and _contains_only_named_works(unit, entries, device, protected_roots))
+            if named_works or _contains_verified_pack_series(unit, entries, device, protected_roots):
                 # Keep the volume itself outside the plan. Its works get separate previews.
                 pending.extend((unit / name, depth + 1, None) for name, _ in reversed(entries))
                 continue
