@@ -139,3 +139,55 @@ def test_named_pack_volume_does_not_claim_ambiguous_numbered_folders(tmp_path, b
 
     rows = list(iter_organizing_previews(archive, allowed_roots=[tmp_path], include_mapping=True))
     assert any(row["unit"] == str(volume) and row["status"] == "blocked" for row in rows)
+
+
+def test_nonconsecutive_author_volumes_keep_titled_works_independent(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    author = settings.data_mount / "Else/2608/260827/作者"
+    first, second = author / "407", author / "409"
+    same_title = "林间 2v"
+    put_files(first / same_title / same_title, {"a.mp4": b"first a", "b.mp4": b"first b"})
+    put_files(first / "海边 1v", {"a.mov": b"third"})
+    put_files(second / same_title, {"cover.jpg": b"photo", "a.mp4": b"film"})
+    put_files(second / "夜景 [1V]", {"b.mov": b"fourth"})
+    put_files(author / same_title, {"001.mp4": b"different work"})
+
+    preview = _preview(client, settings, author)
+    assert preview["summary"]["ready_count"] == 4 and preview["summary"]["blocked_count"] == 0, preview
+    assert {item["unit"] for item in preview["units"] if item["status"] == "ready"} == {
+        str(first / same_title), str(first / "海边 1v"), str(second / same_title), str(second / "夜景 [1V]"),
+    }
+    assert _execute(client, settings, preview)["success_count"] == 4
+    assert {item.name for item in first.iterdir()} == {same_title, "海边 1v"}
+    assert {item.name for item in second.iterdir()} == {same_title, "夜景 [1V]"}
+    assert (first / same_title / "001.mp4").read_bytes() == b"first a"
+    assert (first / same_title / "002.mp4").read_bytes() == b"first b"
+    assert (second / same_title / "P [1 5B]/001.jpg").read_bytes() == b"photo"
+    assert (second / same_title / "V [1 4B]/001.mp4").read_bytes() == b"film"
+    assert (author / same_title / "001.mp4").read_bytes() == b"different work"
+    assert not (first / same_title / same_title).exists()
+    fresh = _preview(client, settings, author)
+    assert fresh["summary"]["ready_count"] == fresh["summary"]["blocked_count"] == 0, fresh
+
+
+@pytest.mark.parametrize("boundary", ["no verified peer", "loose media", "version branch"])
+def test_nonconsecutive_author_volume_requires_independent_titled_works(tmp_path, boundary):
+    author = tmp_path / "Else/2608/260827/作者"
+    first, second = author / "407", author / "409"
+    put_files(first / "林间 1v", {"a.mp4": b"first"})
+    put_files(first / "海边 1v", {"a.mp4": b"second"})
+    if boundary == "loose media":
+        put_files(first, {"loose.mp4": b"loose"})
+    if boundary == "version branch":
+        put_files(first / "海边 1v/原圖無水印", {"cover.jpg": b"cover"})
+    put_files(second / "夜景 1v", {"a.mp4": b"third"})
+    if boundary != "no verified peer":
+        put_files(second / "晨景 1v", {"a.mp4": b"fourth"})
+
+    rows = list(iter_organizing_previews(author, allowed_roots=[tmp_path], include_mapping=True))
+    row, = [row for row in rows if row["unit"] == str(first)]
+    if boundary == "loose media":
+        assert row["status"] == "ready"
+        assert {move["source"] for move in row["_mapping_items"]} == {str(first / "loose.mp4")}
+    else:
+        assert row["status"] == "blocked"

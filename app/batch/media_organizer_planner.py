@@ -67,6 +67,7 @@ _PHOTO_PACK_TOTAL = re.compile(r"\s*([0-9]+)\s*p" + _MEDIA_COUNT_SIZE_SUFFIX + r
 _MIXED_WORK_TOTAL = re.compile(r"(?<![0-9a-z])([0-9]+)\s*p\s*(?:[+／/\-]\s*)?([0-9]+)\s*v(?![0-9a-z])", re.I)
 _ADDITIONAL_WORK_COUNT = re.compile(r"[0-9]+\s*(?:[pv](?![0-9a-z])|张(?:图)?|图|个视频|视频)", re.I)
 _WORK_SEQUENCE_LABEL = re.compile(r"(?<![0-9a-z])(?:exvol|vol|no)[.\s_-]*[0-9]+", re.I)
+_TITLED_MEDIA_COUNT = re.compile(r"(?P<title>.+?)\s+[1-9][0-9]*\s*[pv]", re.I)
 _SPLIT_WORK_TOTAL = re.compile(
     r"\s*([0-9]+)\s*p(?:\s*[+／/\-])?\s*([0-9]+)\s*v"
     r"(?:[\s/\-／]*[0-9]+(?:\.[0-9]+)?\s*(?:[kmgt]i?b|b|[kmgt]))?\s*", re.I,
@@ -1856,13 +1857,16 @@ def _continuous_numbered_directories(
 
 
 def _contains_only_named_works(
-    unit: Path, entries: list[tuple[str, os.stat_result]], device: int, protected_roots: tuple[Path, ...],
+    unit: Path, entries: list[tuple[str, os.stat_result]], device: int, protected_roots: tuple[Path, ...], *,
+    allow_trailing_media_count: bool = False,
 ) -> bool:
     """Confirm a numbered layer contains independent work directories and no files."""
     return bool(entries) and all(
         stat.S_ISDIR(info.st_mode) and info.st_dev == device and not _protected(unit / name, protected_roots)
         and not name.casefold().startswith(".nfc-")
-        and (_COLLECTION_CONTEXT.search(name) or _WORK_FOLDER_MARKER.search(name))
+        and (_COLLECTION_CONTEXT.search(name) or _WORK_FOLDER_MARKER.search(name)
+             or (allow_trailing_media_count and (match := _TITLED_MEDIA_COUNT.fullmatch(normalize("NFKC", name)))
+                 and any(char.isalpha() for char in match["title"])))
         and not _is_wrapper(unit, name, device=device, protected_roots=protected_roots)
         for name, info in entries
     )
@@ -1897,6 +1901,50 @@ def _contains_verified_pack_series(
     return unit.name in _continuous_numbered_directories(
         unit.parent, peers, device, protected_roots, allow_named_peers=True,
     )
+
+
+def _contains_verified_author_works(
+    volume: Path, entries: _DirectoryEntries, device: int, protected_roots: tuple[Path, ...],
+) -> bool:
+    """Accept titled media leaves, including already organized and exact-name-wrapped works."""
+    if len(entries) < 2 or not _contains_only_named_works(
+        volume, entries, device, protected_roots, allow_trailing_media_count=True,
+    ):
+        return False
+    for name, _ in entries:
+        work = volume / name
+        kinds = _media_leaf_kinds(work, device, protected_roots, allow_partial_bucketing=False)
+        if kinds and kinds <= {"P", "V"}:
+            continue
+        inner = _repeated_work_wrapper(work, _entries(work, device), device, protected_roots)
+        if inner is None:
+            return False
+        kinds = _media_leaf_kinds(inner, device, protected_roots, allow_partial_bucketing=False)
+        if not kinds or kinds - {"P", "V"}:
+            return False
+    return True
+
+
+def _is_author_work_volume(
+    unit: Path, entries: _DirectoryEntries, device: int, protected_roots: tuple[Path, ...],
+) -> bool:
+    """Recognize numbered author collections with a similarly structured sibling volume."""
+    ordinal = unit.name.lstrip("0")
+    if not ordinal or not _NUMBERED_LEAF.fullmatch(unit.name) or not _calendar_author_layer(unit.parent):
+        return False
+    try:
+        if not _contains_verified_author_works(unit, entries, device, protected_roots):
+            return False
+        for name, info in _entries(unit.parent, device):
+            peer = unit.parent / name
+            if (not _NUMBERED_LEAF.fullmatch(name) or name.lstrip("0") in {"", ordinal}
+                    or not stat.S_ISDIR(info.st_mode) or info.st_dev != device or _protected(peer, protected_roots)):
+                continue
+            if _contains_verified_author_works(peer, _entries(peer, device), device, protected_roots):
+                return True
+    except (OSError, ValueError):
+        return False
+    return False
 
 
 def _numbered_author_wrapper(entries: list[tuple[str, os.stat_result]]) -> str | None:
@@ -2249,7 +2297,8 @@ def _semantic_previews(
         if hold_reason in {_NUMBERED_WORK_CONTAINER_CANDIDATE, _AMBIGUOUS_DIRECTORY_REASON}:
             named_works = (hold_reason == _NUMBERED_WORK_CONTAINER_CANDIDATE
                            and _contains_only_named_works(unit, entries, device, protected_roots))
-            if named_works or _contains_verified_pack_series(unit, entries, device, protected_roots):
+            if (named_works or _contains_verified_pack_series(unit, entries, device, protected_roots)
+                    or _is_author_work_volume(unit, entries, device, protected_roots)):
                 # Keep the volume itself outside the plan. Its works get separate previews.
                 pending.extend((unit / name, depth + 1, None) for name, _ in reversed(entries))
                 continue
