@@ -69,6 +69,10 @@ _MIXED_WORK_TOTAL = re.compile(r"(?<![0-9a-z])([0-9]+)\s*p\s*(?:[+／/\-]\s*)?([
 _ADDITIONAL_WORK_COUNT = re.compile(r"[0-9]+\s*(?:[pv](?![0-9a-z])|张(?:图)?|图|个视频|视频)", re.I)
 _WORK_SEQUENCE_LABEL = re.compile(r"(?<![0-9a-z])(?:exvol|vol|no)[.\s_-]*[0-9]+", re.I)
 _TITLED_MEDIA_COUNT = re.compile(r"(?P<title>.+?)\s+[1-9][0-9]*\s*[pv]", re.I)
+_MEDIA_BATCH_SCALE = re.compile(
+    r"(?:[0-9]+\s*[pv](?:[\s+_\-]*[0-9]+\s*[pv])?[\s_\-]*)?"
+    r"[0-9]+(?:[.,][0-9]+)?\s*(?:[kmgt](?:i?b)?|b)", re.I,
+)
 _SPLIT_WORK_TOTAL = re.compile(
     r"\s*([0-9]+)\s*p(?:\s*[+／/\-])?\s*([0-9]+)\s*v"
     r"(?:[\s/\-／]*[0-9]+(?:\.[0-9]+)?\s*(?:[kmgt]i?b|b|[kmgt]))?\s*", re.I,
@@ -413,6 +417,18 @@ def _calendar_author_layer(unit: Path) -> bool:
     day = unit.parent.name
     return (len(day) == 6 and day[:4] == unit.parent.parent.name
             and _author_layer(unit) and not _append_calendar_boundary(unit.name))
+
+
+def _bracketed_media_batch(name: str) -> bool:
+    """Recognize labels made only of a size and optional photo/video counts."""
+    label = normalize("NFKC", name).strip()
+    brackets = {"【": "】", "[": "]", "(": ")"}
+    return (len(label) > 2 and brackets.get(label[0]) == label[-1]
+            and _MEDIA_BATCH_SCALE.fullmatch(label[1:-1].strip()) is not None)
+
+
+def _is_author_media_batch(unit: Path) -> bool:
+    return _calendar_author_layer(unit.parent) and _bracketed_media_batch(unit.name)
 
 
 def _scoped_bucket_kind(path: Path, device: int, protected_roots: tuple[Path, ...]) -> str | None:
@@ -1993,7 +2009,8 @@ def _whole_author_inventory(
 ) -> tuple[list[dict], set[Path], bool] | None:
     """Discover a whole-author reorganization or an append to existing video numbers."""
     if (not _author_layer(unit) or _CALENDAR_DIRECTORY.fullmatch(unit.name)
-            or not _CALENDAR_MONTH.fullmatch(unit.parent.parent.name)):
+            or not _CALENDAR_MONTH.fullmatch(unit.parent.parent.name)
+            or any(stat.S_ISDIR(info.st_mode) and _bracketed_media_batch(name) for name, info in entries)):
         return None
     name = _numbered_author_wrapper(entries)
     append_videos = name is None
@@ -2042,6 +2059,29 @@ def _whole_author_inventory(
         if directories != {unit, child} or {row["path"] for row in items} != expected:
             return None
     return (items, directories, append_videos) if {row["kind"] for row in items} == kinds else None
+
+
+def _author_media_batch_inventory(
+    unit: Path, protected_roots: tuple[Path, ...], check_cancelled: Callable[[], None] | None,
+) -> tuple[list[dict], set[Path], bool] | None:
+    """Prove an explicitly sized batch owns its media without crossing a nested work boundary."""
+    directories: set[Path] = set()
+    try:
+        items = list(_semantic_inventory(
+            unit, protected_roots, directories, whole_author=True, check_cancelled=check_cancelled,
+        ))
+    except (OSError, ValueError):
+        return None
+    if not items or any(row["kind"] not in {"P", "V"} for row in items):
+        return None
+    for path in directories - {unit}:
+        name = normalize("NFKC", path.name).strip()
+        if (_bracketed_media_batch(name) or name.casefold() in _VERSION_NAMES
+                or _RESOLUTION_NAME.fullmatch(name) or _WORK_VARIANT_LABEL.search(name)
+                or _WORK_SEQUENCE_LABEL.search(name) or _declared_media_count_label(path) is not None
+                or _FANTIA_POST_COLLECTION.search(name)):
+            return None
+    return items, directories, False
 
 
 def _declared_media_count_label(unit: Path) -> str | None:
@@ -2168,6 +2208,9 @@ def preview_organizing_unit(
             unit, declared_count, os.lstat(unit).st_dev, protected, check_cancelled,
         )
     author_inventory = None
+    if (mode == "semantic" and whole_author is None and not local_media_kinds and local_scope is None
+            and _is_author_media_batch(unit)):
+        author_inventory = _author_media_batch_inventory(unit, protected, check_cancelled)
     if photo_groups is None and mode == "semantic" and not whole_author and not local_media_kinds and local_scope is None:
         needs_layer_scope = local_media_kinds is None
         if (whole_author is None or needs_layer_scope) and (_author_layer(unit) or _local_wrapper_media_kind(unit)):
@@ -2315,6 +2358,11 @@ def _semantic_previews(
                     row = _blocked(unit, "semantic", "Episode contents changed during preview")
                 yield row
                 continue
+            if _is_author_media_batch(unit):
+                row = preview(unit, "semantic", None)
+                if row.get("whole_author"):
+                    yield row
+                    continue
         author_preview = None
         if (hold_reason is None and _author_layer(unit)
                 and (_numbered_author_wrapper(entries) is not None or _author_numbered_video_child(entries) is not None)):

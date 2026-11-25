@@ -17,6 +17,56 @@ def _execute(client, settings, preview):
     return client.get(f"/api/media-organizer/batches/{job}").json()["summary"]
 
 
+@pytest.mark.parametrize("label", ["【2V 2P 55G】", "【8g】", "[2V1P-8GiB]"])
+def test_bracketed_batch_organizes_at_its_own_root(tmp_path, label):
+    client, settings, _ = _fixture(tmp_path)
+    author = settings.data_mount / "Else/2607/260729/作者"
+    package = author / label
+    put_files(package, {
+        "a.mp4": b"film", "P/2024_08-P/cover.jpg": b"photo",
+        "10-11月福利/一个片段/clip.mov": b"clip",
+    })
+    sibling = author / "【10g】"
+    put_files(sibling, {"001.jpg": b"separate package"})
+
+    preview = _preview(client, settings, author)
+    assert preview["summary"]["ready_count"] == 1 and preview["summary"]["blocked_count"] == 0, preview
+    ready, = [row for row in preview["units"] if row["status"] == "ready"]
+    assert ready["unit"] == str(package)
+    assert [group["name"] for group in ready["groups"]] == ["P [1 5B]", "V [2 8B]"]
+    assert _execute(client, settings, preview)["success_count"] == 1
+    assert {p.relative_to(package).as_posix(): p.read_bytes() for p in package.rglob("*") if p.is_file()} == {
+        "P [1 5B]/001.jpg": b"photo", "V [2 8B]/001.mov": b"clip", "V [2 8B]/002.mp4": b"film",
+    }
+    assert {p.name for p in package.iterdir()} == {"P [1 5B]", "V [2 8B]"}
+    assert (sibling / "001.jpg").read_bytes() == b"separate package"
+    fresh = _preview(client, settings, author)
+    assert fresh["summary"]["ready_count"] == fresh["summary"]["blocked_count"] == 0, fresh
+
+
+@pytest.mark.parametrize(("label", "branch"), [
+    ("作品【8g】", "命名子作品"), ("【2607】", "命名子作品"),
+    ("【8g】", "4K"), ("【8g】", "【2G】"), ("【8g】", "NO.001 子作品"),
+])
+def test_size_label_rule_keeps_explicit_inner_boundaries(tmp_path, label, branch):
+    unit = tmp_path / "2607/260729/作者" / label
+    put_files(unit, {"main.mp4": b"film", f"{branch}/cover.jpg": b"photo"})
+    rows = list(iter_organizing_previews(unit, allowed_roots=[tmp_path], include_mapping=True))
+    nested_moves = [move for row in rows for move in row.get("_mapping_items", ())
+                    if Path(move["source"]).is_relative_to(unit / branch)]
+    assert nested_moves and all(Path(move["target"]).is_relative_to(unit / branch) for move in nested_moves)
+
+
+def test_bracketed_batch_is_not_absorbed_by_the_authors_numbered_videos(tmp_path):
+    author = tmp_path / "2607/260729/作者"
+    package = author / "【8g】"
+    put_files(author, {"001.mp4": b"author video", "【8g】/clip.mp4": b"batch video"})
+    rows = list(iter_organizing_previews(author, allowed_roots=[tmp_path], include_mapping=True))
+    ready, = [row for row in rows if row["status"] == "ready"]
+    assert ready["unit"] == str(package)
+    assert [move["target"] for move in ready["_mapping_items"]] == [str(package / "001.mp4")]
+
+
 def test_legacy_counted_buckets_become_standard_within_each_work(tmp_path):
     client, settings, _ = _fixture(tmp_path)
     scope = settings.data_mount / "Else/2610/261014/作者"
