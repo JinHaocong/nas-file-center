@@ -9,6 +9,7 @@ import {
   RetryTaskResponse,
   DeleteTaskResponse,
   ClearTaskHistoryResponse,
+  OrganizerReportInventoryResponse,
   TerminalTaskStatus,
 } from '../types/task';
 
@@ -26,6 +27,12 @@ export interface ListTaskLogsParams {
 }
 
 export const tasksApi = {
+  /** Read a page of the smart organizer report inventory. */
+  getOrganizerReports: (page: number, pageSize: number): Promise<OrganizerReportInventoryResponse> => {
+    const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    return api.get<OrganizerReportInventoryResponse>(`/api/tasks/organizer-reports?${query}`);
+  },
+
   listTasks: (params: ListTasksParams = {}): Promise<PaginatedTasksResponse> => {
     const searchParams = new URLSearchParams();
     if (params.page !== undefined) {

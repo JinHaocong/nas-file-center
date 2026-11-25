@@ -1,11 +1,36 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert';
-import { getTaskDeleteAvailability } from '../src/components/tasks/task_cleanup';
+import { formatReportCleanupFeedback, getTaskDeleteAvailability } from '../src/components/tasks/task_cleanup';
 import { tasksApi } from '../src/api/tasks';
 import { api } from '../src/api/client';
 import { TaskStatus, TerminalTaskStatus } from '../src/types/task';
 
 describe('Task History Cleanup: Policy Matrix & API Contract Tests', () => {
+  test('requests the organizer report inventory as a paginated GET', async () => {
+    const originalGet = api.get;
+    const inventory = {
+      read_only: true, items: [{ job_id: '9223372036854775807', status: 'orphan' }],
+      total: 51, page: 2, page_size: 50, pending_count: 0, total_bytes: 2048, reclaimed_bytes: 0,
+    };
+    let path = '';
+    api.get = (async (url: string) => { path = url; return inventory; }) as typeof api.get;
+    try {
+      assert.deepStrictEqual(await tasksApi.getOrganizerReports(2, 50), inventory);
+      assert.equal(path, '/api/tasks/organizer-reports?page=2&page_size=50');
+    } finally {
+      api.get = originalGet;
+    }
+  });
+
+  test('separates queued and recovery-retained reports in cleanup feedback', () => {
+    const detail = formatReportCleanupFeedback;
+    assert.equal(detail(), '');
+    assert.equal(detail({ queued_count: 0, retained_count: 0 }), '');
+    assert.match(detail({ queued_count: 2, retained_count: 0 }), /2 项报告已排队回收/);
+    assert.match(detail({ queued_count: 0, retained_count: 1 }), /1 项报告保留恢复资料/);
+    assert.match(detail({ queued_count: 2, retained_count: 1 }), /2 项报告已排队回收.*1 项报告保留恢复资料/);
+  });
+
   describe('Policy Matrix: getTaskDeleteAvailability', () => {
     test('null or undefined task disallows deletion safely', () => {
       const resNull = getTaskDeleteAvailability(null);

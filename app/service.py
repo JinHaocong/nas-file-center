@@ -454,7 +454,7 @@ class FileCenterService:
             initial_admin_username=settings.initial_admin_username,
             initial_admin_password=settings.initial_admin_password,
         )
-        self.task_service = TaskService(self.SessionLocal)
+        self.task_service = TaskService(self.SessionLocal, report_settings=settings)
         self.workflow_service = WorkflowService(self.SessionLocal, self.settings)
         self._preview_snapshots: dict[str, dict[str, Any]] = {}
         self.reconcile_startup_entries()
@@ -695,11 +695,11 @@ class FileCenterService:
     def retry_task(self, task_id: int, user_id: int | None = None) -> dict:
         return self.task_service.retry_task(task_id, user_id=user_id)
 
-    def delete_task(self, task_id: int) -> dict:
-        return self.task_service.delete_task(task_id)
+    def delete_task(self, task_id: int, *, reclaim_reports: bool = True) -> dict:
+        return self.task_service.delete_task(task_id, reclaim_reports=reclaim_reports)
 
-    def clear_task_history(self, statuses: list[str] | None = None) -> dict:
-        return self.task_service.clear_task_history(statuses)
+    def clear_task_history(self, statuses: list[str] | None = None, *, reclaim_reports: bool = True) -> dict:
+        return self.task_service.clear_task_history(statuses, reclaim_reports=reclaim_reports)
 
     def get_task_logs(
         self,
@@ -2391,6 +2391,14 @@ class FileCenterService:
 
     def create_plan(self, *, name: str, kind: str, items: list[dict], metadata: dict | None = None) -> BatchPlan:
         with self.SessionLocal() as session:
+            assignment = (metadata or {}).get("luolcy_assignment")
+            if isinstance(assignment, dict) and (preview_id := assignment.get("preview_job_id")) is not None:
+                from app.batch.organizer_report_cleanup import preview_unavailable
+
+                session.execute(text("BEGIN IMMEDIATE"))
+                preview = session.get(WorkJob, preview_id)
+                if preview is not None and preview_unavailable(preview):
+                    raise ValueError("预览已安排报告回收，请重新扫描")
             plan = BatchPlan(
                 name=name,
                 kind=kind,

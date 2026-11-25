@@ -217,6 +217,37 @@ test('opening the batch result URL preserves the exact string job ID and loads t
   assert.match(JSON.stringify(view.toJSON()), /目标路径已存在/);
 });
 
+for (const [cleanup, message] of [
+  ['pending', '报告明细已排队回收'],
+  ['released', '报告明细已回收'],
+] as const) {
+  test(`an organizer batch with ${cleanup} report cleanup skips its linked preview`, async t => {
+    const requests: string[] = [];
+    let finishResult!: (response: Response) => void;
+    t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+      assert.equal(options.method, 'GET');
+      requests.push(url);
+      if (url.includes('/batches/')) return new Promise<Response>(resolve => { finishResult = resolve; });
+      return Response.json({ detail: '找不到此目录预览' }, { status: 404 });
+    });
+    const { view, dispose } = await openBatch(`/batch?operation=media-organize&preview=${previewId}&batch=${batchId}`);
+    try {
+      assert.equal(requests.some(url => url.includes('/previews/')), false, 'read the batch before fetching its preview');
+      finishResult(Response.json({ ...report, report_cleanup_status: cleanup, items: [], filtered_total: 0,
+        summary: { success_count: 2, skipped_count: 0, conflict_count: 0, failed_count: 0 } }));
+      await waitForRenderedText(view, message);
+      assert.equal(requests.some(url => url.includes('/previews/')), false);
+      const visible = JSON.stringify(view.toJSON());
+      assert.match(visible, /整理结果/);
+      assert.doesNotMatch(visible, /找不到此目录预览/);
+      const stats = view.root.findByProps({ className: 'nfc-v2-batch-media-stats' });
+      assert.equal(stats.findAllByType('strong')[0].children.join(''), '2');
+    } finally {
+      await act(dispose);
+    }
+  });
+}
+
 test('preview filtering and complete source-to-target mapping request the right pages', async t => {
   const requests: string[] = [];
   t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {

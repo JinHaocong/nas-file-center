@@ -52,10 +52,15 @@ export function MediaOrganizerBatchEditor() {
     queryFn: () => mediaOrganizerBatchApi.getBatch(batchId!, resultPage.page, resultPage.size),
     enabled: batchId !== null,
     placeholderData: (previous, query) => query?.queryKey[1] === batchId ? previous : undefined,
-    refetchInterval: query => isActive(query.state.data?.status) ? 1200 : false,
+    refetchInterval: query => {
+      if (isActive(query.state.data?.status)) return 1200;
+      return query.state.data?.report_cleanup_status === 'pending' ? 5000 : false;
+    },
   });
   const result = resultQuery.data;
-  const previewId = savedPreviewId ?? result?.preview_job_id ?? null;
+  // The batch determines whether its historical preview can still be read.
+  const previewId = batchId && (!result || result.report_cleanup_status)
+    ? null : savedPreviewId ?? result?.preview_job_id ?? null;
   const previewQuery = useQuery({
     queryKey: ['mediaOrganizerPreview', previewId, previewPage.page, previewPage.size, filter],
     queryFn: () => mediaOrganizerBatchApi.getPreview(previewId!, previewPage.page, previewPage.size, filter),
@@ -231,9 +236,9 @@ export function MediaOrganizerBatchEditor() {
 
       {currentResult ? (
         <MediaOrganizerResultReport report={currentResult}>
-          <ConsolePagination page={resultPage.page} pageSize={resultPage.size}
+          {currentResult.report_cleanup_status !== 'released' && <ConsolePagination page={resultPage.page} pageSize={resultPage.size}
             total={currentResult.filtered_total} pageSizes={pageSizes}
-            onChange={(page, size) => setResultPage({ page, size })} />
+            onChange={(page, size) => setResultPage({ page, size })} />}
         </MediaOrganizerResultReport>
       ) : batchId && selectedPath === null && (
         <DataPanel title="整理结果" variant="dense" className={panelClass}>

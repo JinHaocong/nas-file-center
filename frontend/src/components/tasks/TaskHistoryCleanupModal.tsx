@@ -7,6 +7,7 @@ import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleCheckbox } from '../ui/ConsoleCheckbox';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
 import { useConsoleToast } from '../ui/ConsoleToast';
+import { formatReportCleanupFeedback } from './task_cleanup';
 
 interface Props { onCleaned?: () => void; }
 
@@ -37,12 +38,15 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
   const cleanupMutation = useMutation({
     mutationFn: (statuses: TerminalTaskStatus[]) => tasksApi.clearTaskHistory(statuses),
     onSuccess: async res => {
-      toast.success('已清理 ' + res.deleted_count + ' 个历史任务');
+      const message = `已清理 ${res.deleted_count} 个历史任务`;
+      const feedback = formatReportCleanupFeedback(res.report_cleanup);
+      toast.success(feedback ? `${message}，${feedback}` : message);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tasksList'] }),
         queryClient.invalidateQueries({ queryKey: ['recentTasks'] }),
         queryClient.invalidateQueries({ queryKey: ['taskDetail'] }),
         queryClient.invalidateQueries({ queryKey: ['taskLogs'] }),
+        queryClient.invalidateQueries({ queryKey: ['organizerReports'] }),
       ]);
       setOpen(false);
       onCleaned?.();
@@ -115,7 +119,7 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
               </span>
               <div>
                 <Dialog.Title>清理任务历史</Dialog.Title>
-                <Dialog.Description>仅清理选中终态任务的元数据与事件日志。</Dialog.Description>
+                <Dialog.Description>清理选中终态的任务记录和可安全回收的智能整理报告。</Dialog.Description>
               </div>
               <button type="button" className="nfc-v2-dialog-close"
                 disabled={cleanupMutation.isPending} aria-label="关闭历史清理窗口"
@@ -126,7 +130,7 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
               <div className="nfc-v2-history-warning" role="note">
                 <ConsoleIcon name="shield-check" size={18} />
                 <div><strong>清理范围说明</strong>
-                  <p>该操作会清理所有任务类型中符合所选终态的历史任务，不是仅清理当前分页或当前任务类型筛选结果。</p>
+                  <p>清理适用于所有符合所选终态的任务，包括其他分页和任务类型。</p>
                 </div>
               </div>
 
@@ -144,12 +148,11 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
               </fieldset>
 
               <section className="nfc-v2-history-impacts" aria-label="影响与安全说明">
-                <strong>影响与安全说明：</strong>
+                <strong>清理影响</strong>
                 <ul className="nfc-history-cleanup-list">
-                  <li>选中的终态任务元数据及其关联事件日志（Task Logs）将被永久删除。</li>
-                  <li><strong className="nfc-success-text">绝不会删除</strong> NAS 存储上的任何文件。</li>
-                  <li><strong className="nfc-success-text">绝不会删除</strong> Audit 审计记录。</li>
-                  <li>排队中、执行中、暂停中或取消中的任务受系统保护，不会受到任何影响。</li>
+                  <li>可安全回收的智能整理报告会排队清理。</li>
+                  <li>恢复所需资料和关联事件日志（Task Logs）会保留。</li>
+                  <li>NAS 媒体文件、Audit 审计记录和活动任务会保留。</li>
                 </ul>
               </section>
             </div>

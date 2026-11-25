@@ -25,6 +25,7 @@ from app.tasks.recovery import (
     claim_next_job,
     generate_worker_id,
     recover_interrupted_jobs,
+    renew_and_assert_worker_lease,
     update_worker_heartbeat,
     WorkerHeartbeatDatabaseBusy,
 )
@@ -565,6 +566,7 @@ def worker_loop(
         _cleanup_archive_after_recovery(settings, SessionLocal, worker_id)
 
     last_scheduler_tick_minute = None
+    next_report_cleanup = 0.0
 
     try:
         while True:
@@ -615,6 +617,20 @@ def worker_loop(
                     )
                 else:
                     last_scheduler_tick_minute = scheduler_minute
+
+            if time.monotonic() >= next_report_cleanup:
+                from app.batch.organizer_report_cleanup import process_pending_reports
+
+                try:
+                    process_pending_reports(
+                        SessionLocal, settings, lambda: renew_and_assert_worker_lease(SessionLocal, worker_id),
+                    )
+                except JobLeaseLost:
+                    acquired = False
+                    continue
+                except Exception:
+                    logger.exception("Organizer report cleanup will retry")
+                next_report_cleanup = time.monotonic() + poll_seconds
 
             try:
                 claimed_id = claim_next_job(engine, SessionLocal, worker_id=worker_id)

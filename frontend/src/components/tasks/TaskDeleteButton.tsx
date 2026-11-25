@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { tasksApi } from '../../api/tasks';
 import type { TaskDetail, TaskItem } from '../../types/task';
-import { getTaskDeleteAvailability } from './task_cleanup';
+import { formatReportCleanupFeedback, getTaskDeleteAvailability } from './task_cleanup';
 import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleConfirmDialog } from '../ui/ConsoleConfirmDialog';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
@@ -27,11 +27,14 @@ export const TaskDeleteButton: React.FC<Props> = ({
 
   const deleteMutation = useMutation({
     mutationFn: () => tasksApi.deleteTask(task.id),
-    onSuccess: async () => {
-      toast.success('任务 #' + task.id + ' 已删除');
+    onSuccess: async result => {
+      const message = `任务 #${task.id} 已从列表移除`;
+      const feedback = formatReportCleanupFeedback(result.report_cleanup);
+      toast.success(feedback ? `${message}，${feedback}` : message);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tasksList'] }),
         queryClient.invalidateQueries({ queryKey: ['recentTasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['organizerReports'] }),
       ]);
       queryClient.removeQueries({ queryKey: ['taskDetail', String(task.id)] });
       queryClient.removeQueries({ queryKey: ['taskLogs', String(task.id)] });
@@ -78,7 +81,7 @@ export const TaskDeleteButton: React.FC<Props> = ({
         onOpenChange={next => { if (!deleteMutation.isPending && !deleteInFlight.current) setOpen(next); }}
         title={'确认删除任务 #' + task.id + '？'}
         description={
-          <p>删除后将同时清除该任务的事件日志。该操作不会删除 NAS 上的任何文件，也不会删除 Audit 审计记录。</p>
+          <p>任务将从列表移除，可安全回收的智能整理报告会排队清理。恢复所需资料、NAS 媒体文件和 Audit 审计记录会保留。</p>
         }
         confirmText="确认删除"
         onConfirm={() => { void confirmDelete(); }}

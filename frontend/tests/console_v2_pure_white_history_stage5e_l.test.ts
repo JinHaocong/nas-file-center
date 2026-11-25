@@ -70,12 +70,12 @@ describe('Stage 5E-L terminal-history modal native control and single-flight saf
     assert.doesNotMatch(tasks + plans, /<input type="checkbox"/);
   });
 
-  test('metadata-only warnings, API ownership and audit log protections stay intact', () => {
+  test('cleanup scope, API ownership and audit log protections stay intact', () => {
     for (const token of [
       'tasksApi.clearTaskHistory(statuses)',
       'selectedStatuses.length === 0',
-      'Task Logs', 'Audit 审计记录', '绝不会删除',
-      '不是仅清理当前分页',
+      'Task Logs', 'Audit 审计记录', '可安全回收的智能整理报告会排队清理',
+      '包括其他分页和任务类型',
       'queryClient.invalidateQueries',
     ]) assert.ok(tasks.includes(token), token);
     for (const token of [

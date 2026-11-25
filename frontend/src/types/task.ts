@@ -85,11 +85,41 @@ export interface RetryTaskResponse {
 
 export type TerminalTaskStatus = 'completed' | 'failed' | 'cancelled';
 
+export interface OrganizerReportCleanupFeedback {
+  queued_count: number;
+  retained_count: number;
+}
+
+export type OrganizerReportStatus = 'retained' | 'reclaimable' | 'orphan' | 'pending' | 'released' | 'unknown';
+
+export interface OrganizerReportItem {
+  job_id: string;
+  kind: 'preview' | 'execution';
+  status: OrganizerReportStatus;
+  reason: string;
+  bytes: number;
+  files: number;
+  reclaimed_bytes?: number;
+}
+
+export interface OrganizerReportInventoryResponse {
+  read_only: true;
+  items: OrganizerReportItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  pending_count: number;
+  total_bytes: number;
+  reclaimed_bytes: number;
+}
+
 export interface DeleteTaskResponse {
   deleted: boolean;
   id: TaskId;
+  report_cleanup?: OrganizerReportCleanupFeedback;
 }
 
 export interface ClearTaskHistoryResponse {
   deleted_count: number;
+  report_cleanup?: OrganizerReportCleanupFeedback;
 }

@@ -104,6 +104,7 @@ interface MediaLooseAssignmentDraft {
 
 export interface MediaBatchResult extends OrganizerJob, OrganizerReportPage {
   preview_job_id: OrganizerJobId;
+  report_cleanup_status?: 'pending' | 'released';
   summary: Record<`${MediaBatchOutcome}_count`, number>;
   items: Array<{ unit: string; status: MediaBatchOutcome; reason?: string | null }>;
 }

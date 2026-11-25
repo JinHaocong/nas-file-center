@@ -70,8 +70,8 @@ describe('Console v2 Task Center Radix overlays', () => {
       'selectedStatuses.length === 0',
       'cleanupMutation.isPending', 'tasksApi.clearTaskHistory(statuses)',
       'queryClient.invalidateQueries',
-      'Task Logs', 'Audit 审计记录', '绝不会删除',
-      '不是仅清理当前分页', 'onCleaned?.()', '<Dialog.Overlay',
+      'Task Logs', 'Audit 审计记录', '可安全回收的智能整理报告会排队清理',
+      '包括其他分页和任务类型', 'onCleaned?.()', '<Dialog.Overlay',
       'onPointerDownOutside={event => event.preventDefault()}',
     ]) assert.ok(modal.includes(safety), safety);
     assert.doesNotMatch(modal, /from ['"]antd['"]|<Modal\b|<Checkbox.Group/);

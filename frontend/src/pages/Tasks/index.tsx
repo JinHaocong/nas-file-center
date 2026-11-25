@@ -13,6 +13,8 @@ import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { TaskDetailDrawer } from '../../components/tasks/TaskDetailDrawer';
 import { TaskDeleteButton } from '../../components/tasks/TaskDeleteButton';
 import { TaskHistoryCleanupModal } from '../../components/tasks/TaskHistoryCleanupModal';
+import { OrganizerReportInventory } from '../../components/tasks/OrganizerReportInventory';
+import { useAuth } from '../../contexts/AuthContext';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
@@ -48,6 +50,7 @@ const JOB_TYPE_OPTIONS = [
 
 export const TasksPage: React.FC = () => {
   useTitle('任务中心');
+  const { user } = useAuth();
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -163,6 +166,7 @@ export const TasksPage: React.FC = () => {
         description="查看正在进行的任务，打开记录可核对进度和执行结果。"
         actions={
           <ActionBar compact>
+            {user?.role === 'admin' && <OrganizerReportInventory />}
             <TaskHistoryCleanupModal
               onCleaned={() => {
                 setPage(1);

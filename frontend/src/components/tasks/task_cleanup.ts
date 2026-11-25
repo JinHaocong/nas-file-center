@@ -1,8 +1,17 @@
-import { TaskStatus } from '../../types/task';
+import type { OrganizerReportCleanupFeedback, TaskStatus } from '../../types/task';
 
 export interface TaskDeleteAvailability {
   enabled: boolean;
   reason: string | null;
+}
+
+/** Describe the organizer report outcomes returned by task deletion. */
+export function formatReportCleanupFeedback(cleanup?: OrganizerReportCleanupFeedback): string {
+  if (!cleanup) return '';
+  const messages: string[] = [];
+  if (cleanup.queued_count > 0) messages.push(`${cleanup.queued_count} 项报告已排队回收`);
+  if (cleanup.retained_count > 0) messages.push(`${cleanup.retained_count} 项报告保留恢复资料`);
+  return messages.join('，');
 }
 
 export function getTaskDeleteAvailability(

@@ -1047,11 +1047,24 @@ def get_worker_status(request: Request):
     return request.app.state.service.get_worker_status()
 
 
+@router.get("/tasks/organizer-reports", dependencies=[Depends(require_admin_user)])
+def list_organizer_reports(request: Request, page: int = Query(1, ge=1),
+                           page_size: int = Query(50, ge=1, le=100)):
+    from app.batch.organizer_report_cleanup import inventory
+
+    service = request.app.state.service
+    try:
+        return inventory(service.SessionLocal, service.settings, page=page, page_size=page_size)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(409, "无法读取智能整理报告目录") from exc
+
+
 @router.post("/tasks/clear-history")
-def clear_task_history(request: Request, body: ClearTaskHistoryRequest | None = None):
+def clear_task_history(request: Request, body: ClearTaskHistoryRequest | None = None,
+                       current_user: User = Depends(get_current_user)):
     try:
         statuses = body.statuses if body else None
-        return request.app.state.service.clear_task_history(statuses=statuses)
+        return request.app.state.service.clear_task_history(statuses=statuses, reclaim_reports=current_user.role == "admin")
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -1132,7 +1145,7 @@ def delete_task(
 ):
     _require_restricted_task_admin(request, task_id, current_user)
     try:
-        return request.app.state.service.delete_task(task_id)
+        return request.app.state.service.delete_task(task_id, reclaim_reports=current_user.role == "admin")
     except KeyError as exc:
         raise HTTPException(404, "Task not found") from exc
     except ValueError as exc:

@@ -36,7 +36,7 @@ describe('Pure White Stage 5E-AA Task History controlled dialog focus return', (
       "value: 'completed'", "value: 'failed'", "value: 'cancelled'",
       'onPointerDownOutside={event => event.preventDefault()}',
       'cleanupMutation.isPending || submitting.current) event.preventDefault()',
-      'NAS 存储上的任何文件',
+      'NAS 媒体文件、Audit 审计记录和活动任务会保留',
     ]) assert.ok(modal.includes(token), token);
     assert.ok(modal.indexOf('target.focus();') >
       modal.indexOf("if (target?.isConnected && !target.matches(':disabled')) {"));

@@ -20,6 +20,7 @@ from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_organizer_planner import is_reserved_workspace
 from app.batch.media_package_organizer import APPEND_MEDIA_OPERATIONS, _validate_scope
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
+from app.batch.organizer_report_cleanup import preview_unavailable, report_state
 from app.config import Settings
 from app.execution.luolcy_assignment import LUOLCY_ASSIGNMENT_KIND
 from app.models import TaskEvent, WorkJob, utcnow
@@ -50,7 +51,7 @@ def _selection(value: str, settings: Settings) -> Path:
 
 def _job(session, kind: str, job_id: int) -> tuple[WorkJob, dict]:
     job = session.get(WorkJob, job_id)
-    if job is None or job.kind != kind:
+    if job is None or job.kind != kind or preview_unavailable(job):
         raise KeyError(job_id)
     state = json.loads(job.state_json or "{}")
     if state.get("organizer_flow") != FLOW:
@@ -360,6 +361,14 @@ def enqueue_batch(session_factory, settings: Settings, preview_id: int) -> dict:
 def get_batch(session_factory, job_id: int, *, page: int, page_size: int) -> dict:
     with session_factory() as session:
         job, state = _job(session, BATCH_KIND, job_id)
+        archived = report_state(job)
+        if archived.get("status") == "released":
+            return {
+                **_receipt(job), "selection": state["selection"], "error": job.error_text,
+                "preview_job_id": str(state["preview_job_id"]), "progress": _progress(job),
+                "summary": archived["summary"], "items": [], "filtered_total": 0, "report_cleanup_status": "released",
+                "page": page, "page_size": page_size,
+            }
         where = (TaskEvent.job_id == job_id, TaskEvent.event_type == RESULT_EVENT)
         status = func.json_extract(TaskEvent.context_json, "$.status")
         counts = dict(session.execute(select(status, func.count()).where(*where).group_by(status)).all())
@@ -371,6 +380,7 @@ def get_batch(session_factory, job_id: int, *, page: int, page_size: int) -> dic
             "preview_job_id": str(state["preview_job_id"]), "progress": _progress(job),
             "summary": {f"{name}_count": counts.get(name, 0) for name in RESULT_STATUSES},
             "items": [json.loads(event) for event in events], "filtered_total": sum(counts.values()),
+            **({"report_cleanup_status": "pending"} if archived.get("status") == "pending" else {}),
             "page": page, "page_size": page_size,
         }
 

@@ -323,6 +323,11 @@ export function MediaOrganizerResultReport({ report, children }: {
     <DataPanel title="整理结果" variant="dense" className={panelClass}>
       <TaskProgress status={report.status} progress={{ ...report.progress, percent: null }} />
       {report.error && <p className="nfc-v2-batch-error" role="alert">{report.error}</p>}
+      {report.report_cleanup_status && <p className="nfc-form-note" role="status">
+        {report.report_cleanup_status === 'released'
+          ? '报告明细已回收，整理结果摘要已保留。'
+          : '报告明细已排队回收，整理结果摘要会保留。'}
+      </p>}
       <div className="nfc-v2-batch-media-stats" role="status">
         {resultStatuses.map(status => (
           <span key={status}>{outcomes[status].label} <strong>{report.summary[`${status}_count`].toLocaleString()}</strong></span>
