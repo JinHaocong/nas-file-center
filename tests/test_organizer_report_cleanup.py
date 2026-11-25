@@ -4,6 +4,7 @@ from datetime import timedelta
 import json
 import shutil
 
+import pytest
 from sqlalchemy import delete
 
 from app.models import TaskEvent, WorkJob
@@ -61,6 +62,76 @@ def test_clearing_history_releases_closed_batch_and_keeps_its_summary(tmp_path):
     archived = client.get(f"/api/media-organizer/batches/{batch}").json()
     assert archived["summary"] == original and len(archived["items"]) == 1
     assert (work / "P [1 5B]/001.jpg").read_bytes() == b"photo"
+
+
+@pytest.mark.parametrize("previously_retained", [False, True])
+def test_cleanup_reclaims_verified_report_names_with_a_shared_manifest(tmp_path, previously_retained):
+    client, settings, _ = _fixture(tmp_path)
+    work = settings.data_mount / "作品"
+    put_files(work, {"cover.jpg": b"photo"})
+    preview = _preview(client, settings, work)["job_id"]
+    batch = _batch(client, {"job_id": preview})
+    assert _run_next(settings, batch)
+    result_url = f"/api/media-organizer/batches/{batch}"
+    original = client.get(result_url).json()
+    preview_dir = settings.reports_dir / "organizer-v1-previews" / preview
+    execution_dir = settings.reports_dir / "organizer-v1-executions" / batch
+    manifest = execution_dir / "0.json"
+    original_manifest = manifest.read_bytes()
+    # Reproduce the NAS link count while giving the second name a real external binding.
+    other_link = tmp_path / "manifest alias.json"
+    other_link.hardlink_to(manifest)
+    assert manifest.stat().st_nlink == 2
+    preview_size = sum(file.stat().st_size for file in preview_dir.iterdir())
+    response = client.post("/api/tasks/clear-history", json={"statuses": ["completed"]})
+    assert response.json()["report_cleanup"]["queued_count"] == 1
+    if previously_retained:
+        with client.app.state.service.SessionLocal.begin() as db:
+            for job_id in (preview, batch):
+                job = db.get(WorkJob, job_id)
+                checkpoint = json.loads(job.checkpoint_json)
+                checkpoint["organizer_report_cleanup"].update(
+                    status="retained", reason="报告目录包含未知文件或链接",
+                )
+                job.checkpoint_json = json.dumps(checkpoint)
+
+    _cleanup(client, settings)
+
+    assert not preview_dir.exists() and not execution_dir.exists()
+    assert other_link.read_bytes() == original_manifest and other_link.stat().st_nlink == 1
+    assert (work / "001.jpg").read_bytes() == b"photo"
+    result = client.get(result_url).json()
+    assert result["summary"] == original["summary"] and result["items"] == original["items"]
+    inventory = client.get("/api/tasks/organizer-reports").json()
+    assert inventory["total"] == 0 and inventory["reclaimed_bytes"] == preview_size
+
+
+@pytest.mark.parametrize("artifact", ["corrupt_manifest", "link_intent"])
+def test_cleanup_keeps_a_shared_artifact_that_cannot_be_verified(tmp_path, artifact):
+    client, settings, _ = _fixture(tmp_path)
+    work = settings.data_mount / "作品"
+    put_files(work, {"cover.jpg": b"photo"})
+    preview = _preview(client, settings, work)["job_id"]
+    batch = _batch(client, {"job_id": preview})
+    assert _run_next(settings, batch)
+    execution_dir = settings.reports_dir / "organizer-v1-executions" / batch
+    path = execution_dir / "0.json"
+    if artifact == "corrupt_manifest":
+        envelope = json.loads(path.read_bytes())
+        envelope["checksum"] = "invalid"
+        path.write_text(json.dumps(envelope), encoding="utf-8")
+    else:
+        put_files(execution_dir, {"0.link.json": b"{}"})
+        path = execution_dir / "0.link.json"
+    other_link = tmp_path / "artifact alias.json"
+    other_link.hardlink_to(path)
+
+    assert client.delete(f"/api/tasks/{batch}").json()["report_cleanup"]["queued_count"] == 1
+    _cleanup(client, settings)
+
+    assert path.stat().st_nlink == 2 and other_link.exists()
+    inventory = client.get("/api/tasks/organizer-reports").json()
+    assert inventory["total"] == 2 and inventory["pending_count"] == inventory["reclaimed_bytes"] == 0
 
 
 def test_terminal_batch_with_a_unit_conflict_keeps_recovery_reports(tmp_path):

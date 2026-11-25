@@ -111,7 +111,7 @@ export const LoginPage: React.FC = () => {
         </section>
       </div>
 
-      <footer className="nfc-login-footer">NAS File Center v1.8.10</footer>
+      <footer className="nfc-login-footer">NAS File Center v1.8.11</footer>
     </main>
   );
 };

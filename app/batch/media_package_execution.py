@@ -259,6 +259,11 @@ def load_frozen_manifest(path: Path, *, job_id: int, package: Path) -> dict:
         raise MediaPackageExecutionConflict(
             "Frozen manifest integrity mismatch: unreadable or invalid JSON"
         ) from exc
+    return _validate_frozen_manifest_body(body, job_id=job_id, package=package)
+
+
+def _validate_frozen_manifest_body(body, *, job_id: int, package: Path) -> dict:
+    """Verify a decoded manifest against its expected execution and package."""
     if not isinstance(body, dict) or not isinstance(body.get("manifest"), dict):
         raise MediaPackageExecutionConflict(
             "Frozen manifest integrity mismatch: invalid manifest envelope"

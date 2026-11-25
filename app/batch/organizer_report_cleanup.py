@@ -11,7 +11,7 @@ import re
 import stat
 import time
 
-from sqlalchemy import String, case, cast, func, select, text
+from sqlalchemy import String, case, cast, func, or_, select, text
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.models import BatchPlan, TaskEvent, WorkJob, utcnow
@@ -29,7 +29,11 @@ _RECLAIMED_BYTES = "organizer_report_reclaimed_bytes"
 _ARCHIVED_SUMMARY = "organizer_archived_result"
 _NAMESPACES = {PREVIEW: "organizer-v1-previews", BATCH: "organizer-v1-executions"}
 _PREVIEW_FILE = re.compile(r"(?:summary\.json|units\.jsonl|(?:loose-)?[0-9a-f]{64}\.jsonl)")
-_EXECUTION_FILE = re.compile(r"(?:0|[1-9][0-9]*)\.(?:link\.)?json")
+_EXECUTION_ORDINAL = r"(?:0|[1-9][0-9]*)"
+_EXECUTION_FILE = re.compile(rf"{_EXECUTION_ORDINAL}\.(?:link\.)?json")
+_EXECUTION_MANIFEST_FILE = re.compile(rf"{_EXECUTION_ORDINAL}\.json")
+_ARTIFACT_REJECTION = "报告目录包含未知文件或链接"
+_MANIFEST_LINKS_RECHECKED = "manifest_links_rechecked"
 _FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
@@ -227,23 +231,39 @@ def _snapshot(settings, kind, job_id, *, expected=None):
         if expected is not None and _binding(root) != expected:
             raise ValueError("报告目录在删除请求后已变化")
         files = {}
+        shared_inodes = set()
         with os.scandir(fd) as entries:
             for entry in entries:
                 info = entry.stat(follow_symlinks=False)
+                # Frozen manifests are published with a hardlink. The batch
+                # verification checks the exact file and its checksum before unlinking.
+                shared_manifest = (kind == BATCH and info.st_nlink == 2
+                                   and _EXECUTION_MANIFEST_FILE.fullmatch(entry.name))
                 if (not pattern.fullmatch(entry.name) or not stat.S_ISREG(info.st_mode)
-                        or info.st_dev != root.st_dev or info.st_nlink != 1):
-                    raise ValueError("报告目录包含未知文件或链接")
+                        or info.st_dev != root.st_dev or (info.st_nlink != 1 and not shared_manifest)):
+                    raise ValueError(_ARTIFACT_REJECTION)
+                if shared_manifest:
+                    binding = (info.st_dev, info.st_ino)
+                    if binding in shared_inodes:
+                        raise ValueError(_ARTIFACT_REJECTION)
+                    shared_inodes.add(binding)
                 files[entry.name] = _identity(info)
         if _binding(os.fstat(fd)) != _binding(root):
             raise ValueError("报告目录在核对期间已变化")
         return {"kind": kind, "job_id": job_id, "root": [root.st_dev, root.st_ino], "files": files}
 
 
-def _read_rows(fd, name, binding):
+@contextmanager
+def _bound_report_file(fd, name, binding):
     handle = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
     with os.fdopen(handle, "r", encoding="utf-8") as stream:
         if _identity(os.fstat(stream.fileno())) != binding:
             raise ValueError("报告文件已变化")
+        yield stream
+
+
+def _read_rows(fd, name, binding):
+    with _bound_report_file(fd, name, binding) as stream:
         yield from (json.loads(line) for line in stream)
 
 
@@ -251,7 +271,7 @@ def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fen
     """Prove each originally ready unit finished and has no owned staging directory."""
     from app.batch.media_organizer_archive import PROMOTE_ARCHIVE_CHILDREN, _fingerprint, _valid_snapshot
     from app.batch.media_organizer_jobs import _selection
-    from app.batch.media_package_execution import load_frozen_manifest
+    from app.batch.media_package_execution import _validate_frozen_manifest_body
 
     preview = _report_path(settings, PREVIEW, preview_plan["job_id"])
     execution = _report_path(settings, BATCH, execution_plan["job_id"])
@@ -267,7 +287,7 @@ def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fen
             fence()
             next_check = time.monotonic() + 0.8
 
-    with _directory(preview) as fd:
+    with _directory(preview) as fd, _directory(execution) as execution_fd:
         units = _read_rows(fd, "units.jsonl", preview_plan["files"]["units.jsonl"])
         try:
             for ordinal, (unit, event) in enumerate(zip_longest(units, events)):
@@ -285,7 +305,8 @@ def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fen
                 if not package.is_relative_to(selection) or name not in execution_plan["files"]:
                     raise ValueError("整理范围或冻结清单不完整")
                 manifests.add(name)
-                manifest = load_frozen_manifest(execution / name, job_id=job.id, package=package)
+                with _bound_report_file(execution_fd, name, execution_plan["files"][name]) as stream:
+                    manifest = _validate_frozen_manifest_body(json.load(stream), job_id=job.id, package=package)
                 if any(manifest.get(key) != unit.get(key)
                        for key in ("operation", "input_fingerprint", "organizer_mode")):
                     raise ValueError("冻结清单与执行记录不一致")
@@ -397,10 +418,16 @@ def process_pending_reports(session_factory, settings, fence, *, now=None):
         status = _json_field(WorkJob.checkpoint_json, f"$.{KEY}.status")
         owner = _json_field(WorkJob.checkpoint_json, f"$.{KEY}.owner")
         retry = _json_field(WorkJob.checkpoint_json, f"$.{KEY}.retry_at")
+        reason = _json_field(WorkJob.checkpoint_json, f"$.{KEY}.reason")
+        approved = _json_field(WorkJob.checkpoint_json, f"$.{KEY}.approved")
+        rechecked = _json_field(WorkJob.checkpoint_json, f"$.{KEY}.{_MANIFEST_LINKS_RECHECKED}")
+        pending = status == "pending"
+        legacy_rejection = ((WorkJob.kind == BATCH) & (status == "retained") & (reason == _ARTIFACT_REJECTION)
+                            & (func.coalesce(approved, 0) == 0) & (func.coalesce(rechecked, 0) == 0))
         job = session.scalar(select(WorkJob).where(
-            WorkJob.kind.in_(KINDS), status == "pending", owner == cast(WorkJob.id, String),
+            WorkJob.kind.in_(KINDS), or_(pending, legacy_rejection), owner == cast(WorkJob.id, String),
             func.coalesce(retry, "") <= now.isoformat(),
-        ).order_by(WorkJob.id).limit(1))
+        ).order_by(pending.desc(), WorkJob.id).limit(1))
         if job is None:
             return
         marker = report_state(job)
@@ -410,6 +437,12 @@ def process_pending_reports(session_factory, settings, fence, *, now=None):
         ).order_by(TaskEvent.id))] if job.kind == BATCH and not marker.get("plan") else []
     fence()
     try:
+        if marker["status"] == "retained":
+            # Recheck pre-upgrade requests once using their original directory bindings.
+            pending_marker = {**marker, "status": "pending", _MANIFEST_LINKS_RECHECKED: True}
+            if not _update_request(session_factory, job.id, marker, pending_marker):
+                return
+            marker = pending_marker
         if eligible is None:
             raise ValueError("仍有任务引用或恢复证据不足")
         plan = marker.get("plan")
@@ -434,7 +467,9 @@ def process_pending_reports(session_factory, settings, fence, *, now=None):
             _retire(settings, report, fence)
         released = {k: v for k, v in marker.items() if k not in ("plan", "bindings", "retry_at", "reason")}
         released["status"] = "released"
-        sizes = {report["kind"]: sum(item[2] for item in report["files"].values()) for report in plan}
+        # A removed report name may still have a surviving link outside the report directory.
+        sizes = {report["kind"]: sum(item[2] for item in report["files"].values() if item[-1] == 1)
+                 for report in plan}
         fence()
         _update_request(session_factory, job.id, marker, released, per_report_bytes=sizes)
     except OSError as error:
@@ -456,6 +491,8 @@ def process_pending_reports(session_factory, settings, fence, *, now=None):
 
 def _hold_request(session_factory, job_id, marker, reason):
     held = {key: val for key, val in marker.items() if key not in ("plan", "retry_at")}
+    if reason == _ARTIFACT_REJECTION:
+        held[_MANIFEST_LINKS_RECHECKED] = True
     _update_request(session_factory, job_id, marker, {**held, "status": "retained", "reason": reason})
 
 
