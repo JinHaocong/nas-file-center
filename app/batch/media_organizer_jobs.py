@@ -18,7 +18,7 @@ from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_archive import PROMOTE_ARCHIVE_CHILDREN
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_organizer_planner import is_reserved_workspace
-from app.batch.media_package_organizer import APPEND_MEDIA_OPERATIONS, _validate_scope
+from app.batch.media_package_organizer import APPEND_MEDIA_OPERATIONS, MAX_FILES_PER_GROUP, _validate_scope
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.batch.organizer_report_cleanup import archived_result, preview_unavailable, report_missing, report_reclaimed, report_state
 from app.config import Settings
@@ -566,7 +566,8 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence,
             return "success", None
         fresh = preview_organizing_unit(
             chosen, include_items=True, local_media_kinds=local_media_kinds, whole_author=whole_author,
-            local_scope=unit.get("local_scope"), **options,
+            local_scope=unit.get("local_scope"),
+            video_bucket_limit=manifest.get("video_bucket_limit", MAX_FILES_PER_GROUP), **options,
         )
         if fresh["status"] != "already_organized":
             raise MediaPackageExecutionConflict("整理后重新扫描时仍发现变更")

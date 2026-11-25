@@ -21,7 +21,7 @@ from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_package_naming import organizer_extension
 from app.batch.media_package_organizer import (
     APPEND_MEDIA_OPERATIONS, APPEND_MEDIA_WRAPPER, APPEND_SINGLE_VIDEO, APPEND_VIDEO_OPERATIONS,
-    LIFT_LUOLCY_BUCKETS, MAX_FILES_PER_GROUP,
+    LIFT_LUOLCY_BUCKETS, MAX_FILES_PER_GROUP, MAX_VIDEOS_PER_GROUP,
     PROMOTE_NUMBERED_PHOTO_GROUPS, _LUOLCY_SHORT_VIDEO_FOLDER,
     _author_media_row, _classify, _input_fingerprint,
     _luolcy_batch_boundary, _luolcy_bucket_slot, _luolcy_classification_kind, _luolcy_leaf_promotion,
@@ -137,7 +137,7 @@ def prepare_organizer_manifest(
 
 
 def _freeze_layout(source: Path, fresh: dict, *, media_package_root: Path | None, job_id: int,
-                   organizer_scope: dict | None = None) -> dict:
+                   organizer_scope: dict | None = None, video_bucket_limit: int = MAX_VIDEOS_PER_GROUP) -> dict:
     """Use the planner's complete source-to-target mapping in the frozen engine format."""
     items = fresh["_snapshot_items"]
     if _input_fingerprint(items, source) != fresh["input_fingerprint"]:
@@ -197,6 +197,7 @@ def _freeze_layout(source: Path, fresh: dict, *, media_package_root: Path | None
     manifest = {
         "schema_version": MANIFEST_VERSION, "job_id": job_id, "package": str(source),
         "media_package_root": str(media_package_root) if media_package_root is not None else None,
+        "video_bucket_limit": video_bucket_limit,
         "package_dev": dev, "package_ino": int(package_stat.st_ino),
         "input_fingerprint": fresh["input_fingerprint"], "operation": fresh["operation"],
         "root_stage": root_stage, "groups": groups, "moves": moves, "origin_directories": directories,
@@ -1505,6 +1506,10 @@ def _validate_luolcy_sources(manifest: dict, package: Path) -> None:
 def _validate_frozen_paths(manifest: dict) -> None:
     """Reject any corrupt/artifact-rewritten path outside the resource package."""
     package = Path(manifest["package"])
+    # Pre-upgrade manifests have no capacity field and retain their approved layout.
+    video_bucket_limit = manifest.get("video_bucket_limit", MAX_FILES_PER_GROUP)
+    if type(video_bucket_limit) is not int or video_bucket_limit not in {MAX_VIDEOS_PER_GROUP, MAX_FILES_PER_GROUP}:
+        raise MediaPackageExecutionConflict("Invalid frozen video bucket capacity")
     if (not package.is_absolute() or
             not isinstance(manifest.get("job_id"), int) or manifest["job_id"] < 1):
         raise MediaPackageExecutionConflict("Invalid protected package / job identity")
@@ -1555,8 +1560,9 @@ def _validate_frozen_paths(manifest: dict) -> None:
                 group.get("move_start", -1) < 0 or
                 group.get("kind") not in ("P", "V", "Other")):
             raise MediaPackageExecutionConflict("Invalid frozen MediaPackage group metadata")
-        if group["kind"] in ("P", "V") and group["count"] > MAX_FILES_PER_GROUP:
-            raise MediaPackageExecutionConflict("200-file MediaPackage capacity exceeded")
+        capacity = video_bucket_limit if group["kind"] == "V" else MAX_FILES_PER_GROUP
+        if group["kind"] in ("P", "V") and group["count"] > capacity:
+            raise MediaPackageExecutionConflict("Frozen MediaPackage bucket capacity exceeded")
         if luolcy_author:
             ordinal = kind_indexes.get(group["kind"])
             if ordinal is None or not isinstance(group.get("bytes"), int) or group["bytes"] < 0:
@@ -1610,7 +1616,9 @@ def _validate_frozen_paths(manifest: dict) -> None:
         ):
             raise MediaPackageExecutionConflict("Frozen MediaPackage group rows are inconsistent")
     if root_stage is not None:
-        if (len(rows) > MAX_FILES_PER_GROUP or any(row["group"] is not None for row in rows)
+        flat_limit = (video_bucket_limit if any(_classify(Path(row["source"]).name) == "V" for row in rows)
+                      else MAX_FILES_PER_GROUP)
+        if (len(rows) > flat_limit or any(row["group"] is not None for row in rows)
                 or len({row["target_name"].casefold() for row in rows}) != len(rows)):
             raise MediaPackageExecutionConflict("Flat frozen numbering is inconsistent")
         if manifest["operation"] in APPEND_MEDIA_OPERATIONS:
@@ -1674,7 +1682,10 @@ def _live_organizer_snapshot(manifest: dict, package: Path, mode: str) -> list[d
     whole_author = manifest.get("whole_author", False)
     numbered_photos = manifest.get("operation") == PROMOTE_NUMBERED_PHOTO_GROUPS
     if whole_author or numbered_photos:
-        preview = preview_organizing_unit(package, allowed_roots=[package], include_items=True, **options)
+        preview = preview_organizing_unit(
+            package, allowed_roots=[package], include_items=True,
+            video_bucket_limit=manifest.get("video_bucket_limit", MAX_FILES_PER_GROUP), **options,
+        )
         same_operation = preview.get("operation") == manifest.get("operation")
         if same_operation and (
             (whole_author and preview.get("whole_author") and preview["status"] == "ready")

@@ -191,9 +191,9 @@ def test_large_whole_author_uses_existing_bucket_limits_and_checks_targets(tmp_p
     author = tmp_path / "2611/261123/作者A"
     put(author / "root.mp4")
     put(author / "1/clip.mp4")
-    for index in range(198):
+    for index in range(48):
         put(author / "1/作品" / f"{index:03d}.mp4")
-    bucket = author / "V [200 800B]"
+    bucket = author / "V [50 200B]"
     put(bucket / "video.mp4")
     if occupied:
         (bucket / "empty-folder").mkdir()
@@ -206,7 +206,7 @@ def test_large_whole_author_uses_existing_bucket_limits_and_checks_targets(tmp_p
         assert rows[0]["reason"] == "A target media bucket contains a non-input directory"
     else:
         assert rows[0]["status"] == "ready"
-        assert [group["name"] for group in rows[0]["groups"]] == ["V [200 800B]", "V_1 [1 4B]"]
+        assert [group["name"] for group in rows[0]["groups"]] == ["V [50 200B]", "V_1 [1 4B]"]
 
 
 def test_leaf_photo_pack_joins_its_works_direct_videos(tmp_path):
@@ -583,7 +583,7 @@ def test_author_loose_files_are_reported_separately_from_named_works(tmp_path):
 
 def test_pure_author_layer_groups_only_its_direct_media(tmp_path):
     author = tmp_path / "2611" / "261122" / "作者A"
-    for index in range(201):
+    for index in range(51):
         put(author / f"原视频-{index:03d}.mp4")
     put(author / "videos" / "旧素材.mp4")
     put(author / "NO.001" / "封面.jpg")
@@ -593,7 +593,7 @@ def test_pure_author_layer_groups_only_its_direct_media(tmp_path):
     )}
 
     assert rows[str(author)]["status"] == "ready"
-    assert [group["name"] for group in rows[str(author)]["groups"]] == ["V [200 800B]", "V_1 [1 4B]"]
+    assert [group["name"] for group in rows[str(author)]["groups"]] == ["V [50 200B]", "V_1 [1 4B]"]
     assert all(Path(move["source"]).parent == author for move in rows[str(author)]["_mapping_items"])
     assert rows[str(author / "NO.001")]["sample_moves"][0]["target"] == str(author / "NO.001/001.jpg")
 
@@ -613,8 +613,8 @@ def test_author_rescan_keeps_an_existing_canonical_photo_and_other_layout(tmp_pa
 
 def test_grouped_author_rescan_keeps_other_and_excludes_unrelated_legacy_wrappers(tmp_path):
     author = tmp_path / "2611" / "261122" / "作者A"
-    for index in range(1, 201):
-        put(author / "V [200 800B]" / f"{index:03d}.mp4")
+    for index in range(1, 51):
+        put(author / "V [50 200B]" / f"{index:03d}.mp4")
     put(author / "V_1 [1 4B]/001.mp4")
     put(author / "Other [1 4B]/notes.txt")
     put(author / "videos/旧素材.mp4")
@@ -623,7 +623,7 @@ def test_grouped_author_rescan_keeps_other_and_excludes_unrelated_legacy_wrapper
     rows = {row["unit"]: row for row in iter_organizing_previews(author.parent, allowed_roots=[tmp_path])}
 
     assert rows[str(author)]["status"] == "already_organized"
-    assert rows[str(author)]["totals"] == {"P": 0, "V": 201, "Other": 1}
+    assert rows[str(author)]["totals"] == {"P": 0, "V": 51, "Other": 1}
     assert rows[str(author)]["actual_moves"] == 0
 
 
@@ -942,8 +942,8 @@ def test_contiguous_numbered_media_leaves_are_independent_under_a_generic_parent
 def test_numbered_packages_keep_their_role_after_parent_and_package_bucketing(tmp_path):
     parent = tmp_path / "旧下载"
     for unit in (parent, parent / "1"):
-        for index in range(1, 201):
-            put(unit / "V [200 800B]" / f"{index:03d}.mp4")
+        for index in range(1, 51):
+            put(unit / "V [50 200B]" / f"{index:03d}.mp4")
         put(unit / "V_1 [1 4B]" / "001.mp4")
     put(parent / "2/001.mp4")
 

@@ -386,9 +386,9 @@ def test_201_video_files_regroup_without_filename_loss(tmp_path):
         (old / f"{index + 1:03d}.mp4").write_bytes(bytes([index % 251]))
     (package / "new.mp4").write_bytes(b"z")
     manifest = manifest_for(root, package, job_id=827)
-    assert [g["count"] for g in manifest["groups"]] == [200, 1]
+    assert [g["count"] for g in manifest["groups"]] == [50, 50, 50, 50, 1]
     assert [g["final"] for g in manifest["groups"]] == [
-        "V [200 200B]", "V_1 [1 1B]",
+        "V [50 50B]", "V_1 [50 50B]", "V_2 [50 50B]", "V_3 [50 50B]", "V_4 [1 1B]",
     ]
     executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     files = sorted(package.glob("V*/*.mp4"))
@@ -403,9 +403,9 @@ def test_multigroup_crash_after_first_publish_does_not_move_reused_source(
     tmp_path, monkeypatch,
 ):
     root, package = example(tmp_path)
-    old = package / "V [200 200B]"
+    old = package / "V [50 50B]"
     old.mkdir()
-    for index in range(200):
+    for index in range(50):
         (old / f"{index + 1:03d}.mp4").write_bytes(bytes([index % 251]))
     (package / "new.mp4").write_bytes(b"z")
     manifest = manifest_for(root, package, job_id=828)
@@ -423,21 +423,21 @@ def test_multigroup_crash_after_first_publish_does_not_move_reused_source(
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     monkeypatch.setattr(executor, "_publish_group", publish)
 
-    first = package / "V [200 200B]"
+    first = package / "V [50 50B]"
     second_stage = package / manifest["groups"][1]["stage"]
     assert first.is_dir()
     assert second_stage.is_dir()
-    # 200.mp4 was originally the other group's source, but is now a
+    # 050.mp4 was originally the other group's source, but is now a
     # published file with a DIFFERENT frozen identity.
-    assert (first / "200.mp4").read_bytes() == bytes([198])
-    assert (second_stage / "001.mp4").read_bytes() == bytes([199])
+    assert (first / "050.mp4").read_bytes() == bytes([48])
+    assert (second_stage / "001.mp4").read_bytes() == bytes([49])
     replay = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert replay["files_moved"] == 0
-    assert replay["files_reconciled"] == 201
+    assert replay["files_reconciled"] == 51
     files = sorted(package.glob("V*/*.mp4"))
-    assert len(files) == 201
+    assert len(files) == 51
     assert sorted(path.read_bytes() for path in files) == sorted(
-        [bytes([index % 251]) for index in range(200)] + [b"z"]
+        [bytes([index]) for index in range(50)] + [b"z"]
     )
 
 
@@ -621,7 +621,7 @@ def test_nas_directory_inode_drift_after_staging_uses_original_frozen_file_proof
     root, package = example(tmp_path)
     nested = package / "nested"
     nested.mkdir()
-    for i in range(201):
+    for i in range(51):
         (nested / f"{i:03d}.mp4").write_bytes(f"movie-{i}".encode())
     manifest = manifest_for(root, package, job_id=789)
     publish = executor._publish_group
@@ -637,14 +637,14 @@ def test_nas_directory_inode_drift_after_staging_uses_original_frozen_file_proof
     monkeypatch.setattr(executor, "_publish_group", virtual_inode_shift)
     outcome = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert hit["count"] == 2
-    assert outcome["files_moved"] == 201
+    assert outcome["files_moved"] == 51
     assert (package / manifest["groups"][0]["final"] / "001.mp4").read_bytes() == b"movie-0"
     assert sorted(p.name for p in package.iterdir()) == [
         group["final"] for group in manifest["groups"]
     ]
     # The same frozen manifest remains resumable with a changed directory ID.
     again = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
-    assert again["files_reconciled"] == 201
+    assert again["files_reconciled"] == 51
     assert not nested.exists()
 
 

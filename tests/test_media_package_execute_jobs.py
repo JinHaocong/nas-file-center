@@ -218,7 +218,7 @@ def test_explicit_failed_publish_recovery_reuses_original_manifest_without_reexe
     done = client.get(f"/api/media_package/executions/{recovered_id}").json()
     assert done["status"] == "completed"
     assert client.get(f"/api/media_package/executions/{failed_id}").json()["status"] == "failed"
-    assert any(p.name.startswith("V [200 ") for p in package.iterdir())
+    assert any(p.name.startswith("V [50 ") for p in package.iterdir())
     visible = list(package.glob("V*/*.mp4"))
     assert len(visible) == 201
     assert not nested.exists()
@@ -270,7 +270,7 @@ def test_original_zos_errno95_failed_task_recovers_with_same_manifest_and_stage(
     package = root / "2611" / "261116" / "ExampleAuthor" / "ExampleBundle"
     inner = package / "clips"
     inner.mkdir(parents=True)
-    for index in range(201):
+    for index in range(51):
         (inner / f"{index:03d}.mp4").write_bytes(f"video-{index}".encode())
     pid = _preview(client, settings, package)
     started = client.post(f"/api/media_package/previews/{pid}/execute", json={
@@ -299,7 +299,7 @@ def test_original_zos_errno95_failed_task_recovers_with_same_manifest_and_stage(
     assert old["error"].startswith(
         "[Errno 95] Plain directory rename no-clobber semantics are not positively proven: "
     )
-    assert len(list((package / f".nfc-media_package-stage-{old_id}-0").iterdir())) == 200
+    assert len(list((package / f".nfc-media_package-stage-{old_id}-0").iterdir())) == 50
     assert len(list((package / f".nfc-media_package-stage-{old_id}-1").iterdir())) == 1
 
     # The old preview WorkJob was removed on a prior operator action.
@@ -335,7 +335,7 @@ def test_original_zos_errno95_failed_task_recovers_with_same_manifest_and_stage(
     assert done["status"] == "completed"
     assert client.get(f"/api/media_package/executions/{old_id}").json()["status"] == "failed"
     published = sorted(package.glob("V*/*.mp4"))
-    assert len(published) == 201
+    assert len(published) == 51
     assert not any(x.name.startswith(".nfc-") for x in package.iterdir())
     assert not inner.exists()
     assert client.post(recovery_url, json={"confirmation": token}).json()["job_id"] == new_id

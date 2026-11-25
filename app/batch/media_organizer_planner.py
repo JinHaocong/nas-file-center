@@ -18,6 +18,7 @@ from app.batch.media_organizer_archive import is_repeated_archive, preview_repea
 from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, numbered_name
 from app.batch.media_package_organizer import (
     MAX_DEPTH, MAX_FILES_PER_GROUP, MAX_PACKAGE_DIRECTORIES, MAX_PACKAGE_FILES, MAX_SCOPE_ENTRIES_PER_DIRECTORY,
+    MAX_VIDEOS_PER_GROUP,
     LIFT_LUOLCY_BUCKETS, PROMOTE_NUMBERED_PHOTO_GROUPS,
     _author_media_row, _classify, _input_fingerprint, _luolcy_author_inventory, _package_path, _plan_luolcy_bucket_lift,
     _size_label,
@@ -2129,7 +2130,7 @@ def preview_organizing_unit(
     max_rows: int = 100, include_items: bool = False, include_mapping: bool = False,
     local_media_kinds: tuple[str, ...] | None = None, whole_author: bool | None = None,
     local_scope: str | None = None,
-    check_cancelled: Callable[[], None] | None = None,
+    check_cancelled: Callable[[], None] | None = None, video_bucket_limit: int = MAX_VIDEOS_PER_GROUP,
 ) -> dict:
     """Plan an organizing unit. Only an unspecified whole-author scope is inferred."""
     unit = _checked_scope(unit, allowed_roots, quarantine_root)
@@ -2185,6 +2186,7 @@ def preview_organizing_unit(
     if mode == "luolcy" and whole_author:
         items, luolcy_siblings, nested_buckets = _luolcy_author_inventory(
             unit, media_package_root, check_cancelled=check_cancelled, lift_buckets=True,
+            video_bucket_limit=video_bucket_limit,
         )
         if nested_buckets:
             root_fingerprint = _input_fingerprint(items, unit)
@@ -2231,6 +2233,7 @@ def preview_organizing_unit(
             append_videos=append_videos,
             append_wrapper=append_wrapper,
             numbered_photo_groups=photo_groups is not None,
+            video_bucket_limit=video_bucket_limit,
         )
     if mode == "semantic" and plan["status"] == "ready" and not (local_media_kinds or whole_author):
         held = _author_loose_record(unit, items, directories, protected)

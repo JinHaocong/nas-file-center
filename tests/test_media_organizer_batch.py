@@ -42,6 +42,78 @@ def _preview(client, settings, selection):
     return response.json()
 
 
+@pytest.mark.parametrize("scope", ["semantic", "luolcy_root", "luolcy_nested"])
+def test_old_video_bucket_is_split_at_its_owning_root(tmp_path, scope):
+    client, settings, luolcy = _fixture(tmp_path)
+    root = settings.data_mount / "Else" if scope == "semantic" else luolcy
+    unit = root / "2609/260916/作者"
+    old_bucket = (unit / "V" if scope == "luolcy_nested" else unit) / "V [51 51B]"
+    old_bucket.mkdir(parents=True)
+    for number in range(1, 52):
+        (old_bucket / f"{number:03d}.mp4").write_bytes(bytes([number]))
+
+    preview = _preview(client, settings, unit)
+    row, = [item for item in preview["units"] if item["status"] == "ready"]
+    assert row["unit"] == str(unit)
+    assert [group["name"] for group in row["groups"]] == ["V [50 50B]", "V_1 [1 1B]"]
+
+    batch = _batch(client, preview)
+    assert _run_next(settings, batch)
+    result = client.get(f"/api/media-organizer/batches/{batch}").json()
+    assert result["summary"]["success_count"] == 1
+    first_group = unit / "V [50 50B]"
+    assert [path.read_bytes() for path in sorted(first_group.iterdir())] == [bytes([n]) for n in range(1, 51)]
+    assert (unit / "V_1 [1 1B]/001.mp4").read_bytes() == bytes([51])
+    assert {path.name for path in unit.iterdir()} == {"V [50 50B]", "V_1 [1 1B]"}
+    fresh = _preview(client, settings, unit)
+    assert fresh["summary"]["ready_count"] == fresh["summary"]["blocked_count"] == 0
+
+
+@pytest.mark.parametrize(("count", "old_groups"), [(51, []), (201, [200, 1])])
+def test_frozen_preupgrade_batch_keeps_its_approved_video_layout(tmp_path, monkeypatch, count, old_groups):
+    from app.batch import media_organizer_planner as planner
+    from app.batch import media_package_execution as executor
+
+    client, settings, _ = _fixture(tmp_path)
+    unit = settings.data_mount / "Else/2609/260916/NO.001"
+    unit.mkdir(parents=True)
+    for number in range(1, count + 1):
+        (unit / f"clip-{number:03d}.mp4").write_bytes(bytes([number]))
+    plan = planner.preview_organizing_unit
+
+    def before_upgrade(*args, **kwargs):
+        return plan(*args, **kwargs, video_bucket_limit=200)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(planner, "preview_organizing_unit", before_upgrade)
+        preview = _preview(client, settings, unit)
+    row, = preview["units"]
+    assert [group["count"] for group in row["groups"]] == old_groups
+    batch = _batch(client, preview)
+    with client.app.state.service.SessionLocal() as session:
+        frozen_job = session.get(WorkJob, batch).id
+    approved = before_upgrade(
+        unit, mode="semantic", allowed_roots=settings.allowed_roots,
+        quarantine_root=settings.quarantine_root, media_package_root=settings.media_package_root,
+        include_items=True, include_mapping=True,
+    )
+    manifest = executor._freeze_layout(
+        unit, approved, media_package_root=settings.media_package_root, job_id=frozen_job, video_bucket_limit=200,
+        organizer_scope={"organizer_mode": "semantic", "quarantine_root": str(settings.quarantine_root)},
+    )
+    manifest.pop("video_bucket_limit")
+    evidence = settings.reports_dir / "organizer-v1-executions" / batch / "0.json"
+    executor.save_frozen_manifest(evidence, manifest)
+
+    assert _run_next(settings, batch)
+    result = client.get(f"/api/media-organizer/batches/{batch}").json()
+    assert result["summary"]["success_count"] == 1
+    assert sorted(path.read_bytes() for path in unit.rglob("*.mp4")) == [bytes([n]) for n in range(1, count + 1)]
+    fresh = _preview(client, settings, unit)
+    assert fresh["summary"]["ready_count"] == 1
+    assert [group["count"] for group in fresh["units"][0]["groups"]] == [50] * (count // 50) + [1]
+
+
 def test_new_preview_survives_removal_of_highest_unconfirmed_task(tmp_path):
     client, settings, _ = _fixture(tmp_path)
     selection = settings.data_mount / "NO.001"
@@ -671,7 +743,7 @@ def test_batch_organizes_numbered_siblings_and_local_media_without_crossing_boun
     assert {Path(row["unit"]) for row in preview["units"] if row["status"] == "ready"} == expected_ready
     author_preview = next(row for row in preview["units"] if row["unit"] == str(author))
     assert author_preview["totals"] == {"P": 0, "V": 201, "Other": 0}
-    assert [group["count"] for group in author_preview["groups"]] == [200, 1]
+    assert [group["count"] for group in author_preview["groups"]] == [50, 50, 50, 50, 1]
 
     batch_id = _batch(client, preview)
     assert _run_next(settings, batch_id)
@@ -683,8 +755,8 @@ def test_batch_organizes_numbered_siblings_and_local_media_without_crossing_boun
     for source, (destination, content) in moved.items():
         assert destination.read_bytes() == content
         assert not source.exists()
-    assert len(list((author / "V [200 200B]").iterdir())) == 200
-    assert (author / "V_1 [1 1B]" / "001.mp4").read_bytes() == b"x"
+    assert len(list((author / "V [50 50B]").iterdir())) == 50
+    assert (author / "V_4 [1 1B]" / "001.mp4").read_bytes() == b"x"
 
     rescan = _preview(client, settings, selection)
     assert (rescan["summary"]["needed_moves"], rescan["summary"]["renamed_count"]) == (0, 0)

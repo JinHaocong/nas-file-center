@@ -22,25 +22,25 @@ def preview(root, package, **kwargs):
     )
 
 
-@pytest.mark.parametrize("extension", [".jpg", ".MP4"])
-def test_pure_media_nested_files_flatten_only_to_package_root(tmp_path, extension):
+@pytest.mark.parametrize(("extension", "count"), [(".jpg", 200), (".MP4", 50)])
+def test_pure_media_at_its_capacity_flattens_only_to_package_root(tmp_path, extension, count):
     root, package = make_package(tmp_path)
     nested = package / "额外的目录"
     nested.mkdir()
-    for i in range(200):
+    for i in range(count):
         (nested / f"{i:03d}{extension}").write_bytes(b"payload")
     result = preview(root, package)
     assert result["status"] == "ready"
     assert result["operation"] == "flatten_pure_media"
-    assert result["needed_moves"] == 200
+    assert result["needed_moves"] == count
     assert result["groups"] == []
-    assert len(list(nested.iterdir())) == 200
+    assert len(list(nested.iterdir())) == count
     assert result["sample_moves"][0]["target"].startswith(str(package) + "/")
     assert not any(child.name.startswith("P") for child in package.iterdir())
     assert not any(child.name.startswith("V") for child in package.iterdir())
 
 
-def test_mixed_media_is_grouped_at_two_hundred_and_not_mutated(tmp_path):
+def test_mixed_media_uses_separate_bucket_capacities_and_is_not_mutated(tmp_path):
     root, package = make_package(tmp_path)
     images = package / "图包" / "第一次"
     videos = package / "视频"
@@ -55,16 +55,28 @@ def test_mixed_media_is_grouped_at_two_hundred_and_not_mutated(tmp_path):
     assert result["status"] == "ready", result
     assert result["totals"] == {"P": 201, "V": 202, "Other": 1}
     assert [(x["kind"], x["count"]) for x in result["groups"]] == [
-        ("P", 200), ("P", 1), ("V", 200), ("V", 2), ("Other", 1)
+        ("P", 200), ("P", 1), ("V", 50), ("V", 50), ("V", 50), ("V", 50), ("V", 2), ("Other", 1)
     ]
     assert result["groups"][0]["name"] == "P [200 200B]"
-    assert result["groups"][2]["name"] == "V [200 400B]"
+    assert result["groups"][2]["name"] == "V [50 100B]"
     assert result["total_proposals"] == 404
     assert len(result["sample_moves"]) == 12
     assert result["truncated"] is True
     assert (images / "000.jpg").read_bytes() == b"x"
     assert (videos / "201.mp4").read_bytes() == b"xy"
     assert not any(child.name.startswith("P [") for child in package.iterdir())
+
+
+def test_two_digit_video_bucket_ordinals_are_stable_on_rescan(tmp_path):
+    root, package = make_package(tmp_path)
+    for serial in range(11):
+        stem = f"V_{serial}" if serial else "V"
+        bucket = package / f"{stem} [50 50B]"
+        bucket.mkdir()
+        for number in range(1, 51):
+            (bucket / f"{number:03d}.mp4").write_bytes(b"x")
+
+    assert preview(root, package)["status"] == "already_organized"
 
 
 def test_fixed_package_boundary_rejects_parent_and_other_tree(tmp_path):
@@ -236,24 +248,24 @@ def test_root_and_nested_homonyms_can_be_staged(tmp_path):
     ]
 
 
-@pytest.mark.parametrize("extension,kind", [(".jpg", "P"), (".mp4", "V")])
-@pytest.mark.parametrize("count", [201, 400, 401])
-def test_pure_media_over_200_must_use_numbered_count_size_buckets(
-    tmp_path, extension, kind, count
+@pytest.mark.parametrize("extension,kind,capacity", [(".jpg", "P", 200), (".mp4", "V", 50)])
+@pytest.mark.parametrize("complete,remainder", [(1, 1), (2, 0), (2, 1)])
+def test_pure_media_over_capacity_uses_numbered_count_size_buckets(
+    tmp_path, extension, kind, capacity, complete, remainder,
 ):
     root, package = make_package(tmp_path)
-    # Nested paths do not change the 200-file group capacity.
     folder = package / "nested"
     folder.mkdir()
+    count = complete * capacity + remainder
     for i in range(count):
         (folder / f"{i:04d}{extension}").write_bytes(b"123")
     result = preview(root, package)
     assert result["status"] == "ready", result
     assert result["operation"] == "bucket_pure_media"
     assert result["total_files"] == count
-    expected_counts = [200] * (count // 200)
-    if count % 200:
-        expected_counts.append(count % 200)
+    expected_counts = [capacity] * complete
+    if remainder:
+        expected_counts.append(remainder)
     assert [group["count"] for group in result["groups"]] == expected_counts
     assert [group["name"] for group in result["groups"]] == [
         f"{kind if i == 0 else kind + '_' + str(i)} [{size} {size*3}B]"
@@ -265,28 +277,28 @@ def test_pure_media_over_200_must_use_numbered_count_size_buckets(
     assert len(list(folder.iterdir())) == count
 
 
-@pytest.mark.parametrize("extension,kind", [(".jpg", "P"), (".mp4", "V")])
-def test_flat_pure_media_over_200_is_still_bucketed(tmp_path, extension, kind):
+@pytest.mark.parametrize("extension,kind,capacity", [(".jpg", "P", 200), (".mp4", "V", 50)])
+def test_flat_pure_media_over_capacity_is_still_bucketed(tmp_path, extension, kind, capacity):
     root, package = make_package(tmp_path)
-    for i in range(201):
+    for i in range(capacity + 1):
         (package / f"{i:03d}{extension}").write_bytes(b"x")
     result = preview(root, package)
     assert result["operation"] == "bucket_pure_media"
     assert [(x["kind"], x["count"]) for x in result["groups"]] == [
-        (kind, 200), (kind, 1)
+        (kind, capacity), (kind, 1)
     ]
-    assert result["needed_moves"] == 201
+    assert result["needed_moves"] == capacity + 1
 
 
-@pytest.mark.parametrize("extension", [".jpg", ".mp4"])
-def test_flat_pure_media_exactly_200_is_renumbered(tmp_path, extension):
+@pytest.mark.parametrize("extension,capacity", [(".jpg", 200), (".mp4", 50)])
+def test_flat_pure_media_at_capacity_is_renumbered(tmp_path, extension, capacity):
     root, package = make_package(tmp_path)
-    for i in range(200):
+    for i in range(capacity):
         (package / f"{i:03d}{extension}").write_bytes(b"x")
     result = preview(root, package)
     assert result["status"] == "ready"
     assert result["groups"] == []
-    assert result["needed_moves"] == 200
+    assert result["needed_moves"] == capacity
     assert result["sample_moves"][0]["target"].endswith("001" + extension)
 
 

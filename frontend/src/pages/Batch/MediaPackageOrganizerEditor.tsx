@@ -27,7 +27,7 @@ const packageStatus = (row: MediaPackagePreview): [string, string] => {
 
 const operationText = (row: MediaPackagePreview) => {
   if (row.operation === 'flatten_pure_media') return '纯媒体平铺到资源包根目录';
-  if (row.operation === 'bucket_pure_media') return '纯媒体超过 200 个，按 P/V 分组';
+  if (row.operation === 'bucket_pure_media') return '超过单桶上限，按媒体类型分组';
   if (row.operation === 'sort_mixed_media') return '混合媒体分类到 P/V/Other';
   return row.reason === 'already_flat' ? '纯媒体已平铺' : '没有待整理文件';
 };
@@ -138,9 +138,9 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
             <ConsoleIcon name="shield-check" size={19} />
             <div>
               <strong>资源包及上级目录始终保持不变</strong>
-              <p>纯图片或纯视频不超过 200 个时平铺到资源包根目录；超过 200 个按 P/V 每组最多 200 个分类；
-                混合文件放 P/V/Other。文件夹名称包含实际数量和大小，冲突需要人工检查。
-                执行前重新校验文件身份；禁止覆盖，失败时保留原文件与恢复证据。</p>
+              <p>纯图片不超过 200 张、纯视频不超过 50 个时平铺到资源包根目录。分桶时每个 P 桶最多 200 张，
+                每个 V 桶最多 50 个。混合文件分到 P、V 和 Other。文件夹名称包含实际数量和大小，冲突需要人工检查。
+                执行前重新校验文件身份，禁止覆盖，失败时保留原文件与恢复证据。</p>
             </div>
           </div>
           <div className="nfc-file-tool-primary-actions">

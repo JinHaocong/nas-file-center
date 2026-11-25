@@ -22,7 +22,9 @@ from app.batch.media_package_naming import (
 from app.filters.media_types import get_media_type
 from app.path_safety import require_allowed_path, require_unreserved_path
 
+# Photos and previously published P/V buckets use the original capacity.
 MAX_FILES_PER_GROUP = 200
+MAX_VIDEOS_PER_GROUP = 50
 MAX_PACKAGE_FILES = 300_000
 MAX_PACKAGE_DIRECTORIES = 100_000
 MAX_DEPTH = 64
@@ -187,6 +189,13 @@ def _luolcy_classification_kind(name: str) -> str | None:
     return "PV" if label in {"pv", "p+v", "图视频"} else None
 
 
+def _oversized_video_bucket(name: str, video_limit: int) -> bool:
+    """Recognize a legacy video bucket candidate by its declared file count."""
+    bucket = MEDIA_BUCKET_PATTERN.fullmatch(name)
+    return bool(bucket and bucket["kind"].upper() == "V"
+                and video_limit < int(bucket["label"][1:].partition(" ")[0]) <= MAX_FILES_PER_GROUP)
+
+
 def _luolcy_leaf_hint(name: str) -> bool:
     """Identify a short media label or an unnamed folder in a pair of leaves."""
     name = name.strip()
@@ -269,7 +278,8 @@ def _child_directories(
             count == len(files) + len(packages)
             and all(row["kind"] in {"P", "V"} for row in files)
             and (bool(files) or (not has_labelled_batch and any(
-                _luolcy_classification_kind(name) and not MEDIA_BUCKET_PATTERN.fullmatch(name)
+                _oversized_video_bucket(name, MAX_VIDEOS_PER_GROUP)
+                or (_luolcy_classification_kind(name) and not MEDIA_BUCKET_PATTERN.fullmatch(name))
                 for name in packages
             )))
         )
@@ -535,18 +545,23 @@ def _luolcy_nested_buckets(
 
 def _luolcy_buckets_to_repack(
     author: Path, nested: dict[Path, list[dict]], siblings: dict[str, list[int]], device: int,
-    check_cancelled: Callable[[], None] | None,
+    check_cancelled: Callable[[], None] | None, *, video_bucket_limit: int,
 ) -> dict[Path, list[dict]] | None:
-    """Collect root and nested buckets when competing ordinals require regrouping."""
+    """Collect root and nested buckets when ordinals compete or an old video bucket must split."""
     root_buckets = {name: slot for name in siblings if (slot := _luolcy_bucket_slot(name))}
     nested_slots = [_luolcy_bucket_slot(path.name) for path in nested]
-    if len(set(nested_slots)) == len(nested_slots) and set(nested_slots).isdisjoint(root_buckets.values()):
+    oversized = (any(_oversized_video_bucket(path.name, video_bucket_limit) for path in nested)
+                 or any(_oversized_video_bucket(name, video_bucket_limit) for name in root_buckets))
+    if (not oversized and len(set(nested_slots)) == len(nested_slots)
+            and set(nested_slots).isdisjoint(root_buckets.values())):
         return None
     buckets = dict(nested)
     for name, (kind, _) in root_buckets.items():
         path = author / name
         rows = _luolcy_classification_inventory(path, device, kind, check_cancelled)
         if not rows or not _luolcy_verified_bucket(name, rows):
+            if oversized:
+                raise ValueError(f"Cannot re-bucket videos beside an unverified Luolcy bucket: {path}")
             return None
         buckets[path] = rows
     return buckets
@@ -554,7 +569,7 @@ def _luolcy_buckets_to_repack(
 
 def _luolcy_author_inventory(
     author: Path, root: Path, *, check_cancelled: Callable[[], None] | None = None,
-    lift_buckets: bool = False,
+    lift_buckets: bool = False, video_bucket_limit: int = MAX_VIDEOS_PER_GROUP,
 ) -> tuple[list[dict], dict[str, list[int]], dict[Path, list[dict]]]:
     """Collect reviewed author inputs and identities of independent child directories."""
     rows, children, device = _read_luolcy_author(author, root, check_cancelled=check_cancelled)
@@ -568,7 +583,9 @@ def _luolcy_author_inventory(
         if nested:
             shells = {path.parent.name for path in nested}
             siblings = {name: item for name, item in children.items() if name not in shells}
-            regroup = _luolcy_buckets_to_repack(author, nested, siblings, device, check_cancelled)
+            regroup = _luolcy_buckets_to_repack(
+                author, nested, siblings, device, check_cancelled, video_bucket_limit=video_bucket_limit,
+            )
             if regroup is not None:
                 for path, files in regroup.items():
                     rows.extend(files)
@@ -605,7 +622,8 @@ def _luolcy_author_inventory(
         folder = author / name
         label = _luolcy_classification_kind(name)
         is_short_video = name == _LUOLCY_SHORT_VIDEO_FOLDER and short_videos is not None
-        if preserve_other_buckets and _luolcy_bucket_slot(name) and label not in direct_kinds:
+        if (preserve_other_buckets and _luolcy_bucket_slot(name) and label not in direct_kinds
+                and not _oversized_video_bucket(name, video_bucket_limit)):
             continue
         if label is None and not inspect_leaves and not is_short_video:
             continue
@@ -749,8 +767,8 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
                            include_mapping: bool = False) -> dict:
     """Build a bounded, read-only manifest for one exact resource package.
 
-    Pure image/video packages with up to 200 files are flattened into
-    their package root; larger pure packages are grouped in sized P/V buckets.
+    Pure media packages within their kind's capacity are flattened into the
+    package root. Larger packages use sized P/V buckets.
     An existing group folder containing scanned inputs can be rebuilt by the
     frozen executor; empty/foreign occupants still block unsafe publication.
     """
@@ -768,7 +786,7 @@ def plan_media_layout(
     source: Path, items: list[dict], *, max_rows: int = 100, include_items: bool = False,
     include_mapping: bool = False, organizer_mode: bool = False,
     legacy_bucket_conflicts: bool = True, append_videos: bool = False, append_wrapper: bool = False,
-    numbered_photo_groups: bool = False,
+    numbered_photo_groups: bool = False, video_bucket_limit: int = MAX_VIDEOS_PER_GROUP,
 ) -> dict:
     """Plan the same final media layout from a mode-specific bounded inventory."""
     input_fingerprint = _input_fingerprint(items, source)
@@ -787,10 +805,11 @@ def plan_media_layout(
             **({"_mapping_items": []} if include_mapping else {}),
         }
 
-    # Homogeneous packages <=200 must be flattened *and* renumbered.
+    # Homogeneous packages within their kind's capacity are flattened and renumbered.
     # To avoid a root-level 001/002 rename cycle, the frozen executor stages
     # every file before publishing any numbered basename.
-    if (not numbered_photo_groups and len(items) <= MAX_FILES_PER_GROUP and totals["Other"] == 0
+    flat_limit = video_bucket_limit if totals["V"] else MAX_FILES_PER_GROUP
+    if (not numbered_photo_groups and len(items) <= flat_limit and totals["Other"] == 0
             and (totals["P"] == 0 or totals["V"] == 0)):
         append = append_videos or append_wrapper
         relative_items = ((os.path.relpath(row["path"], source), row) for row in items)
@@ -852,13 +871,10 @@ def plan_media_layout(
 
     # Avoid reordering when readdir() order changes. Only metadata, never
     # data file bytes, are read. Bounded to one package, not the whole library.
-    if organizer_mode:
-        items.sort(key=lambda row: (
-            row["kind"], row.get("photo_range_start", 0), media_source_sort_key(row["path"], source),
-        ))
-    else:
-        items.sort(key=lambda x: (x["kind"], os.path.relpath(x["path"], source).casefold(),
-                                  os.path.relpath(x["path"], source)))
+    items.sort(key=lambda row: (
+        row["kind"], row.get("photo_range_start", 0) if organizer_mode else 0,
+        media_source_sort_key(row["path"], source),
+    ))
     groups = []
     conflicts = []
     sample = []
@@ -898,7 +914,8 @@ def plan_media_layout(
                 by_number.setdefault(Path(row["path"]).parent.name, []).append(row)
             groups_of_kind = sorted(by_number.items(), key=lambda item: (len(item[0].lstrip("0")), item[0].lstrip("0")))
         else:
-            chunks = ([files[i:i + MAX_FILES_PER_GROUP] for i in range(0, len(files), MAX_FILES_PER_GROUP)]
+            capacity = video_bucket_limit if kind == "V" else MAX_FILES_PER_GROUP
+            chunks = ([files[i:i + capacity] for i in range(0, len(files), capacity)]
                       if kind != "Other" else [files])
             groups_of_kind = [(None, chunk) for chunk in chunks]
         for index, (existing_label, chunk) in enumerate(groups_of_kind):
