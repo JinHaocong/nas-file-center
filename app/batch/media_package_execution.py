@@ -193,6 +193,7 @@ def _freeze_layout(source: Path, fresh: dict, *, media_package_root: Path | None
             "group": group_index, "target_name": target_name, "original_name": item["name"],
             "original_relative_path": os.path.relpath(item["path"], source),
             "final_relative_path": os.path.relpath(final, source),
+            **({"detected_extension": item["detected_extension"]} if "detected_extension" in item else {}),
         })
     manifest = {
         "schema_version": MANIFEST_VERSION, "job_id": job_id, "package": str(source),
@@ -338,6 +339,28 @@ def _has_link_intent(intent: LinkIntent | None, source: str, target: str, identi
         os.close(source_fd)
 
 
+def _move_file_at(source: Path, target: Path, source_fd: int, target_fd: int,
+                  identity: list[int], fence: Callable[[], None], link_intent: LinkIntent | None) -> None:
+    """Publish a file through the open source and destination directories without overwriting."""
+    if os.fstat(target_fd).st_dev != identity[0]:
+        raise MediaPackageExecutionConflict("Cross-filesystem move rejected")
+    fence()
+    _check_file(os.stat(source.name, dir_fd=source_fd, follow_symlinks=False), identity, source)
+    try:
+        rename_noreplace_at(source_fd, source.name, target_fd, target.name)
+    except OSError as exc:
+        if exc.errno != errno.EOPNOTSUPP:
+            raise
+        # Persist the intent before FUSE's link/unlink fallback so a restart can verify both names.
+        if link_intent is not None:
+            link_intent.save(link_intent.binding(source_fd, source.name, target_fd, target.name, identity))
+            fence()
+            _check_file(os.stat(source.name, dir_fd=source_fd, follow_symlinks=False), identity, source)
+        os.link(source.name, target.name, src_dir_fd=source_fd, dst_dir_fd=target_fd, follow_symlinks=False)
+        _retire_link(source, target, source_fd, target_fd, identity, fence, durable=link_intent is not None)
+    _check_file(os.stat(target.name, dir_fd=target_fd, follow_symlinks=False), identity, target)
+
+
 def _move_one(move: dict, *, lease_fence: Callable[[], None],
               ignore_final: bool = False, compat_hardlink: bool = False,
               source_replaced_by: list[int] | None = None,
@@ -398,29 +421,7 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None],
         _check_file(source_stat, expected, src)
         dst_fd = _open_folder(stage.parent)
         try:
-            if os.fstat(dst_fd).st_dev != source_stat.st_dev:
-                raise MediaPackageExecutionConflict("Cross-filesystem move rejected")
-            lease_fence()
-            # Recheck immediately before mutation and rely on kernel NOREPLACE.
-            _check_file(os.stat(src.name, dir_fd=src_fd, follow_symlinks=False),
-                        expected, src)
-            try:
-                rename_noreplace_at(src_fd, src.name, dst_fd, stage.name)
-            except OSError as exc:
-                if exc.errno != errno.EOPNOTSUPP:
-                    raise
-                # Safe COMPAT fallback: hardlink publication with O_EXCL-like
-                # semantics, then unlink the source only after checking inode.
-                # A restart reconciles an interrupted two-name hardlink state.
-                if link_intent is not None:
-                    link_intent.save(link_intent.binding(src_fd, src.name, dst_fd, stage.name, expected))
-                    lease_fence()
-                    _check_file(os.stat(src.name, dir_fd=src_fd, follow_symlinks=False), expected, src)
-                os.link(src.name, stage.name, src_dir_fd=src_fd,
-                        dst_dir_fd=dst_fd, follow_symlinks=False)
-                _retire_link(src, stage, src_fd, dst_fd, expected, lease_fence, durable=link_intent is not None)
-            _check_file(os.stat(stage.name, dir_fd=dst_fd, follow_symlinks=False),
-                        expected, stage)
+            _move_file_at(src, stage, src_fd, dst_fd, expected, lease_fence, link_intent)
         finally:
             os.close(dst_fd)
     finally:
@@ -1587,10 +1588,16 @@ def _validate_frozen_paths(manifest: dict) -> None:
                 row["identity"][0] != dev):
             raise MediaPackageExecutionConflict("Unsafe frozen MediaPackage source")
         target_name = row.get("target_name")
+        source_extension = organizer_extension(src.name)
+        detected_extension = row.get("detected_extension")
+        if detected_extension is not None and (
+            detected_extension != ".mp4" or source_extension or manifest.get("organizer_mode") != "semantic"
+        ):
+            raise MediaPackageExecutionConflict("Invalid frozen detected video extension")
         if (not isinstance(target_name, str) or not target_name
                 or Path(target_name).name != target_name
                 or target_name in (".", "..")
-                or organizer_extension(target_name) != organizer_extension(src.name)
+                or organizer_extension(target_name) != (detected_extension or source_extension)
                 or row.get("original_name") != src.name
                 or row.get("original_relative_path") != os.path.relpath(src, package)
                 or row.get("final_relative_path") != os.path.relpath(final, package)):
@@ -1605,6 +1612,8 @@ def _validate_frozen_paths(manifest: dict) -> None:
             if not isinstance(group_index, int) or not 0 <= group_index < len(manifest["groups"]):
                 raise MediaPackageExecutionConflict("Invalid frozen group association")
             group = manifest["groups"][group_index]
+            if detected_extension is not None and group["kind"] != "V":
+                raise MediaPackageExecutionConflict("Detected video must stay in its video group")
             expected_target = package / group["stage"] / target_name
             expected_final = package / group["final"] / target_name
         if dest != expected_target or final != expected_final or src == dest:
@@ -1616,7 +1625,7 @@ def _validate_frozen_paths(manifest: dict) -> None:
         ):
             raise MediaPackageExecutionConflict("Frozen MediaPackage group rows are inconsistent")
     if root_stage is not None:
-        flat_limit = (video_bucket_limit if any(_classify(Path(row["source"]).name) == "V" for row in rows)
+        flat_limit = (video_bucket_limit if any(_classify(row["target_name"]) == "V" for row in rows)
                       else MAX_FILES_PER_GROUP)
         if (len(rows) > flat_limit or any(row["group"] is not None for row in rows)
                 or len({row["target_name"].casefold() for row in rows}) != len(rows)):

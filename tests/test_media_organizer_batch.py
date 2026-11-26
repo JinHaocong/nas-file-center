@@ -42,6 +42,32 @@ def _preview(client, settings, selection):
     return response.json()
 
 
+def test_author_single_video_child_flattens_with_unnumbered_root_in_one_pass(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    month = settings.data_mount / "Else/2604"
+    author = month / "260429/作者"
+    child = author / "JK"
+    child.mkdir(parents=True)
+    (author / "y.mp4").write_bytes(b"first")
+    (author / "z.mp4").write_bytes(b"second")
+    (child / "clip.mp4").write_bytes(b"third")
+
+    preview = _preview(client, settings, month)
+    ready, = [row for row in preview["units"] if row["status"] == "ready"]
+    assert ready["unit"] == str(author)
+    assert ready["operation"] == "flatten_pure_media"
+    assert preview["summary"]["blocked_count"] == 0
+    batch = _batch(client, preview)
+    assert _run_next(settings, batch)
+    result = client.get(f"/api/media-organizer/batches/{batch}").json()
+    assert result["summary"]["success_count"] == 1
+    assert {path.name: path.read_bytes() for path in author.iterdir()} == {
+        "001.mp4": b"first", "002.mp4": b"second", "003.mp4": b"third",
+    }
+    fresh = _preview(client, settings, month)
+    assert fresh["summary"]["ready_count"] == fresh["summary"]["blocked_count"] == 0, fresh
+
+
 def test_gapped_numbered_media_leaves_are_renamed_independently(tmp_path):
     client, settings, _ = _fixture(tmp_path)
     root = settings.data_mount / "Download/下载目录"

@@ -168,6 +168,29 @@ def test_successful_archive_lift_can_reclaim_reports_after_paths_changed(tmp_pat
     assert (archive / "作品乙/001.mp4").read_bytes() == b"video"
 
 
+@pytest.mark.parametrize("replace_video", [False, True])
+def test_structural_media_lift_cleanup_checks_the_moved_video(tmp_path, replace_video):
+    client, settings, _ = _fixture(tmp_path)
+    outer = settings.data_mount / "作者/特辑 [2P+1V]"
+    inner = outer / outer.name
+    put_files(inner / "1", {"001.jpg": b"photo"})
+    put_files(inner / "2", {"001.jpg": b"other"})
+    put_files(inner, {"001.mp4": b"video"})
+    preview = _preview(client, settings, outer)
+    batch = _batch(client, preview)
+    assert _run_next(settings, batch)
+    assert client.get(f"/api/media-organizer/batches/{batch}").json()["summary"]["success_count"] == 1
+    video = outer / "001.mp4"
+    if replace_video:
+        video.write_bytes(b"modified video")
+
+    assert client.delete(f"/api/tasks/{batch}").status_code == 200
+    _cleanup(client, settings)
+
+    assert (settings.reports_dir / "organizer-v1-executions" / batch).exists() == replace_video
+    assert video.read_bytes() == (b"modified video" if replace_video else b"video")
+
+
 def test_referenced_preview_stays_readable_for_queued_batch(tmp_path):
     client, settings, _ = _fixture(tmp_path)
     work = settings.data_mount / "作品"

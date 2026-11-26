@@ -1,7 +1,7 @@
 """Deterministic final names for a fixed resource package.
 
 This module never touches the filesystem. P, V and homogeneous flat packages
-are independently numbered from 001, preserving the original final extension.
+are independently numbered from 001, using the original or verified extension.
 Non-media files retain their name unless a casefold collision needs a suffix.
 """
 from __future__ import annotations
@@ -37,10 +37,10 @@ def media_source_sort_key(path: str, unit: Path) -> tuple:
     return tuple(folded), relative
 
 
-def numbered_name(index: int, name: str) -> str:
+def numbered_name(index: int, name: str, *, detected_extension: str | None = None) -> str:
     if not isinstance(index, int) or index < 1:
         raise ValueError("Numbering index must be positive")
-    return f"{index:03d}{organizer_extension(name)}"
+    return f"{index:03d}{detected_extension or organizer_extension(name)}"
 
 
 def organizer_extension(name: str) -> str:
@@ -59,7 +59,10 @@ def allocate_names(rows: list[dict], *, kind: str) -> tuple[list[str], int]:
     original basename or any prior allocation.
     """
     if kind in ("P", "V", "flat"):
-        names = [numbered_name(index, row["name"]) for index, row in enumerate(rows, 1)]
+        names = [
+            numbered_name(index, row["name"], detected_extension=row.get("detected_extension"))
+            for index, row in enumerate(rows, 1)
+        ]
         return names, 0
 
     if kind != "Other":

@@ -531,7 +531,8 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence,
                 fence()
                 save_frozen_manifest(path, manifest)
             execute_repeated_archive(chosen, manifest, protected, fingerprint, lease_fence=fence,
-                                     allow_fuse_compat=settings.media_package_fuse_compat_enabled)
+                                     allow_fuse_compat=settings.media_package_fuse_compat_enabled,
+                                     link_intent=LinkIntent(path.with_suffix(".link.json")))
             return "success", None
         local_media_kinds = tuple(unit.get("local_media_kinds", ()))
         whole_author = unit.get("whole_author", False)

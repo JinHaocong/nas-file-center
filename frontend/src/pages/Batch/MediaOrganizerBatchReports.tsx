@@ -88,6 +88,9 @@ function PreviewUnitDetails({ row, onDetails }: { row: MediaBatchPreviewUnit; on
 /** Name the actual media present without synthesizing a filename or destination. */
 function unitMediaLabel(row: MediaBatchPreviewUnit) {
   if (row.operation === 'promote_repeated_archive_children') {
+    if (row.sample_moves?.some(move => move.kind !== 'Directory')) {
+      return `整体上提 ${row.needed_moves.toLocaleString()} 项内容`;
+    }
     return `整体上提 ${row.needed_moves.toLocaleString()} 个子目录`;
   }
   const counts = [];

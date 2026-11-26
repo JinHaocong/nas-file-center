@@ -1,6 +1,7 @@
 """Archive-layer recovery through the organizer preview and Worker."""
 
 import errno
+import os
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,132 @@ from tests.test_media_package_execute_jobs import _fixture
 def _put(path: Path, content: bytes = b"media") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
+
+
+@pytest.mark.parametrize("with_volumes", [False, True])
+def test_exact_duplicate_work_title_keeps_the_version_and_volume_boundaries(tmp_path, with_volumes):
+    client, settings, _ = _fixture(tmp_path)
+    author = settings.data_mount / "Else/2608/260806/作者"
+    outer = author / ("特辑2 [2P+3V]" if with_volumes else "线下拍摄-无修无水印[1V]")
+    inner = outer / outer.name
+    _put(inner / "001.mp4", b"main")
+    if with_volumes:
+        for volume in ("1", "2"):
+            _put(inner / volume / "P [1 1B]/001.jpg", b"p")
+            _put(inner / volume / "V [1 1B]/001.mp4", b"v")
+    separate = author / "线下拍摄-加长版[1V]/001.mp4"
+    _put(separate, b"different version")
+
+    preview = _preview(client, settings, author)
+    assert preview["summary"]["ready_count"] == 1
+    job_id = _batch(client, preview)
+    assert _run_next(settings, job_id)
+    result = client.get(f"/api/media-organizer/batches/{job_id}").json()
+    assert result["summary"]["success_count"] == 1, result
+    assert (outer / "001.mp4").read_bytes() == b"main"
+    assert not inner.exists()
+    assert separate.read_bytes() == b"different version"
+    if with_volumes:
+        for volume in ("1", "2"):
+            assert (outer / volume / "P [1 1B]/001.jpg").read_bytes() == b"p"
+            assert (outer / volume / "V [1 1B]/001.mp4").read_bytes() == b"v"
+    rescan = _preview(client, settings, author)
+    assert rescan["summary"]["ready_count"] == rescan["summary"]["blocked_count"] == 0
+
+
+def test_published_picture_buckets_lift_whole_without_absorbing_neighboring_media(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    author = settings.data_mount / "Else/2604/260430/作者"
+    shell = author / "图"
+    for index in range(1, 201):
+        _put(shell / f"P [200 200B]/{index:03}.jpg", b"p")
+    _put(shell / "P_1 [1 1B]/001.jpg", b"q")
+    _put(author / "001.mp4", b"separate video")
+    _put(author / "独立拍摄/001.mp4", b"separate work")
+    bucket_id = (shell / "P [200 200B]").stat().st_ino
+
+    preview = _preview(client, settings, author)
+    assert preview["summary"]["ready_count"] == 1
+    assert preview["summary"]["file_count"] == 203
+    job_id = _batch(client, preview)
+    assert _run_next(settings, job_id)
+    result = client.get(f"/api/media-organizer/batches/{job_id}").json()
+    assert result["summary"]["success_count"] == 1, result
+    assert not shell.exists()
+    assert (author / "P [200 200B]").stat().st_ino == bucket_id
+    assert (author / "P_1 [1 1B]/001.jpg").read_bytes() == b"q"
+    assert (author / "001.mp4").read_bytes() == b"separate video"
+    assert (author / "独立拍摄/001.mp4").read_bytes() == b"separate work"
+    rescan = _preview(client, settings, author)
+    assert rescan["summary"]["ready_count"] == rescan["summary"]["blocked_count"] == 0
+
+
+@pytest.mark.parametrize("late_target", ["P [1 1B]/occupant.txt", "another.jpg"])
+def test_picture_bucket_lift_rejects_photos_added_after_preview(tmp_path, late_target):
+    client, settings, _ = _fixture(tmp_path)
+    author = settings.data_mount / "Else/2604/260430/作者"
+    source = author / "图/P [1 1B]/001.jpg"
+    _put(source, b"p")
+    report = _preview(client, settings, author)
+    assert report["summary"]["ready_count"] == 1
+    _put(author / late_target, b"do not overwrite")
+
+    job_id = _batch(client, report)
+    assert _run_next(settings, job_id)
+    result = client.get(f"/api/media-organizer/batches/{job_id}").json()
+    assert result["summary"]["conflict_count"] == 1, result
+    assert (author / late_target).read_bytes() == b"do not overwrite"
+    assert source.read_bytes() == b"p"
+
+
+def test_duplicate_work_volume_lift_resumes_an_interrupted_video_hardlink(tmp_path, monkeypatch):
+    from app.batch import media_package_execution
+
+    client, settings, _ = _fixture(tmp_path)
+    outer = settings.data_mount / "作者/特辑 [2P+1V]"
+    inner = outer / outer.name
+    _put(inner / "1/001.jpg", b"p")
+    _put(inner / "2/001.jpg", b"q")
+    source, target = inner / "001.mp4", outer / "001.mp4"
+    _put(source, b"video")
+    preview = _preview(client, settings, outer)
+    assert preview["summary"]["ready_count"] == 1
+    job_id = _batch(client, preview)
+    link = os.link
+    open_folder = media_package_execution._open_folder
+
+    def unsupported_rename(*args):
+        raise OSError(errno.EOPNOTSUPP, "simulated native file rename unavailable")
+
+    def interrupt_after_video_link(src, dst, *args, **kwargs):
+        link(src, dst, *args, **kwargs)
+        if src == dst == source.name:
+            raise SystemExit("video linked before source retirement")
+
+    def refuse_reopened_parents(path):
+        assert path not in {outer, inner}, "The lift must reuse the checked directory descriptors"
+        return open_folder(path)
+
+    monkeypatch.setattr(media_package_execution, "rename_noreplace_at", unsupported_rename)
+    monkeypatch.setattr(media_package_execution, "_open_folder", refuse_reopened_parents)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "link", interrupt_after_video_link)
+        with pytest.raises(SystemExit, match="video linked"):
+            _run_next(settings, job_id)
+    assert source.stat().st_ino == target.stat().st_ino
+    engine, sessions = create_engine_and_session(settings.database_path)
+    try:
+        assert recover_interrupted_jobs(engine, sessions, worker_id="organizer-test-worker")["recovered_requeued"] == 1
+    finally:
+        engine.dispose()
+
+    assert _run_next(settings, job_id)
+    result = client.get(f"/api/media-organizer/batches/{job_id}").json()
+    assert result["summary"]["success_count"] == 1, result
+    assert not inner.exists()
+    assert target.read_bytes() == b"video"
+    assert (outer / "1/001.jpg").read_bytes() == b"p"
+    assert (outer / "2/001.jpg").read_bytes() == b"q"
 
 
 def test_repeated_archive_promotes_whole_children_after_media_organization(tmp_path):

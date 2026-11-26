@@ -14,13 +14,14 @@ from unicodedata import name as unicode_name
 from unicodedata import normalize
 
 from app.batch.file_rename import _open_directory_nofollow
-from app.batch.media_organizer_archive import is_repeated_archive, preview_repeated_archive
+from app.batch.media_organizer_archive import is_repeated_archive, is_structural_media_wrapper, preview_repeated_archive
 from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, numbered_name
 from app.batch.media_package_organizer import (
     MAX_DEPTH, MAX_FILES_PER_GROUP, MAX_PACKAGE_DIRECTORIES, MAX_PACKAGE_FILES, MAX_SCOPE_ENTRIES_PER_DIRECTORY,
     MAX_VIDEOS_PER_GROUP,
     LIFT_LUOLCY_BUCKETS, PROMOTE_NUMBERED_PHOTO_GROUPS,
-    _author_media_row, _classify, _input_fingerprint, _luolcy_author_inventory, _package_path, _plan_luolcy_bucket_lift,
+    _author_media_row, _classify, _classify_media_file, _input_fingerprint, _luolcy_author_inventory, _package_path,
+    _plan_luolcy_bucket_lift,
     _size_label,
     _walk_package,
     iter_media_package_discovery, plan_media_layout,
@@ -470,7 +471,7 @@ def _direct_media_selection(
             continue
         if not stat.S_ISREG(info.st_mode) or _protected(path, protected_roots):
             return (), {}
-        kind = _classify(name)
+        kind, _ = _classify_media_file(path, info)
         if kind in {"P", "V"}:
             kinds.add(kind)
         elif not (author and not path.suffix):
@@ -512,7 +513,9 @@ def _repeated_work_wrapper(unit: Path, entries: list[tuple[str, os.stat_result]]
     """Find the media leaf at the end of a chain of exact-name wrappers."""
     if (len(entries) != 1 or _append_calendar_boundary(unit.name)
             or _fantia_collection(unit)
-            or unit.name.casefold() in _VERSION_NAMES or _WORK_VARIANT_LABEL.search(unit.name)
+            or unit.name.casefold() in _VERSION_NAMES
+            or (_WORK_VARIANT_LABEL.search(unit.name) and _declared_media_count_label(unit) is None
+                and _MIXED_WORK_TOTAL.search(unit.name) is None)
             or _author_layer(unit)
             or _AMBIGUOUS.fullmatch(unit.name) or _is_wrapper(unit.parent, unit.name)
             or unit.name == "图包"):
@@ -623,7 +626,10 @@ def _semantic_inventory(
                 continue
             if not stat.S_ISREG(info.st_mode) or info.st_dev != device:
                 raise ValueError(f"Unsupported or cross-device entry: {path}")
-            kind = _classify(name)
+            kind, detected_extension = (
+                (_classify(name), None) if _protected(path, protected_roots)
+                else _classify_media_file(path, info, check_cancelled=check_cancelled)
+            )
             if not depth and local_scope == DIRECT_MEDIA_SCOPE and kind == "Other":
                 continue
             if owned_sources is not None:
@@ -640,6 +646,7 @@ def _semantic_inventory(
                 "path": str(path), "name": name, "kind": kind,
                 "bytes": int(info.st_size), "dev": int(info.st_dev),
                 "ino": int(info.st_ino), "mtime_ns": int(info.st_mtime_ns),
+                **({"detected_extension": detected_extension} if detected_extension else {}),
                 **({"photo_range_start": range_start} if range_start is not None else {}),
             }
         folders.extend(reversed(children))
@@ -2076,15 +2083,15 @@ def _numbered_author_wrapper(entries: list[tuple[str, os.stat_result]]) -> str |
     return names[0] if len(names) == 1 else None
 
 
-def _author_numbered_video_child(entries: list[tuple[str, os.stat_result]]) -> str | None:
-    """Find one child beside a complete sequence of already numbered videos."""
+def _author_video_child(entries: _DirectoryEntries, *, require_numbered: bool = False) -> str | None:
+    """Find one child beside an author's direct videos."""
     if not 2 <= len(entries) <= MAX_FILES_PER_GROUP:
         return None
     children = [name for name, info in entries if stat.S_ISDIR(info.st_mode)]
     files = sorted(name for name, info in entries if stat.S_ISREG(info.st_mode))
     if len(children) != 1 or len(files) != len(entries) - 1:
         return None
-    if not all(_classify(name) == "V" and name == numbered_name(index, name)
+    if not all(_classify(name) == "V" and (not require_numbered or name == numbered_name(index, name))
                for index, name in enumerate(files, 1)):
         return None
     return children[0]
@@ -2106,20 +2113,34 @@ def _author_initials_match(author: str, folder: str) -> bool:
     return folder.casefold() == "".join(lazy_pinyin(author, style=Style.FIRST_LETTER))
 
 
+class _AuthorMediaInventory(NamedTuple):
+    items: list[dict]
+    directories: set[Path]
+    append_videos: bool = False
+    root_first: bool = False
+
+
 def _whole_author_inventory(
     unit: Path, entries: list[tuple[str, os.stat_result]], device: int,
     protected_roots: tuple[Path, ...], check_cancelled: Callable[[], None] | None,
-) -> tuple[list[dict], set[Path], bool] | None:
+) -> _AuthorMediaInventory | None:
     """Discover a whole-author reorganization or an append to existing video numbers."""
     if (not _author_layer(unit) or _CALENDAR_DIRECTORY.fullmatch(unit.name)
             or not _CALENDAR_MONTH.fullmatch(unit.parent.parent.name)
             or any(stat.S_ISDIR(info.st_mode) and _bracketed_media_batch(name) for name, info in entries)):
         return None
     name = _numbered_author_wrapper(entries)
-    append_videos = name is None
-    if append_videos:
-        name = _author_numbered_video_child(entries)
+    video_child = name is None
+    append_videos = False
+    if video_child:
+        name = _author_video_child(entries)
         if name is None:
+            return None
+        append_videos = _author_video_child(entries, require_numbered=True) is not None
+        if not append_videos and any(
+            stat.S_ISREG(info.st_mode) and Path(filename).stem.isdecimal()
+            for filename, info in entries
+        ):
             return None
         label = name.strip().casefold()
         if (label.isdecimal() or _AMBIGUOUS.fullmatch(label)
@@ -2136,14 +2157,14 @@ def _whole_author_inventory(
     try:
         if _protected(child, protected_roots):
             return None
-        if append_videos:
+        if video_child:
             if _is_wrapper(unit, name, device=device, protected_roots=protected_roots):
                 return None
             inner = _regular_media_entries(child, device)
             if (not inner or len(entries) - 1 + len(inner) > MAX_FILES_PER_GROUP
                     or any(_classify(filename) != "V" or _protected(child / filename, protected_roots)
                            for filename, _ in inner)
-                    or (len(inner) > 1 and not _author_initials_match(unit.name, name))):
+                    or (len(inner) > 1 and (not append_videos or not _author_initials_match(unit.name, name)))):
                 return None
         else:
             inner = _entries(child, device)
@@ -2156,17 +2177,19 @@ def _whole_author_inventory(
         ))
     except (OSError, ValueError):
         return None
-    if append_videos:
+    if video_child:
         expected = {str(unit / filename) for filename, info in entries if stat.S_ISREG(info.st_mode)}
         expected.update(str(child / filename) for filename, _ in inner)
         if directories != {unit, child} or {row["path"] for row in items} != expected:
             return None
-    return (items, directories, append_videos) if {row["kind"] for row in items} == kinds else None
+    if {row["kind"] for row in items} != kinds:
+        return None
+    return _AuthorMediaInventory(items, directories, append_videos=append_videos, root_first=video_child)
 
 
 def _author_media_batch_inventory(
     unit: Path, protected_roots: tuple[Path, ...], check_cancelled: Callable[[], None] | None,
-) -> tuple[list[dict], set[Path], bool] | None:
+) -> _AuthorMediaInventory | None:
     """Prove an explicitly sized batch owns its media without crossing a nested work boundary."""
     directories: set[Path] = set()
     try:
@@ -2184,7 +2207,7 @@ def _author_media_batch_inventory(
                 or _WORK_SEQUENCE_LABEL.search(name) or _declared_media_count_label(path) is not None
                 or _FANTIA_POST_COLLECTION.search(name)):
             return None
-    return items, directories, False
+    return _AuthorMediaInventory(items, directories)
 
 
 def _declared_media_count_label(unit: Path) -> str | None:
@@ -2301,7 +2324,10 @@ def preview_organizing_unit(
         if local_media_kinds is None:
             local_media_kinds, _ = _direct_media_selection(unit, direct_entries, device, protected)
         for name, info in direct_entries:
-            if stat.S_ISREG(info.st_mode) and _classify(name) == "Other":
+            path = unit / name
+            if (stat.S_ISREG(info.st_mode) and not _protected(path, protected)
+                    and not is_reserved_workspace(path)
+                    and _classify_media_file(path, info, check_cancelled=check_cancelled)[0] == "Other"):
                 retained_count += 1
                 retained_bytes += info.st_size
     photo_groups = None
@@ -2326,6 +2352,7 @@ def preview_organizing_unit(
                     and _work_media_component(unit, entries, device, protected) is None):
                 local_media_kinds = _layer_media_kinds(unit, entries, device, protected)
     append_videos = False
+    root_first = False
     luolcy_siblings = {}
     root_fingerprint = None
     plan = None
@@ -2345,7 +2372,7 @@ def preview_organizing_unit(
     elif photo_groups is not None:
         items, directories = photo_groups
     elif author_inventory is not None:
-        items, directories, append_videos = author_inventory
+        items, directories, append_videos, root_first = author_inventory
         whole_author = True
     else:
         directories = set()
@@ -2378,6 +2405,7 @@ def preview_organizing_unit(
                                               or _CALENDAR_DIRECTORY.fullmatch(unit.name))),
             append_videos=append_videos,
             append_wrapper=append_wrapper,
+            root_first=root_first,
             numbered_photo_groups=photo_groups is not None,
             video_bucket_limit=video_bucket_limit,
         )
@@ -2470,7 +2498,7 @@ def _semantic_previews(
                     continue
         author_preview = None
         if (hold_reason is None and _author_layer(unit)
-                and (_numbered_author_wrapper(entries) is not None or _author_numbered_video_child(entries) is not None)):
+                and (_numbered_author_wrapper(entries) is not None or _author_video_child(entries) is not None)):
             author_preview = preview(unit, "semantic", None)
             if author_preview.get("whole_author"):
                 # The whole author owns these files, so descendants cannot also become units.
@@ -2563,7 +2591,10 @@ def _semantic_previews(
                 children.extend((child, depth + 1, None) for child in pure_wrappers if child.name not in claimed)
             yield row
         children.sort(key=lambda entry: (str(entry[0]).casefold(), str(entry[0])), reverse=True)
-        if is_repeated_archive(unit) and unit.parent.is_relative_to(selection):
+        if (unit.parent.is_relative_to(selection) and (
+            is_repeated_archive(unit) or ((row is None or row["status"] == "already_organized")
+                                          and is_structural_media_wrapper(unit))
+        )):
             # Execute the media work under its original path before lifting directories.
             pending.append((unit, depth, _FINISH_REPEATED_ARCHIVE))
         pending.extend(children)

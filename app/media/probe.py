@@ -341,17 +341,20 @@ def run_ffprobe(
     binary: str = "ffprobe",
     timeout_seconds: float = 30.0,
     checkpoint: Callable[[], None] | None = None,
+    opened_mp4_fd: int | None = None,
 ) -> MediaProbeResult:
+    mp4_options = ["-protocol_whitelist", "file", "-f", "mov", "-select_streams", "V:0"]
     command = [
         binary,
         "-v",
         "error",
+        *(mp4_options if opened_mp4_fd is not None else []),
         "-print_format",
         "json",
         "-show_entries",
         "format=duration,bit_rate,format_name:"
         "stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,duration,bit_rate",
-        os.fspath(path),
+        f"/dev/fd/{opened_mp4_fd}" if opened_mp4_fd is not None else os.fspath(path),
     ]
 
     # ffprobe output is redirected into bounded temporary files instead of
@@ -369,6 +372,7 @@ def run_ffprobe(
                 stderr=stderr_file,
                 text=False,
                 shell=False,
+                **({"pass_fds": (opened_mp4_fd,)} if opened_mp4_fd is not None else {}),
             )
         except FileNotFoundError as exc:
             return _unknown("video", "FFPROBE_UNAVAILABLE", str(exc))

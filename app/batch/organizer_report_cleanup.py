@@ -269,7 +269,7 @@ def _read_rows(fd, name, binding):
 
 def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fence):
     """Prove each originally ready unit finished and has no owned staging directory."""
-    from app.batch.media_organizer_archive import PROMOTE_ARCHIVE_CHILDREN, _fingerprint, _valid_snapshot
+    from app.batch.media_organizer_archive import PROMOTE_ARCHIVE_CHILDREN, _file_binding, _fingerprint, _valid_snapshot
     from app.batch.media_organizer_jobs import _selection
     from app.batch.media_package_execution import _validate_frozen_manifest_body
 
@@ -278,6 +278,7 @@ def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fen
     selection = _selection(_object(job.state_json)["selection"], settings)
     manifests = set()
     packages = []
+    direct_files = []
     lifts = []
     next_check = 0.0
 
@@ -319,12 +320,24 @@ def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fen
                         destination = package.parent / name
                         lifts.append((ordinal, package / name, destination))
                         packages.append((ordinal, destination, child["identity"]))
+                    for name, identity in snapshot.get("files", {}).items():
+                        direct_files.append((ordinal, package.parent / name, identity))
                 else:
                     packages.append((ordinal, package, [manifest["package_dev"], manifest["package_ino"]]))
         finally:
             units.close()
     if {name.replace(".link.json", ".json") for name in execution_plan["files"]} != manifests:
         raise ValueError("无法核对全部执行清单")
+    for ordinal, final, identity in direct_files:
+        pulse()
+        for step, source, target in lifts:
+            if step > ordinal and final.is_relative_to(source):
+                final = target / final.relative_to(source)
+        if not _selection(str(final.parent), settings).is_relative_to(selection):
+            raise ValueError("上提文件超出原确认范围")
+        with _directory(final.parent) as fd:
+            if _file_binding(fd, final.name) != identity:
+                raise ValueError("上提文件身份已变化")
     prefix = f".nfc-media_package-stage-{job.id}-"
     for ordinal, package, identity in packages:
         pulse()

@@ -397,6 +397,64 @@ def _classify(filename: str) -> str:
     return "P" if media_type == "image" else "V" if media_type == "video" else "Other"
 
 
+_MP4_MAJOR_BRANDS = {b"isom", b"mp41", b"mp42", b"avc1", b"M4V "} | {
+    f"iso{number}".encode("ascii") for number in range(2, 10)
+}
+
+
+def _is_extensionless_mp4(
+    path: Path, info: os.stat_result, check_cancelled: Callable[[], None] | None,
+) -> bool:
+    """Verify a common MP4 header and a real video stream on one bound file."""
+    if not stat.S_ISREG(info.st_mode) or info.st_size < 16:
+        return False
+    expected = (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    def matches(current: os.stat_result) -> bool:
+        return (current.st_dev, current.st_ino, current.st_mode, current.st_size,
+                current.st_mtime_ns, current.st_ctime_ns) == expected
+
+    try:
+        parent_fd = _open_directory_nofollow(path.parent)
+        try:
+            fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
+            try:
+                if not matches(os.fstat(fd)):
+                    return False
+                header = os.pread(fd, 16, 0)
+                length = int.from_bytes(header[:4], "big")
+                if (len(header) != 16 or header[4:8] != b"ftyp"
+                        or header[8:12] not in _MP4_MAJOR_BRANDS
+                        or not 16 <= length <= info.st_size or length % 4):
+                    return False
+                from app.media.probe import run_ffprobe
+
+                result = run_ffprobe(
+                    path, binary=os.getenv("FFPROBE_BINARY", "ffprobe"), timeout_seconds=5,
+                    checkpoint=check_cancelled, opened_mp4_fd=fd,
+                )
+                return (result.integrity_status == "healthy" and bool(result.codec)
+                        and bool(result.width and result.height)
+                        and matches(os.fstat(fd))
+                        and matches(os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)))
+            finally:
+                os.close(fd)
+        finally:
+            os.close(parent_fd)
+    except OSError:
+        return False
+
+
+def _classify_media_file(
+    path: Path, info: os.stat_result, *, check_cancelled: Callable[[], None] | None = None,
+) -> tuple[str, str | None]:
+    """Classify by suffix, with a narrow verified override for extensionless MP4s."""
+    kind = _classify(path.name)
+    if kind == "Other" and not organizer_extension(path.name) and _is_extensionless_mp4(path, info, check_cancelled):
+        return "V", ".mp4"
+    return kind, None
+
+
 def _author_media_row(path: Path, info: os.stat_result, kind: str) -> dict:
     return {
         "path": str(path), "name": path.name, "kind": kind, "bytes": info.st_size,
@@ -786,7 +844,7 @@ def plan_media_layout(
     source: Path, items: list[dict], *, max_rows: int = 100, include_items: bool = False,
     include_mapping: bool = False, organizer_mode: bool = False,
     legacy_bucket_conflicts: bool = True, append_videos: bool = False, append_wrapper: bool = False,
-    numbered_photo_groups: bool = False, video_bucket_limit: int = MAX_VIDEOS_PER_GROUP,
+    root_first: bool = False, numbered_photo_groups: bool = False, video_bucket_limit: int = MAX_VIDEOS_PER_GROUP,
 ) -> dict:
     """Plan the same final media layout from a mode-specific bounded inventory."""
     input_fingerprint = _input_fingerprint(items, source)
@@ -814,7 +872,7 @@ def plan_media_layout(
         append = append_videos or append_wrapper
         relative_items = ((os.path.relpath(row["path"], source), row) for row in items)
         mapping_order = sorted(relative_items, key=lambda pair: (
-            append and Path(pair[1]["path"]).parent != source, pair[0].casefold(), pair[0],
+            (append or root_first) and Path(pair[1]["path"]).parent != source, pair[0].casefold(), pair[0],
         ))
         ordered = [row for _, row in mapping_order]
         new_names, _ = allocate_names(ordered, kind="flat")
