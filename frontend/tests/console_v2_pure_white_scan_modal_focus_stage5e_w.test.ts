@@ -11,12 +11,14 @@ describe('Pure White Stage 5E-W Scan Create controlled modal focus return', () =
   test('remember the real opener before Radix autofocus without adding a fake Dialog.Trigger', () => {
     for (const token of [
       'const returnFocusTarget = useRef<HTMLElement | null>(null);',
-      'onOpenAutoFocus={() => {',
+      'onOpenAutoFocus={event => {',
       'const active = document.activeElement;',
       'active instanceof HTMLElement && active !== document.body',
       'returnFocusTarget.current = active',
+      'nameField.current.focus({ preventScroll: true });',
       '<Dialog.Root open={open} onOpenChange={next => { if (!next) close(); }}>',
     ]) assert.ok(scan.includes(token), token);
+    assert.ok(scan.indexOf('returnFocusTarget.current = active') < scan.indexOf('nameField.current.focus'));
     assert.doesNotMatch(scan, /<Dialog\.Trigger/);
   });
 

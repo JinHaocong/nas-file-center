@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTitle } from '../../hooks/useTitle';
@@ -17,6 +17,21 @@ export const OrganizerPage: React.FC = () => {
   const [activeProfile, setActiveProfile] = useState<OrganizerProfile | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<OrganizerProfile | null>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
+  const moveFocus = useRef(false);
+
+  useEffect(() => {
+    if (!moveFocus.current) return;
+    moveFocus.current = false;
+    workspaceRef.current?.focus({ preventScroll: true });
+    workspaceRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' });
+  }, [activeProfile]);
+
+  /** Place focus on the new workspace after entering or leaving a profile preview. */
+  const openProfile = (profile: OrganizerProfile | null) => {
+    moveFocus.current = true;
+    setActiveProfile(profile);
+  };
 
   const saveMutation = useMutation({
     mutationFn: async (values: Partial<OrganizerProfile>) => {
@@ -49,7 +64,9 @@ export const OrganizerPage: React.FC = () => {
   };
 
   return (
-    <div className="nfc-operations-page nfc-organizer-page nfc-page-layout-workbench">
+    <div className="nfc-operations-page nfc-organizer-page nfc-page-layout-workbench nfc-tool-workspace">
+      <section ref={workspaceRef} key={activeProfile ? 'preview' : 'profiles'} tabIndex={-1}
+        className="nfc-tool-profile-view" aria-label={activeProfile ? '方案预览' : '目录整理方案列表'}>
       {!activeProfile ? (
         <>
           <PageHeader
@@ -57,7 +74,7 @@ export const OrganizerPage: React.FC = () => {
             description="保存可复用的目录统计、命名、编号、标签与 mtime 规则；先只读 Preview，再生成 Plan。"
           />
           <ProfileList
-            onSelectProfile={setActiveProfile}
+            onSelectProfile={openProfile}
             onCreateProfile={handleCreate}
             onEditProfile={handleEdit}
           />
@@ -65,9 +82,10 @@ export const OrganizerPage: React.FC = () => {
       ) : (
         <ProfilePreview
           profile={activeProfile}
-          onBack={() => setActiveProfile(null)}
+          onBack={() => openProfile(null)}
         />
       )}
+      </section>
 
       <ProfileFormModal
         open={modalOpen}

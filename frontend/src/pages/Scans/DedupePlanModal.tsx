@@ -24,6 +24,8 @@ export const DedupePlanModal: React.FC<Props> = ({ scanId, open, onClose }) => {
   const [values, setValues] = useState<ClassicDedupeValues>(defaultClassicDedupeValues);
   const [error, setError] = useState<string | null>(null);
   const submittingRef = useRef(false);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const policyField = useRef<HTMLSelectElement>(null);
   const navigate = useNavigate();
   const toast = useConsoleToast();
 
@@ -86,12 +88,27 @@ export const DedupePlanModal: React.FC<Props> = ({ scanId, open, onClose }) => {
     <Dialog.Root open={open} onOpenChange={next => { if (!next) close(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-dedupe-overlay" />
-        <Dialog.Content className="nfc-overlay-modal nfc-dedupe-plan-modal nfc-v2-dedupe-dialog"
+        <Dialog.Content className="nfc-overlay-modal nfc-dedupe-plan-modal nfc-v2-dedupe-dialog nfc-record-dialog"
+          data-form-dialog aria-busy={busy || undefined}
+          onOpenAutoFocus={event => {
+            const active = document.activeElement;
+            openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+            if (!policyField.current) return;
+            event.preventDefault();
+            policyField.current.focus({ preventScroll: true });
+          }}
+          onCloseAutoFocus={event => {
+            const opener = openerRef.current;
+            openerRef.current = null;
+            if (!opener?.isConnected || opener.matches(':disabled') || !opener.getClientRects().length) return;
+            event.preventDefault();
+            opener.focus({ preventScroll: true });
+          }}
           onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
-          <header className="nfc-v2-dedupe-dialog-header">
+          <header className="nfc-v2-dedupe-dialog-header" data-form-dialog-header>
             <div>
-              <Dialog.Title>生成经典去重计划 (Classic Dedupe Plan)</Dialog.Title>
+              <Dialog.Title>生成经典去重计划</Dialog.Title>
               <Dialog.Description>只生成草稿计划，不会直接删除或修改任何文件。</Dialog.Description>
             </div>
             <button type="button" aria-label="关闭经典去重计划窗口"
@@ -100,49 +117,50 @@ export const DedupePlanModal: React.FC<Props> = ({ scanId, open, onClose }) => {
             </button>
           </header>
 
-          <div className="nfc-v2-dedupe-note" role="note">
-            <ConsoleIcon name="shield-check" size={18} />
-            <span><strong>经典去重策略</strong> 使用单一保留策略。如果需要加权评分、实时预览及可解释的成员决策，请使用「高级精确去重」页面。</span>
-          </div>
-
           <form className="nfc-dedupe-plan-form nfc-v2-dedupe-form" onSubmit={handleCreate}>
-            <div className="nfc-v2-dedupe-field">
-              <label htmlFor="nfc-classic-policy">保留策略</label>
-              <select id="nfc-classic-policy" value={values.policy} disabled={busy}
-                onChange={event => change('policy', event.target.value)}>
-                {POLICY_OPTIONS.map(option => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
+            <div data-form-dialog-body>
+              <div className="nfc-v2-dedupe-note" role="note">
+                <ConsoleIcon name="shield-check" size={18} />
+                <span><strong>扫描 #{scanId}</strong> · 使用单一保留策略生成草稿。加权评分、实时预览和成员选择理由可在「高级精确去重」中查看。</span>
+              </div>
+              <div className="nfc-v2-dedupe-field">
+                <label htmlFor="nfc-classic-policy">保留策略</label>
+                <select id="nfc-classic-policy" ref={policyField} value={values.policy} disabled={busy}
+                  onChange={event => change('policy', event.target.value)}>
+                  {POLICY_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              {values.policy === 'path-priority' && (
+                <div className="nfc-v2-dedupe-field">
+                  <label htmlFor="nfc-classic-path-priority">完整路径优先级模式（每行一个规则）</label>
+                  <textarea id="nfc-classic-path-priority" rows={4} required
+                    placeholder={'/data/Photos/Master/*\n/data/Backup/*'}
+                    value={values.pathPriorityText} disabled={busy}
+                    onChange={event => change('pathPriorityText', event.target.value)} />
+                </div>
+              )}
+              {values.policy === 'relative-path-preference' && (
+                <div className="nfc-v2-dedupe-field">
+                  <label htmlFor="nfc-classic-relative-priority">相对路径优先级模式（每行一个规则）</label>
+                  <textarea id="nfc-classic-relative-priority" rows={4} required
+                    placeholder={'Originals/*\nSorted/*'}
+                    value={values.relativePathPriorityText} disabled={busy}
+                    onChange={event => change('relativePathPriorityText', event.target.value)} />
+                </div>
+              )}
+              <p className="nfc-v2-dedupe-safety">
+                <ConsoleIcon name="shield-check" size={16} />
+                安全保障：系统只生成待审阅的草稿计划；后续须经过 Freeze → Validate → Execute 与 SHA256 校验。
+              </p>
+              {error && <div className="nfc-v2-dedupe-error" role="alert">{error}</div>}
             </div>
-            {values.policy === 'path-priority' && (
-              <div className="nfc-v2-dedupe-field">
-                <label htmlFor="nfc-classic-path-priority">完整路径优先级模式（每行一个规则）</label>
-                <textarea id="nfc-classic-path-priority" rows={4} required
-                  placeholder={'/data/Photos/Master/*\n/data/Backup/*'}
-                  value={values.pathPriorityText} disabled={busy}
-                  onChange={event => change('pathPriorityText', event.target.value)} />
-              </div>
-            )}
-            {values.policy === 'relative-path-preference' && (
-              <div className="nfc-v2-dedupe-field">
-                <label htmlFor="nfc-classic-relative-priority">相对路径优先级模式（每行一个规则）</label>
-                <textarea id="nfc-classic-relative-priority" rows={4} required
-                  placeholder={'Originals/*\nSorted/*'}
-                  value={values.relativePathPriorityText} disabled={busy}
-                  onChange={event => change('relativePathPriorityText', event.target.value)} />
-              </div>
-            )}
-            <p className="nfc-v2-dedupe-safety">
-              <ConsoleIcon name="shield-check" size={16} />
-              安全保障：系统只生成待审阅的草稿计划；后续须经过 Freeze → Validate → Execute 与 SHA256 校验。
-            </p>
-            {error && <div className="nfc-v2-dedupe-error" role="alert">{error}</div>}
-            <div className="nfc-v2-dedupe-actions">
+            <footer className="nfc-v2-dedupe-actions" data-form-dialog-actions>
               <ConsoleButton disabled={busy} onClick={close}>取消</ConsoleButton>
               <ConsoleButton type="submit" variant="primary" loading={busy}
-                leadingIcon={<ConsoleIcon name="check-circle" size={16} />}>生成执行计划</ConsoleButton>
-            </div>
+                leadingIcon={<ConsoleIcon name="check-circle" size={16} />}>生成计划草稿</ConsoleButton>
+            </footer>
           </form>
         </Dialog.Content>
       </Dialog.Portal>

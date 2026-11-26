@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { useQuarantineDialogFocus } from './useQuarantineDialogFocus';
 import { quarantineApi } from '../../api/quarantine';
 import { getStructuredApiError } from '../../api/errors';
 import type { QuarantineBulkPlanResponse, QuarantineBulkPreviewResponse } from '../../types';
@@ -7,6 +8,7 @@ import {
   getQuarantinePurgeAvailability, isBulkPreviewSelectionCurrent,
 } from '../../components/quarantine/quarantine_rules';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
+import { CodePath } from '../../components/ui/CodePath';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
 
@@ -42,6 +44,7 @@ export const BulkPurgeModal: React.FC<Props> = ({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [planLoading, setPlanLoading] = useState(false);
   const inFlight = useRef(false);
+  const dialogFocus = useQuarantineDialogFocus();
   const requestEpoch = useRef(0);
 
   const selectionKey = useMemo(() => [...entryIds].sort((a, b) => a - b).join(','), [entryIds]);
@@ -172,7 +175,9 @@ export const BulkPurgeModal: React.FC<Props> = ({
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
         <Dialog.Content
-          className="nfc-v2-dialog nfc-overlay-modal nfc-quarantine-bulk-purge-modal nfc-v2-quarantine-bulk-dialog"
+          className="nfc-v2-dialog nfc-overlay-modal nfc-quarantine-bulk-purge-modal nfc-v2-quarantine-bulk-dialog nfc-record-dialog nfc-maintenance-dialog"
+          aria-busy={busy || undefined}
+          {...dialogFocus}
           onEscapeKeyDown={event => { if (busy || inFlight.current) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
           <header className="nfc-v2-dialog-heading">
@@ -193,7 +198,7 @@ export const BulkPurgeModal: React.FC<Props> = ({
             <Advisory tone="danger" title={'不可逆操作：已明确选择 ' + entryIds.length + ' 个 active 条目'}>
               <p>此窗口只生成当前 Preview digest 对应的 Draft。真正执行仍必须经过 Freeze → Validate → Execute。执行语义是普通文件删除（unlink）：只移除 NFC 拥有并已冻结的隔离区路径，不覆盖文件内容，也不承诺安全擦除。</p>
             </Advisory>
-            {!preview && (
+            {!previewCurrent && !busy && (
               <p className="nfc-v2-quarantine-bulk-help">
                 先运行 Preview。服务端会重新核验每个选中条目的状态、持久化身份与 unlink_v1 pathname authority；任一 mutation blocker 都会阻止整批 Draft。索引范围内的 hard link 与同内容独立副本仅作为 advisory，不会扩大或改变删除权限。
               </p>
@@ -223,8 +228,8 @@ export const BulkPurgeModal: React.FC<Props> = ({
                       <strong>#{item.entry_id} · 普通文件删除（unlink_v1）</strong>
                       {item.survivor_status === 'found' ? (
                         <Advisory tone="warning" title="当前隔离副本可清除，但索引范围内仍发现存活 hard link">
-                          <ul>{(item.hardlink_survivor_paths || []).map(path => (
-                            <li key={path}><code>{path}</code></li>
+                          <ul className="nfc-maintenance-path-list">{(item.hardlink_survivor_paths || []).map(path => (
+                            <li key={path}><CodePath value={path} /></li>
                           ))}</ul>
                         </Advisory>
                       ) : item.survivor_status === 'incomplete' ? (
@@ -239,8 +244,8 @@ export const BulkPurgeModal: React.FC<Props> = ({
                       )}
                       {(item.independent_copy_paths?.length || 0) > 0 && (
                         <Advisory title="发现同内容但不同 inode 的独立副本">
-                          <ul>{(item.independent_copy_paths || []).map(path => (
-                            <li key={path}><code>{path}</code></li>
+                          <ul className="nfc-maintenance-path-list">{(item.independent_copy_paths || []).map(path => (
+                            <li key={path}><CodePath value={path} /></li>
                           ))}</ul>
                         </Advisory>
                       )}
@@ -263,6 +268,9 @@ export const BulkPurgeModal: React.FC<Props> = ({
                 )}
               </section>
             )}
+            {busy && <p className="nfc-maintenance-pending" role="status">
+              {previewLoading ? '正在核验所选隔离条目…' : '正在生成永久删除草稿…'}
+            </p>}
           </div>
           <div className="nfc-v2-confirm-actions">
             <ConsoleButton onClick={closeSafely} disabled={busy}>取消</ConsoleButton>

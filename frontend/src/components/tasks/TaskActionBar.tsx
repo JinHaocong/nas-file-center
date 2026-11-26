@@ -112,7 +112,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
   };
 
   return (
-    <div className="nfc-task-action-bar nfc-v2-task-actions">
+    <div className="nfc-task-action-bar nfc-v2-task-actions nfc-maintenance-task-actions">
       {(pauseAvail.enabled || activeAction === 'pause') && (
         <ConsoleButton disabled={!pauseAvail.enabled || isAnyPending}
           loading={activeAction === 'pause'} onClick={() => dispatch('pause', () => pauseMutation.mutateAsync())}>
@@ -164,7 +164,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
         title={confirmAction === 'cancel'
           ? '确认取消任务 #' + task.id + '？'
           : '确认重试任务 #' + task.id + '？'}
-        description={<p>{confirmDescription}</p>}
+        description={<p className="nfc-maintenance-action-context">{confirmDescription}</p>}
         confirmText={confirmAction === 'cancel' ? '确认取消' : '确认重试'}
         onConfirm={confirm}
         busy={isAnyPending}

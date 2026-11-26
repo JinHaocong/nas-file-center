@@ -23,6 +23,7 @@ export const DedupeActionDialog: React.FC<Props> = ({
   // The page owns open state without Dialog.Trigger; return focus to its
   // original launch button after cancelling, not a detached or disabled node.
   const returnFocusTarget = React.useRef<HTMLElement | null>(null);
+  const cancelButton = React.useRef<HTMLButtonElement>(null);
   // Defensive callback gate; the owning page retains Preview/Draft and RBAC authority.
   const cancelSafely = () => { if (!busy) onCancel(); };
   const confirmSafely = () => { if (!busy && kind !== null) onConfirm(); };
@@ -47,10 +48,14 @@ export const DedupeActionDialog: React.FC<Props> = ({
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-advanced-dedupe-overlay" />
         <Dialog.Content className="nfc-overlay-modal nfc-v2-advanced-dedupe-dialog"
-          onOpenAutoFocus={() => {
+          data-form-dialog aria-busy={busy || undefined}
+          onOpenAutoFocus={event => {
             const active = document.activeElement;
             returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
               ? active : null;
+            if (!cancelButton.current || cancelButton.current.disabled) return;
+            event.preventDefault();
+            cancelButton.current.focus({ preventScroll: true });
           }}
           onCloseAutoFocus={event => {
             const target = returnFocusTarget.current;
@@ -64,7 +69,7 @@ export const DedupeActionDialog: React.FC<Props> = ({
           }}
           onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
-          <header className="nfc-v2-advanced-dedupe-dialog-header">
+          <header className="nfc-v2-advanced-dedupe-dialog-header" data-form-dialog-header>
             <span className="nfc-v2-advanced-dedupe-dialog-icon">
               <ConsoleIcon name="shield-check" size={20} />
             </span>
@@ -75,7 +80,7 @@ export const DedupeActionDialog: React.FC<Props> = ({
             </button>
           </header>
           <Dialog.Description asChild>
-            <div className="nfc-v2-advanced-dedupe-dialog-copy">
+            <div className="nfc-v2-advanced-dedupe-dialog-copy" data-form-dialog-body>
               {kind === 'generate' && (
                 <>
                   <p>将提交当前权威预览摘要与 Storage Action（{actionLabel}），以原子方式创建执行计划草案。</p>
@@ -109,14 +114,14 @@ export const DedupeActionDialog: React.FC<Props> = ({
               )}
             </div>
           </Dialog.Description>
-          <div className="nfc-v2-advanced-dedupe-dialog-actions">
+          <footer className="nfc-v2-advanced-dedupe-dialog-actions" data-form-dialog-actions>
             {kind !== 'empty_plan' && (
-              <ConsoleButton disabled={busy} onClick={cancelSafely}>取消</ConsoleButton>
+              <ConsoleButton ref={cancelButton} disabled={busy} onClick={cancelSafely}>取消</ConsoleButton>
             )}
             <ConsoleButton variant="primary" disabled={!kind || busy} loading={busy} onClick={confirmSafely}>
               {kind ? confirmTexts[kind] : '确定'}
             </ConsoleButton>
-          </div>
+          </footer>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

@@ -10,23 +10,27 @@ interface Props {
   children: React.ReactNode;
   className?: string;
   titleAside?: React.ReactNode;
+  dismissDisabled?: boolean;
 }
 
 /** Right-aligned Radix sheet with controlled close and accessible focus behavior. */
 export const ConsoleSheet: React.FC<Props> = ({
   open, onClose, title, description, children, className = '',
-  titleAside,
+  titleAside, dismissDisabled = false,
 }) => {
   // Controlled Sheets have no Dialog.Trigger, so remember the active launcher
   // before the portal moves keyboard focus into the inspector.
   const returnFocusTarget = React.useRef<HTMLElement | null>(null);
   return (
-    <Dialog.Root open={open} onOpenChange={next => { if (!next) onClose(); }}>
+    <Dialog.Root open={open} onOpenChange={next => { if (!next && !dismissDisabled) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-sheet-overlay" />
         <Dialog.Content
           className={'nfc-v2-sheet nfc-overlay-drawer ' + className}
           {...(description ? {} : { 'aria-describedby': undefined })}
+          aria-busy={dismissDisabled || undefined}
+          onEscapeKeyDown={event => { if (dismissDisabled) event.preventDefault(); }}
+          onPointerDownOutside={event => { if (dismissDisabled) event.preventDefault(); }}
           onOpenAutoFocus={() => {
             const active = document.activeElement;
             returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
@@ -40,7 +44,7 @@ export const ConsoleSheet: React.FC<Props> = ({
             if (target?.isConnected && !target.matches(':disabled') &&
                 !target.closest('[aria-disabled="true"], [inert], [hidden]')) {
               event.preventDefault();
-              target.focus();
+              target.focus({ preventScroll: true });
             }
           }}
         >
@@ -56,7 +60,7 @@ export const ConsoleSheet: React.FC<Props> = ({
             </div>
             <Dialog.Close asChild>
               <button type="button" className="nfc-v2-dialog-close"
-                aria-label="关闭详情抽屉">
+                aria-label="关闭详情抽屉" disabled={dismissDisabled}>
                 <ConsoleIcon name="x" size={20} />
               </button>
             </Dialog.Close>

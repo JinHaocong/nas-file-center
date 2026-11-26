@@ -80,7 +80,9 @@ async function inspect(page, theme, width, mode) {
         rect: { left: b.left, right: b.right, top: b.top, bottom: b.bottom },
       };
     };
-    const expected = theme === 'dark' ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
+    const expected = mode === 'nested'
+      ? (theme === 'dark' ? 'rgb(35, 39, 34)' : 'rgb(255, 254, 250)')
+      : (theme === 'dark' ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)');
     const rows = mode === 'nested' ? [
       ['sheet overlay', '.nfc-v2-sheet-overlay', 1100, false],
       ['sheet dialog', '.nfc-v2-sheet.nfc-overlay-drawer', 1101, true],

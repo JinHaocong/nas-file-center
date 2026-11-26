@@ -25,7 +25,7 @@ export const ResponsiveNav: React.FC<Props> = ({ open, onClose, opener }) => {
           const field = content.current?.querySelector('input');
           if (field && window.matchMedia?.('(min-width: 768px)').matches) {
             event.preventDefault();
-            field.focus();
+            field.focus({ preventScroll: true });
           }
         }}
         onCloseAutoFocus={event => {
@@ -36,10 +36,10 @@ export const ResponsiveNav: React.FC<Props> = ({ open, onClose, opener }) => {
           }
           if (opener.current?.isConnected && opener.current.getClientRects().length) {
             event.preventDefault();
-            opener.current.focus();
+            opener.current.focus({ preventScroll: true });
           } else {
             event.preventDefault();
-            document.querySelector<HTMLButtonElement>('.nfc-header-nav-toggle')?.focus();
+            document.querySelector<HTMLButtonElement>('.nfc-header-nav-toggle')?.focus({ preventScroll: true });
           }
         }}>
         <header className="nfc-studio-tools-title">

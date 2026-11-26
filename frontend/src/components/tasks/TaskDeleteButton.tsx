@@ -81,7 +81,10 @@ export const TaskDeleteButton: React.FC<Props> = ({
         onOpenChange={next => { if (!deleteMutation.isPending && !deleteInFlight.current) setOpen(next); }}
         title={'确认删除任务 #' + task.id + '？'}
         description={
-          <p>任务将从列表移除，可安全回收的智能整理报告会排队清理。恢复所需资料、NAS 媒体文件和 Audit 审计记录会保留。</p>
+          <dl className="nfc-maintenance-impact nfc-maintenance-impact-list">
+            <div><dt>移除任务</dt><dd>任务将从列表移除，可安全回收的智能整理报告会排队清理。</dd></div>
+            <div><dt>保留内容</dt><dd>恢复所需资料、NAS 媒体文件和 Audit 审计记录会保留。</dd></div>
+          </dl>
         }
         confirmText="确认删除"
         onConfirm={() => { void confirmDelete(); }}

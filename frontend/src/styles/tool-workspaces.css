@@ -1,0 +1,332 @@
+/* Tool workspaces share the application palette but keep their own reading order. */
+.nfc-studio .nfc-app-main .nfc-tool-workspace {
+  --tool-space: clamp(16px, 1.6vw, 24px);
+  --tool-border: var(--studio-line, var(--nfc-hairline));
+  --tool-paper: var(--studio-paper, var(--nfc-surface-1));
+  --tool-soft: var(--studio-soft, var(--nfc-surface-2));
+  --tool-muted: var(--studio-muted, var(--nfc-text-muted));
+  gap: var(--tool-space);
+  min-width: 0;
+}
+
+.nfc-tool-workspace :is(.nfc-tool-workflow-preview, .nfc-workflow-definition-rail,
+  .nfc-workflow-pipeline-canvas, .nfc-tool-profile-view) {
+  scroll-margin-block-start: 90px;
+  min-width: 0;
+}
+
+.nfc-tool-workspace :is(.nfc-tool-workflow-preview, .nfc-workflow-definition-rail,
+  .nfc-workflow-pipeline-canvas, .nfc-tool-profile-view):focus-visible {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: 4px;
+  border-radius: var(--nfc-panel-radius);
+}
+
+.nfc-tool-workflow-nav,
+.nfc-tool-filter-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nfc-tool-workflow-nav {
+  padding: 4px;
+  width: fit-content;
+  max-width: 100%;
+  background: var(--tool-soft);
+  border: 1px solid var(--tool-border);
+  border-radius: var(--nfc-radius-control);
+}
+
+.nfc-tool-workspace .nfc-workflow-editor-layout {
+  align-items: start;
+  gap: var(--tool-space);
+}
+
+.nfc-tool-workspace .nfc-v2-step-toggle .nfc-step-index {
+  border-inline-end: 1px solid var(--tool-border);
+  padding-inline-end: 7px;
+}
+
+.nfc-tool-workspace .nfc-v2-step-toggle[aria-expanded='true'] .nfc-step-index {
+  color: var(--nfc-tint);
+  border-color: var(--nfc-tint-line);
+}
+
+.nfc-tool-workspace .nfc-v2-workflow-table tbody tr:focus-within {
+  background-color: var(--tool-soft);
+}
+
+.nfc-tool-workspace .nfc-tool-filter-strip {
+  justify-content: space-between;
+  padding: 12px var(--tool-space);
+  border-bottom: 1px solid var(--tool-border);
+}
+
+.nfc-tool-filter-strip [role='status'] {
+  color: var(--tool-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.nfc-tool-workflow-mode-filter {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--tool-muted);
+  font-size: 12px;
+}
+
+.nfc-tool-workflow-mode-filter select {
+  min-height: 36px;
+  padding: 5px 10px;
+  color: var(--nfc-text);
+  background: var(--tool-paper);
+  border: 1px solid var(--tool-border);
+  border-radius: var(--nfc-radius-control);
+  font: inherit;
+}
+
+.nfc-tool-segment {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--tool-soft);
+  border: 1px solid var(--tool-border);
+  border-radius: var(--nfc-radius-control);
+  padding: 3px;
+}
+
+.nfc-tool-workspace .nfc-tool-segment > button[aria-pressed='true'] {
+  background: var(--tool-paper);
+  border-color: var(--nfc-tint-line);
+  color: var(--nfc-tint);
+}
+
+.nfc-tool-settings-layout {
+  display: grid;
+  min-width: 0;
+  align-items: start;
+  gap: var(--tool-space);
+}
+
+.nfc-tool-workspace .nfc-settings-section-nav {
+  position: relative;
+  max-width: 100%;
+  width: 100%;
+  padding: 5px;
+}
+
+.nfc-tool-workspace .nfc-settings-section-nav button {
+  display: inline-flex;
+  align-items: center;
+  text-align: start;
+  gap: 7px;
+  min-height: 38px;
+  color: var(--tool-muted);
+}
+
+.nfc-tool-workspace .nfc-settings-section-nav [aria-selected='true'] {
+  color: var(--nfc-tint);
+  box-shadow: inset 0 0 0 1px var(--nfc-tint-line);
+}
+
+.nfc-tool-settings-layout > [role='tabpanel'] {
+  min-width: 0;
+  align-content: start;
+}
+
+.nfc-tool-workspace .nfc-tool-source-layout {
+  display: grid;
+  align-items: start;
+  gap: var(--tool-space);
+  min-width: 0;
+}
+
+.nfc-tool-source-layout > *,
+.nfc-tool-path-match-rules {
+  min-width: 0;
+}
+
+.nfc-tool-workspace .nfc-tool-source-editor {
+  border-color: var(--nfc-tint-line);
+}
+
+.nfc-tool-workspace .nfc-tool-source-editor .nfc-dv-actions {
+  margin-block-start: 14px;
+}
+
+.nfc-tool-workspace .nfc-dv-pair-card {
+  align-content: start;
+}
+
+.nfc-tool-workspace .nfc-dv-footer {
+  padding-block-start: 14px;
+  border-block-start: 1px solid var(--tool-border);
+}
+
+.nfc-tool-path-match-rules {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--tool-border);
+  border-radius: var(--nfc-panel-radius);
+  background: var(--tool-soft);
+}
+
+.nfc-tool-workspace .nfc-path-match-form {
+  align-items: stretch;
+}
+
+.nfc-tool-path-match-rules .nfc-v2-path-match-patterns {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.nfc-tool-workspace .nfc-tool-swap-directories {
+  justify-content: center;
+  min-width: fit-content;
+  align-self: center;
+}
+
+.nfc-tool-filename-search {
+  display: grid;
+  gap: 5px;
+  min-width: min(100%, 176px);
+  color: var(--tool-muted);
+  font-size: 12px;
+}
+
+.nfc-tool-filename-search input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--tool-border);
+  border-radius: var(--nfc-radius-control);
+  background: var(--tool-paper);
+  color: var(--nfc-text);
+  font: inherit;
+}
+
+.nfc-tool-workspace .nfc-v2-rename-mode label {
+  gap: 7px;
+  justify-content: center;
+  min-width: 0;
+}
+
+.nfc-tool-workspace .nfc-v2-rename-mode label:has(input:focus-visible) {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: -2px;
+}
+
+.nfc-tool-workspace .nfc-tool-profile-view {
+  display: grid;
+  gap: var(--tool-space);
+  min-width: 0;
+}
+
+.nfc-tool-workspace .nfc-tool-archive-actions {
+  padding-block: 10px;
+  border-block: 1px solid var(--tool-border);
+}
+
+.nfc-tool-workspace .nfc-archive-recovery-check-result {
+  border-inline-start: 3px solid var(--nfc-tint-line);
+}
+
+/* These features use portal dialogs, so their internal layout has a local scope. */
+.nfc-v2-scheduler-editor .nfc-v2-scheduler-section-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nfc-v2-scheduler-editor .nfc-v2-scheduler-section-label::after {
+  content: '';
+  border-block-start: 1px solid var(--studio-line, var(--nfc-hairline));
+  flex: 1;
+}
+
+.nfc-v2-organizer-profile-dialog .nfc-v2-organizer-profile-errors {
+  margin-block: 12px 4px;
+}
+
+.nfc-dv-remote-dialog .nfc-dv-remote-current {
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 1200px) {
+  .nfc-studio .nfc-app-main .nfc-tool-workspace .nfc-workflow-editor-layout {
+    grid-template-columns: minmax(254px, 30%) minmax(0, 1fr);
+  }
+
+  .nfc-tool-settings-layout {
+    grid-template-columns: minmax(172px, 22%) minmax(0, 1fr);
+  }
+
+  .nfc-tool-workspace .nfc-settings-section-nav {
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .nfc-tool-workspace .nfc-settings-section-nav button {
+    width: 100%;
+  }
+
+  .nfc-tool-workspace .nfc-tool-source-layout.is-editing {
+    grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr);
+  }
+
+  .nfc-tool-source-layout.is-editing .nfc-dv-source-entry {
+    flex-wrap: wrap;
+  }
+
+  .nfc-tool-source-layout.is-editing .nfc-dv-source-buttons {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .nfc-studio .nfc-tool-workspace.nfc-archive-recovery-page .nfc-archive-recovery-layout {
+    grid-template-columns: minmax(0, 1.25fr) minmax(320px, 1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .nfc-tool-workspace .nfc-tool-swap-directories {
+    display: inline-flex;
+    justify-self: end;
+  }
+
+  .nfc-tool-workspace .nfc-settings-section-nav button,
+  .nfc-tool-filename-search input,
+  .nfc-tool-workflow-mode-filter select {
+    min-height: 44px;
+  }
+
+  .nfc-tool-workspace .nfc-settings-section-nav button {
+    padding-inline: 10px;
+  }
+
+  .nfc-tool-workspace .nfc-v2-rename-mode label svg {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-tool-workspace :is(.nfc-tool-source-editor, .nfc-tool-profile-view, .nfc-tool-settings-layout > [role='tabpanel']) {
+    animation: nfc-tool-section-in 170ms var(--nfc-motion-ease, ease-out) both;
+  }
+
+  .nfc-tool-workspace :is(.nfc-settings-section-nav, .nfc-tool-segment) button {
+    transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+  }
+
+  @keyframes nfc-tool-section-in {
+    from { opacity: .62; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}

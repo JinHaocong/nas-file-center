@@ -47,8 +47,8 @@ describe('Console v2 workflow list native migration', () => {
     assert.deepEqual(getPaginationState(2, 30, 31), { pages: 2, current: 2, start: 31, end: 31 });
     const s = read('src/pages/Workflows/WorkflowList.tsx');
     for (const term of [
-      'getPaginationState(page, pageSize, items.length)', 'visibleItems = useMemo(',
-      'items.slice((currentPage - 1) * pageSize, currentPage * pageSize)',
+      'getPaginationState(page, pageSize, matchedItems.length)', 'visibleItems = useMemo(',
+      'matchedItems.slice((currentPage - 1) * pageSize, currentPage * pageSize)',
       'visibleItems.map(workflow =>', '<ConsolePagination page={currentPage}',
       'pageSizes={[15, 30, 60]}', 'setPage(nextPage)', 'setPageSize(nextPageSize)',
       'setPage(1)', 'checked={includeArchived}',

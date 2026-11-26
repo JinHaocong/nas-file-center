@@ -11,13 +11,15 @@ describe('Pure White Stage 5E-Z Plan History cleanup controlled dialog focus ret
   test('retains the actual keyboard opener before Radix auto-focus without an artificial Trigger', () => {
     for (const token of [
       'const returnFocusTarget = useRef<HTMLElement | null>(null);',
-      'onOpenAutoFocus={() => {',
+      'onOpenAutoFocus={event => {',
+      'cancelButton.current.focus({ preventScroll: true });',
       'const active = document.activeElement;',
       'active instanceof HTMLElement && active !== document.body',
       'returnFocusTarget.current = active',
       '<Dialog.Root open={open}',
       '<ConsoleButton leadingIcon={<ConsoleIcon name="trash" size={16} />}',
     ]) assert.ok(modal.includes(token), token);
+    assert.ok(modal.indexOf('returnFocusTarget.current = active') < modal.indexOf('cancelButton.current.focus('));
     assert.doesNotMatch(modal, /<Dialog\.Trigger/);
   });
 

@@ -86,6 +86,7 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
   const { isMobile } = useResponsive();
   const toast = useConsoleToast();
   const rollbackInFlight = useRef(false);
+  const definitionOpener = useRef<HTMLButtonElement | null>(null);
   const [inspectRevision, setInspectRevision] = useState<WorkflowRevisionResponse | null>(null);
   const [rollbackIntent, setRollbackIntent] = useState<RollbackIntent | null>(null);
 
@@ -158,7 +159,10 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
   const revisionActions = (record: WorkflowRevisionResponse) => (
     <div className="nfc-v2-revision-actions">
       <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="file-text" size={15} />}
-        onClick={() => setInspectRevision(record)}>查看</ConsoleButton>
+        onClick={event => {
+          definitionOpener.current = event.currentTarget;
+          setInspectRevision(record);
+        }}>查看</ConsoleButton>
       {record.revision !== currentRevision && (
         <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="arrow-right" size={15} />}
           onClick={() => jumpToRevision(record.revision)}>跳转</ConsoleButton>
@@ -174,8 +178,9 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
   return (
     <>
       <ConsoleSheet open={open} onClose={handleClose}
-        title={`Workflow #${workflowId}`}
-        description="版本历史 · Definition SHA256 对应已保存的不可变工作流定义" className="nfc-v2-revision-sheet">
+        title={`工作流 #${workflowId} · 版本历史`}
+        description="每个已保存版本都有独立的 Definition SHA256。"
+        className="nfc-v2-revision-sheet nfc-reading-sheet" dismissDisabled={rollbackMutation.isPending}>
         {isError && (
           <div className="nfc-v2-revision-error" role="alert">
             <strong>获取版本历史失败</strong>
@@ -237,7 +242,14 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
       }}>
         <Dialog.Portal>
           <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-revision-inspect-overlay" />
-          <Dialog.Content className="nfc-v2-dialog nfc-v2-revision-inspect nfc-overlay-modal">
+          <Dialog.Content className="nfc-v2-dialog nfc-v2-revision-inspect nfc-overlay-modal nfc-reading-dialog"
+            onCloseAutoFocus={event => {
+              const opener = definitionOpener.current;
+              definitionOpener.current = null;
+              if (!opener?.isConnected || opener.disabled) return;
+              event.preventDefault();
+              opener.focus({ preventScroll: true });
+            }}>
             <header className="nfc-v2-dialog-heading">
               <ConsoleIcon name="file-text" size={19} />
               <div>
@@ -254,7 +266,7 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
               <div className="nfc-v2-revision-definition">
                 <span className="nfc-v2-revision-field-label">Definition SHA256</span>
                 <CopyableRevisionDigest sha={inspectRevision.definition_sha256} />
-                <pre className="nfc-code-block nfc-v2-revision-json">
+                <pre className="nfc-code-block nfc-v2-revision-json" tabIndex={0} aria-label="工作流原始定义">
                   {JSON.stringify(inspectRevision.definition, null, 2)}
                 </pre>
               </div>

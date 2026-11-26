@@ -46,8 +46,10 @@ describe('Console v2 residual Ant Design cleanup — audited native safety', () 
   test('Audit displays retained events and retention policy using native controls', () => {
     const source = audit();
     for (const token of [
-      "queryKey: ['auditEvents', page, pageSize, searchText]",
-      'auditApi.listEvents(page, pageSize, searchText || undefined)',
+      "queryKey: ['auditEvents', page, pageSize, appliedSearch, operationFilter]",
+      'auditApi.listEvents(page, pageSize, appliedSearch || undefined, operationFilter)',
+      'setAppliedSearch(searchText.trim())',
+      'filterByOperation(selectedEvent.operation)',
       "queryKey: ['dataLifecyclePolicy']",
       'formatAuditRetention(lifecyclePolicy.audit_retention_days)',
       'isSuccessResult(event.result)', '<StatusBadge',
@@ -68,7 +70,7 @@ describe('Console v2 residual Ant Design cleanup — audited native safety', () 
       'selectedEvent.details, null, 2',
       'setSelectedEvent(event)', 'setSelectedEvent(null)',
       'onPointerDownOutside={event => event.preventDefault()}',
-      '详细元数据 JSON',
+      '<summary>详细元数据 JSON</summary>', 'onCloseAutoFocus=',
     ]) assert.ok(source.includes(token), token);
     assert.doesNotMatch(source, /useMutation|auditApi\.(delete|clear|update)/);
   });

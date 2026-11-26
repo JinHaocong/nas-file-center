@@ -1,0 +1,137 @@
+/* Let maintenance bodies scroll independently of their title and review actions. */
+.nfc-v2-dialog.nfc-maintenance-dialog {
+  --maintenance-inset: clamp(16px, 3vw, 24px);
+  display: flex;
+  flex-direction: column;
+  max-block-size: min(860px, calc(100dvh - 32px));
+  overflow: hidden;
+}
+
+.nfc-maintenance-dialog > :is(.nfc-v2-dialog-heading, .nfc-v2-confirm-actions) {
+  flex: 0 0 auto;
+  min-inline-size: 0;
+  padding-inline: var(--maintenance-inset);
+}
+
+.nfc-maintenance-dialog > .nfc-v2-dialog-heading > div {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.nfc-maintenance-subtitle {
+  margin: 4px 0 0;
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.nfc-maintenance-dialog > :is(.nfc-history-cleanup-stack, .nfc-v2-quarantine-body, .nfc-v2-quarantine-bulk-body) {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  min-inline-size: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  align-content: start;
+  padding: 16px var(--maintenance-inset) 20px;
+}
+
+.nfc-maintenance-dialog > .nfc-v2-confirm-actions {
+  position: relative;
+  z-index: 1;
+  padding-block: 12px;
+  border-block-start: 1px solid var(--nfc-hairline);
+  background: inherit;
+}
+
+.nfc-maintenance-selection {
+  margin-inline-end: auto;
+  min-inline-size: 0;
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.nfc-maintenance-dialog :is(.nfc-v2-history-statuses, .nfc-v2-plan-history-options) label {
+  min-block-size: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--nfc-hairline);
+  border-radius: 8px;
+  background: var(--nfc-surface-1);
+  color: var(--nfc-text);
+  font-size: 13px;
+}
+
+.nfc-maintenance-dialog :is(.nfc-v2-history-statuses, .nfc-v2-plan-history-options) label:has(input:checked) {
+  border-color: var(--nfc-tint-line);
+  background: var(--nfc-tint-soft);
+}
+
+.nfc-maintenance-dialog :is(.nfc-v2-history-statuses, .nfc-v2-plan-history-options) label:has(:focus-visible) {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: 2px;
+}
+
+.nfc-maintenance-dialog :is(.nfc-v2-history-statuses, .nfc-v2-plan-history-options) label:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: .62;
+}
+
+.nfc-maintenance-dialog :is(input, button) { scroll-margin-block: 10px; }
+.nfc-maintenance-dialog .nfc-code-path { max-inline-size: 100%; }
+.nfc-maintenance-dialog .nfc-maintenance-path-list {
+  display: grid;
+  gap: 6px;
+  min-inline-size: 0;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.nfc-maintenance-path-list > li { min-inline-size: 0; }
+.nfc-maintenance-pending { margin: 0; color: var(--nfc-text-muted); font-size: 12px; }
+
+.nfc-maintenance-impact { display: grid; gap: 10px; min-inline-size: 0; margin: 0; }
+.nfc-maintenance-impact :where(dt, dd, p) { margin: 0; overflow-wrap: anywhere; }
+.nfc-maintenance-target-name { color: var(--nfc-text); overflow-wrap: anywhere; }
+.nfc-maintenance-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 88px), 1fr));
+  gap: 6px;
+  margin: 0;
+}
+.nfc-maintenance-summary > div,
+.nfc-maintenance-impact-list > div {
+  min-inline-size: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--nfc-hairline);
+  border-radius: 8px;
+  background: var(--nfc-surface-2);
+}
+.nfc-maintenance-summary dd { color: var(--nfc-text); font-size: 16px; font-weight: 720; font-variant-numeric: tabular-nums; }
+.nfc-maintenance-impact-list dt { margin-block-end: 3px; color: var(--nfc-text); font-weight: 690; }
+.nfc-v2-confirm-description > .nfc-maintenance-action-context {
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid var(--nfc-hairline-strong);
+  overflow-wrap: anywhere;
+}
+.nfc-maintenance-task-actions .nfc-v2-retry-result { flex-basis: 100%; overflow-wrap: anywhere; }
+
+.nfc-maintenance-inventory .nfc-organizer-report-list { gap: 7px; }
+.nfc-maintenance-inventory .nfc-organizer-report-heading :where(strong, span) { min-inline-size: 0; overflow-wrap: anywhere; }
+.nfc-maintenance-inventory-footer {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 1;
+  border-block-start: 1px solid var(--nfc-hairline);
+  background: var(--nfc-surface-1);
+}
+.nfc-maintenance-inventory-footer .nfc-console-pagination { margin-block: 0; }
+.nfc-maintenance-inventory-footer > .nfc-maintenance-pending { padding-block-start: 8px; }
+
+@media (max-width: 767px) {
+  .nfc-v2-dialog.nfc-maintenance-dialog { max-block-size: calc(100dvh - 16px); }
+  .nfc-maintenance-dialog > .nfc-v2-confirm-actions { gap: 6px; padding-block: 9px; }
+  .nfc-maintenance-dialog > .nfc-v2-confirm-actions > button { min-block-size: 44px; }
+  .nfc-maintenance-selection { flex: 1 0 100%; }
+  .nfc-maintenance-dialog :is(.nfc-v2-history-statuses, .nfc-v2-plan-history-options) label { min-block-size: 46px; }
+}

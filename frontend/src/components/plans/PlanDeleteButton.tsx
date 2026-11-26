@@ -68,7 +68,11 @@ export const PlanDeleteButton: React.FC<PlanDeleteButtonProps> = ({
       </span>
       <ConsoleConfirmDialog open={open}
         onOpenChange={next => { if (!busy) setOpen(next); }}
-        title={title} description={description} danger
+        title={title} danger
+        description={<div className="nfc-maintenance-impact">
+          {plan.name && <strong className="nfc-maintenance-target-name">{plan.name}</strong>}
+          <p>{description}</p>
+        </div>}
         confirmText="确认删除" disabled={!canDelete || busy}
         busy={busy} onConfirm={() => { void handleConfirm(); }} />
     </>

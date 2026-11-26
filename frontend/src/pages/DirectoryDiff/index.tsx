@@ -75,6 +75,16 @@ export const DirectoryDiffPage: React.FC = () => {
     clearResult();
   };
 
+  const canSwapRoots = Boolean(rootA.trim() && rootB.trim() && rootA !== rootB);
+
+  /** Reversing the sides invalidates the directional results and their verification authority. */
+  const swapRoots = () => {
+    if (!canSwapRoots || previewGuard.current || verifyGuard.current) return;
+    setRootA(rootB);
+    setRootB(rootA);
+    clearResult();
+  };
+
   const previewMutation = useMutation({ mutationFn: directoryDiffApi.preview });
   const verifyMutation = useMutation({ mutationFn: directoryDiffApi.verify });
 
@@ -163,20 +173,22 @@ export const DirectoryDiffPage: React.FC = () => {
   ) : <span className="nfc-v2-directory-diff-muted">—</span>;
 
   return (
-    <div className="nfc-operations-page nfc-directory-diff-page nfc-page-layout-workbench nfc-v2-directory-diff">
+    <div className="nfc-operations-page nfc-directory-diff-page nfc-page-layout-workbench nfc-v2-directory-diff nfc-tool-workspace">
       <PageHeader title="双目录差异对比"
         description="逐项核对相对路径、文件类型和大小，必要时校验文件内容。" />
       <DataPanel title="选择对比目录"
         description="选择两个互不包含的目录。每侧最多读取 10,000 个条目，自动排除隔离区和符号链接。"
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
-        <div className="nfc-v2-directory-diff-form">
+        <div className="nfc-v2-directory-diff-form" aria-busy={previewLoading || undefined}>
           <div className="nfc-v2-directory-diff-pair">
             <div className="nfc-v2-directory-diff-field" role="group" aria-label="目录 A">
               <span className="nfc-v2-directory-diff-label"><ConsoleIcon name="folder-open" size={18} />目录 A</span>
               <DirectoryPicker value={rootA} placeholder="选择待对比的 A 目录"
                 onChange={value => patchRoot('a', typeof value === 'string' ? value : value[0] || '')} />
             </div>
-            <ConsoleIcon name="git-compare" size={19} className="nfc-v2-directory-diff-connector" />
+            <ConsoleButton className="nfc-v2-directory-diff-connector nfc-tool-swap-directories" size="sm"
+              aria-label="交换目录 A 和 B" disabled={!canSwapRoots || previewLoading || verifyingPath !== null}
+              onClick={swapRoots} leadingIcon={<ConsoleIcon name="git-compare" size={17} />}>交换</ConsoleButton>
             <div className="nfc-v2-directory-diff-field" role="group" aria-label="目录 B">
               <span className="nfc-v2-directory-diff-label"><ConsoleIcon name="folder-open" size={18} />目录 B</span>
               <DirectoryPicker value={rootB} placeholder="选择待对比的 B 目录"

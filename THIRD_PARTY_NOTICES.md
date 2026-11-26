@@ -10,6 +10,8 @@ NAS File Center bundles the following libraries locally in the frontend package 
 - **TanStack Query** — MIT License — https://tanstack.com/query
 - **Apache ECharts / echarts-for-react** — Apache License 2.0 / MIT — https://echarts.apache.org/
 - **Day.js** — MIT License — https://day.js.org/
+- **Motion** — MIT License — https://motion.dev/
+- **Three.js** — MIT License — https://threejs.org/
 - **Argon2 / argon2-cffi** — MIT / Apache 2.0 — https://github.com/hynek/argon2-cffi
 - **fclones** — MIT License — https://github.com/pkolaczk/fclones
 - **cryptography (Python)** — Apache-2.0 / BSD licenses — https://cryptography.io/ (AES-256 CBC decryptor used only after explicit recovery authorization)

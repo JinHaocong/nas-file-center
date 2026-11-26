@@ -15,6 +15,7 @@ export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const submissionInFlight = useRef(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -66,6 +67,7 @@ export const LoginPage: React.FC = () => {
       </header>
 
       <div className="nfc-v2-login-layout">
+        <div className="nfc-login-storage-art" aria-hidden="true" />
         <section className="nfc-login-panel" aria-labelledby="nfc-login-title">
           <h1 id="nfc-login-title" className="nfc-v2-login-heading">登录文件空间</h1>
 
@@ -96,9 +98,14 @@ export const LoginPage: React.FC = () => {
               <label htmlFor="nfc-login-password">管理密码</label>
               <div className="nfc-v2-login-input-wrap">
                 <ConsoleIcon name="lock" size={18} />
-                <input id="nfc-login-password" type="password" name="password" required
+                <input id="nfc-login-password" type={passwordVisible ? 'text' : 'password'} name="password" required
                   value={password} disabled={loading} autoComplete="current-password"
                   onChange={event => setPassword(event.target.value)} />
+                <button type="button" className="nfc-login-password-visibility" disabled={loading}
+                  aria-controls="nfc-login-password" aria-label={passwordVisible ? '隐藏密码' : '显示密码'}
+                  onClick={() => setPasswordVisible(current => !current)}>
+                  {passwordVisible ? '隐藏' : '显示'}
+                </button>
               </div>
             </div>
 
@@ -111,7 +118,7 @@ export const LoginPage: React.FC = () => {
         </section>
       </div>
 
-      <footer className="nfc-login-footer">NAS File Center v1.8.18</footer>
+      <footer className="nfc-login-footer">NAS File Center v2.0.0</footer>
     </main>
   );
 };

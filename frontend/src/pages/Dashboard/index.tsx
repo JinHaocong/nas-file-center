@@ -1,7 +1,7 @@
 import { taskTypeLabel } from '../../utils/taskTypeLabel';
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { dashboardApi, scansApi } from '../../api/domain';
 import { tasksApi } from '../../api/tasks';
 import { PageHeader } from '../../components/ui/PageHeader';
@@ -15,6 +15,7 @@ import { useResponsive } from '../../hooks/useResponsive';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import { DirectoryShelf } from './DirectoryShelf';
+import { FileWorkspace } from './FileWorkspace';
 
 interface QuickAction {
   title: string;
@@ -42,8 +43,15 @@ const taskStateLabel: Record<string, string> = {
 };
 
 export const DashboardPage: React.FC = () => {
+  const [parameters] = useSearchParams();
+  return parameters.get('view') === 'overview' ? <DashboardOverview /> : <FileWorkspace />;
+};
+
+/** Keep operational statistics one step away from the file-first workspace. */
+const DashboardOverview: React.FC = () => {
   useTitle('文件空间');
   const navigate = useNavigate();
+  const [parameters, setParameters] = useSearchParams();
   const { isMobile } = useResponsive();
   const { data: summary, isLoading: summaryLoading, refetch: refetchSummary, isError: summaryError } = useQuery({
     queryKey: ['dashboardSummary'],
@@ -77,6 +85,13 @@ export const DashboardPage: React.FC = () => {
             description="从目录继续整理，也可以查看最近的扫描和任务。"
             actions={
               <>
+                <ConsoleButton onClick={() => {
+                  const next = new URLSearchParams(parameters);
+                  next.delete('view');
+                  setParameters(next);
+                }}>
+                  <ConsoleIcon name="folder-open" size={17} /> 返回文件空间
+                </ConsoleButton>
                 <ConsoleButton variant="primary" onClick={() => navigate('/batch?operation=media-organize')}>
                   <ConsoleIcon name="folders" size={17} /> 智能媒体整理
                 </ConsoleButton>

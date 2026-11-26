@@ -1,5 +1,5 @@
 import type { ScanId } from '../../types';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation } from '@tanstack/react-query';
 import { scansApi } from '../../api/domain';
@@ -8,7 +8,6 @@ import { formatBytes } from '../../utils/format';
 import { CodePath } from '../ui/CodePath';
 import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
-import { useConsoleToast } from '../ui/ConsoleToast';
 import { type DedupePairValues, validateDedupePair, toDedupePairPayload } from './diagnostic_form';
 
 interface DedupeDiagnosticModalProps {
@@ -82,14 +81,15 @@ const DiagnosticPath: React.FC<{
   label: string;
   item: DedupeDiagnosticResponse['paths'][number];
 }> = ({ label, item }) => {
-  const toast = useConsoleToast();
+  const [copyResult, setCopyResult] = useState<{ hash: string; copied: boolean } | null>(null);
+  const currentCopy = copyResult && copyResult.hash === item.sha256 ? copyResult.copied : undefined;
   const copyHash = async () => {
     if (!item.sha256) return;
     try {
       await navigator.clipboard.writeText(item.sha256);
-      toast.success('SHA-256 已复制');
+      setCopyResult({ hash: item.sha256, copied: true });
     } catch {
-      toast.error('无法复制 SHA-256，请手动选中复制');
+      setCopyResult({ hash: item.sha256, copied: false });
     }
   };
   return (
@@ -112,9 +112,12 @@ const DiagnosticPath: React.FC<{
           <span className="nfc-mono">{item.sha256 || item.hash_error || '—'}</span>
           {item.sha256 && (
             <button type="button" aria-label={'复制' + label + ' SHA-256'} onClick={() => { void copyHash(); }}>
-              <ConsoleIcon name="file-check" size={15} /> 复制
+              <ConsoleIcon name="copy" size={15} /> 复制
             </button>
           )}
+          <span className="nfc-diagnostic-copy-feedback" role="status">
+            {currentCopy === true ? 'SHA-256 已复制' : currentCopy === false ? '无法自动复制，请选中摘要文本复制' : ''}
+          </span>
         </dd></div>
       </dl>
     </section>
@@ -127,12 +130,13 @@ export const DedupeDiagnosticModal: React.FC<DedupeDiagnosticModalProps> = ({
   const [values, setValues] = useState<DedupePairValues>({ pathA: '', pathB: '' });
   const [validationError, setValidationError] = useState<string | null>(null);
   const inFlight = useRef(false);
-  const toast = useConsoleToast();
+  const firstPath = useRef<HTMLInputElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const formId = useId();
 
   const mutation = useMutation({
     mutationFn: (request: ReturnType<typeof toDedupePairPayload>) =>
       scansApi.diagnosePair(request),
-    onError: (err: Error) => toast.error(err.message || '重复诊断失败'),
     onSettled: () => { inFlight.current = false; },
   });
 
@@ -152,6 +156,7 @@ export const DedupeDiagnosticModal: React.FC<DedupeDiagnosticModalProps> = ({
     onClose();
   };
   const update = (key: keyof DedupePairValues, value: string) => {
+    if (busy || inFlight.current) return;
     setValues(previous => ({ ...previous, [key]: value }));
     setValidationError(null);
     if (!busy) mutation.reset(); // Results never describe edited paths.
@@ -171,15 +176,31 @@ export const DedupeDiagnosticModal: React.FC<DedupeDiagnosticModalProps> = ({
 
   const result = mutation.data;
   const diagnosis = result ? diagnosisCopy[result.diagnosis] : null;
+  const error = validationError ?? (mutation.isError ? mutation.error.message || '重复诊断失败' : null);
 
   return (
     <Dialog.Root open={open} onOpenChange={next => { if (!next) close(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-dedupe-overlay" />
         <Dialog.Content className="nfc-overlay-modal nfc-dedupe-diagnostic-modal nfc-v2-dedupe-dialog nfc-v2-diagnostic-dialog"
+          data-form-dialog aria-busy={busy || undefined}
+          onOpenAutoFocus={event => {
+            const active = document.activeElement;
+            openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+            if (!firstPath.current) return;
+            event.preventDefault();
+            firstPath.current.focus({ preventScroll: true });
+          }}
+          onCloseAutoFocus={event => {
+            const opener = openerRef.current;
+            openerRef.current = null;
+            if (!opener?.isConnected || opener.matches(':disabled') || !opener.getClientRects().length) return;
+            event.preventDefault();
+            opener.focus({ preventScroll: true });
+          }}
           onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
-          <header className="nfc-v2-dedupe-dialog-header">
+          <header className="nfc-v2-dedupe-dialog-header" data-form-dialog-header>
             <div>
               <Dialog.Title>重复文件诊断</Dialog.Title>
               <Dialog.Description>
@@ -193,32 +214,27 @@ export const DedupeDiagnosticModal: React.FC<DedupeDiagnosticModalProps> = ({
               <ConsoleIcon name="x" size={18} />
             </button>
           </header>
-          <div className="nfc-dedupe-diagnostic-stack nfc-v2-diagnostic-stack">
+          <div className="nfc-dedupe-diagnostic-stack nfc-v2-diagnostic-stack" data-form-dialog-body>
             <div className="nfc-v2-dedupe-note" role="note">
               <ConsoleIcon name="shield-check" size={18} />
               只读诊断，不会移动、隔离或删除文件；所有文件路径受服务端 ALLOWED_ROOTS / PathGuard 限制。
             </div>
-            <form className="nfc-v2-dedupe-form" onSubmit={submit}>
-              <div className="nfc-v2-dedupe-field">
-                <label htmlFor="nfc-diagnostic-path-a">文件 A</label>
-                <input id="nfc-diagnostic-path-a" required type="text" placeholder="/data/..."
-                  value={values.pathA} disabled={busy}
-                  onChange={event => update('pathA', event.target.value)} />
+            <form className="nfc-v2-dedupe-form" id={formId} onSubmit={submit}>
+              <div className="nfc-diagnostic-inputs">
+                <div className="nfc-v2-dedupe-field">
+                  <label htmlFor="nfc-diagnostic-path-a">文件 A</label>
+                  <input id="nfc-diagnostic-path-a" ref={firstPath} required type="text" placeholder="/data/..."
+                    value={values.pathA} disabled={busy}
+                    onChange={event => update('pathA', event.target.value)} />
+                </div>
+                <div className="nfc-v2-dedupe-field">
+                  <label htmlFor="nfc-diagnostic-path-b">文件 B</label>
+                  <input id="nfc-diagnostic-path-b" required type="text" placeholder="/data/..."
+                    value={values.pathB} disabled={busy}
+                    onChange={event => update('pathB', event.target.value)} />
+                </div>
               </div>
-              <div className="nfc-v2-dedupe-field">
-                <label htmlFor="nfc-diagnostic-path-b">文件 B</label>
-                <input id="nfc-diagnostic-path-b" required type="text" placeholder="/data/..."
-                  value={values.pathB} disabled={busy}
-                  onChange={event => update('pathB', event.target.value)} />
-              </div>
-              {validationError && <div className="nfc-v2-dedupe-error" role="alert">{validationError}</div>}
-              <div className="nfc-v2-dedupe-actions is-leading">
-                <ConsoleButton type="submit" variant="primary" loading={busy}
-                  leadingIcon={<ConsoleIcon name="search" size={16} />}>开始诊断</ConsoleButton>
-                {result && (
-                  <ConsoleButton disabled={busy} onClick={() => mutation.reset()}>清除结果</ConsoleButton>
-                )}
-              </div>
+              {error && <div className="nfc-v2-dedupe-error" role="alert">{error}</div>}
             </form>
             {result && diagnosis && (
               <section className="nfc-dedupe-diagnostic-result" aria-label="诊断结果">
@@ -279,6 +295,11 @@ export const DedupeDiagnosticModal: React.FC<DedupeDiagnosticModalProps> = ({
               </section>
             )}
           </div>
+          <footer className="nfc-v2-dedupe-actions" data-form-dialog-actions>
+            {result && <ConsoleButton disabled={busy} onClick={() => mutation.reset()}>清除结果</ConsoleButton>}
+            <ConsoleButton type="submit" form={formId} variant="primary" loading={busy}
+              leadingIcon={<ConsoleIcon name="search" size={16} />}>{busy ? '正在核对文件' : '开始诊断'}</ConsoleButton>
+          </footer>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

@@ -69,3 +69,18 @@ export function navLabel(pathname: string, search = ''): string {
   const destination = currentDestination(pathname, search);
   return consoleNavigation.find(item => item.path === destination)?.label ?? '文件空间';
 }
+
+/** Document workspaces own their location rail; tool routes use their navigation group. */
+export function workspaceNavigationGroup(pathname: string, search = ''): ConsoleNavGroup | undefined {
+  const destination = currentDestination(pathname, search);
+  if (destination === '/dashboard' || destination === '/batch?operation=media-organize') return undefined;
+  return consoleNavGroups.find(group => group.items.some(item => item.path === destination));
+}
+
+/** Folder history has its own scroll position; selection and filter changes keep the current view. */
+export function workspaceViewKey(pathname: string, search: string): string {
+  if (pathname !== '/dashboard') return pathname;
+  const params = new URLSearchParams(search);
+  const view = params.get('view') === 'overview' ? 'overview' : params.get('directory') ?? '';
+  return pathname + ':' + view;
+}

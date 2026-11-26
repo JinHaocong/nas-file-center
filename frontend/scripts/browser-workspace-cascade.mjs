@@ -1188,7 +1188,8 @@ try {
       const label = theme.mode + '-' + theme.system + '-' + width;
       try {
         for (const item of PAGES) {
-          await page.goto(BASE + item.path, { waitUntil: 'domcontentloaded' });
+          const pagePath = item.id === 'dashboard' ? item.path + '?view=overview' : item.path;
+          await page.goto(BASE + pagePath, { waitUntil: 'domcontentloaded' });
           await page.getByRole('heading', { name: item.heading, exact: true }).waitFor();
           await inspect(page, theme.effective, width, item);
           await auditNativeHeaderOwnership(page, item, width, theme);

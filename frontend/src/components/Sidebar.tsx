@@ -19,7 +19,7 @@ export const Sidebar: React.FC<{ onNavigate: () => void }> = ({ onNavigate }) =>
   })).filter(group => group.items.length);
 
   return <div className="nfc-v2-sidebar nfc-v2-sidebar-mobile nfc-studio-tool-directory">
-    <label className="nfc-studio-tool-search">
+    <div className="nfc-studio-tool-search">
       <ConsoleIcon name="search" size={17} />
       <input ref={input} type="search" onKeyDown={event => {
         if (event.nativeEvent.isComposing || event.defaultPrevented) return;
@@ -28,7 +28,11 @@ export const Sidebar: React.FC<{ onNavigate: () => void }> = ({ onNavigate }) =>
         if (first && term && event.key === 'Enter') { event.preventDefault(); first.click(); }
       }} aria-label="搜索工具" placeholder="搜索工具或页面" value={query}
         onChange={event => setQuery(event.target.value)} />
-    </label>
+      {query && <button type="button" className="nfc-tool-search-clear" aria-label="清除工具搜索" onClick={() => {
+        setQuery('');
+        input.current?.focus({ preventScroll: true });
+      }}><ConsoleIcon name="x" size={16} /></button>}
+    </div>
     <nav className="nfc-v2-nav" ref={list} aria-label="主导航" onKeyDown={event => {
       if (!(event.target instanceof HTMLAnchorElement) || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
@@ -57,6 +61,6 @@ export const Sidebar: React.FC<{ onNavigate: () => void }> = ({ onNavigate }) =>
             className={mode === key ? 'is-selected' : ''} onClick={() => { setMode(key); onNavigate(); }}>{label}</button>)}
       </div>
     </div>
-    <div className="nfc-v2-sidebar-footer"><small className="nfc-v2-release-version">v1.8.18</small></div>
+    <div className="nfc-v2-sidebar-footer"><small className="nfc-v2-release-version">v2.0.0</small></div>
   </div>;
 };

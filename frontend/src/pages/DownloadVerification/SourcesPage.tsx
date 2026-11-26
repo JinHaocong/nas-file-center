@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../../components/ui/PageHeader';
@@ -27,6 +27,23 @@ export const DownloadSourcesPage: React.FC = () => {
   const [otpSource, setOtpSource] = useState<VerificationSource | null>(null);
   const [otpCode, setOtpCode] = useState('');
   const [error, setError] = useState('');
+  const addSourceRef = useRef<HTMLButtonElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const otpRef = useRef<HTMLInputElement>(null);
+  const editorOpener = useRef<HTMLButtonElement | null>(null);
+  const restoreOpener = useRef(false);
+  const editorOpen = formOpen || otpSource !== null;
+
+  useEffect(() => {
+    if (formOpen) nameRef.current?.focus();
+    else if (otpSource) otpRef.current?.focus();
+    else if (restoreOpener.current) {
+      restoreOpener.current = false;
+      const opener = editorOpener.current;
+      (opener?.isConnected && !opener.disabled ? opener : addSourceRef.current)?.focus();
+      editorOpener.current = null;
+    }
+  }, [formOpen, otpSource]);
 
   const list = useQuery({
     queryKey: ['download-verify-sources'],
@@ -46,6 +63,8 @@ export const DownloadSourcesPage: React.FC = () => {
       setFormOpen(false);
       setEditing(null);
       setDraft({ ...empty });
+      restoreOpener.current = true;
+      editorOpener.current = addSourceRef.current;
       void qc.invalidateQueries({ queryKey: ['download-verify-sources'] });
     },
     onError: err => setError(message(err)),
@@ -70,18 +89,22 @@ export const DownloadSourcesPage: React.FC = () => {
       setFeedback('双因素验证成功，可以浏览来源目录');
       setError('');
       setOtpCode('');
+      restoreOpener.current = true;
       setOtpSource(null);
     },
     onError: () => setError('双因素验证失败，请检查动态验证码或来源连接'),
   });
 
-  const add = () => {
+  /** Preserve the exact row action for keyboard focus when leaving the editor. */
+  const add = (event: React.MouseEvent<HTMLButtonElement>) => {
+    editorOpener.current = event.currentTarget;
     setEditing(null);
     setDraft({ ...empty });
     setError('');
     setFormOpen(true);
   };
-  const edit = (source: VerificationSource) => {
+  const edit = (source: VerificationSource, opener: HTMLButtonElement) => {
+    editorOpener.current = opener;
     setEditing(source.id);
     setDraft({
       name: source.name, provider: source.provider, base_url: source.base_url,
@@ -91,26 +114,38 @@ export const DownloadSourcesPage: React.FC = () => {
     setFormOpen(true);
   };
 
+  /** Clear unsubmitted credentials and return to the action that opened the editor. */
+  const cancelEditor = () => {
+    restoreOpener.current = true;
+    setFormOpen(false);
+    setEditing(null);
+    setDraft({ ...empty });
+    setOtpSource(null);
+    setOtpCode('');
+    setError('');
+  };
+
   return (
-    <div className="nfc-operations-page nfc-page-layout-workbench nfc-download-verify nfc-dv-source-page">
+    <div className="nfc-operations-page nfc-page-layout-workbench nfc-download-verify nfc-dv-source-page nfc-tool-workspace">
       <PageHeader title="下载校验来源"
         description="为云端文件核对配置服务地址和只读账号。"
         actions={<ConsoleButton onClick={() => navigate('/download-verification')}
           leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}>返回下载校验</ConsoleButton>} />
 
+      <div className={'nfc-tool-source-layout' + (editorOpen ? ' is-editing' : '')}>
       <DataPanel title="已配置来源" description="停用来源后仍可查阅已有校验记录。"
-        action={<ConsoleButton variant="primary" onClick={add}
+        action={<ConsoleButton variant="primary" onClick={add} ref={addSourceRef} disabled={editorOpen}
           leadingIcon={<ConsoleIcon name="plus" size={16} />}>新增来源</ConsoleButton>}>
         {list.isLoading && <p className="nfc-dv-muted">正在读取来源…</p>}
         {list.isError && <p role="alert" className="nfc-dv-error">读取来源列表失败</p>}
         {feedback && <p role="status" className="nfc-dv-feedback">{feedback}</p>}
-        {error && <p role="alert" className="nfc-dv-error">{error}</p>}
+        {error && !editorOpen && <p role="alert" className="nfc-dv-error">{error}</p>}
         {items.length === 0 && !list.isLoading && !list.isError && (
           <div className="nfc-dv-empty">
             <ConsoleIcon name="folder-open" size={28} />
             <strong>还没有配置来源</strong>
             <span>请添加 AList 或 OpenList，随后返回下载校验页选择目录。</span>
-            <ConsoleButton size="sm" variant="primary" onClick={add}>添加第一个来源</ConsoleButton>
+            <ConsoleButton size="sm" variant="primary" onClick={add} disabled={editorOpen}>添加第一个来源</ConsoleButton>
           </div>
         )}
         <div className="nfc-dv-source-list">
@@ -122,29 +157,31 @@ export const DownloadSourcesPage: React.FC = () => {
               <small>{source.provider === 'alist' ? 'AList' : 'OpenList'} · {source.username || '公开目录访问'} · {source.has_password ? '已配置密码' : '无需密码'}</small>
             </div>
             <div className="nfc-dv-source-buttons">
-              {source.username && <ConsoleButton size="sm" onClick={() => {
+              {source.username && <ConsoleButton size="sm" disabled={editorOpen} onClick={event => {
+                editorOpener.current = event.currentTarget;
                 setOtpSource(source); setOtpCode(''); setError('');
               }}>双因素验证</ConsoleButton>}
-              <ConsoleButton size="sm" onClick={() => edit(source)}
+              <ConsoleButton size="sm" disabled={editorOpen} onClick={event => edit(source, event.currentTarget)}
                 leadingIcon={<ConsoleIcon name="pencil" size={14} />}>编辑</ConsoleButton>
-              <ConsoleButton size="sm" variant="ghost" onClick={() => setDeleteTarget(source)}
+              <ConsoleButton size="sm" variant="ghost" disabled={editorOpen} onClick={() => setDeleteTarget(source)}
                 leadingIcon={<ConsoleIcon name="trash" size={14} />}>停用</ConsoleButton>
             </div>
           </article>)}
         </div>
       </DataPanel>
 
-      {formOpen && <DataPanel title={editing === null ? '新增来源' : '编辑来源'}
+      {formOpen && <DataPanel title={editing === null ? '新增来源' : '编辑来源'} className="nfc-tool-source-editor"
         description="使用 NAS File Center 可以访问的容器内地址或局域网地址。PikPak 账号仍由 AList/OpenList 自己管理。">
         <form className="nfc-dv-source-form" onSubmit={event => {
           event.preventDefault();
+          if (save.isPending) return;
           setError('');
           save.mutate();
         }}>
           <fieldset className="nfc-dv-manager-grid nfc-dv-source-fields">
             <legend>服务连接</legend>
             <label>来源名称
-              <input aria-label="来源名称" required maxLength={120} value={draft.name}
+              <input aria-label="来源名称" ref={nameRef} required maxLength={120} value={draft.name}
                 onChange={event => setDraft(x => ({ ...x, name: event.target.value }))} placeholder="例如：客厅的 OpenList" />
             </label>
             <label>服务类型
@@ -174,26 +211,28 @@ export const DownloadSourcesPage: React.FC = () => {
           <p className="nfc-dv-muted">连接凭据仅保存在服务端受保护的配置文件中，不会回显。建议在 AList/OpenList 创建专用只读账号。</p>
           <div className="nfc-dv-actions">
             <ConsoleButton type="submit" variant="primary" loading={save.isPending}>保存来源</ConsoleButton>
-            <ConsoleButton onClick={() => { setFormOpen(false); setEditing(null); setError(''); }}
+            <ConsoleButton onClick={cancelEditor}
               disabled={save.isPending}>取消</ConsoleButton>
           </div>
           {error && <p role="alert" className="nfc-dv-error">{error}</p>}
         </form>
       </DataPanel>}
-      {otpSource && <DataPanel title={'双因素验证 · ' + otpSource.name}
+      {otpSource && <DataPanel title={'双因素验证 · ' + otpSource.name} className="nfc-tool-source-editor"
         description="输入当前一次性验证码。验证码仅用于本次登录，不会保存；会话过期后可再次验证。">
-        <form onSubmit={event => { event.preventDefault(); authenticate.mutate(); }}>
+        <form onSubmit={event => { event.preventDefault(); if (!authenticate.isPending) authenticate.mutate(); }}>
           <label>动态验证码
-            <input aria-label="动态验证码" inputMode="numeric" autoComplete="one-time-code"
+            <input aria-label="动态验证码" ref={otpRef} inputMode="numeric" autoComplete="one-time-code"
               type="text" pattern="[0-9]{6,8}" minLength={6} maxLength={8} required
               value={otpCode} onChange={event => setOtpCode(event.target.value)} />
           </label>
           <div className="nfc-dv-actions">
             <ConsoleButton type="submit" variant="primary" loading={authenticate.isPending}>验证并连接</ConsoleButton>
-            <ConsoleButton onClick={() => { setOtpSource(null); setOtpCode(''); }}>取消</ConsoleButton>
+            <ConsoleButton onClick={cancelEditor} disabled={authenticate.isPending}>取消</ConsoleButton>
           </div>
+          {error && <p role="alert" className="nfc-dv-error">{error}</p>}
         </form>
       </DataPanel>}
+      </div>
       <ConsoleConfirmDialog open={deleteTarget !== null}
         onOpenChange={open => { if (!open) setDeleteTarget(null); }}
         title="停用此来源？"

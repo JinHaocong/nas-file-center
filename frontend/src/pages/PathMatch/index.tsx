@@ -24,6 +24,13 @@ import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
 import { getPaginationState } from '../../components/ui/paginationModel';
 
+const modeDescriptions: Record<PathMatchMode, string> = {
+  'relative-path': '从各自的根目录开始比较，子目录结构也必须一致。',
+  basename: '比较含扩展名的文件名，允许位于不同子目录。',
+  stem: '比较去掉最后一个扩展名后的文件名。',
+  normalized: '先对相对路径应用查找和替换规则，再比较处理结果。',
+};
+
 /** Path Match Preview is read-only; the only write here creates a guarded Plan Draft. */
 export const PathMatchPage: React.FC = () => {
   useTitle('路径匹配');
@@ -182,12 +189,12 @@ export const PathMatchPage: React.FC = () => {
   );
 
   return (
-    <div className="nfc-operations-page nfc-path-match-page nfc-page-layout-workbench nfc-v2-path-match">
+    <div className="nfc-operations-page nfc-path-match-page nfc-page-layout-workbench nfc-v2-path-match nfc-tool-workspace">
       <PageHeader title="跨目录路径匹配"
         description="在多个目录间查找同名或同路径文件，再核对每组保留项。" />
       <DataPanel title="目录与匹配规则"
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
-        <div className="nfc-path-match-form">
+        <div className="nfc-path-match-form" aria-busy={previewLoading || planLoading || undefined}>
           <div className="nfc-v2-path-match-field nfc-v2-path-match-scope">
             <label id="nfc-path-match-roots-label"><ConsoleIcon name="folders" size={18} />比对目录 <small>{roots.length ? `已选 ${roots.length} 个` : '至少选择 2 个'}</small></label>
             <div aria-labelledby="nfc-path-match-roots-label">
@@ -196,15 +203,18 @@ export const PathMatchPage: React.FC = () => {
                 onChange={value => changeRoots(value)} />
             </div>
           </div>
+          <div className="nfc-tool-path-match-rules">
           <div className="nfc-v2-path-match-field nfc-v2-path-match-mode">
             <label htmlFor="nfc-path-match-mode">匹配模式</label>
             <select id="nfc-path-match-mode" value={mode} disabled={planLoading}
+              aria-describedby="nfc-path-match-mode-help"
               onChange={event => changeMode(event.target.value as PathMatchMode)}>
               <option value="relative-path">相对路径完全匹配 (Relative Path)</option>
               <option value="basename">文件名匹配 (Basename)</option>
               <option value="stem">去除后缀主名匹配 (Stem)</option>
               <option value="normalized">正则归一化路径匹配 (Normalized Regex)</option>
             </select>
+            <small id="nfc-path-match-mode-help">{modeDescriptions[mode]}</small>
           </div>
           {mode === 'normalized' && (
             <div className="nfc-form-grid nfc-v2-path-match-patterns">
@@ -223,6 +233,7 @@ export const PathMatchPage: React.FC = () => {
               </div>
             </div>
           )}
+          </div>
           <ActionBar className="nfc-file-tool-primary-actions">
             <ConsoleButton variant="primary" loading={previewLoading} disabled={planLoading}
               leadingIcon={<ConsoleIcon name="play" size={17} />}

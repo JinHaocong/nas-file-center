@@ -146,7 +146,7 @@ export const ArchiveRecoveryPage: React.FC = () => {
   };
 
   return (
-    <div className="nfc-operations-page nfc-page-layout-ledger nfc-archive-recovery-page">
+    <div className="nfc-operations-page nfc-page-layout-ledger nfc-archive-recovery-page nfc-tool-workspace">
       <PageHeader title="压缩包检测与恢复"
         description="检测 ZIP、TAR、7z 和 RAR 压缩包。原压缩包只读，结果存放同级唯一文件夹。" />
       <div className="nfc-archive-recovery-layout">
@@ -206,7 +206,9 @@ export const ArchiveRecoveryPage: React.FC = () => {
             // Only the explicit terminal action may dismiss a WorkJob monitor.
           }} />
       </DataPanel>
-      <DataPanel className="nfc-archive-recovery-run-panel" title="检测与恢复">
+      <DataPanel className="nfc-archive-recovery-run-panel" title="检测与恢复"
+        action={selected && <span className="nfc-panel-count" role="status">{check.isPending ? '检测中'
+          : checkedSourceMatchesSelected ? '已检测' : '待检测'}</span>}>
         <div className="nfc-archive-source-summary">
           <ConsoleIcon name="archive" size={21} />
           <div><strong>待检测文件</strong>{selected ? <CodePath value={selected} /> : <span>请先选择压缩包</span>}</div>
@@ -219,10 +221,11 @@ export const ArchiveRecoveryPage: React.FC = () => {
         <details className="nfc-archive-recovery-limits"><summary>增强恢复条件与资源上限</summary>
           <p className="nfc-archive-recovery-help">7z AES/LZMA2 深度扫描需要正确密码、CRC 完好的 7z 文件头、可独立解码的 LZMA2 重置块及文件 CRC；不支持任意加密流重建和 RAR Solid 深度重同步。单个重置段最多处理 32 MiB；破损块头后的重新扫描窗口最多 8 MiB。整体文件产出限制为 10,000 个、4 GiB、30 分钟。</p>
         </details>
-        <ActionBar>
+        <ActionBar className="nfc-tool-archive-actions">
           <ConsoleButton disabled={!selected || check.isPending || Boolean(taskId)}
+            variant={checkedSourceMatchesSelected ? 'secondary' : 'primary'}
             loading={check.isPending} onClick={() => { void check.mutateAsync(selected).catch(() => {}); }}>检测</ConsoleButton>
-          <ConsoleButton variant="primary" disabled={!checkedSourceMatchesSelected || !check.data?.can_write || !check.data?.dependency_available || passwordChannelBlocked || start.isPending || Boolean(taskId)}
+          <ConsoleButton variant={checkedSourceMatchesSelected ? 'primary' : 'secondary'} disabled={!checkedSourceMatchesSelected || !check.data?.can_write || !check.data?.dependency_available || passwordChannelBlocked || start.isPending || Boolean(taskId)}
             loading={start.isPending} onClick={() => { void start.mutateAsync().catch(() => {}); }}>开始恢复</ConsoleButton>
         </ActionBar>
         {passwordChannelBlocked && checkedSourceMatchesSelected && <p className="nfc-archive-recovery-warning" role="alert">

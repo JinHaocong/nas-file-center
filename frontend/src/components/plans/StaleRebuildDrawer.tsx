@@ -153,17 +153,9 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
   return (
     <ConsoleSheet open={open} onClose={closeSafely}
       title={'过期计划 #' + planId}
-      description="基于权威 Workflow Lineage 和快照重新生成草稿；不自动执行或修改源文件。"
-      className="nfc-stale-rebuild-drawer nfc-v2-stale-rebuild"
-      titleAside={<div className="nfc-v2-rebuild-actions">
-        <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="refresh" size={15} />}
-          onClick={() => { void handleManualRefresh(); }}
-          disabled={submitBusy || rebuildMutation.isPending}
-          loading={isLoading || isFetching}>刷新预览</ConsoleButton>
-        <ConsoleButton size="sm" variant="primary" leadingIcon={<ConsoleIcon name="zap" size={15} />}
-          loading={submitBusy} disabled={!readiness.canSubmit || submitBusy || rebuildMutation.isPending}
-          onClick={() => { void submitRebuild(); }}>生成草稿</ConsoleButton>
-      </div>}>
+      description="核对工作流版本、原始快照及本次变更后生成草稿。"
+      className="nfc-stale-rebuild-drawer nfc-v2-stale-rebuild nfc-reading-sheet"
+      dismissDisabled={submitBusy || rebuildMutation.isPending}>
       <div className="nfc-overlay-stack nfc-v2-rebuild-body">
         {previewInvalidated && <div className="nfc-v2-rebuild-alert is-warning" role="alert">
           <ConsoleIcon name="info" size={17} /><div>
@@ -189,7 +181,7 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
           <>
             <section className="nfc-overlay-section">
               <header className="nfc-overlay-section-header"><div>
-                <span>Authority</span><h3>重建基线</h3>
+                <h3>重建基线</h3>
               </div></header>
               <dl className="nfc-v2-rebuild-facts">
                 <div><dt>工作流</dt><dd>#{preview.workflow_id}</dd></div>
@@ -204,7 +196,7 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
             </section>
             <section className="nfc-overlay-section nfc-overlay-section-flush">
               <header className="nfc-overlay-section-header nfc-overlay-section-header-actions"><div>
-                <span>Operations</span><h3>计划操作预览</h3>
+                <h3>计划操作预览</h3>
               </div></header>
               <label className="nfc-v2-rebuild-name">草稿计划名称（可选）
                 <input value={customPlanName} disabled={submitBusy}
@@ -226,7 +218,8 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
                   ))}
                 </div>
               ) : (
-                <div className="nfc-v2-rebuild-table-scroll"><table className="nfc-v2-rebuild-table">
+                <div className="nfc-v2-rebuild-table-scroll" role="region" aria-label="计划操作预览表格" tabIndex={0}>
+                  <table className="nfc-v2-rebuild-table">
                   <thead><tr><th scope="col">序号</th><th scope="col">操作</th>
                     <th scope="col">变更</th><th scope="col">源路径</th>
                     <th scope="col">目标路径 / mtime</th></tr></thead>
@@ -257,6 +250,15 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
           </>
         )}
       </div>
+      <footer className="nfc-v2-rebuild-actions nfc-reading-action-footer">
+        <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="refresh" size={15} />}
+          onClick={() => { void handleManualRefresh(); }}
+          disabled={submitBusy || rebuildMutation.isPending}
+          loading={isLoading || isFetching}>刷新预览</ConsoleButton>
+        <ConsoleButton size="sm" variant="primary" leadingIcon={<ConsoleIcon name="zap" size={15} />}
+          loading={submitBusy} disabled={!readiness.canSubmit || submitBusy || rebuildMutation.isPending}
+          onClick={() => { void submitRebuild(); }}>生成草稿</ConsoleButton>
+      </footer>
     </ConsoleSheet>
   );
 };

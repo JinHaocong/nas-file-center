@@ -1,0 +1,273 @@
+/* Scan results, plans, activity and integrity records share copyable evidence and quiet controls. */
+.nfc-record-workspace {
+  --record-control-gap: 10px;
+  --record-control-inset: clamp(12px, 1.5vw, 20px);
+  min-width: 0;
+}
+
+.nfc-record-workspace .nfc-record-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px var(--record-control-gap);
+  padding: 10px var(--record-control-inset);
+  background: var(--nfc-surface-1);
+  border-block-end: 1px solid var(--nfc-hairline);
+}
+
+.nfc-record-controls-label {
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.nfc-record-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 3px;
+  max-width: 100%;
+  background: var(--nfc-surface-2);
+  border: 1px solid var(--nfc-hairline);
+  border-radius: 10px;
+}
+
+.nfc-record-segments > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 5px 11px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--nfc-text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 680;
+  cursor: pointer;
+  transition: color 145ms var(--nfc-motion-ease), background-color 145ms var(--nfc-motion-ease),
+    border-color 145ms var(--nfc-motion-ease), box-shadow 145ms var(--nfc-motion-ease);
+}
+
+.nfc-record-segments > button > span {
+  min-width: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  opacity: .82;
+}
+
+.nfc-record-segments > button:hover,
+.nfc-record-segments > button[aria-pressed='true'] {
+  color: var(--nfc-tint);
+  background: var(--nfc-tint-soft);
+}
+
+.nfc-record-segments > button[aria-pressed='true'] {
+  background: var(--nfc-surface-1);
+  border-color: var(--nfc-tint-line);
+  box-shadow: 0 1px 3px rgb(0 0 0 / .07);
+}
+
+.nfc-record-workspace :is(.nfc-record-segments > button, .nfc-record-link, .nfc-record-evidence-navigation > a):focus-visible,
+.nfc-record-dialog .nfc-record-disclosure > summary:focus-visible {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: 2px;
+}
+
+.nfc-record-path-hint {
+  display: block;
+  max-width: min(37ch, 100%);
+  margin-block-start: 4px;
+  overflow: hidden;
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nfc-record-workspace .nfc-record-selected {
+  background-color: var(--nfc-tint-soft);
+  box-shadow: inset 2px 0 var(--nfc-tint);
+  transition: background-color 155ms var(--nfc-motion-ease), box-shadow 155ms var(--nfc-motion-ease);
+}
+
+.nfc-record-attention {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--nfc-hairline);
+  border-inline-start: 2px solid var(--studio-warn-ink);
+  border-radius: var(--nfc-panel-radius);
+  padding: 10px 14px;
+  background: var(--nfc-surface-1);
+}
+
+.nfc-record-attention > svg { color: var(--studio-warn-ink); }
+.nfc-record-attention strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+.nfc-record-attention p {
+  margin: 3px 0 0;
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nfc-record-evidence-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  border-block: 1px solid var(--nfc-hairline);
+  padding: 5px 0;
+}
+
+.nfc-record-link,
+.nfc-record-evidence-navigation > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 6px;
+  padding: 4px 7px;
+  color: var(--nfc-tint);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background-color 145ms var(--nfc-motion-ease);
+}
+
+.nfc-record-link:hover,
+.nfc-record-evidence-navigation > a:hover { background-color: var(--nfc-tint-soft); }
+.nfc-record-workspace [id]:target { scroll-margin-block-start: 20px; }
+.nfc-record-workspace .nfc-record-evidence-navigation > a { min-height: 30px; }
+
+.nfc-record-workspace .nfc-record-selection {
+  justify-content: space-between;
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+}
+
+.nfc-record-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 31rem);
+  min-width: 0;
+}
+
+.nfc-record-workspace .nfc-record-search .nfc-v2-audit-search {
+  flex: 1;
+  max-width: none;
+  min-width: 0;
+}
+
+.nfc-record-filter-value {
+  color: var(--nfc-tint);
+  background: var(--nfc-tint-soft);
+  padding: 5px 8px;
+  border-radius: 7px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.nfc-record-dialog :is(.nfc-v2-dialog-heading, .nfc-v2-sheet-heading, .nfc-v2-dedupe-dialog-header) {
+  min-width: 0;
+}
+
+.nfc-record-dialog :is(.nfc-v2-dialog-heading, .nfc-v2-sheet-heading, .nfc-v2-dedupe-dialog-header) h2 {
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.nfc-record-dialog .nfc-v2-confirm-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nfc-record-dialog .nfc-record-disclosure {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--nfc-hairline);
+  background: var(--nfc-surface-2);
+  border-radius: 8px;
+}
+
+.nfc-record-dialog .nfc-record-disclosure > summary {
+  min-height: 28px;
+  cursor: pointer;
+  color: var(--nfc-text);
+  font-weight: 680;
+}
+
+.nfc-record-dialog .nfc-record-disclosure > pre {
+  max-height: min(36vh, 260px);
+  margin-block: 5px 0;
+  overflow: auto;
+}
+
+.nfc-record-journal-path { display: grid; gap: 4px; min-width: 0; }
+.nfc-record-journal-path > span:first-child { font-size: 11px; color: var(--nfc-text-muted); }
+
+.nfc-record-workspace .nfc-record-bulk-actions {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 7px 13px;
+}
+
+.nfc-record-bulk-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 7px;
+  min-width: 0;
+}
+
+.nfc-record-bulk-review {
+  margin-inline-start: auto;
+  border-inline-start: 1px solid var(--nfc-hairline);
+  padding-inline-start: 12px;
+}
+
+.nfc-record-workspace .nfc-index-record-summary {
+  gap: 8px 17px;
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+}
+
+.nfc-index-record-summary > span strong { color: var(--nfc-text); }
+.nfc-index-record-job { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.nfc-index-record-job small { color: var(--nfc-text-muted); }
+.nfc-record-workspace .nfc-lifecycle-step { min-width: 0; transition: background-color 160ms var(--nfc-motion-ease); }
+
+@media (min-width: 768px) and (max-width: 1519px) {
+  .nfc-record-workspace :is(.nfc-v2-scan-table, .nfc-v2-task-table, .nfc-v2-audit-table, .nfc-v2-indexes-table) :is(th, td) {
+    padding-inline: 10px;
+  }
+}
+
+@media (max-width: 767px) {
+  .nfc-record-segments > button,
+  .nfc-record-workspace .nfc-record-evidence-navigation > a { min-height: 44px; }
+  .nfc-record-attention { grid-template-columns: auto minmax(0, 1fr); padding: 10px; }
+  .nfc-record-attention .nfc-console-button { grid-column: 2; justify-self: start; }
+  .nfc-record-workspace .nfc-record-search { width: 100%; }
+  .nfc-record-workspace .nfc-record-bulk-actions { flex-direction: column; align-items: stretch; }
+  .nfc-record-bulk-review {
+    margin-inline-start: 0;
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--nfc-hairline);
+    padding: 8px 0 0;
+  }
+  .nfc-record-workspace .nfc-duplicate-member-list .nfc-v2-group-expand { min-height: 44px; }
+  .nfc-record-dialog .nfc-record-disclosure > summary { min-height: 44px; align-content: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nfc-record-workspace :is(.nfc-record-segments > button, .nfc-record-selected, .nfc-record-link,
+    .nfc-record-evidence-navigation > a, .nfc-lifecycle-step) { transition: none; }
+}

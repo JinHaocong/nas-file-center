@@ -83,7 +83,7 @@ export const Header: React.FC<Props> = ({ isMobile, navigationOpen, onOpenNaviga
         </div>
         <button type="button" className="nfc-v2-icon-button nfc-header-nav-toggle" onClick={onOpenNavigation}
           aria-label="打开导航菜单" aria-haspopup="dialog" aria-expanded={navigationOpen} aria-keyshortcuts="Control+K Meta+K" title="所有工具">
-          <ConsoleIcon name="menu" size={17} /><span>工具</span><kbd aria-hidden="true">{typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd>
+          <ConsoleIcon name="search" size={16} /><span>查找工具</span><kbd aria-hidden="true">{typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd>
         </button>
         <details className="nfc-v2-dropdown">
           <summary className="nfc-v2-icon-button" aria-label="切换界面主题" title="切换主题">

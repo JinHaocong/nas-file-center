@@ -48,6 +48,12 @@ const JOB_TYPE_OPTIONS = [
   { label: taskTypeLabel('download-verify-webdav'), value: 'download-verify-webdav' },
 ];
 
+const QUICK_STATUS_OPTIONS = [
+  { label: '全部', value: 'all' },
+  { label: '执行中', value: 'running' },
+  { label: '已失败', value: 'failed' },
+] as const;
+
 export const TasksPage: React.FC = () => {
   useTitle('任务中心');
   const { user } = useAuth();
@@ -144,6 +150,7 @@ export const TasksPage: React.FC = () => {
 
   const isFiltered = statusFilter !== 'all' || jobTypeFilter !== 'all';
   const items: TaskItem[] = isError ? [] : data?.items || [];
+  const latestFailure = !isFiltered && items.find(task => task.status === 'failed');
   const noItemsTitle = isFiltered ? '没有匹配的任务' : '暂无任务记录';
   const noItemsDescription = isFiltered
     ? '当前筛选条件没有找到记录，请尝试切换状态或类型。'
@@ -160,7 +167,7 @@ export const TasksPage: React.FC = () => {
   );
 
   return (
-    <div className="nfc-operations-page nfc-tasks-page nfc-page-layout-ledger nfc-v2-tasks-page">
+    <div className="nfc-operations-page nfc-tasks-page nfc-page-layout-ledger nfc-v2-tasks-page nfc-record-workspace">
       <PageHeader
         title="任务中心"
         description="查看正在进行的任务，打开记录可核对进度和执行结果。"
@@ -184,6 +191,16 @@ export const TasksPage: React.FC = () => {
 
       <WorkerStatusCard />
 
+      {latestFailure && (
+        <section className="nfc-record-attention" aria-label="本页最近失败的任务">
+          <ConsoleIcon name="info" size={18} />
+          <div><strong>本页最近失败 · #{latestFailure.id} {taskTypeLabel(latestFailure.job_type)}</strong>
+            {(latestFailure.error || latestFailure.error_code) && <p>{latestFailure.error || latestFailure.error_code}</p>}
+          </div>
+          <ConsoleButton size="sm" onClick={() => openTaskDetail(latestFailure.id)}>查看失败详情</ConsoleButton>
+        </section>
+      )}
+
       {isError && (
         <div className="nfc-v2-task-alert nfc-page-alert" role="alert">
           <ConsoleIcon name="x" size={19} />
@@ -202,6 +219,14 @@ export const TasksPage: React.FC = () => {
         className="nfc-panel-flush"
         variant="dense"
       >
+        <div className="nfc-record-controls">
+          <div className="nfc-record-segments" role="group" aria-label="任务快捷筛选">
+            {QUICK_STATUS_OPTIONS.map(({ label, value }) => (
+              <button key={value} type="button" aria-pressed={statusFilter === value}
+                onClick={() => handleStatusFilterChange(value)}>{label}</button>
+            ))}
+          </div>
+        </div>
         <ActionBar className="nfc-filter-bar nfc-v2-task-filter-bar">
           <ConsoleSelect id="nfc-task-status-filter" label="状态" value={statusFilter}
             onChange={handleStatusFilterChange} options={STATUS_OPTIONS} />
@@ -244,7 +269,7 @@ export const TasksPage: React.FC = () => {
                     const errorText = task.error || task.error_code || '';
                     const clippedError = errorText.length > 28 ? errorText.slice(0, 28) + '…' : errorText;
                     return (
-                      <tr key={task.id}>
+                      <tr key={task.id} className={selectedTaskId !== null && sqliteIdText(task.id) === selectedTaskId ? 'nfc-record-selected' : undefined}>
                         <td>
                           <button type="button" className="nfc-table-link nfc-mono nfc-v2-task-id"
                             onClick={() => openTaskDetail(task.id)}>
@@ -284,7 +309,8 @@ export const TasksPage: React.FC = () => {
             mobile={
               <div className="nfc-mobile-record-list">
                 {items.map(task => (
-                  <article className="nfc-task-mobile-card" key={task.id}>
+                  <article className={'nfc-task-mobile-card' +
+                    (selectedTaskId !== null && sqliteIdText(task.id) === selectedTaskId ? ' nfc-record-selected' : '')} key={task.id}>
                     <div className="nfc-mobile-record-heading">
                       <div>
                         <button type="button" className="nfc-mobile-record-title nfc-mono"

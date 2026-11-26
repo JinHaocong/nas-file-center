@@ -8,12 +8,12 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8'
 describe('Gate6-D media metadata + integrity UI', () => {
   test('media route is wired into the main workspace and header context', () => {
     const router = read('src/router/index.tsx');
-    const sidebar = read('src/components/Sidebar.tsx');
+    const destinations = read('src/components/layout/navItems.ts');
     const header = read('src/components/Header.tsx');
 
     assert.match(router, /path="media"[\s\S]*<MediaPage/);
-    assert.match(sidebar, /key: '\/media'[\s\S]*媒体完整性/);
-    assert.match(header, /'\/media': \{ kicker: 'DATA & SCAN', name: '媒体完整性' \}/);
+    assert.match(destinations, /path: '\/media', label: '媒体完整性'/);
+    assert.match(header, /navLabel\(location\.pathname, location\.search\)/);
   });
 
   test('media page preserves unknown versus corrupt and exposes direct-delete only through preview', () => {

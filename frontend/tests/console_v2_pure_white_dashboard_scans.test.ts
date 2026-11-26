@@ -78,7 +78,10 @@ describe('Pure White v2.1 dashboard and scan detail pass', () => {
   });
 
   test('Scan screen uses localized real counts and only marks active polling when true', () => {
-    assert.ok(scans.includes("const hasActiveScan = items.some(scan => scan.status === 'queued' || scan.status === 'running');"));
+    assert.ok(scans.includes("scan.status === 'queued' || scan.status === 'running'"));
+    assert.ok(scans.includes('const activeScans = pageItems.filter(isActiveScan);'));
+    assert.ok(scans.includes('const hasActiveScan = activeScans.length > 0;'));
+    assert.ok(scans.includes('const items = itemsByView[view];'));
     assert.ok(scans.includes("{hasActiveScan && <span className=\"nfc-v2-scan-live-label\">进行中 · 自动刷新</span>}"));
     assert.ok(scans.includes("(data?.total ?? 0).toLocaleString()"));
     assert.ok(scans.includes('条记录'));

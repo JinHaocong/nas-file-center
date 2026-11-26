@@ -17,6 +17,7 @@ interface Props {
  */
 export const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
   const firstInputRef = useRef<HTMLInputElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
   const submitLock = useRef(false);
   const toast = useConsoleToast();
   const [oldPassword, setOldPassword] = useState('');
@@ -73,14 +74,26 @@ export const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
         <Dialog.Overlay className="nfc-v2-dialog-overlay" />
         <Dialog.Content
           className="nfc-v2-dialog nfc-change-password-modal nfc-overlay-modal"
+          data-form-dialog
+          aria-busy={submitting || undefined}
           onEscapeKeyDown={event => { if (submitting || submitLock.current) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}
           onOpenAutoFocus={event => {
+            const active = document.activeElement;
+            openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+            if (!firstInputRef.current) return;
             event.preventDefault();
-            firstInputRef.current?.focus();
+            firstInputRef.current.focus({ preventScroll: true });
+          }}
+          onCloseAutoFocus={event => {
+            const opener = openerRef.current;
+            openerRef.current = null;
+            if (!opener?.isConnected || opener.matches(':disabled') || !opener.getClientRects().length) return;
+            event.preventDefault();
+            opener.focus({ preventScroll: true });
           }}
         >
-          <div className="nfc-v2-dialog-heading">
+          <header className="nfc-v2-dialog-heading" data-form-dialog-header>
             <span className="nfc-v2-dialog-icon">
               <ConsoleIcon name="lock" size={20} />
             </span>
@@ -94,29 +107,37 @@ export const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
               aria-label="关闭密码修改窗口" disabled={submitting} onClick={close}>
               <ConsoleIcon name="x" size={18} />
             </button>
-          </div>
+          </header>
           <form className="nfc-v2-dialog-form nfc-security-form" onSubmit={handleSubmit}>
-            <label htmlFor="nfc-old-password">当前旧密码</label>
-            <input ref={firstInputRef} id="nfc-old-password" type="password" required
-              autoComplete="current-password" placeholder="请输入当前密码"
-              disabled={submitting} value={oldPassword}
-              onChange={event => { if (!submitLock.current) setOldPassword(event.target.value); }} />
-            <label htmlFor="nfc-new-password">新密码</label>
-            <input id="nfc-new-password" type="password" required minLength={6}
-              autoComplete="new-password" placeholder="请输入新密码（至少6位）"
-              disabled={submitting} value={newPassword}
-              onChange={event => { if (!submitLock.current) setNewPassword(event.target.value); }} />
-            <label htmlFor="nfc-confirm-password">确认新密码</label>
-            <input id="nfc-confirm-password" type="password" required minLength={6}
-              autoComplete="new-password" placeholder="请再次输入新密码"
-              disabled={submitting} value={confirmPassword}
-              onChange={event => { if (!submitLock.current) setConfirmPassword(event.target.value); }} />
-            {error && <div className="nfc-v2-dialog-error" role="alert">{error}</div>}
-            <div className="nfc-v2-dialog-footer">
+            <div data-form-dialog-body>
+              <div className="nfc-password-field">
+                <label htmlFor="nfc-old-password">当前旧密码</label>
+                <input ref={firstInputRef} id="nfc-old-password" type="password" required
+                  autoComplete="current-password" placeholder="请输入当前密码"
+                  disabled={submitting} value={oldPassword}
+                  onChange={event => { if (!submitLock.current) setOldPassword(event.target.value); }} />
+              </div>
+              <div className="nfc-password-field">
+                <label htmlFor="nfc-new-password">新密码</label>
+                <input id="nfc-new-password" type="password" required minLength={6}
+                  autoComplete="new-password" placeholder="请输入新密码（至少6位）"
+                  disabled={submitting} value={newPassword}
+                  onChange={event => { if (!submitLock.current) setNewPassword(event.target.value); }} />
+              </div>
+              <div className="nfc-password-field">
+                <label htmlFor="nfc-confirm-password">确认新密码</label>
+                <input id="nfc-confirm-password" type="password" required minLength={6}
+                  autoComplete="new-password" placeholder="请再次输入新密码"
+                  disabled={submitting} value={confirmPassword}
+                  onChange={event => { if (!submitLock.current) setConfirmPassword(event.target.value); }} />
+              </div>
+              {error && <div className="nfc-v2-dialog-error" role="alert">{error}</div>}
+            </div>
+            <footer className="nfc-v2-dialog-footer" data-form-dialog-actions>
               <ConsoleButton onClick={close} disabled={submitting}>取消</ConsoleButton>
               <ConsoleButton variant="primary" type="submit" loading={submitting}
                 leadingIcon={<ConsoleIcon name="lock" size={16} />}>确认修改</ConsoleButton>
-            </div>
+            </footer>
           </form>
         </Dialog.Content>
       </Dialog.Portal>

@@ -58,7 +58,7 @@ describe('Console v2 native Plan cleanup controls', () => {
   test('legacy cleanup requires explicit guarded Radix confirmation', () => {
     const s = legacy();
     for (const token of [
-      '!summary || summary.plan_count === 0', 'inFlight.current',
+      '!summary || !Number.isSafeInteger(summary.plan_count) || summary.plan_count <= 0', 'inFlight.current',
       '<ConsoleConfirmDialog', 'LEGACY_CLEANUP_CONFIRM_DESCRIPTION',
       'clearLegacyMutation.mutateAsync()', 'useConsoleToast',
       'onConfirm={() => { void handleConfirm(); }}',

@@ -34,6 +34,7 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
   const [validationError, setValidationError] = useState<string | null>(null);
   // Synchronous single-flight guard: closes the gap before React Query renders isPending.
   const submitting = useRef(false);
+  const nameField = useRef<HTMLInputElement>(null);
   // This controlled Radix modal has no Dialog.Trigger: remember its real launcher.
   const returnFocusTarget = useRef<HTMLElement | null>(null);
 
@@ -101,10 +102,14 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-scan-create-overlay" />
         <Dialog.Content className="nfc-form-modal nfc-overlay-modal nfc-scan-create-modal nfc-v2-scan-create-modal"
-          onOpenAutoFocus={() => {
+          data-form-dialog aria-busy={createMutation.isPending || undefined}
+          onOpenAutoFocus={event => {
             const active = document.activeElement;
             returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
               ? active : null;
+            if (!nameField.current) return;
+            event.preventDefault();
+            nameField.current.focus({ preventScroll: true });
           }}
           onCloseAutoFocus={event => {
             const target = returnFocusTarget.current;
@@ -118,7 +123,7 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
           }}
           onEscapeKeyDown={event => { if (createMutation.isPending || submitting.current) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
-          <header className="nfc-v2-scan-create-header">
+          <header className="nfc-v2-scan-create-header" data-form-dialog-header>
             <Dialog.Title>新建 fclones 精确扫描任务</Dialog.Title>
             <Dialog.Description>创建扫描任务并在后台执行，选择路径仍受 ALLOWED_ROOTS 约束。</Dialog.Description>
             <button type="button" aria-label="关闭新建扫描"
@@ -127,73 +132,71 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
               <ConsoleIcon name="x" size={18} />
             </button>
           </header>
-      <form className="nfc-v2-scan-create-form" onSubmit={submit}>
-        <div className="nfc-v2-scan-create-field">
-          <label htmlFor="nfc-scan-name">任务名称</label>
-          <input id="nfc-scan-name" type="text" required
-            autoComplete="off" placeholder="例如：电影库与备份盘跨盘查重"
-            value={values.name} disabled={createMutation.isPending}
-            onChange={event => update('name', event.target.value)} />
-        </div>
-
-        <div className="nfc-v2-scan-create-field">
-          <span className="nfc-v2-scan-create-label" id="nfc-scan-roots-label">
-            待扫描根目录
-          </span>
-          <DirectoryPicker multiple disabled={createMutation.isPending}
-            value={values.roots}
-            onChange={next => update('roots', Array.isArray(next)
-              ? next.map(String) : String(next || '').split('\n').map(v => v.trim()).filter(Boolean))}
-            placeholder="点击选择或添加待扫描目录..." />
-          <p className="nfc-v2-scan-create-hint">请至少选择一个目录；所有路径必须位于 ALLOWED_ROOTS 白名单内。</p>
-        </div>
-
-        <label className="nfc-v2-scan-create-switch">
-          <ConsoleCheckbox checked={values.isolate}
-            disabled={createMutation.isPending}
-            onCheckedChange={checked => update('isolate', checked)} />
-          <span>
-            <strong>跨目录隔离模式 (Isolate / A-B)</strong>
-            <small>仅报告跨越不同输入根目录的重复组，不报告单根目录内部重复。</small>
-          </span>
-        </label>
-
-        <div className="nfc-v2-scan-create-field">
-          <label htmlFor="nfc-scan-min-size">最小文件大小过滤</label>
-          <input id="nfc-scan-min-size" type="text"
-            placeholder="例如：100M、1G；留空不限制"
-            value={values.minSize} disabled={createMutation.isPending}
-            onChange={event => update('minSize', event.target.value)} />
-        </div>
-
-        <div className="nfc-v2-scan-create-patterns">
-          <div className="nfc-v2-scan-create-field">
-            <label htmlFor="nfc-scan-include">包含文件名 Pattern（每行一个，可选）</label>
-            <textarea id="nfc-scan-include" rows={3} placeholder={'*.mp4\n*.mkv'}
-              value={values.namePatternsText} disabled={createMutation.isPending}
-              onChange={event => update('namePatternsText', event.target.value)} />
-          </div>
-          <div className="nfc-v2-scan-create-field">
-            <label htmlFor="nfc-scan-exclude">排除文件名 Pattern（每行一个，可选）</label>
-            <textarea id="nfc-scan-exclude" rows={3} placeholder={'*.part\n*.tmp'}
-              value={values.excludePatternsText} disabled={createMutation.isPending}
-              onChange={event => update('excludePatternsText', event.target.value)} />
-          </div>
-        </div>
-
-        {validationError && (
-          <div className="nfc-v2-scan-create-error" role="alert">{validationError}</div>
-        )}
-        <div className="nfc-v2-scan-create-note">
-          <ConsoleIcon name="shield-check" size={16} />
-          扫描仅读取目录并生成结果快照；后续文件修改需要单独的 Plan 安全流程。
-        </div>
-        <div className="nfc-v2-scan-create-actions">
-          <ConsoleButton disabled={createMutation.isPending} onClick={close}>取消</ConsoleButton>
-          <ConsoleButton type="submit" variant="primary" loading={createMutation.isPending}
-            leadingIcon={<ConsoleIcon name="file-search" size={16} />}>开始扫描</ConsoleButton>
-        </div>
-      </form>
+          <form className="nfc-v2-scan-create-form" onSubmit={submit}>
+            <div data-form-dialog-body>
+              <div className="nfc-v2-scan-create-field">
+                <label htmlFor="nfc-scan-name">任务名称</label>
+                <input ref={nameField} id="nfc-scan-name" type="text" required
+                  autoComplete="off" placeholder="例如：电影库与备份盘跨盘查重"
+                  value={values.name} disabled={createMutation.isPending}
+                  onChange={event => update('name', event.target.value)} />
+              </div>
+              <div className="nfc-v2-scan-create-field" role="group" aria-labelledby="nfc-scan-roots-label">
+                <span className="nfc-v2-scan-create-label" id="nfc-scan-roots-label">待扫描根目录</span>
+                <DirectoryPicker multiple disabled={createMutation.isPending}
+                  value={values.roots}
+                  onChange={next => update('roots', Array.isArray(next)
+                    ? next.map(String) : String(next || '').split('\n').map(v => v.trim()).filter(Boolean))}
+                  placeholder="点击选择或添加待扫描目录..." />
+                <p className="nfc-v2-scan-create-hint" aria-live="polite">
+                  {values.roots.length ? `已选择 ${values.roots.length} 个目录。` : '请至少选择一个目录。'}
+                  路径必须位于 ALLOWED_ROOTS 白名单内。
+                </p>
+              </div>
+              <label className="nfc-v2-scan-create-switch">
+                <ConsoleCheckbox checked={values.isolate} disabled={createMutation.isPending}
+                  onCheckedChange={checked => update('isolate', checked)} />
+                <span>
+                  <strong>跨目录隔离模式 (Isolate / A-B)</strong>
+                  <small>仅报告跨越不同输入根目录的重复组，不报告单根目录内部重复。</small>
+                </span>
+              </label>
+              <fieldset className="nfc-scan-filter-fields">
+                <legend>文件过滤</legend>
+                <div className="nfc-v2-scan-create-field">
+                  <label htmlFor="nfc-scan-min-size">最小文件大小</label>
+                  <input id="nfc-scan-min-size" type="text"
+                    placeholder="例如：100M、1G；留空不限制"
+                    value={values.minSize} disabled={createMutation.isPending}
+                    onChange={event => update('minSize', event.target.value)} />
+                </div>
+                <div className="nfc-v2-scan-create-patterns">
+                  <div className="nfc-v2-scan-create-field">
+                    <label htmlFor="nfc-scan-include">包含的文件名模式（每行一个）</label>
+                    <textarea id="nfc-scan-include" rows={3} placeholder={'*.mp4\n*.mkv'}
+                      value={values.namePatternsText} disabled={createMutation.isPending}
+                      onChange={event => update('namePatternsText', event.target.value)} />
+                  </div>
+                  <div className="nfc-v2-scan-create-field">
+                    <label htmlFor="nfc-scan-exclude">排除的文件名模式（每行一个）</label>
+                    <textarea id="nfc-scan-exclude" rows={3} placeholder={'*.part\n*.tmp'}
+                      value={values.excludePatternsText} disabled={createMutation.isPending}
+                      onChange={event => update('excludePatternsText', event.target.value)} />
+                  </div>
+                </div>
+              </fieldset>
+              {validationError && <div className="nfc-v2-scan-create-error" role="alert">{validationError}</div>}
+              <div className="nfc-v2-scan-create-note">
+                <ConsoleIcon name="shield-check" size={16} />
+                扫描仅读取目录并生成结果快照；后续文件修改需要单独的 Plan 安全流程。
+              </div>
+            </div>
+            <footer className="nfc-v2-scan-create-actions" data-form-dialog-actions>
+              <ConsoleButton disabled={createMutation.isPending} onClick={close}>取消</ConsoleButton>
+              <ConsoleButton type="submit" variant="primary" loading={createMutation.isPending}
+                leadingIcon={<ConsoleIcon name="file-search" size={16} />}>开始扫描</ConsoleButton>
+            </footer>
+          </form>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

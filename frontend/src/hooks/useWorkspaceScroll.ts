@@ -1,11 +1,14 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { useLocation, useNavigationType } from 'react-router-dom';
 
+import { workspaceViewKey } from '../components/layout/navItems';
+
 interface ScrollPosition { pane: number; window: number }
 
 /** Restore the desktop pane or mobile document when returning to a previously read page. */
 export function useWorkspaceScroll(main: RefObject<HTMLElement>, authenticated: boolean) {
-  const { key, pathname, hash } = useLocation();
+  const { key, pathname, search, hash } = useLocation();
+  const workspace = workspaceViewKey(pathname, search);
   const navigationType = useNavigationType();
   const positions = useRef(new Map<string, ScrollPosition>());
   const previousPath = useRef<string>();
@@ -18,8 +21,8 @@ export function useWorkspaceScroll(main: RefObject<HTMLElement>, authenticated: 
       return;
     }
     const saved = navigationType === 'POP' ? positions.current.get(key) : undefined;
-    const changedPage = previousPath.current !== undefined && previousPath.current !== pathname;
-    previousPath.current = pathname;
+    const changedPage = previousPath.current !== undefined && previousPath.current !== workspace;
+    previousPath.current = workspace;
     let observer: ResizeObserver | undefined;
     let timeout: number | undefined;
     let restoring = false;
@@ -68,5 +71,5 @@ export function useWorkspaceScroll(main: RefObject<HTMLElement>, authenticated: 
       for (const event of ['wheel', 'touchstart', 'keydown', 'pointerdown']) window.removeEventListener(event, stopRestoring);
       stopRestoring();
     };
-  }, [authenticated, hash, key, main, navigationType, pathname]);
+  }, [authenticated, hash, key, main, navigationType, workspace]);
 }

@@ -12,12 +12,14 @@ describe('Pure White Stage 5E-Y direct advanced Dedupe dialog focus return', () 
   test('controlled Radix dialog captures actual opener before focus trap, without a Dialog.Trigger', () => {
     for (const token of [
       'const returnFocusTarget = React.useRef<HTMLElement | null>(null);',
-      'onOpenAutoFocus={() => {',
+      'onOpenAutoFocus={event => {',
       'const active = document.activeElement;',
       'active instanceof HTMLElement && active !== document.body',
       'returnFocusTarget.current = active',
+      'cancelButton.current.focus({ preventScroll: true });',
       '<Dialog.Root open={kind !== null}',
     ]) assert.ok(dialog.includes(token), token);
+    assert.ok(dialog.indexOf('returnFocusTarget.current = active') < dialog.indexOf('cancelButton.current.focus'));
     assert.doesNotMatch(dialog, /<Dialog\.Trigger/);
   });
 

@@ -14,7 +14,8 @@ describe('Pure White Stage 5E-U controlled Sheet focus recovery', () => {
       'onOpenAutoFocus={() => {', 'const active = document.activeElement;',
       'active instanceof HTMLElement && active !== document.body',
       'returnFocusTarget.current = active',
-      '<Dialog.Root open={open} onOpenChange={next => { if (!next) onClose(); }}>',
+      '<Dialog.Root open={open} onOpenChange={next => { if (!next && !dismissDisabled) onClose(); }}>',
+      'onEscapeKeyDown={event => { if (dismissDisabled) event.preventDefault(); }}',
       '<Dialog.Close asChild>', 'aria-label="关闭详情抽屉"',
     ]) assert.ok(sheet.includes(token), token);
     assert.doesNotMatch(sheet, /<Dialog\.Trigger/);
@@ -26,10 +27,11 @@ describe('Pure White Stage 5E-U controlled Sheet focus recovery', () => {
       'returnFocusTarget.current = null;',
       "if (target?.isConnected && !target.matches(':disabled') &&",
       '!target.closest(\'[aria-disabled="true"], [inert], [hidden]\')',
-      'event.preventDefault();', 'target.focus();',
+      'event.preventDefault();', 'target.focus({ preventScroll: true });',
     ]) assert.ok(sheet.includes(token), token);
-    assert.ok(sheet.indexOf('target.focus();') > sheet.indexOf("if (target?.isConnected && !target.matches(':disabled') &&"));
-    assert.ok(sheet.indexOf('event.preventDefault();') > sheet.indexOf('onCloseAutoFocus={event => {'));
+    const callback = sheet.slice(sheet.indexOf('onCloseAutoFocus={event => {'));
+    assert.ok(callback.indexOf('target.focus({ preventScroll: true });') > callback.indexOf("if (target?.isConnected && !target.matches(':disabled') &&"));
+    assert.ok(callback.indexOf('event.preventDefault();') < callback.indexOf('target.focus({ preventScroll: true });'));
   });
 
   test('read-only Tasks 32-case matrix checks Close, Enter reopen, Escape and exact focus return', () => {

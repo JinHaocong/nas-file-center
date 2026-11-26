@@ -48,7 +48,7 @@ export const LegacyPlanCleanup: React.FC = () => {
       inFlight.current = false;
     }
   };
-  if (!summary || summary.plan_count === 0) return null;
+  if (!summary || !Number.isSafeInteger(summary.plan_count) || summary.plan_count <= 0) return null;
   return (
     <>
       <div className="nfc-legacy-plan-cleanup nfc-v2-legacy-plan-cleanup" role="note">
@@ -72,7 +72,14 @@ export const LegacyPlanCleanup: React.FC = () => {
       <ConsoleConfirmDialog open={open}
         onOpenChange={next => { if (!clearLegacyMutation.isPending) setOpen(next); }}
         title="确认清理旧版计划记录？"
-        description={LEGACY_CLEANUP_CONFIRM_DESCRIPTION}
+        description={<div className="nfc-maintenance-impact">
+          <dl className="nfc-maintenance-summary" aria-label="本次清理范围">
+            <div><dt>旧版计划</dt><dd>{summary.plan_count.toLocaleString()}</dd></div>
+            <div><dt>计划条目</dt><dd>{summary.item_count?.toLocaleString() ?? '—'}</dd></div>
+            <div><dt>关联扫描</dt><dd>{summary.affected_scan_count?.toLocaleString() ?? '—'}</dd></div>
+          </dl>
+          <p>{LEGACY_CLEANUP_CONFIRM_DESCRIPTION}</p>
+        </div>}
         confirmText="确认清理" danger
         busy={clearLegacyMutation.isPending}
         onConfirm={() => { void handleConfirm(); }} />

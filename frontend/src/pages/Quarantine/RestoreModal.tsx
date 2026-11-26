@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { useQuarantineDialogFocus } from './useQuarantineDialogFocus';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { quarantineApi } from '../../api/quarantine';
 import { getStructuredApiError } from '../../api/errors';
 import type { QuarantineEntry, QuarantineConflictPolicy } from '../../types';
 import { getQuarantineRestoreAvailability } from '../../components/quarantine/quarantine_rules';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
+import { CodePath } from '../../components/ui/CodePath';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
 import { formatBytes } from '../../utils/format';
@@ -25,6 +27,7 @@ export const RestoreModal: React.FC<Props> = ({
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
   const inFlight = useRef(false);
+  const dialogFocus = useQuarantineDialogFocus();
   const [conflictPolicy, setConflictPolicy] = useState<QuarantineConflictPolicy>('skip');
   const [customTarget, setCustomTarget] = useState('');
 
@@ -87,7 +90,9 @@ export const RestoreModal: React.FC<Props> = ({
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
         <Dialog.Content
-          className="nfc-v2-dialog nfc-overlay-modal nfc-quarantine-restore-modal nfc-v2-quarantine-dialog"
+          className="nfc-v2-dialog nfc-overlay-modal nfc-quarantine-restore-modal nfc-v2-quarantine-dialog nfc-record-dialog nfc-maintenance-dialog"
+          aria-busy={busy || undefined}
+          {...dialogFocus}
           onEscapeKeyDown={event => { if (busy || inFlight.current) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
           <header className="nfc-v2-dialog-heading">
@@ -111,8 +116,8 @@ export const RestoreModal: React.FC<Props> = ({
               </div>
             </div>}
             <dl className="nfc-v2-quarantine-facts nfc-quarantine-descriptions">
-              <div><dt>原始文件路径</dt><dd><code className="nfc-breakall">{entry.original_path}</code></dd></div>
-              <div><dt>当前隔离路径</dt><dd><code className="nfc-breakall">{entry.quarantine_path}</code></dd></div>
+              <div><dt>原始文件路径</dt><dd><CodePath value={entry.original_path} /></dd></div>
+              <div><dt>当前隔离路径</dt><dd><CodePath value={entry.quarantine_path} /></dd></div>
               <div><dt>文件大小</dt><dd>{formatBytes(entry.size)}</dd></div>
               {entry.hash && <div><dt>内容 SHA256</dt><dd><code className="nfc-mono-break">{entry.hash}</code></dd></div>}
             </dl>
@@ -144,13 +149,14 @@ export const RestoreModal: React.FC<Props> = ({
                 <span>自定义恢复绝对路径</span>
                 <input type="text" value={customTarget}
                   placeholder="例如: /data/restored_files/my_file.txt"
-                  aria-invalid={!availability.canRestore && !isSafeMode}
+                  aria-invalid={Boolean(customTarget.trim()) && !availability.canRestore && !isSafeMode}
                   disabled={isSafeMode || busy}
                   onChange={event => setCustomTarget(event.target.value)} />
-                {!availability.canRestore && !isSafeMode &&
+                {customTarget.trim() && !availability.canRestore && !isSafeMode &&
                   <span className="nfc-v2-quarantine-error" role="alert">{availability.reason}</span>}
               </label>
             )}
+            {busy && <p className="nfc-maintenance-pending" role="status">正在恢复文件…</p>}
           </div>
           <div className="nfc-v2-confirm-actions">
             <ConsoleButton disabled={busy} onClick={closeSafely}>取消</ConsoleButton>

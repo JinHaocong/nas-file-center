@@ -501,7 +501,7 @@ export const PlanDetailPage: React.FC = () => {
   );
 
   return (
-    <div className="nfc-operations-page nfc-plan-detail-page nfc-page-layout-detail">
+    <div className="nfc-operations-page nfc-plan-detail-page nfc-page-layout-detail nfc-record-workspace">
       <PageHeader title={plan.name}
         description={<div className="nfc-plan-header-meta">
           <span className="nfc-mono">计划 #{planId}</span>
@@ -567,6 +567,11 @@ export const PlanDetailPage: React.FC = () => {
             type="text" size="middle" buttonText="删除计划" />
         </details>
       </section>
+
+      <nav className="nfc-record-evidence-navigation" aria-label="计划核对位置">
+        <a href="#plan-snapshot"><ConsoleIcon name="file-text" size={15} />查看计划摘要</a>
+        <a href="#plan-change-list"><ConsoleIcon name="list-checks" size={15} />核对变更清单</a>
+      </nav>
 
       {isMediaSortPlan && stageJob && (
         <DataPanel title={stageJob.stage === 'freeze' ? '冻结进度（Freeze）' : '实时校验进度（Validate）'}
@@ -641,6 +646,7 @@ export const PlanDetailPage: React.FC = () => {
       </div>
 
       <DataPanel
+        id="plan-snapshot"
         title="计划摘要"
         description="冻结参数、预期变更与执行前安全上下文。"
         className="nfc-plan-summary nfc-panel-flush"
@@ -649,6 +655,7 @@ export const PlanDetailPage: React.FC = () => {
       </DataPanel>
 
       <DataPanel
+        id="plan-change-list"
         title="计划项清单"
         description="每一项真实文件操作都必须在校验后由既有 Worker 执行链处理。"
         action={

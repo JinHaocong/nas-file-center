@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 import { TaskProgress } from '../../components/tasks/TaskProgress';
@@ -6,6 +6,7 @@ import { CodePath } from '../../components/ui/CodePath';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsolePagination } from '../../components/ui/ConsolePagination';
+import { ConsoleSheet } from '../../components/ui/ConsoleSheet';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { MediaThumbnail, ThumbnailSwitch } from '../../components/ui/MediaThumbnail';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
@@ -106,18 +107,23 @@ function unitName(path: string) {
 }
 
 /** Render the selected unit using only paths reported by its verified preview. */
-function UnitInspection({ row, onDetails, panelRef }: {
+function UnitInspection({ row, onDetails, onClose, closeDisabled }: {
   row: MediaBatchPreviewUnit;
   onDetails: OpenUnitDetails;
-  panelRef: React.Ref<HTMLElement>;
+  onClose?: () => void;
+  closeDisabled: boolean;
 }) {
   const sample = row.sample_moves?.find(move => move.source !== move.target);
   const archiveLift = row.operation === 'promote_repeated_archive_children';
   return (
-    <section ref={panelRef} className="nfc-unit-inspection" aria-label="所选目录整理详情" id="organizer-unit-inspection">
+    <section className="nfc-unit-inspection" aria-label="所选目录整理详情" id="organizer-unit-inspection">
       <div className="nfc-unit-inspection-heading">
         <h3><ConsoleIcon name="folder-open" size={19} />{unitName(row.unit)}</h3>
         <StatusBadge status={previewTones[row.status]} label={previewLabels[row.status]} />
+        {onClose && <button className="nfc-file-workspace-icon" type="button" aria-label="关闭整理详情"
+          onClick={onClose} disabled={closeDisabled}>
+          <ConsoleIcon name="x" size={16} />
+        </button>}
       </div>
       <CodePath value={row.unit} />
       <div className="nfc-unit-facts">
@@ -140,7 +146,8 @@ function UnitInspection({ row, onDetails, panelRef }: {
 }
 
 /** Display a preview's aggregated totals and the current page of independent units. */
-export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDetails, action, children, footer }: {
+export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDetails, action, children, footer,
+  detail, onDismissDetails, pending = false, detailBusy = false }: {
   preview: MediaBatchPreview;
   selected?: MediaBatchPreviewUnit;
   onSelect: (row: MediaBatchPreviewUnit) => void;
@@ -148,48 +155,58 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
   action: React.ReactNode;
   children: React.ReactNode;
   footer: React.ReactNode;
+  detail?: React.ReactNode;
+  onDismissDetails?: () => void;
+  pending?: boolean;
+  detailBusy?: boolean;
 }) {
   const { showThumbnails } = useDisplayPreferences();
   const { isMobile } = useResponsive();
-  const inspectionRef = useRef<HTMLElement>(null);
-  const revealAfterSelection = useRef(false);
-  const selectedIndex = preview.units.findIndex(row => row.unit === selected?.unit);
-  const columns = showThumbnails ? 2 : 1;
-  const insertAfter = isMobile && selectedIndex >= 0
-    ? Math.min(preview.units.length - 1, selectedIndex + (columns - 1 - selectedIndex % columns))
-    : -1;
+  const [view, setView] = useState<'grid' | 'list'>('list');
+  const [selectionKey, setSelectionKey] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const selectedCard = useRef<HTMLButtonElement>(null);
+  const selectedKey = selected ? preview.job_id + '/' + selected.unit : null;
+  const listView = !showThumbnails || view === 'list';
+  const sheetOpen = isMobile && selectedKey !== null && selectedKey === selectionKey;
+  const desktopOpen = !isMobile && selected !== undefined && !collapsed;
 
-  /** 补偿展开位置变化，只在详情标题被导航挡住或离开视口时滚动。 */
-  function revealInspection() {
-    const panel = inspectionRef.current;
-    if (!panel) return;
-    const { top } = panel.getBoundingClientRect();
-    if (top < 72 || top > window.innerHeight - 128) {
-      panel.scrollIntoView({ block: 'start', behavior: 'instant' });
-    }
+  /** Close only the current inspector and clear details tied to its row. */
+  function closeInspection() {
+    if (detailBusy) return;
+    setSelectionKey(null);
+    setCollapsed(true);
+    onDismissDetails?.();
+    if (!isMobile) selectedCard.current?.focus({ preventScroll: true });
   }
 
-  useLayoutEffect(() => {
-    if (isMobile && revealAfterSelection.current) revealInspection();
-    revealAfterSelection.current = false;
-  }, [isMobile, selected?.unit]);
-
-  /** 等选中行完成布局再判断详情是否需要滚入视口。 */
+  /** Mobile opens a sheet only on explicit selection, including when reopening the same row. */
   function selectUnit(row: MediaBatchPreviewUnit) {
-    if (isMobile) {
-      if (row.unit === selected?.unit) revealInspection();
-      else revealAfterSelection.current = true;
-    }
+    if (detailBusy) return;
+    setCollapsed(false);
+    if (isMobile) setSelectionKey(preview.job_id + '/' + row.unit);
     onSelect(row);
   }
 
   const summary = preview.summary;
   if (!summary) return null;
-  const inspector = selected && <UnitInspection key={selected.unit} row={selected}
-    onDetails={onDetails} panelRef={inspectionRef} />;
+  const inspector = selected && <>
+    <UnitInspection key={selected.unit} row={selected} onDetails={onDetails}
+      onClose={isMobile ? undefined : closeInspection} closeDisabled={detailBusy} />
+    {detail}
+  </>;
 
   return (
-    <DataPanel title="整理预览" variant="dense" className={panelClass} action={<ThumbnailSwitch />}>
+    <DataPanel title="整理预览" variant="dense" className={panelClass + ' nfc-organizer-workspace-report'} action={
+      <div className="nfc-organizer-workspace-view-actions">
+        <div className="nfc-file-workspace-view" role="group" aria-label="整理预览显示方式">
+          <button type="button" aria-label="网格视图" aria-pressed={!listView} disabled={!showThumbnails}
+            onClick={() => setView('grid')}><ConsoleIcon name="layout-dashboard" size={16} /></button>
+          <button type="button" aria-label="列表视图" aria-pressed={listView}
+            onClick={() => setView('list')}><ConsoleIcon name="list-checks" size={16} /></button>
+        </div>
+        <ThumbnailSwitch />
+      </div>}>
       <div className="nfc-unit-summarybar">
         <div className="nfc-unit-summary">
         <strong>{summary.unit_count.toLocaleString()} 个整理单元</strong>
@@ -210,33 +227,37 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
         </details>
       </div>
       {children}
-      {preview.units.length > 0 ? (
-        <>
-          <ul className={'nfc-unit-gallery' + (showThumbnails ? '' : ' is-compact')} role="list" aria-label="逐目录整理预览">
-            {preview.units.map((row, index) => {
+      {pending ? <p className="nfc-file-workspace-loading" role="status">正在读取此页预览…</p> : preview.units.length > 0 ? (
+        <div className={'nfc-organizer-workspace-body' + (desktopOpen ? ' has-inspector' : '')}>
+          <ul className={'nfc-unit-gallery' + (listView ? ' is-compact' : '')} role="list" aria-label="逐目录整理预览">
+            {preview.units.map(row => {
               const sample = row.sample_moves?.find(move => move.kind === 'P') ??
                 row.sample_moves?.find(move => move.kind === 'V');
               return (
-                <React.Fragment key={preview.job_id + '/' + row.unit}>
-                  <li>
-                    <button type="button" className="nfc-unit-card" aria-pressed={selected?.unit === row.unit}
-                      title={row.unit} aria-controls={inspector ? 'organizer-unit-inspection' : undefined}
-                      onClick={() => selectUnit(row)}>
-                      <MediaThumbnail path={row.unit} kind="directory" size="cover" representativeFile={sample?.source} />
-                      <span className="nfc-unit-caption">
-                        <strong>{unitName(row.unit)}</strong>
-                        <small>{unitMediaLabel(row)}</small>
-                        <StatusBadge status={previewTones[row.status]} label={previewLabels[row.status]} />
-                      </span>
-                    </button>
-                  </li>
-                  {index === insertAfter && <li className="nfc-unit-gallery-inspection" role="presentation">{inspector}</li>}
-                </React.Fragment>
+                <li key={preview.job_id + '/' + row.unit}>
+                  <button type="button" className="nfc-unit-card" aria-pressed={selected?.unit === row.unit}
+                    disabled={detailBusy}
+                    ref={selected?.unit === row.unit ? selectedCard : undefined}
+                    title={row.unit} aria-haspopup={isMobile ? 'dialog' : undefined}
+                    aria-controls={selected?.unit === row.unit && (desktopOpen || sheetOpen) ? 'organizer-unit-inspection' : undefined}
+                    onClick={() => selectUnit(row)}>
+                    <MediaThumbnail path={row.unit} kind="directory" size={listView ? 'small' : 'cover'} representativeFile={sample?.source} />
+                    <span className="nfc-unit-caption">
+                      <strong>{unitName(row.unit)}</strong>
+                      <small>{unitMediaLabel(row)}</small>
+                      <StatusBadge status={previewTones[row.status]} label={previewLabels[row.status]} />
+                    </span>
+                  </button>
+                </li>
               );
             })}
           </ul>
-          {insertAfter === -1 && inspector}
-        </>
+          {desktopOpen && <aside className="nfc-organizer-workspace-inspector" aria-label="整理详情">{inspector}</aside>}
+          {sheetOpen && <ConsoleSheet open onClose={closeInspection} title="整理详情"
+            className="nfc-organizer-workspace-sheet" dismissDisabled={detailBusy}>
+            {inspector}
+          </ConsoleSheet>}
+        </div>
       ) : <ConsoleEmpty title="当前筛选没有整理单元" />}
       {footer}
       {action && <footer className="nfc-unit-confirmation">
@@ -249,11 +270,12 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
 }
 
 /** Read the selected unit's mapping independently of the preview table page. */
-export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClose }: {
+export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClose, embedded = false }: {
   previewId: OrganizerJobId;
   mappingId: string;
   unit: string;
   onClose: () => void;
+  embedded?: boolean;
 }) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -262,11 +284,25 @@ export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClos
     queryKey: ['mediaOrganizerMapping', previewId, mappingId, page, pageSize],
     queryFn: () => mediaOrganizerBatchApi.getMapping(previewId, mappingId, page, pageSize),
   });
+  const records = data && <ul className="nfc-v2-batch-organizer-records" role="list" aria-label="媒体文件位置调整明细">
+    {data.moves.map(move => (
+      <li key={move.source}>
+        <div className="nfc-v2-batch-organizer-record-heading">
+          <strong className="nfc-v2-batch-organizer-kind">{mappingKindLabels[move.kind]}</strong>
+          {move.kind !== 'Directory' && <span>{formatBytes(move.bytes)}</span>}
+        </div>
+        <dl className="nfc-v2-batch-organizer-paths">
+          <div><dt>源路径</dt><dd><CodePath value={move.source} /></dd></div>
+          <div><dt>目标路径</dt><dd><CodePath value={move.target} /></dd></div>
+        </dl>
+      </li>
+    ))}
+  </ul>;
 
   useEffect(() => {
     reportRef.current?.focus({ preventScroll: true });
-    reportRef.current?.scrollIntoView?.({ block: 'start' });
-  }, []);
+    reportRef.current?.scrollIntoView?.({ block: embedded ? 'nearest' : 'start', behavior: 'instant' });
+  }, [embedded]);
 
   return (
     <div className="nfc-v2-batch-organizer-focus-region" ref={reportRef} tabIndex={-1}
@@ -279,7 +315,7 @@ export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClos
         ) : data ? (
           <>
             <ResponsiveDataView
-              desktop={<div className="nfc-v2-batch-media-scroll">
+              desktop={embedded ? records : <div className="nfc-v2-batch-media-scroll">
                 <table className="nfc-v2-batch-media-table">
                   <caption className="nfc-v2-batch-media-sr-only">媒体文件位置调整明细</caption>
                   <thead><tr><th scope="col">类型</th><th scope="col">源路径</th>
@@ -293,20 +329,7 @@ export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClos
                   ))}</tbody>
                 </table>
               </div>}
-              mobile={<ul className="nfc-v2-batch-organizer-records" role="list" aria-label="媒体文件位置调整明细">
-                {data.moves.map(move => (
-                  <li key={move.source}>
-                    <div className="nfc-v2-batch-organizer-record-heading">
-                      <strong className="nfc-v2-batch-organizer-kind">{mappingKindLabels[move.kind]}</strong>
-                      {move.kind !== 'Directory' && <span>{formatBytes(move.bytes)}</span>}
-                    </div>
-                    <dl className="nfc-v2-batch-organizer-paths">
-                      <div><dt>源路径</dt><dd><CodePath value={move.source} /></dd></div>
-                      <div><dt>目标路径</dt><dd><CodePath value={move.target} /></dd></div>
-                    </dl>
-                  </li>
-                ))}
-              </ul>}
+              mobile={records}
             />
             <ConsolePagination page={page} pageSize={pageSize} total={data.total_moves}
               pageSizes={[25, 50, 100]} onChange={(next, size) => { setPage(next); setPageSize(size); }} />

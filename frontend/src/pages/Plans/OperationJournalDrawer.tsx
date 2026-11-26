@@ -26,7 +26,7 @@ const afterPath = (record: OperationJournalEntry) =>
 
 /** All four original evidence objects are available without mutating the journal. */
 const JournalEvidence: React.FC<{ record: OperationJournalEntry }> = ({ record }) => (
-  <details className="nfc-v2-journal-evidence">
+  <details className="nfc-v2-journal-evidence nfc-record-disclosure">
     <summary>查看原始审计数据</summary>
     <div className="nfc-journal-json-grid">
       {([
@@ -52,9 +52,9 @@ const JournalFlow: React.FC<{ record: OperationJournalEntry }> = ({ record }) =>
   return (
     <div className="nfc-journal-mutation">
       <div className="nfc-journal-path-flow">
-        <CodePath value={beforePath(record)} />
+        <div className="nfc-record-journal-path"><span>执行前</span><CodePath value={beforePath(record)} /></div>
         <ConsoleIcon name="arrow-right" size={15} />
-        <CodePath value={afterPath(record)} />
+        <div className="nfc-record-journal-path"><span>执行后</span><CodePath value={afterPath(record)} /></div>
       </div>
       <div className="nfc-journal-meta">
         {(bSize || aSize) && <span>大小 {bSize || '—'} → {aSize || '—'}</span>}
@@ -73,6 +73,8 @@ export const OperationJournalDrawer: React.FC<Props> = ({ planId, open, onClose 
     queryKey: ['planOperationJournal', planId, page, pageSize],
     queryFn: () => plansApi.getOperationJournal(planId, page, pageSize),
     enabled: open && !!planId,
+    // Keep the pagination controls mounted as another page of the same evidence loads.
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === planId ? previous : undefined,
   });
 
   const records = data?.items || [];
@@ -89,7 +91,7 @@ export const OperationJournalDrawer: React.FC<Props> = ({ planId, open, onClose 
     <ConsoleSheet
       open={open}
       onClose={onClose}
-      className="nfc-v2-operation-journal"
+      className="nfc-v2-operation-journal nfc-record-dialog nfc-reading-sheet"
       title={'计划 #' + planId + ' 操作日志'}
       description="Worker 真实文件系统变更的只读审计证据；Undo Plan 根据这些记录逆向生成。"
       titleAside={
@@ -97,10 +99,10 @@ export const OperationJournalDrawer: React.FC<Props> = ({ planId, open, onClose 
           loading={isFetching} onClick={() => { void refetch(); }}>刷新</ConsoleButton>
       }
     >
-      <div className="nfc-overlay-stack nfc-v2-journal-body">
-        <p className="nfc-overlay-intro">
-          操作日志包含路径、大小、时间戳与 inode。展开记录可以查看完整的 before/after 和 metadata JSON。
-        </p>
+      <div className="nfc-overlay-stack nfc-v2-journal-body" aria-busy={isFetching || undefined}>
+        {data && !isError && <p className="nfc-reading-result-count" role="status">
+          {isFetching ? '正在更新操作日志…' : `共 ${data.total ?? records.length} 条执行记录`}
+        </p>}
         {isError && (
           <div className="nfc-v2-journal-feedback" role="alert">
             <strong>读取操作日志失败</strong>
@@ -117,7 +119,7 @@ export const OperationJournalDrawer: React.FC<Props> = ({ planId, open, onClose 
         {!isError && !isLoading && records.length > 0 && (
           <ResponsiveDataView
             desktop={
-              <div className="nfc-v2-journal-table-scroll">
+              <div className="nfc-v2-journal-table-scroll" role="region" aria-label="操作日志明细表格" tabIndex={0}>
                 <table className="nfc-v2-journal-table">
                   <thead><tr>
                     <th scope="col">序号</th>

@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { useQuarantineDialogFocus } from './useQuarantineDialogFocus';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { quarantineApi } from '../../api/quarantine';
 import { getStructuredApiError } from '../../api/errors';
 import type { QuarantineEntry, QuarantinePurgeResponse } from '../../types';
 import { getQuarantinePurgeAvailability } from '../../components/quarantine/quarantine_rules';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
+import { CodePath } from '../../components/ui/CodePath';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
 import { formatBytes } from '../../utils/format';
@@ -39,6 +41,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
   const inFlight = useRef(false);
+  const dialogFocus = useQuarantineDialogFocus();
   const [confirmInput, setConfirmInput] = useState('');
   const [purgeResult, setPurgeResult] = useState<QuarantinePurgeResponse | null>(null);
 
@@ -93,7 +96,9 @@ export const PurgeConfirmModal: React.FC<Props> = ({
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
         <Dialog.Content
-          className="nfc-v2-dialog nfc-overlay-modal nfc-quarantine-purge-modal nfc-v2-quarantine-dialog"
+          className="nfc-v2-dialog nfc-overlay-modal nfc-quarantine-purge-modal nfc-v2-quarantine-dialog nfc-record-dialog nfc-maintenance-dialog"
+          aria-busy={busy || undefined}
+          {...dialogFocus}
           onEscapeKeyDown={event => { if (busy || inFlight.current) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
           <header className="nfc-v2-dialog-heading">
@@ -124,8 +129,8 @@ export const PurgeConfirmModal: React.FC<Props> = ({
             </Notice>}
 
             <dl className="nfc-v2-quarantine-facts">
-              <div><dt>原始路径</dt><dd><code className="nfc-breakall">{entry.original_path}</code></dd></div>
-              <div><dt>隔离区路径</dt><dd><code className="nfc-breakall">{entry.quarantine_path}</code></dd></div>
+              <div><dt>原始路径</dt><dd><CodePath value={entry.original_path} /></dd></div>
+              <div><dt>隔离区路径</dt><dd><CodePath value={entry.quarantine_path} /></dd></div>
               <div><dt>文件大小</dt><dd>{formatBytes(entry.size)}</dd></div>
             </dl>
 
@@ -137,7 +142,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
                 </Notice>
                 {purgeResult.survivor_status === 'found' ? (
                   <Notice tone="warning" title="当前隔离副本已清除，但索引范围内仍发现存活 hard link">
-                    <ul>{survivorPaths.map(path => <li key={path}><code>{path}</code></li>)}</ul>
+                    <ul className="nfc-maintenance-path-list">{survivorPaths.map(path => <li key={path}><CodePath value={path} /></li>)}</ul>
                   </Notice>
                 ) : purgeResult.survivor_status === 'incomplete' ? (
                   <Notice tone="warning" title="隔离区路径已清除，但索引范围内 hard link 核验不完整">
@@ -150,7 +155,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
                 )}
                 {independentCopyPaths.length > 0 && (
                   <Notice tone="info" title="发现同内容但不同 inode 的独立副本">
-                    <ul>{independentCopyPaths.map(path => <li key={path}><code>{path}</code></li>)}</ul>
+                    <ul className="nfc-maintenance-path-list">{independentCopyPaths.map(path => <li key={path}><CodePath value={path} /></li>)}</ul>
                   </Notice>
                 )}
               </div>
@@ -161,7 +166,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
                 </span>
                 <input type="text" autoComplete="off" spellCheck={false}
                   placeholder="请输入 DELETE" value={confirmInput}
-                  aria-invalid={confirmInput.length > 0 && !availability.canPurge}
+                  aria-invalid={confirmInput.length > 0 && confirmInput !== 'DELETE'}
                   disabled={!isAdmin || !allowMutation || !allowDelete || busy}
                   onChange={event => setConfirmInput(event.target.value)} />
                 {confirmInput && confirmInput !== 'DELETE' && (
@@ -169,6 +174,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
                 )}
               </label>
             )}
+            {busy && <p className="nfc-maintenance-pending" role="status">正在清除隔离区路径…</p>}
           </div>
           <div className="nfc-v2-confirm-actions">
             {!purgeResult && <ConsoleButton disabled={busy} onClick={closeSafely}>取消</ConsoleButton>}

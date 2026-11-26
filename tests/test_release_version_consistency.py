@@ -7,8 +7,8 @@ import tomllib
 from app.main import create_app
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-RELEASE_VERSION = "1.8.18"
-KOMODO_IMAGE_VERSION = "1.8.18"
+RELEASE_VERSION = "2.0.0"
+KOMODO_IMAGE_VERSION = "2.0.0"
 
 
 def test_fastapi_backend_version():

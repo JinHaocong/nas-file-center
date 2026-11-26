@@ -72,6 +72,12 @@ const modeLabel = (mode: WorkflowMode) => {
 
 const workflowModes: WorkflowMode[] = ['file', 'organizer', 'dedupe', 'utility'];
 
+/** Moves to an editor section without changing the workflow revision URL. */
+function focusWorkflowSection(element: HTMLElement | null): void {
+  element?.focus({ preventScroll: true });
+  element?.scrollIntoView({ block: 'start', behavior: 'instant' });
+}
+
 const modeIcon = (mode: WorkflowMode) => {
   if (mode === 'file') return <ConsoleIcon name="file-text" size={17} />;
   if (mode === 'organizer') return <ConsoleIcon name="folders" size={17} />;
@@ -96,6 +102,9 @@ export const WorkflowBuilderPage: React.FC = () => {
   const { user } = useAuth();
   const formId = React.useId();
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const definitionRef = useRef<HTMLElement>(null);
+  const pipelineRef = useRef<HTMLElement>(null);
+  const previewRef = useRef<HTMLElement>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [nameError, setNameError] = useState('');
@@ -368,9 +377,10 @@ export const WorkflowBuilderPage: React.FC = () => {
     : isHistoricalView
     ? `historical r${targetRevision}`
     : `r${workflow?.current_revision}`;
+  const hasPreview = !isNew && workflow && (!isHistoricalView || Boolean(historicalRevisionData));
 
   return (
-    <div className="nfc-operations-page nfc-workflow-builder-grid nfc-workflow-builder-page nfc-page-layout-workbench">
+    <div className="nfc-operations-page nfc-workflow-builder-grid nfc-workflow-builder-page nfc-page-layout-workbench nfc-tool-workspace">
       <PageHeader
         title={isNew ? '新建工作流' : workflow?.name || `工作流 #${workflowId}`}
         description={
@@ -442,8 +452,17 @@ export const WorkflowBuilderPage: React.FC = () => {
         )}
       </div>
 
+      <nav className="nfc-tool-workflow-nav" aria-label="工作流编辑区导航">
+        <ConsoleButton size="sm" variant="ghost" leadingIcon={<ConsoleIcon name="settings" size={15} />}
+          onClick={() => focusWorkflowSection(definitionRef.current)}>设置</ConsoleButton>
+        <ConsoleButton size="sm" variant="ghost" leadingIcon={<ConsoleIcon name="list-checks" size={15} />}
+          onClick={() => focusWorkflowSection(pipelineRef.current)}>执行步骤</ConsoleButton>
+        {hasPreview && <ConsoleButton size="sm" variant="ghost" leadingIcon={<ConsoleIcon name="file-search" size={15} />}
+          onClick={() => focusWorkflowSection(previewRef.current)}>执行预览</ConsoleButton>}
+      </nav>
+
       <div className="nfc-workflow-editor-layout">
-        <aside className="nfc-workflow-definition-rail">
+        <aside className="nfc-workflow-definition-rail" ref={definitionRef} tabIndex={-1} aria-label="工作流设置">
           <DataPanel
         title="工作流设置"
         className="nfc-complex-form-panel"
@@ -501,7 +520,7 @@ export const WorkflowBuilderPage: React.FC = () => {
           </DataPanel>
         </aside>
 
-        <section className="nfc-workflow-pipeline-canvas" aria-label="执行步骤">
+        <section className="nfc-workflow-pipeline-canvas" aria-label="执行步骤" ref={pipelineRef} tabIndex={-1}>
           <DataPanel
             title="执行步骤"
             description="从上往下执行，预览使用已保存的版本。"
@@ -518,18 +537,16 @@ export const WorkflowBuilderPage: React.FC = () => {
         </section>
       </div>
 
-      {!isNew &&
-        workflow &&
-        (!isHistoricalView || Boolean(historicalRevisionData)) && (
-          <WorkflowPreviewPanel
-            workflowId={workflow.id}
-            revision={isHistoricalView ? targetRevision! : workflow.current_revision}
-            mode={mode}
-            isDirty={isDirty}
-            isArchived={isArchived}
-            onGeneratePlanSuccess={(planId) => navigate(`/plans/${planId}`)}
-          />
-        )}
+      {hasPreview && <section className="nfc-tool-workflow-preview" aria-label="执行预览" ref={previewRef} tabIndex={-1}>
+        <WorkflowPreviewPanel
+          workflowId={workflow.id}
+          revision={isHistoricalView ? targetRevision! : workflow.current_revision}
+          mode={mode}
+          isDirty={isDirty}
+          isArchived={isArchived}
+          onGeneratePlanSuccess={(planId) => navigate(`/plans/${planId}`)}
+        />
+      </section>}
 
       <ConsoleConfirmDialog
         open={confirmation !== null}

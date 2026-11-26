@@ -151,7 +151,7 @@ export const ScanDetailPage: React.FC = () => {
   const groupsTotal = groupsError ? null : groupsData?.total;
 
   return (
-    <div className="nfc-operations-page nfc-scan-detail-page nfc-v2-scan-detail-page nfc-page-layout-detail">
+    <div className="nfc-operations-page nfc-scan-detail-page nfc-v2-scan-detail-page nfc-page-layout-detail nfc-record-workspace">
       <PageHeader
         title={scan.name}
         description={
@@ -219,6 +219,12 @@ export const ScanDetailPage: React.FC = () => {
           description="展开组查看各个文件成员；数据只读，不会直接修改文件。"
           action={<span className="nfc-panel-count">{groupsTotal ?? '—'} 组</span>}
           className="nfc-panel-flush nfc-v2-groups-panel" variant="dense">
+          {!groupsError && !groupsLoading && expandedGroupIds.length > 0 && (
+            <div className="nfc-record-controls nfc-record-selection">
+              <span>{expandedGroupIds.length} 组已展开</span>
+              <ConsoleButton size="sm" variant="ghost" onClick={() => setExpandedGroupIds([])}>收起成员列表</ConsoleButton>
+            </div>
+          )}
           {groupsError ? (
             <div className="nfc-v2-group-status" role="alert">
               <ConsoleEmpty title="重复文件组加载失败"
@@ -248,7 +254,7 @@ export const ScanDetailPage: React.FC = () => {
                       const expanded = expandedGroupIds.includes(group.id);
                       return (
                         <React.Fragment key={group.id}>
-                          <tr>
+                          <tr className={expanded ? 'nfc-record-selected' : undefined}>
                             <td><strong className="nfc-mono">#{group.id}</strong></td>
                             <td><span className="nfc-mono nfc-hash-value"
                               title={group.content_hash}>{group.content_hash.slice(0, 18)}…</span></td>
@@ -282,8 +288,9 @@ export const ScanDetailPage: React.FC = () => {
               }
               mobile={
                 <div className="nfc-mobile-record-list">
-                  {groupItems.map(group => (
-                    <article className="nfc-duplicate-group-mobile-card" key={group.id}>
+                  {groupItems.map(group => {
+                    const expanded = expandedGroupIds.includes(group.id);
+                    return <article className={'nfc-duplicate-group-mobile-card' + (expanded ? ' nfc-record-selected' : '')} key={group.id}>
                       <div className="nfc-mobile-record-heading">
                         <div>
                           <span className="nfc-mobile-record-title nfc-mono">Group #{group.id}</span>
@@ -297,18 +304,22 @@ export const ScanDetailPage: React.FC = () => {
                           {group.content_hash.slice(0, 14)}…
                         </b></span>
                       </div>
-                      <details className="nfc-duplicate-member-list">
-                        <summary>查看 {group.members.length} 个成员</summary>
-                        <div>{group.members.map(member => (
+                      <div className="nfc-duplicate-member-list">
+                        <button type="button" className="nfc-v2-group-expand" aria-expanded={expanded}
+                          aria-controls={'nfc-mobile-group-members-' + group.id} onClick={() => toggleGroup(group.id)}>
+                          <ConsoleIcon name="chevron-right" size={15} />
+                          {expanded ? '收起成员' : '查看 ' + group.members.length + ' 个成员'}
+                        </button>
+                        {expanded && <div id={'nfc-mobile-group-members-' + group.id}>{group.members.map(member => (
                           <div className="nfc-duplicate-member" key={member.id}>
                             <span className="nfc-kind-badge">root #{member.root_id}</span>
                             <CodePath value={member.path} />
                             <span className="nfc-table-meta">{formatBytes(member.size)}</span>
                           </div>
-                        ))}</div>
-                      </details>
+                        ))}</div>}
+                      </div>
                     </article>
-                  ))}
+                  })}
                 </div>
               }
             />

@@ -33,12 +33,18 @@ const ContextDetails: React.FC<{
   data: Record<string, unknown> | null | undefined;
   emptyLabel: string;
 }> = ({ title, data, emptyLabel }) => (
-  <details className="nfc-v2-task-context">
-    <summary>{title}</summary>
-    {data && Object.keys(data).length > 0
-      ? <pre className="nfc-code-block">{JSON.stringify(sanitizeContext(data), null, 2)}</pre>
-      : <span className="nfc-v2-task-muted">{emptyLabel}</span>}
-  </details>
+  data && Object.keys(data).length > 0 ? (
+    <details className="nfc-v2-task-context">
+      <summary>{title}</summary>
+      <pre className="nfc-code-block" tabIndex={0} aria-label={title}>
+        {JSON.stringify(sanitizeContext(data), null, 2)}
+      </pre>
+    </details>
+  ) : (
+    <div className="nfc-v2-task-context nfc-reading-empty-context">
+      <strong>{title}</strong><span className="nfc-v2-task-muted">{emptyLabel}</span>
+    </div>
+  )
 );
 
 export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onViewTask }) => {
@@ -61,7 +67,7 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
     <ConsoleSheet open={open} onClose={onClose}
       title="任务详情"
       description={task ? taskTypeLabel(task.job_type) : undefined}
-      className="nfc-task-detail-drawer"
+      className="nfc-task-detail-drawer nfc-reading-sheet"
       titleAside={task ? (
         <><span className="nfc-v2-task-id">#{task.id}</span><StatusBadge status={task.status} /></>
       ) : taskId ? <span className="nfc-v2-task-id">#{taskId}</span> : null}

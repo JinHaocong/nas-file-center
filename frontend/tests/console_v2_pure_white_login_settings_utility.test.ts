@@ -114,7 +114,7 @@ describe('Pure White Stage 4A login, settings and utility preview', () => {
     const src = read('src/pages/Login/index.tsx');
     for (const token of [
       'submissionInFlight.current', 'await login({ username, password })',
-      'navigate(\'/dashboard\', { replace: true })', 'type="password"',
+      'navigate(\'/dashboard\', { replace: true })', "type={passwordVisible ? 'text' : 'password'}",
       'autoComplete="current-password"', 'aria-busy={loading}',
       'disabled={loading || !username.trim() || !password}',
       '<option value="light">', '<option value="dark">',

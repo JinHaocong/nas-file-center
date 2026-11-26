@@ -131,7 +131,7 @@ async function inspect(page, effectiveTheme, width, kind, selector) {
     const cs = getComputedStyle(content);
     const ms = getComputedStyle(mask);
     const r = content.getBoundingClientRect();
-    const expectSurface = effectiveTheme === 'dark' ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
+    const expectSurface = effectiveTheme === 'dark' ? 'rgb(35, 39, 34)' : 'rgb(255, 254, 250)';
     const problems = [];
     const check = (valid, reason) => { if (!valid) problems.push(reason); };
     const expectedOverlay = kind === 'confirm' ? 1300 : 1100;

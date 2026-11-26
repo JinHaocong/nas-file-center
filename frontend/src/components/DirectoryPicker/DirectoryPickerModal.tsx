@@ -41,6 +41,8 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({
     browser: null, favorites: null, recent: null,
   });
+  const locationRow = useRef<HTMLDivElement>(null);
+  const pendingLocationFocus = useRef<{ path: string; opener: Element | null } | null>(null);
   const [confirmFavoriteId, setConfirmFavoriteId] = useState<number | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const confirmingRef = useRef(false);
@@ -66,17 +68,24 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     setConfirmFavoriteId(null);
     setIsConfirming(false);
     confirmingRef.current = false;
+    pendingLocationFocus.current = null;
   }, [open, disabled, initialPath, selectedValues, multiple]);
 
   const { data: dirData, isLoading: isDirLoading, isFetching: isDirFetching,
     isError: isDirError, error: dirError, refetch: refetchDir,
   } = useQuery({
-    queryKey: ['filesystem', 'list', currentPath, page, PAGE_SIZE, searchQuery],
+    queryKey: ['filesystem', 'list', currentPath, page, PAGE_SIZE, searchQuery, user?.id ?? null],
     queryFn: () => filesystemApi.listDirectory(
       currentPath || undefined, true, page, PAGE_SIZE, searchQuery || undefined,
     ),
     enabled: open,
     staleTime: 5000,
+    placeholderData: (previous, previousQuery) => {
+      const key = previousQuery?.queryKey;
+      // Preserve the list and paginator only when loading another page in the same directory.
+      return key?.[2] === currentPath && key[5] === searchQuery && key[6] === (user?.id ?? null)
+        ? previous : undefined;
+    },
   });
   useEffect(() => {
     if (open && dirData?.path && !currentPath) setCurrentPath(dirData.path);
@@ -128,8 +137,28 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     favData?.items?.some(item => item.path === effectiveCurrentPath),
   [favData?.items, effectiveCurrentPath]);
 
+  useEffect(() => {
+    const pending = pendingLocationFocus.current;
+    if (!pending) return;
+    if (!open || activeTab !== 'browser' || currentPath !== pending.path || isDirError) {
+      pendingLocationFocus.current = null;
+      return;
+    }
+    if (isDirFetching || !dirData) return;
+    pendingLocationFocus.current = null;
+    if (effectiveCurrentPath !== pending.path) return;
+
+    const active = document.activeElement;
+    if (active === document.body || (active === pending.opener && active instanceof HTMLElement &&
+        !active.isContentEditable && !active.matches('input, textarea, select, [role="textbox"]'))) {
+      locationRow.current?.focus({ preventScroll: true });
+    }
+  }, [open, activeTab, currentPath, isDirError, isDirFetching, dirData, effectiveCurrentPath]);
+
+  /** Return keyboard focus to the current directory context after the next folder loads. */
   const handleNavigate = (path: string) => {
     if (disabledRef.current || confirmingRef.current) return;
+    if (path !== currentPath) pendingLocationFocus.current = { path, opener: document.activeElement };
     setCurrentPath(path);
     setSearchQuery('');
     setPage(1);
@@ -185,7 +214,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-directory-overlay" />
         <Dialog.Content
-          className="nfc-directory-picker-modal nfc-overlay-modal nfc-v2-directory-dialog"
+          className="nfc-directory-picker-modal nfc-overlay-modal nfc-v2-directory-dialog nfc-reading-picker"
           data-mobile={isMobile || undefined}
           onEscapeKeyDown={event => { if (busy || confirmFavoriteId !== null) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}
@@ -217,8 +246,8 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
 
           <div className="nfc-directory-picker-body">
             <div className="nfc-directory-browser-toolbar">
-              <div className="nfc-directory-browser-row">
-                <PathBreadcrumb currentPath={effectiveCurrentPath}
+              <div ref={locationRow} tabIndex={-1} role="group" aria-label="当前目录位置" className="nfc-directory-browser-row">
+                <PathBreadcrumb currentPath={effectiveCurrentPath || currentPath}
                   allowedRoots={allowedRoots} onNavigate={handleNavigate} />
                 <div className="nfc-v2-directory-toolbar-actions">
                   <ConsoleButton size="sm" disabled={busy || !dirData?.parent}
@@ -290,7 +319,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                   <div className="nfc-directory-search-row">
                     <ConsoleIcon name="search" size={17} />
                     <input type="search" aria-label="搜索子目录"
-                      placeholder="搜索子目录（如 Download、Photos）..."
+                      placeholder="筛选当前目录的子目录"
                       value={searchQuery} disabled={busy}
                       onChange={event => { setSearchQuery(event.target.value); setPage(1); }} />
                   </div>
@@ -299,19 +328,19 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                       无法读取目录：{dirError instanceof Error ? dirError.message : '请检查目录访问权限'}
                       <ConsoleButton size="sm" onClick={() => { void refetchDir(); }}>重试</ConsoleButton>
                     </div>
-                  ) : isDirLoading || isDirFetching ? (
+                  ) : isDirLoading || (isDirFetching && !dirData) ? (
                     <p className="nfc-v2-directory-loading" role="status">正在读取目录…</p>
                   ) : !dirData?.items?.length ? (
                     <ConsoleEmpty title={searchQuery ? '没有匹配的子目录' : '当前目录下无子文件夹'} />
                   ) : (
                     <>
-                      <div className="nfc-directory-list-viewport">
+                      <div className="nfc-directory-list-viewport" aria-busy={isDirFetching || undefined}>
                         <ul className="nfc-v2-directory-list">
                           {dirData.items.map(item => (
                             <li className={selectedPaths.includes(item.path) ? 'is-selected' : ''}
                               key={item.path}>
                               <button type="button" className="nfc-v2-directory-open"
-                                disabled={busy} onClick={() => handleNavigate(item.path)}
+                                disabled={busy || isDirFetching} onClick={() => handleNavigate(item.path)}
                                 aria-label={'进入目录 ' + item.name}>
                                 <MediaThumbnail path={item.path} kind="directory" />
                                 <span><strong>{item.name}</strong><small>{item.path}</small></span>
@@ -319,13 +348,13 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                               {multiple ? (
                                 <label className="nfc-v2-directory-toggle">
                                   <input type="checkbox" aria-label={'选择目录 ' + item.name}
-                                    disabled={busy} checked={selectedPaths.includes(item.path)}
+                                    disabled={busy || isDirFetching} checked={selectedPaths.includes(item.path)}
                                     onChange={() => handleToggleSelect(item.path)} />
                                 </label>
                               ) : (
                                 <ConsoleButton size="sm"
                                   variant={selectedPaths.includes(item.path) ? 'primary' : 'secondary'}
-                                  disabled={busy} onClick={() => handleToggleSelect(item.path)}>
+                                  disabled={busy || isDirFetching} onClick={() => handleToggleSelect(item.path)}>
                                   {selectedPaths.includes(item.path) ? '已选' : '选择'}
                                 </ConsoleButton>
                               )}
@@ -334,7 +363,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                         </ul>
                       </div>
                       <div className="nfc-directory-pagination-row">
-                        <span>共 {dirData.total} 个目录</span>
+                        <span role="status">{isDirFetching ? '正在更新目录列表…' : `共 ${dirData.total} 个目录`}</span>
                         {dirData.total > PAGE_SIZE && (
                           <ConsolePagination page={page} pageSize={PAGE_SIZE}
                             total={dirData.total} pageSizes={[PAGE_SIZE]}
@@ -423,7 +452,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
             <div className="nfc-directory-picker-selection">
               {multiple ? (
                 <>
-                  <span>已选 <strong>{selectedPaths.length}</strong> 个目录</span>
+                  <span role="status">已选 <strong>{selectedPaths.length}</strong> 个目录</span>
                   <div className="nfc-directory-picker-selected-tags">
                     {selectedPaths.map(path => (
                       <button type="button" key={path}
@@ -437,7 +466,8 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                 </>
               ) : (
                 <span className="nfc-directory-picker-current-selection">
-                  当前选择：{selectedPaths[0] || effectiveCurrentPath || '尚未选择'}
+                  <small>当前选择</small>
+                  <strong>{selectedPaths[0] || effectiveCurrentPath || '尚未选择'}</strong>
                 </span>
               )}
             </div>

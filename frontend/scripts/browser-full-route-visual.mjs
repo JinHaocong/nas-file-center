@@ -345,7 +345,15 @@ try {
       const problems = [];
       try {
         loginFixture = Boolean(item.public);
-        await tab.goto(BASE + item.path, { waitUntil: 'domcontentloaded' });
+        if (item.id === 'dashboard') {
+          await tab.goto(BASE + item.path, { waitUntil: 'domcontentloaded' });
+          await tab.locator('.nfc-file-workspace-entries').waitFor();
+          const fileWorkspaceOverflow = await tab.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+          if (fileWorkspaceOverflow > 3) problems.push('File workspace horizontal overflow: ' + fileWorkspaceOverflow + 'px');
+        }
+        // Metrics and scan-list checks target the separate overview.
+        const pagePath = item.id === 'dashboard' ? item.path + '?view=overview' : item.path;
+        await tab.goto(BASE + pagePath, { waitUntil: 'domcontentloaded' });
         if (item.public) await tab.locator('#nfc-login-theme-select').waitFor();
         else await tab.locator('#main-content').waitFor();
         // The scan detail route can mount its data panel after the shell.
@@ -1217,8 +1225,10 @@ try {
           for (const [selector, accessibleName] of targets) {
             const control = tab.locator(selector);
             await control.focus();
-            await tab.keyboard.press('Tab');
+            // The last select can be the last tabbable element on an empty page.
+            // Walk from its previous control without crossing browser chrome.
             await tab.keyboard.press('Shift+Tab');
+            await tab.keyboard.press('Tab');
             const data = await control.evaluate(element => {
               const style = getComputedStyle(element);
               const rect = element.getBoundingClientRect();

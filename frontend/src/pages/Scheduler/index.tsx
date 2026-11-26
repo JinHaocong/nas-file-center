@@ -30,6 +30,7 @@ export const SchedulerPage: React.FC = () => {
   const [historySchedule, setHistorySchedule] = useState<ScheduleItem | null>(null);
   const [runTarget, setRunTarget] = useState<ScheduleItem | null>(null);
   const [runBusy, setRunBusy] = useState(false);
+  const [visibility, setVisibility] = useState<'all' | 'enabled' | 'disabled'>('all');
   const runInFlight = useRef(false);
   const enableInFlight = useRef(false);
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
@@ -127,9 +128,10 @@ export const SchedulerPage: React.FC = () => {
     </div>
   );
 
-  const items: ScheduleItem[] = data?.items || [];
+  const schedules: ScheduleItem[] = data?.items || [];
+  const items = visibility === 'all' ? schedules : schedules.filter(row => row.enabled === (visibility === 'enabled'));
   return (
-    <div className="nfc-operations-page nfc-scheduler-page nfc-page-layout-ledger nfc-v2-scheduler-page">
+    <div className="nfc-operations-page nfc-scheduler-page nfc-page-layout-ledger nfc-v2-scheduler-page nfc-tool-workspace">
       <PageHeader title="计划任务"
         description="按时区和触发规则安排索引、扫描、媒体任务或工作流。"
         actions={<ActionBar compact>
@@ -157,11 +159,22 @@ export const SchedulerPage: React.FC = () => {
         description="错过的触发会跳过，手动运行和定时运行都记入历史。"
         action={<span className="nfc-panel-count">{data?.total ?? 0} 个计划</span>}
         className="nfc-panel-flush" variant="dense">
+        {!isError && schedules.length > 0 && <div className="nfc-tool-filter-strip">
+          <div className="nfc-tool-segment" role="group" aria-label="按启停状态筛选计划任务">
+            {([['all', '全部'], ['enabled', '启用'], ['disabled', '停用']] as const).map(([value, label]) => (
+              <ConsoleButton key={value} size="sm" variant="ghost" aria-pressed={visibility === value}
+                onClick={() => setVisibility(value)}>{label}</ConsoleButton>
+            ))}
+          </div>
+          <span role="status">显示 {items.length} 项</span>
+        </div>}
         {!isError && isLoading && <div role="status" className="nfc-v2-scheduler-list-state">
           正在读取计划任务…
         </div>}
-        {!isError && !isLoading && items.length === 0 &&
-          <ConsoleEmpty title="暂无计划任务" description="可以由管理员创建定时任务。" />}
+        {!isError && !isLoading && items.length === 0 && (schedules.length === 0
+          ? <ConsoleEmpty title="暂无计划任务" description="可以由管理员创建定时任务。" />
+          : <ConsoleEmpty title={visibility === 'enabled' ? '暂无启用计划' : '暂无停用计划'}
+              description="可切换筛选查看其他状态的计划任务。" />)}
         {!isError && !isLoading && items.length > 0 && (
           <ResponsiveDataView
             desktop={<div className="nfc-v2-scheduler-table-scroll">

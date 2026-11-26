@@ -26,6 +26,7 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
   const submitting = useRef(false);
   // Controlled Radix Dialog has no Dialog.Trigger; save the actual launcher before autofocus.
   const returnFocusTarget = useRef<HTMLElement | null>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
 
@@ -94,11 +95,16 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
         <Dialog.Portal>
           <Dialog.Overlay className="nfc-v2-dialog-overlay" />
           <Dialog.Content
-            className="nfc-v2-dialog nfc-v2-history-dialog nfc-overlay-modal nfc-history-cleanup-modal nfc-task-history-cleanup-modal"
-            onOpenAutoFocus={() => {
+            className="nfc-v2-dialog nfc-v2-history-dialog nfc-overlay-modal nfc-history-cleanup-modal nfc-task-history-cleanup-modal nfc-maintenance-dialog"
+            aria-busy={cleanupMutation.isPending || undefined}
+            onOpenAutoFocus={event => {
               const active = document.activeElement;
               returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
                 ? active : null;
+              if (cancelButton.current && !cancelButton.current.disabled) {
+                event.preventDefault();
+                cancelButton.current.focus({ preventScroll: true });
+              }
             }}
             onCloseAutoFocus={event => {
               const target = returnFocusTarget.current;
@@ -119,7 +125,7 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
               </span>
               <div>
                 <Dialog.Title>清理任务历史</Dialog.Title>
-                <Dialog.Description>清理选中终态的任务记录和可安全回收的智能整理报告。</Dialog.Description>
+                <Dialog.Description className="nfc-maintenance-subtitle">清理选中终态的任务记录和可安全回收的智能整理报告。</Dialog.Description>
               </div>
               <button type="button" className="nfc-v2-dialog-close"
                 disabled={cleanupMutation.isPending} aria-label="关闭历史清理窗口"
@@ -158,7 +164,10 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
             </div>
 
             <footer className="nfc-v2-confirm-actions">
-              <ConsoleButton disabled={cleanupMutation.isPending}
+              <span className="nfc-maintenance-selection" role="status">
+                {selectedStatuses.length ? `已选 ${selectedStatuses.length} 种状态` : '请选择要清理的状态'}
+              </span>
+              <ConsoleButton ref={cancelButton} disabled={cleanupMutation.isPending}
                 onClick={closeSafely}>取消</ConsoleButton>
               <ConsoleButton variant="danger"
                 disabled={selectedStatuses.length === 0 || cleanupMutation.isPending}

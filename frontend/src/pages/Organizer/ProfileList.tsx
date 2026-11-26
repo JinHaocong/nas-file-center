@@ -36,6 +36,8 @@ export const ProfileList: React.FC<ProfileListProps> = ({
   const importGuard = useRef(false);
   const fileReadToken = useRef(0);
   const fileRef = useRef<HTMLInputElement>(null);
+  const importTextRef = useRef<HTMLTextAreaElement>(null);
+  const importOpener = useRef<HTMLElement | null>(null);
   const exportGuard = useRef(false);
 
   const [search, setSearch] = useState('');
@@ -321,19 +323,35 @@ export const ProfileList: React.FC<ProfileListProps> = ({
         <Dialog.Portal>
           <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-organizer-import-overlay" />
           <Dialog.Content className="nfc-v2-organizer-import-dialog nfc-overlay-modal"
+            onOpenAutoFocus={event => {
+              const opener = document.activeElement;
+              importOpener.current = opener instanceof HTMLElement && opener !== document.body ? opener : null;
+              if (importTextRef.current) {
+                event.preventDefault();
+                importTextRef.current.focus({ preventScroll: true });
+              }
+            }}
+            onCloseAutoFocus={event => {
+              const opener = importOpener.current;
+              importOpener.current = null;
+              if (opener?.isConnected && !opener.matches(':disabled')) {
+                event.preventDefault();
+                opener.focus({ preventScroll: true });
+              }
+            }}
             onEscapeKeyDown={event => { if (importMutation.isPending || importGuard.current || readingFile) event.preventDefault(); }}
             onPointerDownOutside={event => event.preventDefault()}>
             <header className="nfc-v2-organizer-import-heading">
               <div>
                 <Dialog.Title>导入整理方案 (JSON)</Dialog.Title>
-                <Dialog.Description>选择导出的 JSON 文件，或将完整 JSON 内容粘贴到输入框；校验后提交服务器。</Dialog.Description>
+                <Dialog.Description>选择导出的文件，或直接粘贴配置。</Dialog.Description>
               </div>
               <button type="button" className="nfc-v2-organizer-import-close"
                 aria-label="关闭导入窗口" disabled={importMutation.isPending || readingFile} onClick={closeImport}>
                 <ConsoleIcon name="x" size={18} />
               </button>
             </header>
-            <div className="nfc-v2-organizer-import-body">
+            <div className="nfc-v2-organizer-import-body" aria-busy={readingFile || importMutation.isPending}>
               <input type="file" ref={fileRef} accept=".json,application/json"
                 aria-label="选择本地 JSON 方案文件" className="nfc-v2-organizer-file-input"
                 onChange={event => { void handleImportFile(event); }} />
@@ -343,7 +361,7 @@ export const ProfileList: React.FC<ProfileListProps> = ({
               <label className="nfc-v2-organizer-import-text-label" htmlFor="nfc-v2-organizer-import-json">
                 JSON 配置内容
               </label>
-              <textarea id="nfc-v2-organizer-import-json" rows={10}
+              <textarea ref={importTextRef} id="nfc-v2-organizer-import-json" rows={10}
                 aria-label="方案 JSON 内容" value={importJsonText}
                 disabled={importMutation.isPending || readingFile}
                 placeholder="粘贴导出文件的 JSON 内容..."

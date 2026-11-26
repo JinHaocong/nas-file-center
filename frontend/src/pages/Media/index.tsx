@@ -77,7 +77,7 @@ const QueueDialog: React.FC<QueueDialogProps> = ({
     <Dialog.Root open={open} onOpenChange={next => { if (!next && !busy) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
-        <Dialog.Content className="nfc-v2-dialog nfc-overlay-modal nfc-v2-media-queue-dialog"
+        <Dialog.Content className="nfc-v2-dialog nfc-overlay-modal nfc-v2-media-queue-dialog nfc-record-dialog"
           onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
           <header className="nfc-v2-dialog-heading">
@@ -256,6 +256,18 @@ export const MediaPage: React.FC = () => {
     change(); setPage(1); resetSelection();
   };
 
+  /** Clear all location and integrity filters along with their selection scope. */
+  function resetFilters() {
+    changeFilter(() => {
+      setRootKey(undefined);
+      setMediaKind(undefined);
+      setIntegrityStatus(undefined);
+      setVerificationStatus(undefined);
+      setSearch('');
+      setSearchApplied('');
+    });
+  }
+
   const beginDeletePreview = async (ids: number[]) => {
     if (!isAdmin || deleteInFlight.current || previewInFlight.current || deleteBusy) return;
     const uniqueIds = [...new Set(ids)];
@@ -345,7 +357,7 @@ export const MediaPage: React.FC = () => {
   const summary = summaryQuery.data;
 
   return (
-    <div className="nfc-operations-page nfc-media-page nfc-page-layout-ledger nfc-v2-media-page">
+    <div className="nfc-operations-page nfc-media-page nfc-page-layout-ledger nfc-v2-media-page nfc-record-workspace">
       <PageHeader title="媒体完整性"
         description="独立分析图片/视频元数据，并建立 SHA256 基线复核内容变化；媒体探测与哈希校验不会修改源文件。"
         actions={<ActionBar compact>
@@ -374,7 +386,7 @@ export const MediaPage: React.FC = () => {
       <DataPanel title="媒体目录"
         description="图片/视频 metadata 与完整性结果；unknown 不会被当作 corrupt。"
         variant="dense" className="nfc-panel-flush"
-        action={<span className="nfc-panel-count">{mediaQuery.data?.total ?? 0} assets</span>}>
+        action={<span className="nfc-panel-count">{mediaQuery.data?.total ?? '—'} 项媒体</span>}>
         <div className="nfc-filter-bar nfc-v2-media-filters">
           <label>索引根目录
             <select value={rootKey || ''} disabled={deleteBusy}
@@ -416,6 +428,12 @@ export const MediaPage: React.FC = () => {
             </label>
             <ConsoleButton type="submit" size="sm">搜索</ConsoleButton>
           </form>
+          {(rootKey || mediaKind || integrityStatus || verificationStatus || searchApplied || search) &&
+            <ConsoleButton variant="ghost" size="sm" disabled={deleteBusy}
+              onClick={resetFilters}>清除筛选</ConsoleButton>}
+        </div>
+        <div className="nfc-record-controls nfc-record-selection">
+          <span aria-live="polite">已选择 {selectedIds.length} 个损坏媒体</span>
           <ConsoleButton variant="danger" size="sm" className="nfc-media-destructive-action"
             leadingIcon={<ConsoleIcon name="trash" size={15} />}
             disabled={!isAdmin || selectedIds.length === 0 || deleteBusy || deletePreviewBusy}

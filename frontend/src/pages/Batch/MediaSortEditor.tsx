@@ -192,32 +192,36 @@ export const MediaSortEditor: React.FC = () => {
 
   return (
     <>
-      <DataPanel title="图片 / 视频自动分类"
-        description={recursive
-          ? '递归检查选中目录及其子目录：图片和视频分别归入每层目录自己的 P / V。'
-          : '只处理当前目录一级文件，不扫描子目录。'}
-        className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench nfc-v2-batch-media-panel">
-        <div className="nfc-v2-batch-form">
-          <div className="nfc-v2-batch-field">
-            <span>需要整理的当前目录</span>
-            <DirectoryPicker multiple={false} value={directory} disabled={busy}
-              placeholder="选择混放图片和视频的目录" onChange={changeDirectory} />
-            <small>大目录将交给后台 Worker 逐层扫描；预览不修改源文件，不一次性传输所有路径。</small>
+      <div className="nfc-batch-authoring">
+        <DataPanel title="图片 / 视频自动分类"
+          description={recursive
+            ? '递归检查选中目录及其子目录：图片和视频分别归入每层目录自己的 P / V。'
+            : '只处理当前目录一级文件，不扫描子目录。'}
+          className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench nfc-v2-batch-media-panel">
+          <div className="nfc-v2-batch-form">
+            <div className="nfc-v2-batch-field">
+              <span>需要整理的当前目录</span>
+              <DirectoryPicker multiple={false} value={directory} disabled={busy}
+                placeholder="选择混放图片和视频的目录" onChange={changeDirectory} />
+              <small>大目录将交给后台 Worker 逐层扫描；预览不修改源文件，不一次性传输所有路径。</small>
+            </div>
+            <label className="nfc-v2-batch-media-recursive">
+              <ConsoleCheckbox checked={recursive} disabled={busy}
+                onCheckedChange={changeRecursive} aria-label="递归处理子目录" />
+              <span><strong>递归处理子目录</strong>
+                <small>默认关闭。开启后每层目录各自使用 P/V，跳过已有 P、V 和数字后缀分类目录。</small>
+              </span>
+            </label>
+            <label className="nfc-v2-batch-media-recursive">
+              <ConsoleCheckbox checked={smartSkip} disabled={busy}
+                onCheckedChange={changeSmartSkip} aria-label="智能跳过已整理目录" />
+              <span><strong>智能跳过已整理目录（推荐）</strong>
+                <small>默认开启。纯图片/纯视频目录保留原有名称；如本层已有 P/V，仍检查并整理残留文件。</small>
+              </span>
+            </label>
           </div>
-          <label className="nfc-v2-batch-media-recursive">
-            <ConsoleCheckbox checked={recursive} disabled={busy}
-              onCheckedChange={changeRecursive} aria-label="递归处理子目录" />
-            <span><strong>递归处理子目录</strong>
-              <small>默认关闭。开启后每层目录各自使用 P/V，跳过已有 P、V 和数字后缀分类目录。</small>
-            </span>
-          </label>
-          <label className="nfc-v2-batch-media-recursive">
-            <ConsoleCheckbox checked={smartSkip} disabled={busy}
-              onCheckedChange={changeSmartSkip} aria-label="智能跳过已整理目录" />
-            <span><strong>智能跳过已整理目录（推荐）</strong>
-              <small>默认开启。纯图片/纯视频目录保留原有名称；如本层已有 P/V，仍检查并整理残留文件。</small>
-            </span>
-          </label>
+        </DataPanel>
+        <DataPanel title="扫描与计划" className="nfc-batch-draft-inspector" variant="quiet">
           <div className="nfc-v2-batch-notice" role="note">
             <ConsoleIcon name="shield-check" size={19} />
             <div><strong>先只读预览，再生成安全 Move Plan</strong>
@@ -244,8 +248,8 @@ export const MediaSortEditor: React.FC = () => {
               </ConsoleButton>
             )}
           </ActionBar>
-        </div>
-      </DataPanel>
+        </DataPanel>
+      </div>
 
       {previewJobId !== null && (
         <DataPanel title="预览扫描进度" variant="dense"

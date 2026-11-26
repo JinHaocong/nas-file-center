@@ -26,12 +26,17 @@ function isPackageName(name: string): boolean {
 }
 
 /** Review one author's actual loose files and draft their selected same-author moves. */
-export function MediaOrganizerLooseFilesReport({ previewId, looseId, author, disabled, onClose }: {
+export function MediaOrganizerLooseFilesReport({
+  previewId, looseId, author, disabled, onClose, onDraftBusyChange, onDraftCreated, planId,
+}: {
   previewId: OrganizerJobId;
   looseId: string;
   author: string;
   disabled: boolean;
   onClose: () => void;
+  onDraftBusyChange: (busy: boolean) => void;
+  onDraftCreated: (planId: string) => void;
+  planId?: string;
 }) {
   const [pagination, setPagination] = useState({ page: 1, size: 50 });
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
@@ -39,7 +44,6 @@ export function MediaOrganizerLooseFilesReport({ previewId, looseId, author, dis
   const [existingPackage, setExistingPackage] = useState('');
   const [newPackage, setNewPackage] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [planId, setPlanId] = useState('');
   const [problem, setProblem] = useState('');
   const submittingRef = useRef(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -81,18 +85,20 @@ export function MediaOrganizerLooseFilesReport({ previewId, looseId, author, dis
     }
     submittingRef.current = true;
     setSubmitting(true);
+    onDraftBusyChange(true);
     setProblem('');
     try {
       const draft = await mediaOrganizerBatchApi.createAssignmentDraft(previewId, looseId, {
         sources: [...selected], package_name: packageName, new_package: createPackage,
       });
-      setPlanId(draft.plan_id);
+      onDraftCreated(draft.plan_id);
       setSelected(new Set());
     } catch (error: unknown) {
       setProblem(getStructuredApiError(error).message || '无法生成归属草稿');
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
+      onDraftBusyChange(false);
     }
   }
 

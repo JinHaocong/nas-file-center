@@ -24,10 +24,11 @@ import { ResponsiveDescriptions } from '../../components/ui/ResponsiveDescriptio
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { CodePath } from '../../components/ui/CodePath';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
-import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
+import { ConsoleIcon, type ConsoleIconName } from '../../components/ui/ConsoleIcon';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
+import { useResponsive } from '../../hooks/useResponsive';
 
 type Confirmation =
   | { kind: 'clear' }
@@ -51,16 +52,21 @@ const settingsSections = [
 
 type SettingsSectionId = typeof settingsSections[number]['id'];
 
+const settingsIcons: Record<SettingsSectionId, ConsoleIconName> = {
+  appearance: 'sun', safety: 'shield-check', retention: 'archive', resources: 'sliders', sessions: 'user',
+};
+
 /** 方向键切换设置分区，Home 和 End 分别跳到首尾标签。 */
 function handleSettingsTabKey(
   event: React.KeyboardEvent<HTMLButtonElement>,
   index: number,
   sections: ReadonlyArray<typeof settingsSections[number]>,
   onSelect: (id: SettingsSectionId) => void,
+  vertical: boolean,
 ) {
   const last = sections.length - 1;
-  const next = event.key === 'ArrowRight' ? (index === last ? 0 : index + 1)
-    : event.key === 'ArrowLeft' ? (index === 0 ? last : index - 1)
+  const next = event.key === (vertical ? 'ArrowDown' : 'ArrowRight') ? (index === last ? 0 : index + 1)
+    : event.key === (vertical ? 'ArrowUp' : 'ArrowLeft') ? (index === 0 ? last : index - 1)
     : event.key === 'Home' ? 0 : event.key === 'End' ? last : -1;
   if (next < 0) return;
   event.preventDefault();
@@ -73,14 +79,29 @@ function SettingsSectionNav({ sections, active, onSelect }: {
   active: SettingsSectionId;
   onSelect: (id: SettingsSectionId) => void;
 }) {
+  const { isDesktop } = useResponsive();
+  const selectedTab = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (isDesktop) return;
+    const tab = selectedTab.current;
+    const list = tab?.parentElement;
+    if (!tab || !list || list.scrollWidth <= list.clientWidth) return;
+    const offset = tab.getBoundingClientRect().left - list.getBoundingClientRect().left;
+    if (offset < 0 || offset + tab.offsetWidth > list.clientWidth) {
+      list.scrollLeft += offset - (list.clientWidth - tab.offsetWidth) / 2;
+    }
+  }, [active, isDesktop]);
   return (
-    <div className="nfc-settings-section-nav" role="tablist" aria-label="设置分区">
+    <div className="nfc-settings-section-nav" role="tablist" aria-label="设置分区"
+      aria-orientation={isDesktop ? 'vertical' : 'horizontal'}>
       {sections.map((section, index) => (
         <button key={section.id} id={'settings-tab-' + section.id} type="button" role="tab"
           aria-selected={active === section.id} aria-controls="nfc-settings-active-panel"
+          ref={active === section.id ? selectedTab : undefined}
           tabIndex={active === section.id ? 0 : -1}
           onClick={() => onSelect(section.id)}
-          onKeyDown={event => handleSettingsTabKey(event, index, sections, onSelect)}>
+          onKeyDown={event => handleSettingsTabKey(event, index, sections, onSelect, isDesktop)}>
+          <ConsoleIcon name={settingsIcons[section.id]} size={17} />
           {section.label}
         </button>
       ))}
@@ -387,7 +408,7 @@ export const SettingsPage: React.FC = () => {
   const sessions = sessionsData?.sessions || [];
 
   return (
-    <div className="nfc-operations-page nfc-settings-page nfc-system-controls-page nfc-page-layout-workbench nfc-v2-settings">
+    <div className="nfc-operations-page nfc-settings-page nfc-system-controls-page nfc-page-layout-workbench nfc-v2-settings nfc-tool-workspace">
       <PageHeader title="系统设置与安全中心"
         description="集中查看文件安全开关、数据保留、资源控制与管理员会话。危险文件开关仍只能通过宿主机环境变量配置。"
         actions={<ActionBar compact>
@@ -400,8 +421,9 @@ export const SettingsPage: React.FC = () => {
         </ActionBar>}
       />
 
+      <div className="nfc-tool-settings-layout">
       <SettingsSectionNav sections={visibleSections} active={activeSection} onSelect={selectSection} />
-      <div className="nfc-settings-grid" id="nfc-settings-active-panel"
+      <div className="nfc-settings-grid" id="nfc-settings-active-panel" key={activeSection}
         role="tabpanel" aria-labelledby={'settings-tab-' + activeSection} tabIndex={0}>
         {activeSection === 'appearance' && <DataPanel id="appearance" title="界面显示" className="nfc-settings-appearance">
           <div className="nfc-thumbnail-settings-row">
@@ -709,6 +731,7 @@ export const SettingsPage: React.FC = () => {
                   </div>}
                 />}
         </DataPanel>}
+      </div>
       </div>
 
       <ConsoleConfirmDialog open={confirmation !== null}

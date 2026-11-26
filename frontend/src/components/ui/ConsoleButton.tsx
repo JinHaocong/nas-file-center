@@ -19,8 +19,13 @@ export const ConsoleButton = React.forwardRef<HTMLButtonElement, ConsoleButtonPr
       className={['nfc-console-button', 'nfc-console-button-' + variant,
         'nfc-console-button-' + size, className].filter(Boolean).join(' ')}
     >
-      {loading ? <span className="nfc-console-spinner" aria-hidden="true" /> : leadingIcon}
-      <span>{children}</span>
+      {leadingIcon && <span className="nfc-console-button-icon" aria-hidden="true">
+        {loading ? <span className="nfc-console-spinner" /> : leadingIcon}
+      </span>}
+      {loading && !leadingIcon && <span className="nfc-console-button-busy-overlay" aria-hidden="true">
+        <span className="nfc-console-spinner" />
+      </span>}
+      <span className="nfc-console-button-label">{children}</span>
     </button>
   ),
 );

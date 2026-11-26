@@ -23,6 +23,7 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
   // Controlled dialogs have no Dialog.Trigger: remember the actual keyboard
   // opener before Radix moves focus into the confirmation portal.
   const returnFocusTarget = React.useRef<HTMLElement | null>(null);
+  const cancelButton = React.useRef<HTMLButtonElement>(null);
   return (
     <Dialog.Root open={open} onOpenChange={next => {
       if (!busy) onOpenChange(next);
@@ -31,10 +32,15 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
         <Dialog.Content
           className="nfc-v2-dialog nfc-v2-confirm-dialog nfc-overlay-modal"
-          onOpenAutoFocus={() => {
+          onOpenAutoFocus={event => {
             const active = document.activeElement;
             returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
               ? active : null;
+            // Open at the safe action so pressing Enter can't confirm by surprise.
+            if (cancelButton.current && !cancelButton.current.disabled) {
+              event.preventDefault();
+              cancelButton.current.focus({ preventScroll: true });
+            }
           }}
           onCloseAutoFocus={event => {
             const target = returnFocusTarget.current;
@@ -44,7 +50,7 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
             if (target?.isConnected && !target.matches(':disabled') &&
                 !target.closest('[aria-disabled="true"], [inert], [hidden]')) {
               event.preventDefault();
-              target.focus();
+              target.focus({ preventScroll: true });
             }
           }}
           onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}
@@ -67,7 +73,7 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
             <div className="nfc-v2-confirm-description">{description}</div>
           </Dialog.Description>
           <div className="nfc-v2-confirm-actions">
-            <ConsoleButton disabled={busy} onClick={() => { if (!busy) onOpenChange(false); }}>取消</ConsoleButton>
+            <ConsoleButton ref={cancelButton} disabled={busy} onClick={() => { if (!busy) onOpenChange(false); }}>取消</ConsoleButton>
             <ConsoleButton variant={danger ? 'danger' : 'primary'}
               disabled={busy || disabled} loading={busy}
               onClick={() => { if (!busy && !disabled) onConfirm(); }}>

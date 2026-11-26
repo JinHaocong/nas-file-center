@@ -1,0 +1,164 @@
+/* Shared control and overlay interiors. Keep business actions in their owning component. */
+.nfc-console-button {
+  position: relative;
+  min-inline-size: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.nfc-console-button-icon {
+  display: inline-grid;
+  flex: 0 0 1rem;
+  inline-size: 1rem;
+  block-size: 1rem;
+  place-items: center;
+}
+.nfc-console-button-icon > svg { max-inline-size: 100%; max-block-size: 100%; }
+.nfc-console-button-icon > .nfc-console-spinner { flex: none; }
+.nfc-console-button-label { min-inline-size: 0; overflow-wrap: anywhere; }
+.nfc-console-button-busy-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.nfc-console-button:has(> .nfc-console-button-busy-overlay) > .nfc-console-button-label { opacity: 0; }
+.nfc-console-button[aria-busy="true"] { cursor: progress; }
+.nfc-console-button :is(.nfc-console-button-icon, .nfc-console-button-busy-overlay) { color: inherit; }
+
+.nfc-console-select-shell { min-inline-size: 0; }
+.nfc-console-select-shell:focus-within > .nfc-console-select-chevron { color: var(--nfc-tint); }
+.nfc-console-select:disabled + .nfc-console-select-chevron { opacity: .55; }
+.nfc-console-filter-label { overflow-wrap: anywhere; }
+.nfc-console-pagination { column-gap: 12px; row-gap: 8px; }
+.nfc-console-page-buttons { min-inline-size: 0; }
+.nfc-console-pagination :is(.nfc-console-page-buttons button, select) { min-block-size: 34px; }
+
+.nfc-code-path .nfc-v2-code-path-copy {
+  position: relative;
+  flex: 0 0 auto;
+  inline-size: 34px;
+  padding-inline: 0;
+  justify-content: center;
+}
+.nfc-code-path .nfc-v2-code-path-copy[data-copied="true"] {
+  color: var(--nfc-tint);
+  border-color: var(--nfc-tint-line);
+  background: var(--nfc-tint-soft);
+}
+/* Keep the acknowledgement visible without pushing a path or sibling controls sideways. */
+.nfc-v2-code-path-copy > small {
+  position: absolute;
+  z-index: 1;
+  inset-inline-end: 0;
+  inset-block-end: calc(100% + 5px);
+  padding: 2px 6px;
+  border: 1px solid var(--nfc-hairline);
+  border-radius: 5px;
+  color: var(--nfc-text);
+  background: var(--nfc-surface-1);
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.nfc-v2-confirm-dialog.nfc-overlay-modal[data-state] {
+  display: flex;
+  flex-direction: column;
+  max-block-size: calc(100dvh - max(32px, env(safe-area-inset-top) + env(safe-area-inset-bottom) + 24px));
+  min-block-size: 0;
+  overflow: hidden;
+}
+.nfc-v2-confirm-dialog > :is(.nfc-v2-dialog-heading, .nfc-v2-confirm-actions) { flex: 0 0 auto; }
+.nfc-v2-confirm-description {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+.nfc-v2-confirm-actions { flex-wrap: wrap; gap: 8px; background-color: var(--studio-paper); }
+.nfc-v2-dialog-heading :is(h2, h3), .nfc-v2-sheet-title-row :is(h2, h3) { overflow-wrap: anywhere; }
+.nfc-v2-dialog-heading > :not(.nfc-v2-dialog-close), .nfc-v2-sheet-heading { min-inline-size: 0; }
+.nfc-v2-sheet-body { scrollbar-gutter: stable; }
+.nfc-v2-sheet-body .nfc-data-panel { min-inline-size: 0; }
+.nfc-v2-sheet-body .nfc-data-panel-heading { min-inline-size: 0; overflow-wrap: anywhere; }
+.nfc-data-panel-action, .nfc-responsive-descriptions :is(.nfc-description-item, dd) { min-inline-size: 0; }
+.nfc-responsive-descriptions dd { overflow-wrap: anywhere; }
+.nfc-console-empty :is(strong, p) { max-inline-size: min(100%, 42ch); overflow-wrap: anywhere; }
+.nfc-console-empty p { line-height: 1.6; }
+.nfc-v2-sheet-body .nfc-console-empty { border-radius: 9px; }
+
+.nfc-studio-tool-search { position: relative; }
+.nfc-studio-tool-search input { min-inline-size: 0; }
+.nfc-studio-tool-search input::-webkit-search-cancel-button { appearance: none; }
+.nfc-tool-search-clear {
+  display: grid;
+  flex: 0 0 32px;
+  place-items: center;
+  min-block-size: 32px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--studio-muted);
+  cursor: pointer;
+}
+.nfc-tool-search-clear:hover { background: var(--nfc-tint-soft); color: var(--nfc-tint); }
+
+.nfc-v2-index-create-dialog.nfc-overlay-modal {
+  display: flex;
+  flex-direction: column;
+  min-block-size: 0;
+  overflow: hidden;
+}
+.nfc-v2-index-create-dialog > .nfc-v2-dialog-heading { flex: 0 0 auto; }
+.nfc-v2-index-create-dialog .nfc-v2-index-form {
+  display: flex;
+  flex-direction: column;
+  min-block-size: 0;
+  gap: 0;
+  padding: 0;
+}
+.nfc-index-create-fields {
+  display: grid;
+  gap: 11px;
+  min-block-size: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px 16px;
+}
+.nfc-v2-index-create-dialog .nfc-v2-index-form > .nfc-v2-confirm-actions { flex: 0 0 auto; margin: 0; }
+.nfc-v2-organizer-import-dialog .nfc-v2-organizer-import-body { overscroll-behavior: contain; }
+.nfc-v2-organizer-import-dialog textarea { line-height: 1.6; }
+.nfc-v2-organizer-import-dialog textarea:focus-visible { outline: 2px solid var(--nfc-tint); outline-offset: 2px; }
+
+@media (pointer: coarse) {
+  :is(.nfc-v2-dialog, .nfc-v2-sheet, .nfc-v2-mobile-nav-dialog) .nfc-v2-dialog-close { min-inline-size: 44px; min-block-size: 44px; }
+  .nfc-code-path .nfc-v2-code-path-copy { inline-size: 44px; }
+}
+
+@media (pointer: coarse), (max-width: 767px) {
+  .nfc-console-pagination :is(.nfc-console-page-buttons button, select) { min-block-size: 44px; }
+}
+
+@media (max-width: 479px) {
+  .nfc-v2-confirm-dialog .nfc-v2-confirm-actions > .nfc-console-button { flex: 1 1 auto; }
+  .nfc-v2-sheet-body { scrollbar-gutter: auto; }
+}
+
+@media (max-width: 767px) {
+  .nfc-index-create-fields { padding: 18px 18px 14px; }
+  .nfc-tool-search-clear { flex-basis: 44px; min-block-size: 44px; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-console-button {
+    transition: background-color 135ms ease, border-color 135ms ease, color 135ms ease, translate 110ms ease;
+  }
+  .nfc-console-button:active:not(:disabled) { translate: 0 1px; }
+  .nfc-v2-code-path-copy > small { animation: nfc-copy-feedback 130ms var(--nfc-motion-ease) both; }
+  .nfc-v2-toast { animation: nfc-component-toast-appear 160ms var(--nfc-motion-ease) both; }
+}
+
+@keyframes nfc-copy-feedback { from { opacity: 0; translate: 0 3px; } }
+@keyframes nfc-component-toast-appear { from { opacity: 0; translate: 0 5px; } }

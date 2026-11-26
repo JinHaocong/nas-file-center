@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Outlet, Navigate } from 'react-router-dom';
+import { Outlet, Navigate, useLocation } from 'react-router-dom';
+
 import { useAuth } from '../contexts/AuthContext';
+import { useWorkspaceMotion } from '../hooks/useWorkspaceMotion';
 import { useWorkspaceScroll } from '../hooks/useWorkspaceScroll';
 import { Header } from '../components/Header';
 import { ResponsiveNav } from '../components/layout/ResponsiveNav';
 import { MobileDock } from '../components/layout/MobileDock';
+import { WorkspaceNavigation } from '../components/layout/WorkspaceNavigation';
 import { ConsoleIcon } from '../components/ui/ConsoleIcon';
 import { useResponsive } from '../hooks/useResponsive';
 
@@ -12,11 +15,13 @@ import { useResponsive } from '../hooks/useResponsive';
 export const MainLayout: React.FC = () => {
   const { isAuthenticated, loading } = useAuth();
   const { isMobile } = useResponsive();
+  const { pathname } = useLocation();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
 
   const main = useRef<HTMLElement>(null);
   useWorkspaceScroll(main, isAuthenticated && !loading);
+  useWorkspaceMotion(main, pathname, isAuthenticated && !loading);
 
   useEffect(() => {
     if (!isAuthenticated || loading) return;
@@ -56,7 +61,10 @@ export const MainLayout: React.FC = () => {
     <a className="nfc-v2-skip-link" href="#main-content">跳转到主要内容</a>
     <div className="nfc-app-main nfc-v2-main">
       <Header isMobile={isMobile} navigationOpen={navigationOpen} onOpenNavigation={openNavigation} />
-      <main ref={main} className="nfc-page-content nfc-v2-page-content" id="main-content" tabIndex={-1}><Outlet /></main>
+      <div className="nfc-workspace-frame">
+        <WorkspaceNavigation />
+        <main ref={main} className="nfc-page-content nfc-v2-page-content" id="main-content" tabIndex={-1}><Outlet /></main>
+      </div>
       {isMobile && <MobileDock moreOpen={navigationOpen} onMore={openNavigation} />}
     </div>
     <ResponsiveNav open={navigationOpen} onClose={() => setNavigationOpen(false)} opener={opener} />

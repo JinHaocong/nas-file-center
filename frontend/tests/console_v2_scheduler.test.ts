@@ -156,6 +156,12 @@ describe('Console v2 native Scheduler S4 semantics', () => {
       'onPointerDownOutside={event => event.preventDefault()}',
     ]) assert.ok(e.includes(token), token);
   });
+  test('editing the schedule time releases the old preview lock and rejects the previous response', () => {
+    const e = editor();
+    const invalidate = e.slice(e.indexOf('const invalidatePreview'), e.indexOf('const bindWorkflowCurrent'));
+    assert.match(invalidate, /previewEpoch\.current \+= 1;[\s\S]*setPreviewLoading\(false\)/);
+    assert.match(e, /previewEpoch\.current === ticket && live\.current\.open\) setPreviewTimes/);
+  });
   test('Scheduler list admin toggle uses expected revision and Run now explicit confirmation', () => {
     const p = page();
     for(const token of [

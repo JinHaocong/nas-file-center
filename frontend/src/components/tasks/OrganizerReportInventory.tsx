@@ -10,6 +10,7 @@ import { StatusBadge } from '../ui/StatusBadge';
 
 import { tasksApi } from '../../api/tasks';
 
+import { useAuth } from '../../contexts/AuthContext';
 import { formatBytes } from '../../utils/format';
 
 import type { OrganizerReportStatus } from '../../types/task';
@@ -25,13 +26,15 @@ const REPORT_STATUS: Record<OrganizerReportStatus, { label: string; tone: string
 
 /** Open the read-only inventory and refresh it while report cleanup is pending. */
 export function OrganizerReportInventory() {
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const { data, isLoading, isError, isFetching, error, refetch } = useQuery({
-    queryKey: ['organizerReports', page, pageSize],
+  const { data, isLoading, isError, isFetching, isPlaceholderData, error, refetch } = useQuery({
+    queryKey: ['organizerReports', user?.id ?? null, page, pageSize],
     queryFn: () => tasksApi.getOrganizerReports(page, pageSize),
     enabled: open,
+    placeholderData: (previous, query) => query?.queryKey[1] === (user?.id ?? null) ? previous : undefined,
     staleTime: 0,
     refetchInterval: query => (query.state.data?.pending_count ?? 0) > 0 ? 5000 : false,
   });
@@ -42,9 +45,9 @@ export function OrganizerReportInventory() {
         setPage(1);
         setOpen(true);
       }}>整理报告盘点</ConsoleButton>
-      <ConsoleSheet open={open} onClose={() => setOpen(false)}
+      <ConsoleSheet open={open} onClose={() => setOpen(false)} className="nfc-maintenance-inventory"
         title="整理报告盘点" description="只读查看智能整理报告的占用、恢复保护和回收结果。">
-        <div className="nfc-v2-task-inspector">
+        <div className="nfc-v2-task-inspector" aria-busy={isFetching || undefined}>
           {isLoading && <div className="nfc-overlay-loading" role="status">正在读取报告盘点…</div>}
           {isError && (
             <div className="nfc-v2-task-inline-alert" role="alert">
@@ -90,11 +93,14 @@ export function OrganizerReportInventory() {
                   })}
                 </ul>
               ) : <ConsoleEmpty title="暂无报告记录" />}
-              {data.total > 0 && <ConsolePagination page={page} pageSize={pageSize} total={data.total}
-                pageSizes={[20, 50, 100]} onChange={(nextPage, nextSize) => {
-                  setPage(nextPage);
-                  setPageSize(nextSize);
-                }} />}
+              {data.total > 0 && <footer className="nfc-maintenance-inventory-footer">
+                {isPlaceholderData && <p className="nfc-maintenance-pending" role="status">正在读取报告第 {page} 页…</p>}
+                <ConsolePagination page={page} pageSize={pageSize} total={data.total}
+                  pageSizes={[20, 50, 100]} onChange={(nextPage, nextSize) => {
+                    setPage(nextPage);
+                    setPageSize(nextSize);
+                  }} />
+              </footer>}
             </>
           )}
         </div>

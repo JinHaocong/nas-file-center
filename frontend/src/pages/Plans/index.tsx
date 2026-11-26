@@ -21,6 +21,13 @@ import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
 
+type PlanView = 'all' | 'review' | 'active';
+
+/** Select plans whose current stage requires a user decision before execution. */
+function needsPlanReview(plan: Plan): boolean {
+  return ['draft', 'frozen', 'ready', 'stale', 'failed', 'partial'].includes(plan.status);
+}
+
 /** Make the link describe the record the user will review. */
 function planReviewLabel(status: Plan['status']): string {
   switch (status) {
@@ -49,6 +56,7 @@ export const PlansPage: React.FC = () => {
   const requestedSize = Number(search.get('size'));
   const pageSize = [10, 20, 50, 100].includes(requestedSize) ? requestedSize : 20;
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [view, setView] = useState<PlanView>('all');
   const writeListPage = useCallback((destination: number, size: number) => {
     setSearch(previous => {
       const next = new URLSearchParams(previous);
@@ -96,7 +104,13 @@ export const PlansPage: React.FC = () => {
     onSettled: () => setDeletingId(null),
   });
 
-  const items: Plan[] = data?.items || [];
+  const pageItems: Plan[] = isError ? [] : data?.items || [];
+  const itemsByView: Record<PlanView, Plan[]> = {
+    all: pageItems,
+    review: pageItems.filter(needsPlanReview),
+    active: pageItems.filter(plan => plan.status === 'validating' || plan.status === 'executing'),
+  };
+  const items = itemsByView[view];
   const openPlan = (id: number) => navigate('/plans/' + id, { state: { fromPlanList: true } });
 
   /** Page size changes reset to the first page and a return from detail retains the list position. */
@@ -105,7 +119,7 @@ export const PlansPage: React.FC = () => {
   }
 
   return (
-    <div className="nfc-operations-page nfc-plans-page nfc-page-layout-ledger nfc-v2-plans-page">
+    <div className="nfc-operations-page nfc-plans-page nfc-page-layout-ledger nfc-v2-plans-page nfc-record-workspace">
       <PageHeader title="执行计划"
         description="在执行前核对范围、冻结快照并校验文件。"
         actions={
@@ -122,6 +136,18 @@ export const PlansPage: React.FC = () => {
         description="选择计划查看待变更的文件和校验结果。"
         action={<span className="nfc-panel-count">{data?.total ?? 0} 项</span>}
         className="nfc-panel-flush" variant="dense">
+        {!isError && !isLoading && pageItems.length > 0 && (
+          <div className="nfc-record-controls">
+            <span className="nfc-record-controls-label">本页进度</span>
+            <div className="nfc-record-segments" role="group" aria-label="筛选本页计划">
+              {([['all', '全部'], ['review', '待核对'], ['active', '进行中']] as const).map(([id, label]) => (
+                <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>
+                  {label}<span>{itemsByView[id].length}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {isError ? (
           <div className="nfc-v2-plan-list-state">
             <ConsoleEmpty title="计划列表加载失败"
@@ -130,9 +156,12 @@ export const PlansPage: React.FC = () => {
           </div>
         ) : isLoading ? (
           <div className="nfc-v2-plan-list-state" role="status">正在加载执行计划…</div>
-        ) : items.length === 0 ? (
+        ) : pageItems.length === 0 ? (
           <ConsoleEmpty title="暂无执行计划"
             description="可以从扫描去重、批量整理或重命名预览创建计划草稿。" />
+        ) : items.length === 0 ? (
+          <ConsoleEmpty title="本页没有符合进度的计划"
+            action={<ConsoleButton onClick={() => setView('all')}>查看本页全部</ConsoleButton>} />
         ) : (
           <ResponsiveDataView
             desktop={

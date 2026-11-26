@@ -1,10 +1,12 @@
 import React, { useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { indexesApi } from '../../api/domain';
 import { getStructuredApiError } from '../../api/errors';
 import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime } from '../../utils/format';
+import { sqliteIdText } from '../../utils/sqliteId';
 import type { IndexRoot } from '../../types';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
 import {
@@ -32,6 +34,12 @@ const INDEX_REMOVE_DESCRIPTION = (
     <p><strong>不会删除 NAS 上的任何真实文件或目录</strong>，且不会删除 Task、Scan、Plan 或 Audit 历史记录。</p>
   </div>
 );
+
+/** Connect an active root to the exact task record rather than the queue homepage. */
+function IndexTaskLink({ record }: { record: IndexRoot }) {
+  const id = record.has_active_job ? sqliteIdText(record.active_job_id) : null;
+  return id ? <Link className="nfc-record-link" to={'/tasks?task=' + id}>任务 #{id}</Link> : null;
+}
 
 export const IndexesPage: React.FC = () => {
   useTitle('文件索引');
@@ -197,7 +205,7 @@ export const IndexesPage: React.FC = () => {
   };
 
   return (
-    <div className="nfc-operations-page nfc-indexes-page nfc-page-layout-ledger nfc-v2-indexes-page">
+    <div className="nfc-operations-page nfc-indexes-page nfc-page-layout-ledger nfc-v2-indexes-page nfc-record-workspace">
       <PageHeader title="文件索引"
         description="维护大型 NAS 目录的增量元数据索引。移除操作只清理 NFC 索引元数据，不触碰真实文件。"
         actions={<ActionBar compact>
@@ -208,7 +216,7 @@ export const IndexesPage: React.FC = () => {
         </ActionBar>}
       />
       <DataPanel title="索引根目录" description="目录状态、索引规模与后台任务一览。"
-        action={<span className="nfc-panel-count">{data?.total ?? 0} roots</span>}
+        action={<span className="nfc-panel-count">{isError || !data ? '—' : data.total.toLocaleString()} 个目录</span>}
         className="nfc-panel-flush" variant="dense">
         {isError && (
           <div className="nfc-v2-indexes-error" role="alert">
@@ -219,9 +227,14 @@ export const IndexesPage: React.FC = () => {
         )}
         {!isError && isLoading && <div role="status" className="nfc-v2-indexes-loading">正在读取索引根目录…</div>}
         {!isError && !isLoading && items.length === 0 &&
-          <ConsoleEmpty title="暂无索引根目录" description="可以从上方加入新的索引任务。" />}
+          <ConsoleEmpty title="暂无索引根目录" description="添加目录后即可在后台建立索引。"
+            action={<ConsoleButton variant="primary" onClick={openCreate}>选择目录</ConsoleButton>} />}
         {!isError && !isLoading && items.length > 0 && (
           <>
+            <div className="nfc-record-controls nfc-index-record-summary" aria-label="本页索引状态">
+              <span><strong>{items.filter(record => record.path_state === 'available').length}</strong> 个目录可用</span>
+              <span><strong>{items.filter(record => record.has_active_job).length}</strong> 个目录有后台任务</span>
+            </div>
             <ResponsiveDataView
               desktop={<div className="nfc-v2-indexes-table-scroll">
                 <table className="nfc-v2-indexes-table">
@@ -246,7 +259,8 @@ export const IndexesPage: React.FC = () => {
                       <td className="nfc-table-meta">{record.last_indexed_at
                         ? formatDateTime(record.last_indexed_at) : '尚未完成索引'}</td>
                       <td>{record.has_active_job && record.active_job_id
-                        ? <span className="nfc-kind-badge">#{record.active_job_id} {record.active_job_status}</span>
+                        ? <div className="nfc-index-record-job"><IndexTaskLink record={record} />
+                          {record.active_job_status && <small>{record.active_job_status}</small>}</div>
                         : <span className="nfc-table-muted">—</span>}</td>
                       <td>{renderActions(record)}</td>
                     </tr>
@@ -275,7 +289,7 @@ export const IndexesPage: React.FC = () => {
                       </div>
                       {record.has_active_job && record.active_job_id && (
                         <div className="nfc-mobile-record-note">
-                          任务 #{record.active_job_id} · {record.active_job_status}
+                          <IndexTaskLink record={record} /> {record.active_job_status}
                         </div>
                       )}
                       <div className="nfc-mobile-record-actions">{renderActions(record, true)}</div>
@@ -302,7 +316,7 @@ export const IndexesPage: React.FC = () => {
         <Dialog.Portal>
           <Dialog.Overlay className="nfc-v2-dialog-overlay" />
           <Dialog.Content
-            className="nfc-v2-dialog nfc-overlay-modal nfc-index-create-modal nfc-v2-index-create-dialog"
+            className="nfc-v2-dialog nfc-overlay-modal nfc-index-create-modal nfc-v2-index-create-dialog nfc-record-dialog"
             onOpenAutoFocus={() => {
               const active = document.activeElement;
               createReturnFocusTarget.current = active instanceof HTMLElement && active !== document.body
@@ -333,18 +347,20 @@ export const IndexesPage: React.FC = () => {
               </button>
             </header>
             <form className="nfc-v2-index-form" onSubmit={event => { event.preventDefault(); void handleCreate(); }}>
-              <label className="nfc-v2-index-form-label" id="index-create-root-label">目录路径</label>
-              <div aria-labelledby="index-create-root-label">
-                <DirectoryPicker multiple={false} allowManualInput={true}
-                  value={rootDraft} disabled={createMutation.isPending}
-                  onChange={value => {
-                    setRootDraft(typeof value === 'string' ? value : value[0] || '');
-                    setRootError('');
-                  }} placeholder="点击选择要建立索引的根目录..." />
+              <div className="nfc-index-create-fields">
+                <span className="nfc-v2-index-form-label" id="index-create-root-label">目录路径</span>
+                <div role="group" aria-labelledby="index-create-root-label">
+                  <DirectoryPicker multiple={false} allowManualInput={true}
+                    value={rootDraft} disabled={createMutation.isPending}
+                    onChange={value => {
+                      setRootDraft(typeof value === 'string' ? value : value[0] || '');
+                      setRootError('');
+                    }} placeholder="选择要建立索引的根目录" />
+                </div>
+                {rootError && <p className="nfc-v2-index-field-error" role="alert">{rootError}</p>}
+                <p className="nfc-form-note">索引在后台生成，可在任务中心查看进度。</p>
               </div>
-              {rootError && <p className="nfc-v2-index-field-error" role="alert">{rootError}</p>}
-              <p className="nfc-form-note">后台 Worker 将异步遍历该目录并生成 SQLite 增量索引，不会阻塞当前界面。服务端会再次校验目录白名单与访问规则。</p>
-              <div className="nfc-v2-confirm-actions">
+              <div className="nfc-v2-confirm-actions" role="group" aria-label="索引操作">
                 <ConsoleButton disabled={createMutation.isPending} onClick={closeCreate}>取消</ConsoleButton>
                 <ConsoleButton variant="primary" type="submit" loading={createMutation.isPending}
                   disabled={!rootDraft.trim()}>加入队列</ConsoleButton>

@@ -74,7 +74,7 @@ describe('Console v2 native completed Scan picker and login', () => {
       '<Navigate to="/dashboard" replace />',
       'submissionInFlight.current',
       'if (submissionInFlight.current || isAuthenticated',
-      'type="password"', 'type="text"', 'name="username"',
+      "type={passwordVisible ? 'text' : 'password'}", 'type="text"', 'name="username"',
       'name="password"', 'autoComplete="username"',
       'autoComplete="current-password"', 'required',
       'event.preventDefault()', 'aria-busy={loading}',

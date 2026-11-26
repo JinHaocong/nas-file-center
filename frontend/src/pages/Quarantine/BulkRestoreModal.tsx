@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { useQuarantineDialogFocus } from './useQuarantineDialogFocus';
 import { quarantineApi } from '../../api/quarantine';
 import { getStructuredApiError } from '../../api/errors';
 import type {
@@ -30,6 +31,7 @@ export const BulkRestoreModal: React.FC<Props> = ({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [planLoading, setPlanLoading] = useState(false);
   const inFlight = useRef(false);
+  const dialogFocus = useQuarantineDialogFocus();
   const requestEpoch = useRef(0);
 
   const selectionKey = useMemo(() => [...entryIds].sort((a, b) => a - b).join(','), [entryIds]);
@@ -161,7 +163,9 @@ export const BulkRestoreModal: React.FC<Props> = ({
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
         <Dialog.Content
-          className="nfc-v2-dialog nfc-overlay-modal nfc-quarantine-bulk-restore-modal nfc-v2-quarantine-bulk-dialog"
+          className="nfc-v2-dialog nfc-overlay-modal nfc-quarantine-bulk-restore-modal nfc-v2-quarantine-bulk-dialog nfc-record-dialog nfc-maintenance-dialog"
+          aria-busy={busy || undefined}
+          {...dialogFocus}
           onEscapeKeyDown={event => { if (busy || inFlight.current) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
           <header className="nfc-v2-dialog-heading">
@@ -201,7 +205,7 @@ export const BulkRestoreModal: React.FC<Props> = ({
                 <span>自动重命名 — 使用服务端冻结的安全目标，不覆盖</span>
               </label>
             </fieldset>
-            {!preview && <p className="nfc-v2-quarantine-bulk-help">
+            {!previewCurrent && !busy && <p className="nfc-v2-quarantine-bulk-help">
               先运行 Preview。任何 blocked 条目都会阻止整批 Draft 生成，不会静默丢弃成员。
             </p>}
             {preview && previewCurrent && (
@@ -222,6 +226,9 @@ export const BulkRestoreModal: React.FC<Props> = ({
                 )}
               </section>
             )}
+            {busy && <p className="nfc-maintenance-pending" role="status">
+              {previewLoading ? '正在核验所选隔离条目…' : '正在生成恢复草稿…'}
+            </p>}
           </div>
           <div className="nfc-v2-confirm-actions">
             <ConsoleButton onClick={closeSafely} disabled={busy}>取消</ConsoleButton>

@@ -11,13 +11,15 @@ describe('Pure White Stage 5E-AA Task History controlled dialog focus return', (
   test('remembers the actual launcher before Radix autofocus without a fake Trigger', () => {
     for (const token of [
       'const returnFocusTarget = useRef<HTMLElement | null>(null);',
-      'onOpenAutoFocus={() => {',
+      'onOpenAutoFocus={event => {',
+      'cancelButton.current.focus({ preventScroll: true });',
       'const active = document.activeElement;',
       'active instanceof HTMLElement && active !== document.body',
       'returnFocusTarget.current = active',
       '<Dialog.Root open={open}',
       'onClick={handleOpen}',
     ]) assert.ok(modal.includes(token), token);
+    assert.ok(modal.indexOf('returnFocusTarget.current = active') < modal.indexOf('cancelButton.current.focus('));
     assert.doesNotMatch(modal, /<Dialog\.Trigger/);
   });
 

@@ -56,6 +56,7 @@ export const FilenameAuditPage: React.FC = () => {
   const [parent, setParent] = useState('');
   const [result, setResult] = useState<FilenameAuditPreview | null>(null);
   const [filter, setFilter] = useState<FilenameAuditFilterMode>('all');
+  const [fileQuery, setFileQuery] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(30);
@@ -81,6 +82,7 @@ export const FilenameAuditPage: React.FC = () => {
     activePreviewKey.current = null;
     setResult(null);
     setFilter('all');
+    setFileQuery('');
     setSelected([]);
     setPage(1);
   };
@@ -170,7 +172,9 @@ export const FilenameAuditPage: React.FC = () => {
     }
   };
 
-  const visible = filterFilenameAuditRows(result?.items || [], filter);
+  const normalizedFileQuery = fileQuery.trim().toLocaleLowerCase();
+  const visible = filterFilenameAuditRows(result?.items || [], filter).filter(row =>
+    !normalizedFileQuery || row.name.toLocaleLowerCase().includes(normalizedFileQuery));
   const pagination = getPaginationState(page, pageSize, visible.length);
   const visiblePage = visible.slice((pagination.current - 1) * pageSize, pagination.current * pageSize);
   const pageReady = visiblePage.filter(isFilenameAuditRepairable);
@@ -209,13 +213,13 @@ export const FilenameAuditPage: React.FC = () => {
     </span>;
 
   return (
-    <div className="nfc-operations-page nfc-filename-audit-page nfc-page-layout-workbench nfc-v2-filename-audit">
+    <div className="nfc-operations-page nfc-filename-audit-page nfc-page-layout-workbench nfc-v2-filename-audit nfc-tool-workspace">
       <PageHeader title="文件名质量巡检"
         description="只读检查所选目录下一级普通文件的名称质量；检测结果不代表内容损坏或恶意文件。" />
       <DataPanel title="巡检目录"
         description="最多检查 10,000 个直接条目。不递归、不打开文件内容、跳过目录与符号链接。"
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
-        <div className="nfc-v2-filename-form">
+        <div className="nfc-v2-filename-form" aria-busy={busy || undefined}>
           <div className="nfc-v2-filename-field">
             <label id="nfc-filename-directory-label"><ConsoleIcon name="folder-open" size={18} />目标目录</label>
             <div aria-labelledby="nfc-filename-directory-label">
@@ -245,6 +249,11 @@ export const FilenameAuditPage: React.FC = () => {
             ' 项；问题 ' + result.issues_total + ' 处'}
           action={<span className="nfc-panel-count">{visible.length} / {result.total} 个文件</span>}>
           <ActionBar className="nfc-v2-filename-actions">
+            <label className="nfc-tool-filename-search">
+              <span>查找文件名</span>
+              <input type="search" value={fileQuery} disabled={planLoading} placeholder="输入文件名片段"
+                onChange={event => { setFileQuery(event.target.value); setPage(1); }} />
+            </label>
             <label className="nfc-v2-filename-filter">
               <span>筛选问题</span>
               <select value={filter} disabled={planLoading}

@@ -121,6 +121,7 @@ export const BatchPage: React.FC = () => {
 
   const isMedia = operation === 'media-sort' || operation === 'media-organize';
   const tool = operations.find(item => item.op === operation);
+  const scopeCount = operation === 'move' || operation === 'rename' ? splitLines(mappingsText).length : paths.length;
   const toolChooser = (
     <details className="nfc-studio-tool-picker" ref={toolPicker}
       onBlur={event => {
@@ -161,44 +162,52 @@ export const BatchPage: React.FC = () => {
     <div className="nfc-operations-page nfc-batch-page nfc-page-layout-workbench nfc-v2-batch">
       <PageHeader title={tool?.title ?? '批量处理'} actions={toolChooser} />
 
-      {!isMedia && <DataPanel title="操作范围" description="核对路径后生成执行计划。"
-        className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
-        <div className="nfc-batch-form nfc-v2-batch-form">
-          <label className="nfc-v2-batch-field">
-            <span>计划名称</span>
-            <input value={name} required disabled={planLoading}
-              placeholder="批量处理计划" aria-invalid={Boolean(validationError) && !name.trim()}
-              onChange={event => { setName(event.target.value); setValidationError(''); }} />
-          </label>
-
-          {operation === 'quarantine' && (
-            <div className="nfc-v2-batch-notice nfc-page-alert" role="note">
-              <ConsoleIcon name="shield-check" size={19} />
-              <div><strong>Quarantine-first 隔离</strong>
-                <p>文件移动到 NAS File Center 隔离区并保留原目录结构；不会直接永久删除。</p>
-              </div>
-            </div>
-          )}
-          {(operation === 'quarantine' || operation === 'touch') && (
-            <div className="nfc-v2-batch-field" role="group" aria-label="文件或目录绝对路径清单">
-              <span>文件或目录绝对路径清单</span>
-              <DirectoryPicker multiple value={paths} disabled={planLoading}
-                placeholder="点击选择或添加目录或路径..."
-                onChange={onPathsChange} />
-              <small>支持可视化选择目录；单文件路径可通过高级手动输入填写。</small>
-            </div>
-          )}
-          {(operation === 'move' || operation === 'rename') && (
+      {!isMedia && <div className="nfc-batch-authoring">
+        <DataPanel title="操作范围" description="核对路径后生成执行计划。"
+          className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
+          <div className="nfc-batch-form nfc-v2-batch-form">
             <label className="nfc-v2-batch-field">
-              <span>路径映射清单</span>
-              <textarea rows={7} className="nfc-mono-input" disabled={planLoading}
-                value={mappingsText}
-                placeholder={'/data/DiskA/file1.txt -> /data/DiskB/file1.txt\n/data/DiskA/file2.txt -> /data/DiskB/file2.txt'}
-                onChange={event => { setMappingsText(event.target.value); setValidationError(''); }} />
-              <small>每行一条：源路径 -&gt; 目标路径；均需填写绝对路径。</small>
+              <span>计划名称</span>
+              <input value={name} required disabled={planLoading}
+                placeholder="批量处理计划" aria-invalid={Boolean(validationError) && !name.trim()}
+                onChange={event => { setName(event.target.value); setValidationError(''); }} />
             </label>
-          )}
-          {validationError && <p className="nfc-v2-batch-error" role="alert">{validationError}</p>}
+
+            {operation === 'quarantine' && (
+              <div className="nfc-v2-batch-notice nfc-page-alert" role="note">
+                <ConsoleIcon name="shield-check" size={19} />
+                <div><strong>Quarantine-first 隔离</strong>
+                  <p>文件移动到 NAS File Center 隔离区并保留原目录结构；不会直接永久删除。</p>
+                </div>
+              </div>
+            )}
+            {(operation === 'quarantine' || operation === 'touch') && (
+              <div className="nfc-v2-batch-field" role="group" aria-label="文件或目录绝对路径清单">
+                <span>文件或目录绝对路径清单</span>
+                <DirectoryPicker multiple value={paths} disabled={planLoading}
+                  placeholder="点击选择或添加目录或路径..."
+                  onChange={onPathsChange} />
+                <small>支持可视化选择目录；单文件路径可通过高级手动输入填写。</small>
+              </div>
+            )}
+            {(operation === 'move' || operation === 'rename') && (
+              <label className="nfc-v2-batch-field">
+                <span>路径映射清单</span>
+                <textarea rows={7} className="nfc-mono-input" disabled={planLoading}
+                  value={mappingsText}
+                  placeholder={'/data/DiskA/file1.txt -> /data/DiskB/file1.txt\n/data/DiskA/file2.txt -> /data/DiskB/file2.txt'}
+                  onChange={event => { setMappingsText(event.target.value); setValidationError(''); }} />
+                <small>每行一条：源路径 -&gt; 目标路径；均需填写绝对路径。</small>
+              </label>
+            )}
+            {validationError && <p className="nfc-v2-batch-error" role="alert">{validationError}</p>}
+          </div>
+        </DataPanel>
+        <DataPanel title="计划摘要" className="nfc-batch-draft-inspector" variant="quiet">
+          <dl>
+            <div><dt>操作类型</dt><dd>{tool?.title}</dd></div>
+            <div><dt>{operation === 'move' || operation === 'rename' ? '路径映射' : '已选路径'}</dt><dd>{scopeCount.toLocaleString()} 项</dd></div>
+          </dl>
           <ActionBar className="nfc-file-tool-primary-actions">
             <ConsoleButton variant="primary" loading={planLoading}
               leadingIcon={<ConsoleIcon name="calendar" size={17} />}
@@ -209,8 +218,8 @@ export const BatchPage: React.FC = () => {
               Plan 创建后仍需在计划详情完成 Freeze、Validate 与 Execute。
             </span>
           </ActionBar>
-        </div>
-      </DataPanel>}
+        </DataPanel>
+      </div>}
       {operation === 'media-sort' && <MediaSortEditor />}
       {operation === 'media-organize' && <MediaOrganizerBatchEditor />}
     </div>

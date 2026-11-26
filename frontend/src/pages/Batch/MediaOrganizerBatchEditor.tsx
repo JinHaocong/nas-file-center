@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 
@@ -21,6 +21,56 @@ import type { TaskStatus } from '../../types/task';
 
 const panelClass = 'nfc-v2-batch-media-panel';
 const pageSizes = [10, 25, 50, 100];
+const previewFilters: readonly [MediaPreviewFilter, string][] = [
+  ['all', '全部'], ['ready', '待整理'], ['blocked', '冲突'], ['already_organized', '已整理'],
+  ['skipped', '跳过'], ['needs_assignment', '待确认归属'],
+];
+
+interface FilterHighlight { x: number; y: number; width: number; height: number }
+
+/** Measure the current button so the active surface follows filtering and responsive wrapping. */
+function OrganizerFilters({ value, counts, onChange, disabled }: {
+  value: MediaPreviewFilter;
+  counts: Record<MediaPreviewFilter, number | undefined>;
+  onChange: (filter: MediaPreviewFilter) => void;
+  disabled: boolean;
+}) {
+  const bar = useRef<HTMLDivElement>(null);
+  const active = useRef<HTMLButtonElement>(null);
+  const [highlight, setHighlight] = useState<FilterHighlight | null>(null);
+  const hasUnassigned = Boolean(counts.needs_assignment) || value === 'needs_assignment';
+
+  useLayoutEffect(() => {
+    const button = active.current;
+    const container = bar.current;
+    if (!button || !container) return;
+    /** Publish geometry only when it changes, including after font measurements. */
+    function measure() {
+      if (!button) return;
+      const next = { x: button.offsetLeft, y: button.offsetTop, width: button.offsetWidth, height: button.offsetHeight };
+      setHighlight(previous => previous && previous.x === next.x && previous.y === next.y &&
+        previous.width === next.width && previous.height === next.height ? previous : next);
+    }
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    for (const candidate of container.querySelectorAll('button')) observer.observe(candidate);
+    return () => observer.disconnect();
+  }, [value, hasUnassigned]);
+
+  return <div ref={bar} className="nfc-organizer-workspace-filters" id="media-organizer-batch-filter"
+    data-highlight={Boolean(highlight)} role="group" aria-label="筛选状态">
+    {highlight && <span aria-hidden="true" className="nfc-organizer-filter-highlight" style={{
+      width: highlight.width, height: highlight.height, transform: `translate(${highlight.x}px, ${highlight.y}px)`,
+    }} />}
+    {previewFilters.filter(([key]) => key !== 'needs_assignment' || hasUnassigned)
+      .map(([key, label]) => <button key={key} ref={value === key ? active : undefined} type="button"
+        data-preview-filter={key} aria-pressed={value === key} disabled={disabled} onClick={() => onChange(key)}>
+        {label} <span>{counts[key] ?? 0}</span>
+      </button>)}
+  </div>;
+}
 
 /** Check whether the current background task can still change its result. */
 function isActive(status?: TaskStatus): boolean {
@@ -39,6 +89,10 @@ export function MediaOrganizerBatchEditor() {
   const [previewPage, setPreviewPage] = useState({ page: 1, size: 25 });
   const [filter, setFilter] = useState<MediaPreviewFilter>('all');
   const [resultPage, setResultPage] = useState({ page: 1, size: 25 });
+  const [assignmentBusy, setAssignmentBusy] = useState(false);
+  const [assignmentDraft, setAssignmentDraft] = useState<{
+    previewId: OrganizerJobId; detailId: string; planId: string;
+  } | null>(null);
   const [details, setDetails] = useState<{
     previewId: OrganizerJobId; unit: string; id: string; kind: 'mapping' | 'loose';
   } | null>(null);
@@ -87,7 +141,7 @@ export function MediaOrganizerBatchEditor() {
   const selection = selectedPath ?? result?.selection ?? preview?.selection ?? (suggestedValid ? suggested : '');
   const scanning = (previewId !== null && previewQuery.isPending) || isActive(preview?.status);
   const organizing = (batchId !== null && resultQuery.isPending) || isActive(result?.status);
-  const busy = action !== null || scanning || organizing;
+  const busy = action !== null || scanning || organizing || assignmentBusy;
   const invalidLink = (params.has('preview') && !savedPreviewId) || (params.has('batch') && !batchId);
 
   /** Only one user action can be submitted until its response is applied to the URL. */
@@ -174,16 +228,18 @@ export function MediaOrganizerBatchEditor() {
     batchId === null && !existingBatchId;
   const currentUnit = currentPreview?.units.find(row => row.unit === inspectedUnit) ?? currentPreview?.units[0];
   const currentDetails = details?.previewId === previewId && details?.unit === currentUnit?.unit ? details : null;
+  const previewSummary = currentPreview?.summary;
 
   /** Switch the inspector and discard any detail report belonging to the previous unit. */
   function inspectUnit(row: MediaBatchPreviewUnit) {
+    if (assignmentBusy) return;
     if (currentUnit?.unit !== row.unit) setDetails(null);
     setInspectedUnit(row.unit);
   }
 
   /** Open the paginated report attached to one preview row. */
   function openDetails(row: MediaBatchPreviewUnit, opener: HTMLButtonElement) {
-    if (!previewId) return;
+    if (!previewId || assignmentBusy) return;
     const id = row.loose_id ?? row.mapping_id;
     if (!id) return;
     detailOpener.current = opener;
@@ -192,6 +248,7 @@ export function MediaOrganizerBatchEditor() {
 
   /** Return keyboard focus to the row that opened the report. */
   function closeDetails() {
+    if (assignmentBusy) return;
     setDetails(null);
     const opener = detailOpener.current;
     // 窗口尺寸跨过断点后，详情可能已经移动到目录卡片所在的行。
@@ -201,6 +258,39 @@ export function MediaOrganizerBatchEditor() {
       opener?.focus();
     }
   }
+
+  /** A different filter starts on page one and keeps detail tied to visible data. */
+  function changeFilter(nextFilter: MediaPreviewFilter) {
+    if (nextFilter === filter || assignmentBusy) return;
+    setDetails(null);
+    setInspectedUnit(null);
+    setFilter(nextFilter);
+    setPreviewPage(previous => ({ ...previous, page: 1 }));
+  }
+
+  const filterCounts = {
+    all: previewSummary?.unit_count,
+    ready: previewSummary?.ready_count,
+    blocked: previewSummary?.blocked_count,
+    already_organized: previewSummary?.already_organized_count,
+    skipped: previewSummary?.skipped_count,
+    needs_assignment: previewSummary?.needs_assignment_count,
+  } satisfies Record<MediaPreviewFilter, number | undefined>;
+
+  const detailReport = currentDetails?.kind === 'mapping' ? (
+    <MediaOrganizerMappingReport key={`${currentDetails.previewId}:${currentDetails.id}`}
+      previewId={currentDetails.previewId} mappingId={currentDetails.id} unit={currentDetails.unit}
+      onClose={closeDetails} embedded />
+  ) : currentDetails?.kind === 'loose' ? (
+    <MediaOrganizerLooseFilesReport key={`${currentDetails.previewId}:${currentDetails.id}`}
+      previewId={currentDetails.previewId} looseId={currentDetails.id} author={currentDetails.unit}
+      disabled={busy} onClose={closeDetails} onDraftBusyChange={setAssignmentBusy}
+      planId={assignmentDraft?.previewId === currentDetails.previewId && assignmentDraft.detailId === currentDetails.id
+        ? assignmentDraft.planId : undefined}
+      onDraftCreated={planId => setAssignmentDraft({
+        previewId: currentDetails.previewId, detailId: currentDetails.id, planId,
+      })} />
+  ) : null;
 
   return (
     <>
@@ -250,47 +340,26 @@ export function MediaOrganizerBatchEditor() {
 
       {currentPreview?.status === 'completed' && currentPreview.summary && (
         <MediaOrganizerPreviewReport preview={currentPreview} selected={currentUnit} onSelect={inspectUnit} onDetails={openDetails}
+          detail={detailReport} onDismissDetails={() => setDetails(null)} pending={previewQuery.isPlaceholderData}
+          detailBusy={assignmentBusy}
           action={canConfirm && (
             <ConsoleButton variant="primary" disabled={busy} loading={action === 'confirm'}
               onClick={confirmBatch}>确认整理全部</ConsoleButton>
           )}
           footer={<ConsolePagination page={previewPage.page} pageSize={previewPage.size}
             total={currentPreview.filtered_total} pageSizes={pageSizes}
-            onChange={(page, size) => { setDetails(null); setPreviewPage({ page, size }); }} />}>
+            onChange={(page, size) => {
+              if (assignmentBusy) return;
+              setDetails(null);
+              setPreviewPage({ page, size });
+            }} />}>
           {!currentPreview.execution_enabled && <p className="nfc-form-note">当前仅可预览。</p>}
           {currentPreview.summary.ready_count === 0 && <p className="nfc-form-note">没有可整理的单元。</p>}
           {!!currentPreview.summary.needs_assignment_count && (
             <p className="nfc-form-note">批量整理会跳过待确认归属的散件。可逐个作者选择文件和目标资源包。</p>
           )}
-          <div className="nfc-unit-filter">
-            <label htmlFor="media-organizer-batch-filter">筛选状态</label>
-            <select id="media-organizer-batch-filter" value={filter} onChange={event => {
-              setDetails(null);
-              setFilter(event.target.value as MediaPreviewFilter);
-              setPreviewPage(previous => ({ ...previous, page: 1 }));
-            }}>
-              <option value="all">全部</option>
-              <option value="ready">待整理</option>
-              <option value="blocked">冲突</option>
-              <option value="already_organized">已整理</option>
-              <option value="skipped">跳过</option>
-              {!!currentPreview.summary.needs_assignment_count && (
-                <option value="needs_assignment">待确认归属</option>
-              )}
-            </select>
-          </div>
-          {currentDetails?.kind === 'loose' && (
-            <MediaOrganizerLooseFilesReport key={`${currentDetails.previewId}:${currentDetails.id}`}
-              previewId={currentDetails.previewId} looseId={currentDetails.id} author={currentDetails.unit}
-              disabled={busy} onClose={closeDetails} />
-          )}
+          <OrganizerFilters value={filter} counts={filterCounts} onChange={changeFilter} disabled={assignmentBusy} />
         </MediaOrganizerPreviewReport>
-      )}
-
-      {currentDetails?.kind === 'mapping' && currentPreview?.status === 'completed' && (
-        <MediaOrganizerMappingReport key={`${currentDetails.previewId}:${currentDetails.id}`}
-          previewId={currentDetails.previewId} mappingId={currentDetails.id} unit={currentDetails.unit}
-          onClose={closeDetails} />
       )}
     </>
   );

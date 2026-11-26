@@ -24,6 +24,7 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
   // The controlled Radix modal has no Dialog.Trigger: retain its real launcher
   // before autofocus moves into the overlay, then restore it on safe close.
   const returnFocusTarget = useRef<HTMLElement | null>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
 
@@ -77,11 +78,16 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
       }}>
         <Dialog.Portal>
           <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
-          <Dialog.Content className="nfc-v2-dialog nfc-overlay-modal nfc-history-cleanup-modal nfc-plan-history-cleanup-modal nfc-v2-plan-history-dialog"
-            onOpenAutoFocus={() => {
+          <Dialog.Content className="nfc-v2-dialog nfc-overlay-modal nfc-history-cleanup-modal nfc-plan-history-cleanup-modal nfc-v2-plan-history-dialog nfc-maintenance-dialog"
+            aria-busy={cleanupMutation.isPending || undefined}
+            onOpenAutoFocus={event => {
               const active = document.activeElement;
               returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
                 ? active : null;
+              if (cancelButton.current && !cancelButton.current.disabled) {
+                event.preventDefault();
+                cancelButton.current.focus({ preventScroll: true });
+              }
             }}
             onCloseAutoFocus={event => {
               const target = returnFocusTarget.current;
@@ -97,53 +103,57 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
             onPointerDownOutside={event => event.preventDefault()}>
             <header className="nfc-v2-dialog-heading">
               <span className="nfc-v2-dialog-icon is-danger"><ConsoleIcon name="trash" size={20} /></span>
-              <div><Dialog.Title>清理计划历史</Dialog.Title></div>
+              <div>
+                <Dialog.Title>清理计划历史</Dialog.Title>
+                <Dialog.Description className="nfc-maintenance-subtitle">确认要清理的终态计划和记录范围。</Dialog.Description>
+              </div>
               <button type="button" className="nfc-v2-dialog-close" aria-label="关闭清理窗口"
                 disabled={cleanupMutation.isPending}
                 onClick={closeSafely}><ConsoleIcon name="x" size={18} /></button>
             </header>
-            <Dialog.Description asChild>
-              <div className="nfc-history-cleanup-stack nfc-v2-plan-history-body">
-                <div className="nfc-v2-plan-cleanup-warning" role="note">
-                  <ConsoleIcon name="info" size={18} />
-                  <div><strong>批量清理说明</strong>
-                    <p>批量清理仅删除选定状态的已终态计划历史元数据与条目记录（BatchPlan 及 BatchPlanItem），不会撤销已执行的文件操作（Delete ≠ Undo）。</p>
-                  </div>
-                </div>
-                <fieldset className="nfc-v2-plan-history-options">
-                  <legend className="nfc-history-cleanup-label">选择要清理的历史计划状态：</legend>
-                  {PLAN_HISTORY_OPTIONS.map(item => (
-                    <label key={item.value}>
-                      <ConsoleCheckbox checked={selectedStatuses.includes(item.value)}
-                        disabled={cleanupMutation.isPending}
-                        onCheckedChange={checked => {
-                          if (submitting.current || cleanupMutation.isPending) return;
-                          setSelectedStatuses(current => checked
-                            ? [...current.filter(value => value !== item.value), item.value]
-                            : current.filter(value => value !== item.value));
-                        }} />
-                      <span>{item.label}</span>
-                    </label>
-                  ))}
-                </fieldset>
-                <div className="nfc-history-cleanup-note">
-                  <strong className="nfc-history-cleanup-note-title">影响与安全说明：</strong>
-                  <ul className="nfc-history-cleanup-list">
-                    <li>选中的终态计划元数据及操作条目将被永久删除。</li>
-                    <li><strong className="nfc-success-text">绝不会删除或修改</strong> NAS 存储上的任何文件。</li>
-                    <li><strong className="nfc-success-text">绝不会删除</strong> Audit 审计记录与关联的任务。</li>
-                    <li>草稿 (draft)、已冻结 (frozen)、已就绪 (ready) 及运行中 (validating / executing) 的计划受系统保护，不受影响。</li>
-                  </ul>
+            <div className="nfc-history-cleanup-stack nfc-v2-plan-history-body">
+              <div className="nfc-v2-plan-cleanup-warning" role="note">
+                <ConsoleIcon name="info" size={18} />
+                <div><strong>批量清理说明</strong>
+                  <p>批量清理仅删除选定状态的已终态计划历史元数据与条目记录（BatchPlan 及 BatchPlanItem），不会撤销已执行的文件操作（Delete ≠ Undo）。</p>
                 </div>
               </div>
-            </Dialog.Description>
-            <div className="nfc-v2-confirm-actions">
-              <ConsoleButton disabled={cleanupMutation.isPending}
+              <fieldset className="nfc-v2-plan-history-options">
+                <legend className="nfc-history-cleanup-label">选择要清理的历史计划状态：</legend>
+                {PLAN_HISTORY_OPTIONS.map(item => (
+                  <label key={item.value}>
+                    <ConsoleCheckbox checked={selectedStatuses.includes(item.value)}
+                      disabled={cleanupMutation.isPending}
+                      onCheckedChange={checked => {
+                        if (submitting.current || cleanupMutation.isPending) return;
+                        setSelectedStatuses(current => checked
+                          ? [...current.filter(value => value !== item.value), item.value]
+                          : current.filter(value => value !== item.value));
+                      }} />
+                    <span>{item.label}</span>
+                  </label>
+                ))}
+              </fieldset>
+              <div className="nfc-history-cleanup-note">
+                <strong className="nfc-history-cleanup-note-title">影响与安全说明：</strong>
+                <ul className="nfc-history-cleanup-list">
+                  <li>选中的终态计划元数据及操作条目将被永久删除。</li>
+                  <li><strong className="nfc-success-text">绝不会删除或修改</strong> NAS 存储上的任何文件。</li>
+                  <li><strong className="nfc-success-text">绝不会删除</strong> Audit 审计记录与关联的任务。</li>
+                  <li>草稿 (draft)、已冻结 (frozen)、已就绪 (ready) 及运行中 (validating / executing) 的计划受系统保护，不受影响。</li>
+                </ul>
+              </div>
+            </div>
+            <footer className="nfc-v2-confirm-actions">
+              <span className="nfc-maintenance-selection" role="status">
+                {selectedStatuses.length ? `已选 ${selectedStatuses.length} 种状态` : '请选择要清理的状态'}
+              </span>
+              <ConsoleButton ref={cancelButton} disabled={cleanupMutation.isPending}
                 onClick={closeSafely}>取消</ConsoleButton>
               <ConsoleButton variant="danger" loading={cleanupMutation.isPending}
                 disabled={selectedStatuses.length === 0 || cleanupMutation.isPending}
                 onClick={() => { void handleConfirm(); }}>确认清理</ConsoleButton>
-            </div>
+            </footer>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

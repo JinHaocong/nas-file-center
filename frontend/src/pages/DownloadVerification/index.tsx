@@ -216,14 +216,14 @@ export const DownloadVerificationPage: React.FC = () => {
     || (run.source_id ? '已停用来源' : '旧版 WebDAV');
 
   return (
-    <div className="nfc-operations-page nfc-page-layout-workbench nfc-download-verify nfc-download-verify-page">
+    <div className="nfc-operations-page nfc-page-layout-workbench nfc-download-verify nfc-download-verify-page nfc-tool-workspace">
       <PageHeader title="下载完整性校验"
         description="核对 AList 或 OpenList 的来源清单与 NAS 下载目录。"
         actions={<ConsoleButton leadingIcon={<ConsoleIcon name="settings" size={16} />}
           onClick={() => navigate('/download-sources')}>管理来源</ConsoleButton>} />
 
       <DataPanel title="新建下载核对">
-        <div className="nfc-dv-workspace">
+        <div className="nfc-dv-workspace" aria-busy={start.isPending || undefined}>
           <div className="nfc-dv-field nfc-dv-source">
             <label htmlFor="nfc-dv-source">校验来源</label>
             <div className="nfc-dv-control-row">
@@ -232,7 +232,7 @@ export const DownloadVerificationPage: React.FC = () => {
                   const source = sourceList.find(item => String(item.id) === event.target.value);
                   if (source) changeSource(source.id);
                 }}
-                disabled={sourceList.length === 0}>
+                disabled={sourceList.length === 0 || start.isPending}>
                 {sourceList.length === 0 && <option value="">尚未添加来源</option>}
                 {sourceList.map(source => <option key={source.id} value={source.id}>
                   {source.name} · {source.provider === 'alist' ? 'AList' : 'OpenList'}
@@ -257,8 +257,8 @@ export const DownloadVerificationPage: React.FC = () => {
                 <div className="nfc-dv-control-row">
                   <input id="nfc-dv-remote-path" aria-label="云端相对目录" value={remoteRoot}
                     onChange={event => setRemoteRoot(event.target.value)}
-                    placeholder="根目录 /" disabled={chosenId === null} />
-                  <ConsoleButton disabled={chosenId === null}
+                    placeholder="根目录 /" disabled={chosenId === null || start.isPending} />
+                  <ConsoleButton disabled={chosenId === null || start.isPending}
                     leadingIcon={<ConsoleIcon name="folder-open" size={16} />}
                     onClick={event => { opener.current = event.currentTarget; setPickerOpen(true); }}>
                     选择目录
@@ -275,7 +275,7 @@ export const DownloadVerificationPage: React.FC = () => {
               </div>
               <div className="nfc-dv-field">
                 <label>本地目录</label>
-                <DirectoryPicker value={localRoot} onChange={value =>
+                <DirectoryPicker value={localRoot} disabled={start.isPending} onChange={value =>
                   setLocalRoot(typeof value === 'string' ? value : value[0] || '')}
                   placeholder="请选择 NAS 已下载文件夹" />
                 <small>以两个选择的文件夹为根，逐级比较内部相对路径</small>
@@ -283,7 +283,7 @@ export const DownloadVerificationPage: React.FC = () => {
             </div>
           </div>
 
-          <fieldset className="nfc-dv-modes">
+          <fieldset className="nfc-dv-modes" disabled={start.isPending}>
             <legend>比较方式</legend>
             <label className={mode === 'metadata' ? 'is-selected' : ''}>
               <input type="radio" name="verify-mode" checked={mode === 'metadata'}

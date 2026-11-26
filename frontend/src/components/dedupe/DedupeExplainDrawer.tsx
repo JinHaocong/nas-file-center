@@ -101,7 +101,8 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
 
   return (
     <ConsoleSheet open={open} onClose={onClose} title="去重决策分析"
-      description="只读展示后端评分、资格、安全排除和容量平衡依据" className="nfc-v2-dedupe-explain-sheet nfc-dedupe-explain-drawer"
+      description="核对评分、保留资格、安全排除和容量平衡依据"
+      className="nfc-v2-dedupe-explain-sheet nfc-dedupe-explain-drawer nfc-reading-sheet"
       titleAside={<DecisionTag decision={decisionCls.kind} eligible={member.eligible_as_keep} />}>
       <div className="nfc-overlay-stack nfc-dedupe-explain-stack nfc-v2-dedupe-explain">
         {member.incomplete && (
@@ -228,7 +229,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
             {factorContributions.length === 0 ? (
               <Notice>当前无单独计分因子贡献项。</Notice>
             ) : (
-              <div className="nfc-v2-dedupe-explain-table-wrap">
+              <div className="nfc-v2-dedupe-explain-table-wrap" role="region" aria-label="评分明细表格" tabIndex={0}>
                 <table className="nfc-v2-dedupe-explain-table">
                   <thead><tr>
                     <th scope="col">因子名称</th>

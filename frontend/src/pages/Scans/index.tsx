@@ -20,6 +20,13 @@ import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { DedupeDiagnosticModal } from '../../components/dedupe/DedupeDiagnosticModal';
 
+type ScanView = 'all' | 'active' | 'completed';
+
+/** Identify scans that are still waiting for a result from the worker. */
+function isActiveScan(scan: ScanJob): boolean {
+  return scan.status === 'queued' || scan.status === 'running';
+}
+
 export const ScansPage: React.FC = () => {
   useTitle('扫描去重');
   const navigate = useNavigate();
@@ -29,6 +36,7 @@ export const ScansPage: React.FC = () => {
   const [diagnosticOpen, setDiagnosticOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [view, setView] = useState<ScanView>('all');
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
@@ -36,7 +44,7 @@ export const ScansPage: React.FC = () => {
     queryFn: () => scansApi.listScans(page, pageSize),
     refetchInterval: query => {
       const items = query.state.data?.items || [];
-      const hasActive = items.some(scan => scan.status === 'queued' || scan.status === 'running');
+      const hasActive = items.some(isActiveScan);
       return hasActive ? 3000 : false;
     },
   });
@@ -58,8 +66,12 @@ export const ScansPage: React.FC = () => {
     onSettled: () => setDeletingId(null),
   });
 
-  const items: ScanJob[] = isError ? [] : data?.items || [];
-  const hasActiveScan = items.some(scan => scan.status === 'queued' || scan.status === 'running');
+  const pageItems: ScanJob[] = isError ? [] : data?.items || [];
+  const activeScans = pageItems.filter(isActiveScan);
+  const completedScans = pageItems.filter(scan => scan.status === 'completed');
+  const itemsByView: Record<ScanView, ScanJob[]> = { all: pageItems, active: activeScans, completed: completedScans };
+  const items = itemsByView[view];
+  const hasActiveScan = activeScans.length > 0;
   const openScan = (id: number) => navigate('/scans/' + id);
   const changePage = (nextPage: number, nextSize: number) => {
     if (nextSize !== pageSize) {
@@ -73,7 +85,7 @@ export const ScansPage: React.FC = () => {
     value === null || value === undefined ? '—' : value.toLocaleString();
 
   return (
-    <div className="nfc-operations-page nfc-scans-page nfc-v2-scans-page nfc-page-layout-ledger">
+    <div className="nfc-operations-page nfc-scans-page nfc-v2-scans-page nfc-page-layout-ledger nfc-record-workspace">
       <PageHeader
         title="扫描去重"
         description="选择目录查找重复文件，完成后可逐组核对。"
@@ -97,6 +109,18 @@ export const ScansPage: React.FC = () => {
           <span className="nfc-panel-count">{isError ? '—' : (data?.total ?? 0).toLocaleString()} 条记录</span>
         </div>}
         className="nfc-panel-flush" variant="dense">
+        {!isError && !isLoading && pageItems.length > 0 && (
+          <div className="nfc-record-controls">
+            <span className="nfc-record-controls-label">本页状态</span>
+            <div className="nfc-record-segments" role="group" aria-label="筛选本页扫描">
+              {([['all', '全部'], ['active', '进行中'], ['completed', '已完成']] as const).map(([id, label]) => (
+                <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>
+                  {label}<span>{itemsByView[id].length}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {isError ? (
           <div className="nfc-v2-scan-list-state" role="alert">
             <ConsoleEmpty title="扫描历史加载失败"
@@ -105,12 +129,15 @@ export const ScansPage: React.FC = () => {
           </div>
         ) : isLoading ? (
           <div className="nfc-v2-scan-list-state" role="status">正在读取扫描历史…</div>
-        ) : items.length === 0 ? (
+        ) : pageItems.length === 0 ? (
           <ConsoleEmpty title="暂无扫描记录"
             description="创建 fclones 精确扫描后，重复组与扫描进度会在这里显示。"
             action={<ConsoleButton variant="primary" onClick={() => setIsModalOpen(true)}>
               新建扫描
             </ConsoleButton>} />
+        ) : items.length === 0 ? (
+          <ConsoleEmpty title="本页没有符合状态的扫描"
+            action={<ConsoleButton onClick={() => setView('all')}>查看本页全部</ConsoleButton>} />
         ) : (
           <ResponsiveDataView
             desktop={
@@ -135,6 +162,9 @@ export const ScansPage: React.FC = () => {
                           <span>{scan.name}</span>
                         </button>
                         <span className="nfc-v2-scan-id">#{scan.id}</span>
+                        {scan.roots?.length > 0 && <small className="nfc-record-path-hint" title={scan.roots.join('\n')}>
+                          {scan.roots[0]}{scan.roots.length > 1 && ` · 另有 ${scan.roots.length - 1} 个根目录`}
+                        </small>}
                       </td>
                       <td><span className="nfc-kind-badge">
                         {scan.mode === 'isolate' ? 'A/B isolate' : 'standard'}
@@ -174,6 +204,9 @@ export const ScansPage: React.FC = () => {
                       </div>
                       <StatusBadge status={scan.status} />
                     </div>
+                    {scan.roots?.length > 0 && <small className="nfc-record-path-hint" title={scan.roots.join('\n')}>
+                      {scan.roots[0]}{scan.roots.length > 1 && ` · 另有 ${scan.roots.length - 1} 个根目录`}
+                    </small>}
                     <div className="nfc-mobile-record-facts nfc-mobile-record-facts-3">
                       <span>重复组 <b>{count(scan.total_groups)}</b></span>
                       <span>重复文件 <b>{count(scan.total_files_in_groups)}</b></span>

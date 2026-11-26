@@ -33,6 +33,7 @@ const modeLabel = (mode: WorkflowListItem['mode']) => {
   if (mode === 'utility') return '目录工具流';
   return '文件规则流';
 };
+const listModes: WorkflowListItem['mode'][] = ['file', 'organizer', 'dedupe', 'utility'];
 
 export const WorkflowListPage: React.FC = () => {
   useTitle('工作流中心');
@@ -43,6 +44,7 @@ export const WorkflowListPage: React.FC = () => {
   const mutationInFlight = useRef(false);
 
   const [includeArchived, setIncludeArchived] = useState(false);
+  const [modeFilter, setModeFilter] = useState<WorkflowListItem['mode'] | 'all'>('all');
   const [selectedWorkflowForRevision, setSelectedWorkflowForRevision] = useState<WorkflowListItem | null>(null);
   const [confirmation, setConfirmation] = useState<WorkflowListIntent | null>(null);
   const [page, setPage] = useState(1);
@@ -89,10 +91,11 @@ export const WorkflowListPage: React.FC = () => {
   });
 
   const items = workflows || [];
-  const { current: currentPage } = getPaginationState(page, pageSize, items.length);
+  const matchedItems = modeFilter === 'all' ? items : items.filter(workflow => workflow.mode === modeFilter);
+  const { current: currentPage } = getPaginationState(page, pageSize, matchedItems.length);
   const visibleItems = useMemo(
-    () => items.slice((currentPage - 1) * pageSize, currentPage * pageSize),
-    [items, currentPage, pageSize],
+    () => matchedItems.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [matchedItems, currentPage, pageSize],
   );
   const busy = archiveMutation.isPending || permanentDeleteMutation.isPending;
   const confirmTarget = getAuthorizedWorkflowListTarget(
@@ -149,7 +152,7 @@ export const WorkflowListPage: React.FC = () => {
   );
 
   return (
-    <div className="nfc-operations-page nfc-workflows-page nfc-v2-workflow-list-page nfc-page-layout-ledger">
+    <div className="nfc-operations-page nfc-workflows-page nfc-v2-workflow-list-page nfc-page-layout-ledger nfc-tool-workspace">
       <PageHeader
         title="工作流"
         description="把常用文件规则保存为工作流，按版本预览和生成计划。"
@@ -182,6 +185,20 @@ export const WorkflowListPage: React.FC = () => {
         action={<span className="nfc-panel-count">{items.length} 个工作流</span>}
         className="nfc-panel-flush"
         variant="dense">
+        {!isLoading && !isError && items.length > 0 && <div className="nfc-tool-filter-strip">
+          <label className="nfc-tool-workflow-mode-filter">
+            工作流模式
+            <select value={modeFilter} onChange={event => {
+              const value = event.target.value;
+              setModeFilter(listModes.find(mode => mode === value) ?? 'all');
+              setPage(1);
+            }}>
+              <option value="all">全部模式</option>
+              {listModes.map(mode => <option key={mode} value={mode}>{modeLabel(mode)}</option>)}
+            </select>
+          </label>
+          <span role="status">显示 {matchedItems.length} 项</span>
+        </div>}
         {isError && (
           <div role="alert" className="nfc-v2-workflow-list-error">
             <strong>获取工作流列表失败</strong>
@@ -195,10 +212,10 @@ export const WorkflowListPage: React.FC = () => {
             加载工作流中…
           </div>
         )}
-        {!isLoading && !isError && items.length === 0 && (
+        {!isLoading && !isError && matchedItems.length === 0 && (
           <ConsoleEmpty title="暂无工作流" description="当前筛选下尚无工作流定义。" />
         )}
-        {!isLoading && !isError && items.length > 0 && (
+        {!isLoading && !isError && matchedItems.length > 0 && (
           <>
             <ResponsiveDataView
               desktop={
@@ -262,7 +279,7 @@ export const WorkflowListPage: React.FC = () => {
                 </div>
               }
             />
-            <ConsolePagination page={currentPage} pageSize={pageSize} total={items.length}
+            <ConsolePagination page={currentPage} pageSize={pageSize} total={matchedItems.length}
               pageSizes={[15, 30, 60]}
               onChange={(nextPage, nextPageSize) => {
                 setPage(nextPage);

@@ -7,6 +7,7 @@ import TestRenderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import { DirectoryPicker } from '../src/components/DirectoryPicker';
 import { ConsoleConfirmDialog } from '../src/components/ui/ConsoleConfirmDialog';
+import { ConsoleSheet } from '../src/components/ui/ConsoleSheet';
 import { ConsoleToastProvider } from '../src/components/ui/ConsoleToast';
 import { DisplayPreferencesProvider } from '../src/contexts/DisplayPreferencesContext';
 import { BatchPage } from '../src/pages/Batch';
@@ -62,11 +63,18 @@ async function waitForRenderedText(view: ReactTestRenderer, text: string) {
 
 test.beforeEach(() => {
   Object.defineProperty(globalThis, 'document', { configurable: true, value: Object.assign(new EventTarget(), { title: '' }) });
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: Object.assign(new EventTarget(), { innerWidth: 1440, setTimeout, clearTimeout }),
+  });
 });
 
-test.afterEach(() => { Reflect.deleteProperty(globalThis, 'document'); });
+test.after(() => {
+  Reflect.deleteProperty(globalThis, 'document');
+  Reflect.deleteProperty(globalThis, 'window');
+});
 
-test('mobile media organizer inserts one inspector just after the selected row', t => {
+test('mobile media organizer opens a controlled sheet without inserting rows or changing their order', t => {
   const settings = Object.assign(new EventTarget(), {
     innerWidth: 390,
     localStorage: { getItem: () => 'on', setItem: () => {} },
@@ -74,27 +82,37 @@ test('mobile media organizer inserts one inspector just after the selected row',
   Object.defineProperty(globalThis, 'window', { configurable: true, value: settings });
   const allUnits = [readyUnit, blockedUnit, ...['third', 'fourth', 'fifth'].map(name =>
     ({ ...readyUnit, unit: selection + '/' + name }))] as MediaBatchPreview['units'];
-  const render = (index: number) => (
+  const render = (index: number, detailBusy = false) => (
     <DisplayPreferencesProvider>
       <MediaOrganizerPreviewReport preview={{ ...preview, units: allUnits }} selected={allUnits[index]}
-        onSelect={() => {}} onDetails={() => {}} action={null} footer={null}>{null}</MediaOrganizerPreviewReport>
+        onSelect={() => {}} onDetails={() => {}} action={null} footer={null}
+        detailBusy={detailBusy}>{null}</MediaOrganizerPreviewReport>
     </DisplayPreferencesProvider>
   );
   let view!: ReactTestRenderer;
   act(() => { view = TestRenderer.create(render(0)); });
   t.after(() => { act(() => view.unmount()); Reflect.deleteProperty(globalThis, 'window'); });
 
-  const order = () => view.root.findByType('ul').findAllByType('li').map(item =>
-    item.props.className === 'nfc-unit-gallery-inspection' ? 'details'
-      : item.findByType('button').props.title.replace(selection + '/', ''));
-  assert.deepEqual(order(), ['ready', 'blocked', 'details', 'third', 'fourth', 'fifth']);
+  const order = () => view.root.findByProps({ 'aria-label': '逐目录整理预览' }).findAllByType('li')
+    .map(item => item.findByType('button').props.title.replace(selection + '/', ''));
+  assert.deepEqual(order(), ['ready', 'blocked', 'third', 'fourth', 'fifth']);
+  assert.equal(view.root.findAllByType(ConsoleSheet).length, 0);
+  act(() => view.root.findByProps({ title: readyUnit.unit }).props.onClick());
+  assert.equal(view.root.findByType(ConsoleSheet).props.title, '整理详情');
+  assert.deepEqual(order(), ['ready', 'blocked', 'third', 'fourth', 'fifth']);
+  act(() => view.update(render(0, true)));
+  assert.equal(view.root.findByType(ConsoleSheet).props.dismissDisabled, true);
+  act(() => view.root.findByType(ConsoleSheet).props.onClose());
+  assert.equal(view.root.findByType(ConsoleSheet).props.open, true);
+  act(() => view.update(render(0)));
+  act(() => view.root.findByType(ConsoleSheet).props.onClose());
+  assert.equal(view.root.findAllByType(ConsoleSheet).length, 0);
   act(() => view.update(render(4)));
-  assert.deepEqual(order(), ['ready', 'blocked', 'third', 'fourth', 'fifth', 'details']);
-  act(() => view.update(render(2)));
-  act(() => view.root.findAllByType('button').find(item => item.props.role === 'switch')!.props.onClick());
-  assert.deepEqual(order(), ['ready', 'blocked', 'third', 'details', 'fourth', 'fifth']);
+  act(() => view.root.findByProps({ title: allUnits[4].unit }).props.onClick());
+  assert.equal(view.root.findByType(ConsoleSheet).props.open, true);
   act(() => { settings.innerWidth = 1200; settings.dispatchEvent(new Event('resize')); });
   assert.deepEqual(order(), ['ready', 'blocked', 'third', 'fourth', 'fifth']);
+  assert.equal(view.root.findAllByType(ConsoleSheet).length, 0);
   assert.equal(view.root.findByProps({ id: 'organizer-unit-inspection' }).type, 'section');
 });
 
@@ -267,7 +285,7 @@ test('preview filtering and complete source-to-target mapping request the right 
   const { view, dispose } = await openBatch(`/batch?operation=media-organize&preview=${previewId}`);
   t.after(dispose);
   await act(async () => {
-    view.root.findByProps({ id: 'media-organizer-batch-filter' }).props.onChange({ target: { value: 'ready' } });
+    view.root.findByProps({ 'data-preview-filter': 'ready' }).props.onClick();
     await settle();
   });
   assert.ok(requests.some(url => url.includes('status_filter=ready')));
@@ -283,8 +301,8 @@ test('preview filtering and complete source-to-target mapping request the right 
   assert.ok(requests.some(url => url.endsWith('/mappings/preview-mapping?page=2&page_size=50')));
 });
 
-for (const width of [767, 768]) {
-  test(`organizer reports use one readable layout with working details at ${width}px`, async t => {
+for (const width of [768, 1440]) {
+  test(`organizer reports keep the mapping readable in the inspector at ${width}px`, async t => {
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: { innerWidth: width, setTimeout, clearTimeout, addEventListener() {}, removeEventListener() {} },
@@ -337,17 +355,9 @@ for (const width of [767, 768]) {
     await waitForRenderedText(view, source);
     assert.equal(focusedMapping, true, 'opening the mapping must bring keyboard focus into the report');
 
-    const captions = ['各整理单元结果', '媒体文件位置调整明细'];
-    if (width < 768) {
-      assert.equal(view.root.findAllByType('table').length, 0);
-      for (const caption of captions) {
-        const list = view.root.findByProps({ role: 'list', 'aria-label': caption });
-        assert.ok(list.findAllByType('li').length > 0);
-      }
-    } else {
-      assert.deepEqual(view.root.findAllByType('caption').map(caption => caption.children.join('')).sort(),
-        captions.sort());
-    }
+    assert.deepEqual(view.root.findAllByType('caption').map(caption => caption.children.join('')), ['各整理单元结果']);
+    const list = view.root.findByProps({ role: 'list', 'aria-label': '媒体文件位置调整明细' });
+    assert.ok(list.findAllByType('li').length > 0);
     assert.ok(view.root.findAllByType('code').some(code => code.props.title === source));
     assert.ok(view.root.findAllByType('code').some(code => code.props.title === target));
     await waitForRenderedText(view, '目标路径已存在');
@@ -420,7 +430,7 @@ test('Luolcy loose files remain selected across pages and an existing package cr
   assert.match(JSON.stringify(view.toJSON()), /待归属作者/);
   assert.doesNotMatch(JSON.stringify(view.toJSON()), /确认整理全部/);
   await act(async () => {
-    view.root.findByProps({ id: 'media-organizer-batch-filter' }).props.onChange({ target: { value: 'needs_assignment' } });
+    view.root.findByProps({ 'data-preview-filter': 'needs_assignment' }).props.onClick();
     await settle();
   });
   assert.ok(requests.some(({ url }) => url.includes('status_filter=needs_assignment')));

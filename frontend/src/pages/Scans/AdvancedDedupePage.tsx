@@ -368,7 +368,7 @@ const ScanDedupeWorkspace: React.FC<{ scanId: string }> = ({ scanId }) => {
   ];
 
   return (
-    <div className="nfc-operations-page nfc-dedupe-stage-stack nfc-advanced-dedupe-page nfc-page-layout-workbench">
+    <div className="nfc-operations-page nfc-dedupe-stage-stack nfc-advanced-dedupe-page nfc-page-layout-workbench nfc-record-workspace">
       <PageHeader
         title="高级精确去重"
         description={
@@ -386,6 +386,13 @@ const ScanDedupeWorkspace: React.FC<{ scanId: string }> = ({ scanId }) => {
           </ActionBar>
         }
       />
+
+      <nav className="nfc-record-evidence-navigation" aria-label="高级去重配置位置">
+        <a href="#dedupe-settings"><ConsoleIcon name="folder-open" size={15} />扫描范围</a>
+        <a href="#dedupe-storage"><ConsoleIcon name="archive" size={15} />存储动作</a>
+        <a href="#dedupe-strategy"><ConsoleIcon name="list-checks" size={15} />评分与预览</a>
+        {previewData && <a href="#dedupe-members"><ConsoleIcon name="search" size={15} />候选文件</a>}
+      </nav>
 
       <div id="dedupe-settings" tabIndex={-1} className="nfc-dedupe-cockpit nfc-dedupe-location">
         <div className="nfc-dedupe-context-rail">
@@ -408,6 +415,7 @@ const ScanDedupeWorkspace: React.FC<{ scanId: string }> = ({ scanId }) => {
 
         <div className="nfc-dedupe-strategy-stage">
           <DataPanel
+            id="dedupe-storage"
             title="存储动作"
             description="Quarantine 保持默认；Hardlink / Reflink 需要显式选择，且任何动作变化都会使已有 Preview 失效。"
           >
@@ -425,6 +433,7 @@ const ScanDedupeWorkspace: React.FC<{ scanId: string }> = ({ scanId }) => {
           </DataPanel>
 
           <DataPanel
+        id="dedupe-strategy"
         title="评分策略与偏好配置"
         description="调整评分策略后，需要重新生成预览。"
       >

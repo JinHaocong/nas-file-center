@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useQuery } from '@tanstack/react-query';
 import { auditApi, dataLifecycleApi } from '../../api/domain';
@@ -24,16 +24,19 @@ export const AuditPage: React.FC = () => {
   useTitle('审计日志');
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
   const [searchText, setSearchText] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [operationFilter, setOperationFilter] = useState<string>();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const detailsOpener = useRef<HTMLButtonElement | null>(null);
 
   const { data: lifecyclePolicy } = useQuery({
     queryKey: ['dataLifecyclePolicy'],
     queryFn: () => dataLifecycleApi.getPolicy(),
   });
   const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
-    queryKey: ['auditEvents', page, pageSize, searchText],
-    queryFn: () => auditApi.listEvents(page, pageSize, searchText || undefined),
+    queryKey: ['auditEvents', page, pageSize, appliedSearch, operationFilter],
+    queryFn: () => auditApi.listEvents(page, pageSize, appliedSearch || undefined, operationFilter),
   });
 
   const items = data?.items || [];
@@ -47,11 +50,18 @@ export const AuditPage: React.FC = () => {
   };
   const renderDetailsButton = (event: AuditEvent) => (
     <ConsoleButton size="sm" variant="ghost"
-      onClick={() => setSelectedEvent(event)}>详细元数据</ConsoleButton>
+      onClick={click => { detailsOpener.current = click.currentTarget; setSelectedEvent(event); }}>查看事件</ConsoleButton>
   );
 
+  /** Close the open event and search matching operations across all pages. */
+  function filterByOperation(operation: string) {
+    setOperationFilter(operation);
+    setPage(1);
+    setSelectedEvent(null);
+  }
+
   return (
-    <div className="nfc-operations-page nfc-audit-page nfc-page-layout-ledger nfc-v2-audit-page">
+    <div className="nfc-operations-page nfc-audit-page nfc-page-layout-ledger nfc-v2-audit-page nfc-record-workspace">
       <PageHeader
         title="审计日志"
         description="按系统数据生命周期保留策略记录文件操作、隔离变更和计划校验结果。"
@@ -68,13 +78,24 @@ export const AuditPage: React.FC = () => {
         action={<span className="nfc-panel-count">{data?.total ?? 0} 条</span>}
         className="nfc-panel-flush" variant="dense">
         <ActionBar className="nfc-filter-bar nfc-v2-audit-filter">
-          <label className="nfc-v2-audit-search" htmlFor="audit-search-input">
-            <ConsoleIcon name="search" size={17} />
-            <input id="audit-search-input" type="search" value={searchText}
-              aria-label="搜索审计事件（操作或路径）"
-              placeholder="搜索操作/路径..."
-              onChange={event => { setSearchText(event.target.value); setPage(1); }} />
-          </label>
+          <form className="nfc-record-search" onSubmit={event => {
+            event.preventDefault();
+            setAppliedSearch(searchText.trim());
+            setPage(1);
+          }}>
+            <label className="nfc-v2-audit-search" htmlFor="audit-search-input">
+              <ConsoleIcon name="search" size={17} />
+              <input id="audit-search-input" type="search" value={searchText}
+                aria-label="搜索审计事件（操作或路径）"
+                placeholder="搜索操作或路径"
+                onChange={event => setSearchText(event.target.value)} />
+            </label>
+            <ConsoleButton type="submit" size="sm">搜索</ConsoleButton>
+          </form>
+          {operationFilter && <span className="nfc-record-filter-value" title={operationFilter}>操作 · {operationFilter}</span>}
+          {(operationFilter || appliedSearch || searchText) && <ConsoleButton size="sm" variant="ghost" onClick={() => {
+            setSearchText(''); setAppliedSearch(''); setOperationFilter(undefined); setPage(1);
+          }}>清除筛选</ConsoleButton>}
         </ActionBar>
         {isError && (
           <div className="nfc-v2-audit-feedback" role="alert">
@@ -138,7 +159,15 @@ export const AuditPage: React.FC = () => {
         onOpenChange={next => { if (!next) setSelectedEvent(null); }}>
         <Dialog.Portal>
           <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
-          <Dialog.Content className="nfc-v2-dialog nfc-overlay-modal nfc-audit-detail-modal nfc-v2-audit-detail-modal"
+          <Dialog.Content className="nfc-v2-dialog nfc-overlay-modal nfc-audit-detail-modal nfc-v2-audit-detail-modal nfc-record-dialog nfc-reading-dialog"
+            onCloseAutoFocus={event => {
+              const target = detailsOpener.current;
+              detailsOpener.current = null;
+              if (target?.isConnected && !target.disabled) {
+                event.preventDefault();
+                target.focus({ preventScroll: true });
+              }
+            }}
             onPointerDownOutside={event => event.preventDefault()}>
             <header className="nfc-v2-dialog-heading">
               <span className="nfc-v2-dialog-icon"><ConsoleIcon name="file-text" size={20} /></span>
@@ -159,13 +188,18 @@ export const AuditPage: React.FC = () => {
                 <div><span>执行结果</span><StatusBadge
                   status={isSuccessResult(selectedEvent.result) ? 'completed' : 'failed'}
                   label={selectedEvent.result} /></div>
-                <div><span>涉及路径</span><CodePath value={selectedEvent.path} /></div>
-                <div className="nfc-audit-json"><span>详细元数据 JSON</span>
-                  <pre className="nfc-code-block">{JSON.stringify(selectedEvent.details, null, 2)}</pre>
-                </div>
+                <div className="nfc-reading-audit-path"><span>涉及路径</span><CodePath value={selectedEvent.path} /></div>
+                <details className="nfc-audit-json nfc-record-disclosure"><summary>详细元数据 JSON</summary>
+                  <pre className="nfc-code-block" tabIndex={0} aria-label="审计事件原始元数据">
+                    {JSON.stringify(selectedEvent.details, null, 2)}
+                  </pre>
+                </details>
               </div>
             )}
             <div className="nfc-v2-confirm-actions">
+              {selectedEvent?.operation && <ConsoleButton onClick={() => filterByOperation(selectedEvent.operation)}>
+                筛选同类事件
+              </ConsoleButton>}
               <ConsoleButton onClick={() => setSelectedEvent(null)}>关闭</ConsoleButton>
             </div>
           </Dialog.Content>

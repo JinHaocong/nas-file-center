@@ -515,7 +515,7 @@ export const QuarantinePage: React.FC = () => {
     : '删除隔离记录 #' + (cleanupTarget?.kind === 'single' ? cleanupTarget.record.id : '') + '？';
 
   return (
-    <div className="nfc-operations-page nfc-quarantine-page nfc-page-layout-ledger nfc-v2-quarantine-ledger">
+    <div className="nfc-operations-page nfc-quarantine-page nfc-page-layout-ledger nfc-v2-quarantine-ledger nfc-record-workspace">
       <PageHeader title="文件隔离区"
         description="Quarantine-first 文件安全边界。恢复遵循零覆盖语义；永久删除同时受管理员、ALLOW_MUTATION 与 ALLOW_DELETE 约束。"
         actions={<ActionBar compact>
@@ -529,7 +529,7 @@ export const QuarantinePage: React.FC = () => {
       </div>}
 
       <DataPanel title="隔离文件" description="筛选、显式选择并生成恢复或永久删除 Draft；实际文件操作仍必须经过 Plan 的 Freeze → Validate → Execute。"
-        action={<span className="nfc-panel-count">{quarantineData?.total ?? 0} entries</span>}
+        action={<span className="nfc-panel-count">{isError || !quarantineData ? '—' : quarantineData.total.toLocaleString()} 条记录</span>}
         className="nfc-panel-flush" variant="dense">
         <div className="nfc-quarantine-command-center nfc-v2-quarantine-command-center">
           <ActionBar className="nfc-filter-bar nfc-quarantine-filter-bar nfc-v2-quarantine-filters">
@@ -546,40 +546,44 @@ export const QuarantinePage: React.FC = () => {
             <ConsoleSelect id="quarantine-state-filter" label="隔离状态" value={stateFilter}
               options={STATE_FILTER_OPTIONS} onChange={handleFilterChange} />
           </ActionBar>
-          {!isError && <ActionBar className="nfc-bulk-action-bar nfc-v2-quarantine-bulk-actions">
-            <span className={'nfc-selection-count' + (selectedEntryIds.length ? ' nfc-selection-count-active' : '')}
-              aria-live="polite">已选择 {selectedEntryIds.length}</span>
-            <ConsoleButton size="sm" disabled={currentPageSelectableIds.length === 0}
-              onClick={handleSelectCurrentPage}>选择本页 active ({currentPageSelectableIds.length})</ConsoleButton>
-            <ConsoleButton size="sm" loading={resolvingFilteredSelection}
-              disabled={resolvingFilteredSelection} onClick={() => { void handleSelectAllFiltered(); }}>
-              选择筛选全部 active
-            </ConsoleButton>
-            <ConsoleButton size="sm" disabled={selectedEntryIds.length === 0} onClick={clearBulkSelection}>
-              清空选择
-            </ConsoleButton>
-            <span title={isSafeMode ? 'ALLOW_MUTATION=false，禁止生成批量恢复计划' : undefined}>
-              <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="archive" size={15} />}
-                disabled={selectedEntryIds.length === 0 || isSafeMode}
-                onClick={() => { setBulkRestoreEntryIds([...selectedEntryIds]); setBulkRestoreOpen(true); }}>
-                批量恢复
+          {!isError && <ActionBar className="nfc-bulk-action-bar nfc-v2-quarantine-bulk-actions nfc-record-bulk-actions">
+            <div className="nfc-record-bulk-group" role="group" aria-label="选择隔离文件">
+              <span className={'nfc-selection-count' + (selectedEntryIds.length ? ' nfc-selection-count-active' : '')}
+                aria-live="polite">已选择 {selectedEntryIds.length}</span>
+              <ConsoleButton size="sm" disabled={currentPageSelectableIds.length === 0}
+                onClick={handleSelectCurrentPage}>选择本页 active ({currentPageSelectableIds.length})</ConsoleButton>
+              <ConsoleButton size="sm" loading={resolvingFilteredSelection}
+                disabled={resolvingFilteredSelection} onClick={() => { void handleSelectAllFiltered(); }}>
+                选择筛选全部 active
               </ConsoleButton>
-            </span>
-            <span title={!isAdmin ? '仅系统管理员允许永久删除' : isSafeMode ? 'ALLOW_MUTATION=false，禁止生成删除计划' : !allowDelete ? 'ALLOW_DELETE=false，服务端禁止永久删除' : '先 Preview，再输入 DELETE 生成 unlink_v1 Draft'}>
-              <ConsoleButton size="sm" variant="danger" leadingIcon={<ConsoleIcon name="trash" size={15} />}
-                disabled={selectedEntryIds.length === 0 || !isAdmin || isSafeMode || !allowDelete}
-                onClick={() => { setBulkPurgeEntryIds([...selectedEntryIds]); setBulkPurgeOpen(true); }}>
-                批量永久删除
+              <ConsoleButton size="sm" disabled={selectedEntryIds.length === 0} onClick={clearBulkSelection}>
+                清空选择
               </ConsoleButton>
-            </span>
-            <span title={!isAdmin ? '仅系统管理员允许删除隔离记录' : '批量清理当前筛选结果中的 restored / purged / abandoned / conflict；restored 会额外释放 .nas-file-center-trash 私有副本空间'}>
-              <ConsoleButton size="sm" variant="danger" leadingIcon={<ConsoleIcon name="trash" size={15} />}
-                disabled={!isAdmin || resolvingTerminalRecords || cleanupBusy || bulkDeleteRecordsMutation.isPending}
-                loading={resolvingTerminalRecords}
-                onClick={() => { void handleDeleteFilteredTerminalRecords(); }}>
-                批量删除记录
-              </ConsoleButton>
-            </span>
+            </div>
+            <div className="nfc-record-bulk-group nfc-record-bulk-review" role="group" aria-label="隔离文件操作">
+              <span title={isSafeMode ? 'ALLOW_MUTATION=false，禁止生成批量恢复计划' : undefined}>
+                <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="archive" size={15} />}
+                  disabled={selectedEntryIds.length === 0 || isSafeMode}
+                  onClick={() => { setBulkRestoreEntryIds([...selectedEntryIds]); setBulkRestoreOpen(true); }}>
+                  批量恢复
+                </ConsoleButton>
+              </span>
+              <span title={!isAdmin ? '仅系统管理员允许永久删除' : isSafeMode ? 'ALLOW_MUTATION=false，禁止生成删除计划' : !allowDelete ? 'ALLOW_DELETE=false，服务端禁止永久删除' : '先 Preview，再输入 DELETE 生成 unlink_v1 Draft'}>
+                <ConsoleButton size="sm" variant="danger" leadingIcon={<ConsoleIcon name="trash" size={15} />}
+                  disabled={selectedEntryIds.length === 0 || !isAdmin || isSafeMode || !allowDelete}
+                  onClick={() => { setBulkPurgeEntryIds([...selectedEntryIds]); setBulkPurgeOpen(true); }}>
+                  批量永久删除
+                </ConsoleButton>
+              </span>
+              <span title={!isAdmin ? '仅系统管理员允许删除隔离记录' : '批量清理当前筛选结果中的 restored / purged / abandoned / conflict；restored 会额外释放 .nas-file-center-trash 私有副本空间'}>
+                <ConsoleButton size="sm" variant="danger" leadingIcon={<ConsoleIcon name="trash" size={15} />}
+                  disabled={!isAdmin || resolvingTerminalRecords || cleanupBusy || bulkDeleteRecordsMutation.isPending}
+                  loading={resolvingTerminalRecords}
+                  onClick={() => { void handleDeleteFilteredTerminalRecords(); }}>
+                  批量删除记录
+                </ConsoleButton>
+              </span>
+            </div>
           </ActionBar>}
           {selectionNotice && <div className="nfc-v2-quarantine-selection-notice nfc-selection-notice" role="status">
             <ConsoleIcon name="info" size={16} />{selectionNotice}

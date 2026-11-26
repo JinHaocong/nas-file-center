@@ -10,10 +10,11 @@ const browser = read('scripts/browser-task-overlays.mjs');
 describe('Pure White Stage 5E-T controlled confirm focus return', () => {
   test('capture the real opener before Radix autofocus for dialogs without Dialog.Trigger', () => {
     assert.match(confirm, /returnFocusTarget = React\.useRef<HTMLElement \| null>\(null\)/);
-    assert.match(confirm, /onOpenAutoFocus=\{\(\) => \{/);
+    assert.match(confirm, /onOpenAutoFocus=\{event => \{/);
     assert.match(confirm, /const active = document\.activeElement;/);
     assert.match(confirm, /active instanceof HTMLElement && active !== document\.body/);
     assert.match(confirm, /returnFocusTarget\.current = active/);
+    assert.match(confirm, /cancelButton\.current\.focus\(\{ preventScroll: true \}\)/);
     assert.doesNotMatch(confirm, /<Dialog\.Trigger/);
   });
 
@@ -25,7 +26,7 @@ describe('Pure White Stage 5E-T controlled confirm focus return', () => {
       "target?.isConnected && !target.matches(':disabled')",
       '!target.closest(\'[aria-disabled="true"], [inert], [hidden]\')',
       'event.preventDefault();',
-      'target.focus();',
+      'target.focus({ preventScroll: true });',
       'if (!busy) onOpenChange(next);',
       'disabled={busy || disabled} loading={busy}',
       'if (!busy && !disabled) onConfirm();',

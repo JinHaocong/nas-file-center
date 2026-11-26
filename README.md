@@ -2,7 +2,7 @@
 
 面向自托管 NAS 的中文 Web 文件工具。可以从一个目录开始整理照片和视频，跨目录查找重复文件，或把反复执行的归档流程保存成工作流。扫描和媒体整理在后台运行，关闭页面后可以回到任务中心查看结果。
 
-**当前版本 `1.8.18`** · Docker 镜像 `kerwinjhc/nas-file-center:1.8.18` · `linux/amd64`
+**当前版本 `2.0.0`** · Docker 镜像 `kerwinjhc/nas-file-center:2.0.0` · `linux/amd64`
 
 [Docker Hub](https://hub.docker.com/r/kerwinjhc/nas-file-center/tags) · [镜像构建](https://github.com/JinHaocong/nas-file-center/actions/workflows/dockerhub-publish.yml) · [发布验证](https://github.com/JinHaocong/nas-file-center/actions/workflows/release-validation.yml)
 
@@ -10,11 +10,11 @@
 
 ## 界面预览
 
-截图来自 `1.8.17` 的本地生产构建。路径、收藏、封面、任务和统计均为演示数据。真实 NAS 上的最近目录和文件记录未用于截图。
+截图来自 `2.0.0` 的本地生产构建。路径、收藏、封面、任务和统计均为演示数据。真实 NAS 上的最近目录和文件记录未用于截图。
 
 ### 文件空间
 
-从收藏的目录进入整理预览，也能查看索引规模、扫描摘要和后台任务。
+从左侧位置进入目录，在网格或列表中浏览文件，右侧就地查看详情并发起整理预览。运行概览仍可查看索引规模、扫描摘要和后台任务。
 
 ![文件空间浅色界面，展示演示收藏、扫描统计和快捷工具](README.assets/file-space.webp)
 
@@ -76,9 +76,9 @@
 
 桶名中的数量和大小取自实际文件。整理器会根据目录结构识别可去掉的包装层，并保留识别出的独立作品、分册或版本边界。目标重名和归属无法确认的情况可在预览中检查。
 
-### 版本 1.8.18
+### 版本 2.0.0
 
-本版修复 FUSE 目录上提时，目标目录 inode 变化会导致恢复校验中止的问题。执行器用原清单核对目标路径、设备和已落盘文件，并在逐项校验通过后清理对应的源目录。[ZOS / FUSE 兼容验证](docs/media-package-zfuse-compat.md)
+文件空间支持直接浏览挂载目录、切换网格与列表，并对选中项就地查看详情。整理预览集中展示路径映射与冲突原因，手机端可从底部展开详情。全站按钮、表单、抽屉与确认窗口采用统一的反馈，遵循系统的减少动态效果设置。文件空间在支持 WebGL 的环境下按需加载存储模型，并提供静态预览。
 
 ## 快速开始
 
@@ -118,10 +118,10 @@ docker compose ps
 ```yaml
 services:
   api:
-    image: kerwinjhc/nas-file-center:1.8.18
+    image: kerwinjhc/nas-file-center:2.0.0
     platform: linux/amd64
   worker:
-    image: kerwinjhc/nas-file-center:1.8.18
+    image: kerwinjhc/nas-file-center:2.0.0
     platform: linux/amd64
 ```
 

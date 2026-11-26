@@ -1,0 +1,141 @@
+/* Reading surfaces keep scope and actions visible while evidence scrolls. */
+.nfc-reading-picker .nfc-directory-browser-toolbar {
+  padding: 10px 12px;
+  background: var(--nfc-dialog-surface);
+  border: 1px solid var(--nfc-dialog-line);
+  border-radius: 10px;
+}
+.nfc-reading-picker .nfc-directory-browser-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+}
+.nfc-reading-picker .nfc-directory-browser-row > nav { min-width: 0; }
+.nfc-reading-picker .nfc-directory-browser-row:focus-visible {
+  outline: 2px solid var(--nfc-tint, var(--nfc-dialog-accent));
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.nfc-reading-picker .nfc-v2-directory-toolbar-actions { justify-content: flex-end; }
+.nfc-reading-picker .nfc-directory-search-row:focus-within { border-color: var(--nfc-tint-line, var(--nfc-dialog-accent)); }
+.nfc-reading-picker .nfc-directory-list-viewport[aria-busy='true'] .nfc-v2-directory-list { opacity: .6; }
+.nfc-reading-picker .nfc-v2-directory-list li.is-selected {
+  box-shadow: inset 3px 0 var(--nfc-tint, var(--nfc-dialog-accent));
+  background: var(--nfc-tint-soft, var(--nfc-dialog-surface));
+}
+.nfc-reading-picker .nfc-v2-directory-list li:not(.is-selected):hover { background-color: var(--nfc-dialog-surface); }
+.nfc-reading-picker .nfc-directory-pagination-row { min-height: 32px; }
+.nfc-reading-picker .nfc-directory-picker-footer {
+  background: var(--nfc-dialog-paper);
+  box-shadow: 0 -4px 16px rgb(0 0 0 / .04);
+}
+.nfc-reading-picker .nfc-directory-picker-selection :is(small, strong) { overflow-wrap: anywhere; }
+.nfc-reading-picker .nfc-directory-picker-current-selection { display: grid; gap: 3px; }
+.nfc-reading-picker .nfc-directory-picker-current-selection small { color: var(--nfc-dialog-muted); }
+.nfc-reading-picker .nfc-directory-picker-current-selection strong {
+  color: var(--nfc-dialog-text);
+  font-size: 12px;
+  font-weight: 660;
+}
+.nfc-reading-picker .nfc-directory-picker-selected-tags { align-items: flex-start; }
+.nfc-reading-picker .nfc-directory-picker-selected-tags button { min-height: 31px; text-align: start; }
+.nfc-reading-picker .nfc-dv-remote-file {
+  min-width: 0;
+  display: grid;
+  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+}
+.nfc-reading-picker .nfc-dv-remote-file span { overflow-wrap: anywhere; }
+.nfc-reading-picker .nfc-dv-remote-file small { color: var(--nfc-dialog-muted); font-size: 10px; }
+
+.nfc-reading-sheet .nfc-overlay-section-header h3 { margin-block: 0; }
+.nfc-reading-sheet .nfc-v2-sheet-body { scroll-padding-block: 12px 20px; }
+:is(.nfc-reading-sheet, .nfc-reading-dialog) .nfc-code-block {
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+}
+:is(.nfc-reading-sheet, .nfc-reading-dialog) :is(pre, [role='region']):focus-visible {
+  outline: 2px solid var(--nfc-tint, currentColor);
+  outline-offset: -2px;
+}
+.nfc-reading-sheet .nfc-reading-empty-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5px 12px;
+  padding: 12px 14px;
+  font-size: 12px;
+}
+.nfc-reading-sheet .nfc-v2-dedupe-explain-copy { flex-wrap: wrap; }
+.nfc-reading-sheet :is(.nfc-v2-dedupe-explain-fact, .nfc-dedupe-sibling-path) {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+.nfc-reading-sheet :is(.nfc-v2-journal-table-scroll, .nfc-v2-rebuild-table-scroll, .nfc-v2-dedupe-explain-table-wrap) {
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+  border: 1px solid var(--v2-line);
+  border-radius: 8px;
+}
+.nfc-reading-sheet .nfc-reading-result-count {
+  margin: 0;
+  padding: 9px 12px;
+  color: var(--v2-muted);
+  border-inline-start: 2px solid var(--nfc-tint, var(--v2-line));
+  background: var(--v2-canvas);
+  font-size: 12px;
+}
+.nfc-reading-sheet .nfc-journal-path-flow .nfc-code-path { max-width: 100%; }
+.nfc-reading-sheet .nfc-journal-meta { flex-wrap: wrap; overflow-wrap: anywhere; }
+.nfc-reading-sheet .nfc-reading-run-facts { margin: 0; gap: 10px 18px; }
+.nfc-reading-run-facts dt { color: var(--v2-muted, var(--studio-muted)); font-size: 11px; }
+.nfc-reading-run-facts dd { margin: 4px 0 0; font-variant-numeric: tabular-nums; }
+.nfc-reading-run-task { margin-block-start: 12px; }
+.nfc-reading-run-task .nfc-console-button { max-inline-size: 100%; white-space: normal; text-align: start; }
+.nfc-reading-sheet.nfc-v2-stale-rebuild .nfc-v2-sheet-body {
+  padding-block-end: 0;
+  scroll-padding-block-end: 82px;
+}
+.nfc-reading-sheet .nfc-reading-action-footer {
+  position: sticky;
+  inset-block-end: 0;
+  z-index: 1;
+  justify-content: flex-end;
+  margin-block-start: 16px;
+  padding-block: 12px max(12px, env(safe-area-inset-bottom));
+  border-block-start: 1px solid var(--v2-line);
+  background: var(--v2-paper, var(--studio-paper));
+}
+.nfc-reading-dialog.nfc-v2-dialog { min-block-size: 0; }
+.nfc-reading-dialog :is(.nfc-audit-detail, .nfc-v2-revision-definition) {
+  min-block-size: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.nfc-reading-dialog :is(.nfc-audit-detail, .nfc-v2-revision-definition) > pre,
+.nfc-reading-dialog .nfc-audit-json > pre { max-block-size: min(46dvh, 380px); overflow-y: auto; }
+.nfc-reading-dialog .nfc-reading-audit-path {
+  grid-column: 1 / -1;
+  padding: 10px;
+  border: 1px solid var(--v2-line);
+  border-radius: 8px;
+  background: var(--v2-canvas);
+}
+
+@media (max-width: 767px) {
+  .nfc-reading-picker .nfc-directory-browser-row { grid-template-columns: minmax(0, 1fr); }
+  .nfc-reading-picker .nfc-v2-directory-toolbar-actions { justify-content: flex-start; }
+  .nfc-reading-picker .nfc-directory-picker-footer { padding-block-end: max(12px, env(safe-area-inset-bottom)); }
+  .nfc-reading-picker .nfc-directory-picker-selection { max-block-size: 74px; }
+  .nfc-reading-picker .nfc-directory-picker-footer-actions { gap: 8px; }
+  .nfc-reading-picker .nfc-directory-picker-footer-actions .nfc-console-button { min-height: 44px; }
+  .nfc-reading-sheet .nfc-reading-action-footer .nfc-console-button { flex-basis: auto; flex-grow: 1; }
+  .nfc-reading-sheet .nfc-reading-run-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-reading-picker .nfc-v2-directory-list li { transition: background-color 150ms var(--nfc-motion-ease, ease); }
+}
