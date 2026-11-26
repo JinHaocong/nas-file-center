@@ -93,6 +93,138 @@ def test_picture_bucket_lift_rejects_photos_added_after_preview(tmp_path, late_t
     assert source.read_bytes() == b"p"
 
 
+@pytest.mark.parametrize("nested_volumes", [False, True])
+def test_structural_lift_publishes_tree_when_fuse_cannot_rename_directories(tmp_path, monkeypatch, nested_volumes):
+    from app.batch import media_organizer_archive
+
+    client, settings, _ = _fixture(tmp_path)
+    settings.media_package_fuse_compat_enabled = True
+    author = settings.data_mount / "Else/2604/260430/作者"
+    if nested_volumes:
+        target = author / "特辑 [2P+3V]"
+        wrapper = target / target.name
+        payloads = {"1/P [1 1B]/001.jpg": b"p", "2/P [1 1B]/001.jpg": b"q", "001.mp4": b"v",
+                    "1/V [1 1B]/001.mp4": b"v", "2/V [1 1B]/001.mp4": b"w"}
+    else:
+        target, wrapper = author, author / "图"
+        payloads = {f"P [200 200B]/{index:03}.jpg": b"p" for index in range(1, 201)}
+        payloads["P_1 [1 1B]/001.jpg"] = b"q"
+        _put(author / "001.mp4", b"separate video")
+        _put(author / "独立拍摄/001.mp4", b"separate work")
+    for name, payload in payloads.items():
+        _put(wrapper / name, payload)
+    original_inodes = {name: (wrapper / name).stat().st_ino for name in payloads}
+    report = _preview(client, settings, author)
+    assert report["summary"]["ready_count"] == 1
+
+    def unsupported(*args):
+        raise OSError(errno.EOPNOTSUPP, "FUSE has no atomic directory rename")
+
+    monkeypatch.setattr(media_organizer_archive, "rename_noreplace_at", unsupported)
+    monkeypatch.setattr(media_organizer_archive, "probe_directory_rename_noreplace_compat_at", lambda *args: False)
+    job_id = _batch(client, report)
+    assert _run_next(settings, job_id)
+    result = client.get(f"/api/media-organizer/batches/{job_id}").json()
+    assert result["summary"]["success_count"] == 1, result
+    assert not wrapper.exists()
+    if not nested_volumes:
+        payloads.update({"001.mp4": b"separate video", "独立拍摄/001.mp4": b"separate work"})
+    assert {path.relative_to(target).as_posix(): path.read_bytes()
+            for path in target.rglob("*") if path.is_file()} == payloads
+    assert {name: (target / name).stat().st_ino for name in original_inodes} == original_inodes
+    rescan = _preview(client, settings, author)
+    assert rescan["summary"]["ready_count"] == rescan["summary"]["blocked_count"] == 0
+
+
+@pytest.mark.parametrize("interruption", ["link", "unlink", "rmdir"])
+def test_fuse_tree_lift_recovers_links_and_source_retirement(tmp_path, monkeypatch, interruption):
+    from app.batch import media_organizer_archive
+
+    client, settings, _ = _fixture(tmp_path)
+    settings.media_package_fuse_compat_enabled = True
+    outer = settings.data_mount / "作者/特辑 [2P]"
+    wrapper = outer / outer.name
+    _put(wrapper / "1/001.jpg", b"first")
+    _put(wrapper / "2/001.jpg", b"second")
+    original = (wrapper / "1/001.jpg").stat().st_ino
+    preview = _preview(client, settings, outer)
+    job_id = _batch(client, preview)
+
+    def unsupported(*args):
+        raise OSError(errno.EOPNOTSUPP, "FUSE has no atomic directory rename")
+
+    monkeypatch.setattr(media_organizer_archive, "rename_noreplace_at", unsupported)
+    monkeypatch.setattr(media_organizer_archive, "probe_directory_rename_noreplace_compat_at", lambda *args: False)
+    filesystem_call = getattr(os, interruption)
+
+    def interrupt(*args, **kwargs):
+        name = "1" if interruption == "rmdir" else "001.jpg"
+        if args[0] == name:
+            filesystem_call(*args, **kwargs)
+            raise SystemExit("interrupted tree lift")
+        return filesystem_call(*args, **kwargs)
+
+    with monkeypatch.context() as cut_power:
+        cut_power.setattr(os, interruption, interrupt)
+        with pytest.raises(SystemExit, match="interrupted tree lift"):
+            _run_next(settings, job_id)
+    assert (outer / "1/001.jpg").stat().st_ino == original
+    assert (wrapper / "1/001.jpg").exists() == (interruption == "link")
+    assert (wrapper / "1").exists() == (interruption != "rmdir")
+    assert (wrapper / "2/001.jpg").read_bytes() == b"second"
+
+    engine, sessions = create_engine_and_session(settings.database_path)
+    try:
+        assert recover_interrupted_jobs(engine, sessions, worker_id="organizer-test-worker")["recovered_requeued"] == 1
+    finally:
+        engine.dispose()
+
+    assert _run_next(settings, job_id)
+    result = client.get(f"/api/media-organizer/batches/{job_id}").json()
+    assert result["summary"]["success_count"] == 1, result
+    assert not wrapper.exists()
+    assert sorted(path.relative_to(outer).as_posix() for path in outer.rglob("*") if path.is_file()) == [
+        "1/001.jpg", "2/001.jpg",
+    ]
+    assert (outer / "1/001.jpg").read_bytes() == b"first"
+    assert (outer / "2/001.jpg").read_bytes() == b"second"
+
+
+def test_fuse_tree_lift_does_not_adopt_an_empty_target_created_during_publication(tmp_path, monkeypatch):
+    from app.batch import media_organizer_archive
+
+    client, settings, _ = _fixture(tmp_path)
+    settings.media_package_fuse_compat_enabled = True
+    outer = settings.data_mount / "作者/特辑 [2P]"
+    wrapper = outer / outer.name
+    _put(wrapper / "1/001.jpg", b"first")
+    _put(wrapper / "2/001.jpg", b"second")
+    job_id = _batch(client, _preview(client, settings, outer))
+
+    def unsupported(*args):
+        raise OSError(errno.EOPNOTSUPP, "FUSE has no atomic directory rename")
+
+    mkdir = os.mkdir
+    foreign = []
+
+    def add_foreign_target(name, *args, **kwargs):
+        if name == "1" and kwargs.get("dir_fd") is not None:
+            mkdir(name, *args, **kwargs)
+            foreign.append((outer / "1").stat().st_ino)
+        return mkdir(name, *args, **kwargs)
+
+    monkeypatch.setattr(media_organizer_archive, "rename_noreplace_at", unsupported)
+    monkeypatch.setattr(media_organizer_archive, "probe_directory_rename_noreplace_compat_at", lambda *args: False)
+    monkeypatch.setattr(os, "mkdir", add_foreign_target)
+    assert _run_next(settings, job_id)
+    result = client.get(f"/api/media-organizer/batches/{job_id}").json()
+    assert result["summary"]["conflict_count"] == 1, result
+    assert foreign == [(outer / "1").stat().st_ino]
+    assert not list((outer / "1").iterdir())
+    assert (wrapper / "1/001.jpg").read_bytes() == b"first"
+    assert (wrapper / "2/001.jpg").read_bytes() == b"second"
+
+
 def test_duplicate_work_volume_lift_resumes_an_interrupted_video_hardlink(tmp_path, monkeypatch):
     from app.batch import media_package_execution
 

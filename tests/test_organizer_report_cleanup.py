@@ -1,6 +1,7 @@
 """Smart organizer report cleanup through the actual task and Worker interfaces."""
 
 from datetime import timedelta
+import errno
 import json
 import shutil
 
@@ -189,6 +190,43 @@ def test_structural_media_lift_cleanup_checks_the_moved_video(tmp_path, replace_
 
     assert (settings.reports_dir / "organizer-v1-executions" / batch).exists() == replace_video
     assert video.read_bytes() == (b"modified video" if replace_video else b"video")
+
+
+@pytest.mark.parametrize("replace_media", [False, True])
+def test_fuse_lift_cleanup_proves_recreated_directories_and_their_media(tmp_path, monkeypatch, replace_media):
+    from app.batch import media_organizer_archive
+
+    client, settings, _ = _fixture(tmp_path, fuse_compat=True)
+    outer = settings.data_mount / "作者/特辑 [2P+2V]"
+    inner = outer / outer.name
+    put_files(inner / "1", {"cover.jpg": b"photo", "clip.mp4": b"film"})
+    put_files(inner / "2", {"001.jpg": b"other"})
+    put_files(inner, {"001.mp4": b"video"})
+    original_volume_inode = (inner / "1").stat().st_ino
+    preview = _preview(client, settings, outer)
+    assert preview["summary"]["ready_count"] == 2
+
+    def unsupported(*args):
+        raise OSError(errno.EOPNOTSUPP, "FUSE has no atomic directory rename")
+
+    monkeypatch.setattr(media_organizer_archive, "rename_noreplace_at", unsupported)
+    monkeypatch.setattr(media_organizer_archive, "probe_directory_rename_noreplace_compat_at", lambda *args: False)
+    batch = _batch(client, preview)
+    assert _run_next(settings, batch)
+    result = client.get(f"/api/media-organizer/batches/{batch}").json()
+    assert result["summary"]["success_count"] == 2, result
+    assert (outer / "1").stat().st_ino != original_volume_inode
+    video = outer / "1/V [1 4B]/001.mp4"
+    if replace_media:
+        video.write_bytes(b"changed film")
+
+    assert client.delete(f"/api/tasks/{batch}").status_code == 200
+    _cleanup(client, settings)
+
+    assert (settings.reports_dir / "organizer-v1-executions" / batch).exists() == replace_media
+    assert (settings.reports_dir / "organizer-v1-previews" / preview["job_id"]).exists() == replace_media
+    assert (outer / "1/P [1 5B]/001.jpg").read_bytes() == b"photo"
+    assert video.read_bytes() == (b"changed film" if replace_media else b"film")
 
 
 def test_referenced_preview_stays_readable_for_queued_batch(tmp_path):

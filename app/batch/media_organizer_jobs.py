@@ -527,7 +527,10 @@ def _finish_unit(unit: dict, settings: Settings, path: Path, job_id: int, fence,
             if os.path.lexists(path):
                 manifest = load_frozen_manifest(path, job_id=job_id, package=chosen)
             else:
-                manifest = freeze_repeated_archive(chosen, protected, fingerprint, job_id, check_cancelled=fence)
+                manifest = freeze_repeated_archive(
+                    chosen, protected, fingerprint, job_id, check_cancelled=fence,
+                    allow_fuse_compat=settings.media_package_fuse_compat_enabled,
+                )
                 fence()
                 save_frozen_manifest(path, manifest)
             execute_repeated_archive(chosen, manifest, protected, fingerprint, lease_fence=fence,

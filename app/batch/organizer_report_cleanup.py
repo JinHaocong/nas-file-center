@@ -267,6 +267,14 @@ def _read_rows(fd, name, binding):
         yield from (json.loads(line) for line in stream)
 
 
+def _lift_destination(path: Path, ordinal: int, lifts: list[tuple[int, Path, Path]]) -> Path:
+    """Resolve a recorded path through the structural operations that followed it."""
+    for step, source, target in lifts:
+        if step > ordinal and path.is_relative_to(source):
+            path = target / path.relative_to(source)
+    return path
+
+
 def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fence):
     """Prove each originally ready unit finished and has no owned staging directory."""
     from app.batch.media_organizer_archive import PROMOTE_ARCHIVE_CHILDREN, _file_binding, _fingerprint, _valid_snapshot
@@ -280,6 +288,7 @@ def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fen
     packages = []
     direct_files = []
     lifts = []
+    lift_layouts = []
     next_check = 0.0
 
     def pulse():
@@ -316,10 +325,16 @@ def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fen
                     if (not _valid_snapshot(snapshot, package.name)
                             or _fingerprint(snapshot) != unit["input_fingerprint"]):
                         raise ValueError("归档提层清单无效")
+                    layouts = manifest.get("lift_layouts")
+                    if layouts is not None and (not isinstance(layouts, dict)
+                                                or layouts.keys() != snapshot["children"].keys()):
+                        raise ValueError("归档提层目录清单无效")
                     for name, child in snapshot["children"].items():
                         destination = package.parent / name
                         lifts.append((ordinal, package / name, destination))
                         packages.append((ordinal, destination, child["identity"]))
+                        if layouts is not None:
+                            lift_layouts.append((ordinal, destination, child, layouts[name]))
                     for name, identity in snapshot.get("files", {}).items():
                         direct_files.append((ordinal, package.parent / name, identity))
                 else:
@@ -328,11 +343,27 @@ def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fen
             units.close()
     if {name.replace(".link.json", ".json") for name in execution_plan["files"]} != manifests:
         raise ValueError("无法核对全部执行清单")
-    for ordinal, final, identity in direct_files:
+    recreated = {}
+    if lift_layouts:
+        from app.batch.media_organizer_planner import _resolved_protected_roots
+        from app.batch.media_organizer_tree_lift import verify_completed_lift
+
+        protected = _resolved_protected_roots(settings.media_package_root, settings.quarantine_root)
+        for ordinal, destination, child, layout in lift_layouts:
+            pulse()
+            final = _lift_destination(destination, ordinal, lifts)
+            if (not _selection(str(final), settings).is_relative_to(selection)
+                    or any(final.is_relative_to(root) or root.is_relative_to(final) for root in protected)):
+                raise ValueError("上提目录超出原确认范围")
+            with _directory(final) as fd:
+                info = os.fstat(fd)
+                if [info.st_dev, info.st_ino] == child["identity"]:
+                    continue
+            for folder, (original, published) in verify_completed_lift(final, layout, child, checkpoint=pulse).items():
+                recreated.setdefault(folder, set()).add((tuple(original), tuple(published)))
+    for ordinal, path, identity in direct_files:
         pulse()
-        for step, source, target in lifts:
-            if step > ordinal and final.is_relative_to(source):
-                final = target / final.relative_to(source)
+        final = _lift_destination(path, ordinal, lifts)
         if not _selection(str(final.parent), settings).is_relative_to(selection):
             raise ValueError("上提文件超出原确认范围")
         with _directory(final.parent) as fd:
@@ -341,16 +372,15 @@ def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fen
     prefix = f".nfc-media_package-stage-{job.id}-"
     for ordinal, package, identity in packages:
         pulse()
-        final = package
         # Later structural units can lift a directory whose media was already organized.
-        for step, source, target in lifts:
-            if step > ordinal and final.is_relative_to(source):
-                final = target / final.relative_to(source)
+        final = _lift_destination(package, ordinal, lifts)
         if not _selection(str(final), settings).is_relative_to(selection):
             raise ValueError("完成目录超出原确认范围")
         with _directory(final) as fd:
             info = os.fstat(fd)
-            if [info.st_dev, info.st_ino] != identity:
+            actual = (info.st_dev, info.st_ino)
+            frozen = tuple(identity)
+            if actual != frozen and (frozen, actual) not in recreated.get(final, ()):
                 raise ValueError("整理完成的目录身份已变化")
             if any(name.casefold().startswith(prefix) for name in os.listdir(fd)):
                 raise ValueError("整理目录仍有暂存文件")

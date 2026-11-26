@@ -591,7 +591,7 @@ def _compat_marker_matches(dir_fd: int, name: str, expected: bytes) -> bool:
     """Require exact regular marker bytes; never follow a substituted symlink."""
     try:
         fd = os.open(
-            name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd,
+            name, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd,
         )
     except FileNotFoundError:
         return False

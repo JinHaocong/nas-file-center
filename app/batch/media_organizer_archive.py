@@ -15,6 +15,7 @@ from unicodedata import normalize
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_link_intent import LinkIntent
+from app.batch.media_organizer_tree_lift import check_tree_lift, execute_tree_lift, validate_lift_layout
 from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, numbered_name
 from app.batch.media_package_organizer import MAX_DEPTH, MAX_FILES_PER_GROUP, MAX_PACKAGE_DIRECTORIES, MAX_PACKAGE_FILES, _classify
 from app.fs_ops import probe_directory_rename_noreplace_compat_at, rename_noreplace_at
@@ -157,11 +158,12 @@ def _valid_media_children(mode: str, children: dict, files: dict) -> bool:
 
 
 def _tree_content_digest(unit: Path, identity: list[int], protected_roots: tuple[Path, ...],
-                         check_cancelled: Callable[[], None] | None = None) -> str:
+                         check_cancelled: Callable[[], None] | None = None, *,
+                         layout: dict | None = None) -> str:
     """Bind the file identity multiset while allowing media renames inside the same child."""
     if any(unit.is_relative_to(root) or root.is_relative_to(unit) for root in protected_roots):
         raise ValueError("重复归档包含受保护目录")
-    pending = [(unit, 0)]
+    pending = [(unit, 0, layout)]
     directories = 0
     files = []
     last_check = 0.0
@@ -174,7 +176,7 @@ def _tree_content_digest(unit: Path, identity: list[int], protected_roots: tuple
             last_check = now
 
     while pending:
-        path, depth = pending.pop()
+        path, depth, tree = pending.pop()
         directories += 1
         if depth > MAX_DEPTH or directories > MAX_PACKAGE_DIRECTORIES:
             raise ValueError("重复归档超过目录范围限制")
@@ -184,19 +186,25 @@ def _tree_content_digest(unit: Path, identity: list[int], protected_roots: tuple
             current = _identity(before)
             if current[0] != identity[0] or (depth == 0 and current != identity):
                 raise ValueError("重复归档目录身份或磁盘已变化")
+            if tree is not None:
+                tree.update(identity=current, directories={}, files={})
             with os.scandir(fd) as entries:
                 for entry in entries:
                     info = entry.stat(follow_symlinks=False)
                     if info.st_dev != identity[0] or entry.name.casefold().startswith(".nfc-"):
                         raise ValueError("重复归档包含跨设备目录或待恢复文件")
                     if stat.S_ISDIR(info.st_mode):
-                        pending.append((path / entry.name, depth + 1))
+                        child = tree["directories"].setdefault(entry.name, {}) if tree is not None else None
+                        pending.append((path / entry.name, depth + 1, child))
                         if directories + len(pending) > MAX_PACKAGE_DIRECTORIES:
                             raise ValueError("重复归档超过目录范围限制")
                     elif stat.S_ISREG(info.st_mode):
                         # Keep duplicate identities: they account for distinct hardlinks
                         # and must not disappear during a previous media operation.
-                        files.append((info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns))
+                        file_identity = _file_identity(info)
+                        files.append(file_identity)
+                        if tree is not None:
+                            tree["files"][entry.name] = file_identity
                         if len(files) > MAX_PACKAGE_FILES:
                             raise ValueError("重复归档超过文件数量限制")
                         if len(files) % 256 == 0:
@@ -214,7 +222,8 @@ def _tree_content_digest(unit: Path, identity: list[int], protected_roots: tuple
 
 
 def _snapshot(unit: Path, protected_roots: tuple[Path, ...],
-              check_cancelled: Callable[[], None] | None = None) -> dict:
+              check_cancelled: Callable[[], None] | None = None, *,
+              lift_layouts: dict | None = None) -> dict:
     mode = _check_archive_scope(unit, protected_roots)
     with _directory(unit.parent) as archive_fd, _directory(unit) as wrapper_fd:
         archive = _identity(os.fstat(archive_fd))
@@ -251,7 +260,8 @@ def _snapshot(unit: Path, protected_roots: tuple[Path, ...],
                 kinds = _media_leaf_kinds(child, archive[0], protected_roots, allow_partial_bucketing=False)
                 if not kinds or kinds - {"P", "V"}:
                     raise ValueError("同名目录内的分册并非独立媒体")
-            content = _tree_content_digest(child, identity, protected_roots, check_cancelled)
+            layout = lift_layouts.setdefault(name, {}) if lift_layouts is not None else None
+            content = _tree_content_digest(child, identity, protected_roots, check_cancelled, layout=layout)
             children[name] = {"identity": identity, "content": content}
         if not _valid_media_children(mode, children, files):
             raise ValueError("上提目录包含未确认的分类或文件")
@@ -288,17 +298,20 @@ def preview_repeated_archive(unit: Path, protected_roots: tuple[Path, ...],
 
 
 def freeze_repeated_archive(unit: Path, protected_roots: tuple[Path, ...], fingerprint: str,
-                            job_id: int, *, check_cancelled: Callable[[], None]) -> dict:
+                            job_id: int, *, check_cancelled: Callable[[], None],
+                            allow_fuse_compat: bool = False) -> dict:
     """Bind the preview to the exact source and target directory identities."""
     from app.batch.media_package_execution import MANIFEST_VERSION
 
-    snapshot = _snapshot(unit, protected_roots, check_cancelled)
+    layouts = {} if allow_fuse_compat and is_structural_media_wrapper(unit) else None
+    snapshot = _snapshot(unit, protected_roots, check_cancelled, lift_layouts=layouts)
     if fingerprint != _fingerprint(snapshot):
         raise ValueError("重复归档目录在预览后已变化")
     return {
         "package": str(unit), "schema_version": MANIFEST_VERSION, "job_id": job_id,
         "organizer_mode": "semantic", "operation": PROMOTE_ARCHIVE_CHILDREN,
         "snapshot": snapshot, "input_fingerprint": fingerprint,
+        **({"lift_layouts": layouts} if layouts is not None else {}),
     }
 
 
@@ -306,14 +319,17 @@ def _location(unit: Path, archive_fd: int, wrapper_fd: int | None, name: str, id
     """Accept either the frozen source or the identical already published directory."""
     origin = _binding(wrapper_fd, name) if wrapper_fd is not None else None
     destination = _binding(archive_fd, name)
-    wanted = _fold(name)
-    if any(other != name and _fold(other) == wanted for other in os.listdir(archive_fd)):
-        raise ValueError(f"重复归档目标与同名目录冲突：{unit.parent / name}")
+    _check_target_name(unit, archive_fd, name)
     if origin == identity and destination is None:
         return unit / name
     if origin is None and destination == identity:
         return unit.parent / name
     raise ValueError(f"重复归档源或目标身份已变化：{name}")
+
+
+def _check_target_name(unit: Path, parent_fd: int, name: str) -> None:
+    if any(other != name and _fold(other) == _fold(name) for other in os.listdir(parent_fd)):
+        raise ValueError(f"重复归档目标与同名目录冲突：{unit.parent / name}")
 
 
 def _promote(source_fd: int, target_fd: int, name: str, *, allow_fuse_compat: bool,
@@ -420,17 +436,45 @@ def execute_repeated_archive(unit: Path, manifest: dict, protected_roots: tuple[
     children, files = snapshot["children"], snapshot.get("files", {})
     if not _valid_media_children(mode, children, files):
         raise ValueError("上提清单与目录结构不一致")
+    layouts = manifest.get("lift_layouts")
+    token = ""
+    if layouts is not None:
+        from app.batch.media_package_execution import _manifest_checksum
+
+        if mode == "archive" or not isinstance(layouts, dict) or layouts.keys() != children.keys():
+            raise ValueError("上提布局与冻结记录不一致")
+        for name, layout in layouts.items():
+            validate_lift_layout(layout, children[name])
+        token = _manifest_checksum(manifest)
+    layouts = layouts or {}
     approved = children.keys() | files.keys()
     with _directory(unit.parent) as archive_fd:
         if _identity(os.fstat(archive_fd)) != snapshot["archive"]:
             raise ValueError("重复归档目标父目录身份已变化")
         _check_destination(unit, mode, archive_fd, approved)
         wrapper_id = _binding(archive_fd, unit.name)
+
+        def uses_tree_lift(name: str, identity: list[int]) -> bool:
+            target = _binding(archive_fd, name) if name in layouts else None
+            return target is not None and target != identity
+
+        def verify_child(wrapper_fd: int | None, name: str, child: dict) -> None:
+            if any((unit.parent / name).is_relative_to(root) or root.is_relative_to(unit.parent / name)
+                   for root in protected_roots):
+                raise ValueError("重复归档目标目录受保护")
+            if uses_tree_lift(name, child["identity"]):
+                if not allow_fuse_compat:
+                    raise ValueError("FUSE 目录上提兼容模式已关闭")
+                _check_target_name(unit, archive_fd, name)
+                check_tree_lift(wrapper_fd, archive_fd, name, layouts[name], token, checkpoint=lease_fence)
+            else:
+                current = _location(unit, archive_fd, wrapper_fd, name, child["identity"])
+                _verify_content(current, child, mode, protected_roots, lease_fence)
+
         if wrapper_id is None:
             # Recovery after successful cleanup, before the batch result was committed.
             for name, child in children.items():
-                current = _location(unit, archive_fd, None, name, child["identity"])
-                _verify_content(current, child, mode, protected_roots, lease_fence)
+                verify_child(None, name, child)
             for name, identity in files.items():
                 if _file_binding(archive_fd, name) != identity:
                     raise ValueError(f"上提后的直属文件已变化：{name}")
@@ -450,12 +494,7 @@ def execute_repeated_archive(unit: Path, manifest: dict, protected_roots: tuple[
 
             check_parents()
             for name, child in children.items():
-                # Validate both the current source and its prospective target against current protection.
-                if any((unit.parent / name).is_relative_to(root) or root.is_relative_to(unit.parent / name)
-                       for root in protected_roots):
-                    raise ValueError("重复归档目标目录受保护")
-                current = _location(unit, archive_fd, wrapper_fd, name, child["identity"])
-                _verify_content(current, child, mode, protected_roots, lease_fence)
+                verify_child(wrapper_fd, name, child)
             for name, identity in files.items():
                 if any((unit.parent / name).is_relative_to(root) or root.is_relative_to(unit.parent / name)
                        for root in protected_roots):
@@ -465,6 +504,15 @@ def execute_repeated_archive(unit: Path, manifest: dict, protected_roots: tuple[
                 identity = child["identity"]
                 lease_fence()
                 check_parents()
+                def tree_fence() -> None:
+                    lease_fence()
+                    check_parents()
+                    _check_target_name(unit, archive_fd, name)
+
+                if uses_tree_lift(name, identity):
+                    execute_tree_lift(wrapper_fd, archive_fd, name, layouts[name], token,
+                                      checkpoint=lease_fence, fence=tree_fence)
+                    continue
                 if _location(unit, archive_fd, wrapper_fd, name, identity).parent == unit:
                     def revalidate() -> None:
                         lease_fence()
@@ -478,6 +526,13 @@ def execute_repeated_archive(unit: Path, manifest: dict, protected_roots: tuple[
                                  revalidate=revalidate)
                     except FileExistsError as exc:
                         raise ValueError(f"重复归档上提目标已占用：{unit.parent / name}") from exc
+                    except OSError as exc:
+                        if exc.errno != errno.EOPNOTSUPP or not allow_fuse_compat or name not in layouts:
+                            raise
+                        revalidate()
+                        execute_tree_lift(wrapper_fd, archive_fd, name, layouts[name], token,
+                                          checkpoint=lease_fence, fence=tree_fence)
+                        continue
                     if _location(unit, archive_fd, wrapper_fd, name, identity).parent != unit.parent:
                         raise ValueError("重复归档目标目录身份未通过校验")
                     _verify_content(unit.parent / name, child, mode, protected_roots, lease_fence)
