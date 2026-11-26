@@ -115,6 +115,22 @@ def _check_binding(parent: int | None, name: str, fd: int | None) -> None:
         raise ValueError(f"上提目录在执行期间已变化：{name}")
 
 
+def _has_published_file(fd: int, tree: dict) -> bool:
+    """Find an exact frozen file in the current target subtree, through open directory FDs."""
+    if any(_check_file(fd, name, identity) for name, identity in tree["files"].items()):
+        return True
+    for name, child in tree["directories"].items():
+        with _open(fd, name) as target:
+            if target is None:
+                continue
+            _check_binding(fd, name, target)
+            if os.fstat(target).st_dev != child["identity"][0]:
+                raise ValueError(f"上提目标跨越了挂载边界：{name}")
+            if _has_published_file(target, child):
+                return True
+    return False
+
+
 class _Lift:
     def __init__(self, token: str, *, source_active: bool, checkpoint: Callable[[], None]):
         self.token = token
@@ -122,18 +138,47 @@ class _Lift:
         self.checkpoint = checkpoint
         self.completed: dict[Path, list[int]] = {}
 
-    def _marker(self, path: Path, fd: int) -> bytes:
-        binding = [self.token, path.as_posix(), _identity(os.fstat(fd))]
+    def _marker(self, path: Path, identity: list[int]) -> bytes:
+        binding = [self.token, path.as_posix(), identity]
         return json.dumps(binding, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
-    def _check_target(self, fd: int, path: Path, phase: str) -> set[str]:
-        from app.batch.media_package_execution import _compat_marker_matches
+    def _check_owner(self, fd: int, path: Path, tree: dict) -> bool:
+        """Treat the recorded inode as creation evidence and require payload proof after inode drift."""
+        current = _identity(os.fstat(fd))
+        expected = self._marker(path, current)
+        limit = len(expected) + 32  # Namespace and checksum are fixed; only inode digits may differ.
+        try:
+            marker = os.open(_OWNER, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        except FileNotFoundError:
+            return False
+        with os.fdopen(marker, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_dev != current[0] or not 0 < info.st_size <= limit:
+                raise ValueError(f"上提目录的恢复记录无效：{path}")
+            data = stream.read(limit + 1)
+            if len(data) != info.st_size:
+                raise ValueError(f"上提目录的恢复记录已变化：{path}")
+        if data == expected:
+            return True
+        try:
+            binding = json.loads(data)
+        except (ValueError, RecursionError) as exc:
+            raise ValueError(f"上提目录的恢复记录无效：{path}") from exc
+        if (not isinstance(binding, list) or len(binding) != 3
+                or not _valid_identity(binding[2], 2, current[0]) or data != self._marker(path, binding[2])):
+            raise ValueError(f"上提目录的恢复记录已变化：{path}")
+        # ZOS may change a directory's reported inode when links are published.
+        # A copied witness on an empty directory cannot establish custody.
+        if not _has_published_file(fd, tree):
+            raise ValueError(f"上提目标目录身份已变化且缺少已校验文件：{path}")
+        return True
 
+    def _check_target(self, fd: int, path: Path, tree: dict, phase: str) -> set[str]:
         names = set(os.listdir(fd))
         if _OWNER in names:
             if phase == "completed":
                 raise ValueError(f"上提目录仍有恢复记录：{path}")
-            if not _compat_marker_matches(fd, _OWNER, self._marker(path, fd)):
+            if not self._check_owner(fd, path, tree):
                 raise ValueError(f"上提目录的恢复记录已变化：{path}")
             names.remove(_OWNER)
         elif self.source_active and phase not in {"clean", "completed"}:
@@ -156,7 +201,7 @@ class _Lift:
             if target is None or os.listdir(target):
                 raise ValueError(f"新建上提目标已变化：{path}")
             _check_binding(parent, name, target)
-            _compat_create_marker(target, _OWNER, self._marker(path, target))
+            _compat_create_marker(target, _OWNER, self._marker(path, _identity(os.fstat(target))))
         os.fsync(parent)
 
     def walk(self, source_parent: int | None, target_parent: int | None, name: str, path: Path,
@@ -185,14 +230,14 @@ class _Lift:
                 guard()
                 allowed = tree["files"].keys() | tree["directories"].keys()
                 source_names = set(os.listdir(source)) if source is not None else set()
-                target_names = self._check_target(target, path, phase) if target is not None else set()
+                target_names = self._check_target(target, path, tree, phase) if target is not None else set()
                 if source_names - allowed or target_names - allowed:
                     raise ValueError(f"上提目录出现未确认的内容：{path}")
                 for child, layout in tree["directories"].items():
                     self.walk(source, target, child, path / child, layout, phase, guard)
                 for leaf, identity in tree["files"].items():
                     self._file(source, target, leaf, identity, phase, guard)
-                self._finish(source_parent, source, target, name, path, phase, guard)
+                self._finish(source_parent, source, target, name, path, tree, phase, guard)
 
     @staticmethod
     def _file(source: int | None, target: int | None, name: str, identity: list[int],
@@ -218,7 +263,7 @@ class _Lift:
             os.unlink(name, dir_fd=source)
 
     def _finish(self, source_parent: int | None, source: int | None, target: int | None,
-                name: str, path: Path, phase: str, guard: Callable[[], None]) -> None:
+                name: str, path: Path, tree: dict, phase: str, guard: Callable[[], None]) -> None:
         if phase == "completed":
             guard()
             self.completed[path] = _identity(os.fstat(target))
@@ -230,10 +275,8 @@ class _Lift:
             os.rmdir(name, dir_fd=source_parent)
             os.fsync(source_parent)
         elif phase == "clean" and _entry(target, _OWNER) is not None:
-            from app.batch.media_package_execution import _compat_marker_matches
-
             guard()
-            if _compat_marker_matches(target, _OWNER, self._marker(path, target)):
+            if self._check_owner(target, path, tree):
                 os.unlink(_OWNER, dir_fd=target)
                 os.fsync(target)
 

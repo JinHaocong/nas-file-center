@@ -2,7 +2,7 @@
 
 面向自托管 NAS 的中文 Web 文件工具。可以从一个目录开始整理照片和视频，跨目录查找重复文件，或把反复执行的归档流程保存成工作流。扫描和媒体整理在后台运行，关闭页面后可以回到任务中心查看结果。
 
-**当前版本 `1.8.17`** · Docker 镜像 `kerwinjhc/nas-file-center:1.8.17` · `linux/amd64`
+**当前版本 `1.8.18`** · Docker 镜像 `kerwinjhc/nas-file-center:1.8.18` · `linux/amd64`
 
 [Docker Hub](https://hub.docker.com/r/kerwinjhc/nas-file-center/tags) · [镜像构建](https://github.com/JinHaocong/nas-file-center/actions/workflows/dockerhub-publish.yml) · [发布验证](https://github.com/JinHaocong/nas-file-center/actions/workflows/release-validation.yml)
 
@@ -76,9 +76,9 @@
 
 桶名中的数量和大小取自实际文件。整理器会根据目录结构识别可去掉的包装层，并保留识别出的独立作品、分册或版本边界。目标重名和归属无法确认的情况可在预览中检查。
 
-### 版本 1.8.17
+### 版本 1.8.18
 
-本版为已整理图片桶上提和同名分册上提增加了 FUSE 兼容执行分支。兼容分支逐项校验目标文件，并在校验通过后清理对应的源目录。文件系统身份校验异常时会保留执行清单供排查。[ZOS / FUSE 兼容验证](docs/media-package-zfuse-compat.md)
+本版修复 FUSE 目录上提时，目标目录 inode 变化会导致恢复校验中止的问题。执行器用原清单核对目标路径、设备和已落盘文件，并在逐项校验通过后清理对应的源目录。[ZOS / FUSE 兼容验证](docs/media-package-zfuse-compat.md)
 
 ## 快速开始
 
@@ -118,10 +118,10 @@ docker compose ps
 ```yaml
 services:
   api:
-    image: kerwinjhc/nas-file-center:1.8.17
+    image: kerwinjhc/nas-file-center:1.8.18
     platform: linux/amd64
   worker:
-    image: kerwinjhc/nas-file-center:1.8.17
+    image: kerwinjhc/nas-file-center:1.8.18
     platform: linux/amd64
 ```
 

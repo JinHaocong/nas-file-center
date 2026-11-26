@@ -1,6 +1,7 @@
 """Archive-layer recovery through the organizer preview and Worker."""
 
 import errno
+import json
 import os
 from pathlib import Path
 
@@ -223,6 +224,85 @@ def test_fuse_tree_lift_does_not_adopt_an_empty_target_created_during_publicatio
     assert not list((outer / "1").iterdir())
     assert (wrapper / "1/001.jpg").read_bytes() == b"first"
     assert (wrapper / "2/001.jpg").read_bytes() == b"second"
+
+
+@pytest.mark.parametrize("scenario", ["live", "resume", "empty_target", "changed_file", "changed_witness"])
+def test_fuse_tree_lift_rechecks_the_frozen_files_when_the_target_inode_drifts(tmp_path, monkeypatch, scenario):
+    from app.batch import media_organizer_archive, media_organizer_tree_lift
+
+    client, settings, _ = _fixture(tmp_path)
+    settings.media_package_fuse_compat_enabled = True
+    outer = settings.data_mount / "作者/特辑 [2P]"
+    wrapper = outer / outer.name
+    _put(wrapper / "1/001.jpg", b"first")
+    _put(wrapper / "2/001.jpg", b"second")
+    original = (wrapper / "1/001.jpg").stat().st_ino
+    job_id = _batch(client, _preview(client, settings, outer))
+    inode_aliases = set()
+    identity = media_organizer_tree_lift._identity
+    link = os.link
+
+    def unsupported(*args):
+        raise OSError(errno.EOPNOTSUPP, "FUSE has no atomic directory rename")
+
+    def live_identity(info):
+        device, inode = identity(info)
+        return [device, inode + 10**19 if (device, inode) in inode_aliases else inode]
+
+    def link_with_reported_inode_change(source, target, *args, **kwargs):
+        link(source, target, *args, **kwargs)
+        if source == target == "001.jpg" and kwargs.get("dst_dir_fd") is not None:
+            inode_aliases.add(tuple(identity(os.fstat(kwargs["dst_dir_fd"]))))
+            if scenario != "live":
+                raise SystemExit("interrupted after target inode changed")
+
+    monkeypatch.setattr(media_organizer_archive, "rename_noreplace_at", unsupported)
+    monkeypatch.setattr(media_organizer_archive, "probe_directory_rename_noreplace_compat_at", lambda *args: False)
+    monkeypatch.setattr(media_organizer_tree_lift, "_identity", live_identity)
+    if scenario != "live":
+        with monkeypatch.context() as first_run:
+            first_run.setattr(os, "link", link_with_reported_inode_change)
+            with pytest.raises(SystemExit, match="interrupted after target inode changed"):
+                _run_next(settings, job_id)
+        target = outer / "1/001.jpg"
+        if scenario in {"empty_target", "changed_file"}:
+            target.unlink()
+        if scenario == "changed_file":
+            target.write_bytes(b"foreign")
+        if scenario == "changed_witness":
+            witness = target.parent / ".nfc-lift-owner.json"
+            binding = json.loads(witness.read_bytes())
+            binding[1] = "another-bucket"
+            witness.write_text(json.dumps(binding, separators=(",", ":")), encoding="utf-8")
+        engine, sessions = create_engine_and_session(settings.database_path)
+        try:
+            assert recover_interrupted_jobs(engine, sessions, worker_id="organizer-test-worker")["recovered_requeued"] == 1
+        finally:
+            engine.dispose()
+        assert _run_next(settings, job_id)
+    else:
+        monkeypatch.setattr(os, "link", link_with_reported_inode_change)
+        assert _run_next(settings, job_id)
+
+    result = client.get(f"/api/media-organizer/batches/{job_id}").json()
+    if scenario not in {"live", "resume"}:
+        assert result["summary"]["conflict_count"] == 1, result["items"]
+        assert (wrapper / "1/001.jpg").read_bytes() == b"first"
+        assert (wrapper / "2/001.jpg").read_bytes() == b"second"
+        assert (outer / "1/.nfc-lift-owner.json").exists()
+        if scenario == "changed_file":
+            assert (outer / "1/001.jpg").read_bytes() == b"foreign"
+        elif scenario == "empty_target":
+            assert not (outer / "1/001.jpg").exists()
+        else:
+            assert (outer / "1/001.jpg").stat().st_ino == original
+        return
+    assert result["summary"]["success_count"] == 1, result["items"]
+    assert not wrapper.exists()
+    assert (outer / "1/001.jpg").stat().st_ino == original
+    assert (outer / "1/001.jpg").read_bytes() == b"first"
+    assert (outer / "2/001.jpg").read_bytes() == b"second"
+    assert not list(outer.rglob(".nfc-lift-owner.json"))
 
 
 def test_duplicate_work_volume_lift_resumes_an_interrupted_video_hardlink(tmp_path, monkeypatch):
