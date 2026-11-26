@@ -34,8 +34,8 @@ def test_komodo_compose_and_readme_deployment_consistency():
     assert "SESSION_COOKIE_SECURE=true" in readme_text
     assert "SESSION_COOKIE_SECURE=true" in env_text
 
-    # 4. Ensure Zoraxy and nginx_network deployment architecture is documented
-    assert "file.kerwin.cloud" in readme_text
+    # 4. Document the proxy topology with a public documentation placeholder.
+    assert "https://files.example.com" in readme_text
     assert "Zoraxy" in readme_text
     assert "nginx_network" in readme_text
     assert parsed_komodo["networks"]["nginx_network"]["external"] is True

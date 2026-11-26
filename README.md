@@ -102,7 +102,7 @@ cp config.example.env .env
 | `DATA_MODE`、`ALLOW_MUTATION`、`ALLOW_DELETE` | 示例默认以 `ro`、`false`、`false` 启动。文件实际变更还需要相应的读写挂载和服务端权限。 |
 | `ALLOWED_ROOTS` | 容器内允许访问的目录。可把范围缩小到需要管理的共享目录。 |
 | `QUARANTINE_ROOT`、`PROTECT_LAST_FILE` | 隔离区位置和最后一份文件的保护策略。 |
-| `SESSION_COOKIE_SECURE` | HTTPS 部署保持 `true`。仅在本地 HTTP 测试时设为 `false`，否则浏览器可能不会发送登录 Cookie。 |
+| `SESSION_COOKIE_SECURE` | HTTPS 部署使用 `SESSION_COOKIE_SECURE=true`。仅在本地 HTTP 测试时设为 `false`，否则浏览器可能不会发送登录 Cookie。 |
 
 ### 2. 启动 API 和 Worker
 
@@ -137,7 +137,7 @@ docker compose -f compose.yaml -f compose.image.yaml up -d --no-build --pull alw
 2. 把 API 和 Worker 的镜像标签同时更新为目标版本，拉取镜像并重新部署。
 3. 登录确认页面版本和 Worker 在线状态。整理规则更新后，从目标目录生成一份新预览。
 
-在 Komodo 中配置 API 和 Worker 两个服务，共用 `/config` 和 `/data` 挂载。API 使用镜像默认启动命令，Worker 的启动命令为 `python -m app.worker`。使用 HTTPS 反向代理时，把内网 API 服务转发到 `8080`，Worker 无需对外暴露端口。
+在 Komodo 中配置 API 和 Worker 两个服务，共用 `/config` 和 `/data` 挂载。API 使用镜像默认启动命令，Worker 的启动命令为 `python -m app.worker`。以 Zoraxy 为例，可将反向代理和 API 接入同一外部 Docker 网络（例如 `nginx_network`），将自己的 HTTPS 域名（示例 `https://files.example.com`）转发到 `nas-file-center-api:8080`。Worker 无需对外暴露端口。
 
 ## 常用操作
 
