@@ -1,247 +1,232 @@
-# NAS File Center v1.4.6
+# NAS File Center
 
-> **说明**：当前版本为 **NAS File Center v1.4.6**，在既有 NAS 安全执行与 Worker 体系上集成媒体资源包整理、每个 P/V 分组独立从 001 编号、普通文件重名自动避让、原路径映射及恢复保护。真实存储设备上的正式执行仍应先进行小范围兼容性验收。
+面向自托管 NAS 的中文 Web 文件工具。可以从一个目录开始整理照片和视频，跨目录查找重复文件，或把反复执行的归档流程保存成工作流。扫描和媒体整理在后台运行，关闭页面后可以回到任务中心查看结果。
 
-面向几十 TB NAS 数据的**中文 Web 文件批处理与精确去重中心**。
+**当前版本 `1.8.17`** · Docker 镜像 `kerwinjhc/nas-file-center:1.8.17` · `linux/amd64`
 
-> **版本权威**：当前产品 / Python package / Docker image 版本统一为 **1.4.6**。
-> **v1.4.6 修复**：冻结清单校验信息更明确，防止 WorkJob ID 重用导致历史报告碰撞；预览报告禁止覆盖，并新增只读恢复证据排查工具。
-> **v1.4.5 修复**：已有 P/V 数量大小分组中的文件参与统一扫描和安全重组；仅在完整冻结校验与暂存成功后清理已证实为空的旧分组目录，保留 FUSE 安全发布、禁止覆盖和中断恢复保护.
->
-> **MediaPackage 报告安全排查**：冻结清单失败原因细分、旧报告任务 ID 防撞、只读检查命令与保留策略见 [媒体包报告与恢复安全说明](docs/media-package-report-safety.md)。
->
-> 当前开发顺序以 [`docs/roadmap-current.md`](docs/roadmap-current.md) 为准；旧 roadmap 仅作历史证据。
+[Docker Hub](https://hub.docker.com/r/kerwinjhc/nas-file-center/tags) · [镜像构建](https://github.com/JinHaocong/nas-file-center/actions/workflows/dockerhub-publish.yml) · [发布验证](https://github.com/JinHaocong/nas-file-center/actions/workflows/release-validation.yml)
 
-核心原则：**fclones 负责高性能重复发现；NAS File Center 负责规则、Dry Run、SHA256 二次校验、安全执行、审计和可视化操作。** fclones 永远不会被调用 `remove/link/dedupe` 等破坏性子命令。
+[界面预览](#界面预览) · [功能一览](#功能一览) · [快速开始](#快速开始) · [常用操作](#常用操作) · [本地开发](#本地开发)
 
----
+## 界面预览
 
-## v0.4.7 历史功能亮点（延续至 v1.4.6）
+截图来自 `1.8.17` 的本地生产构建。路径、收藏、封面、任务和统计均为演示数据。真实 NAS 上的最近目录和文件记录未用于截图。
 
-> **新增只读功能（实现 PR #261，须待 CI / NAS 验收）：** OpenList WebDAV → NAS 下载完整性校验，原始目录结构严格匹配，双端完整 SHA256，支持后台 Worker 与分页差异报告。默认禁用；凭据必须由运维通过只读 secret 文件部署。配置与限制见 [WebDAV 下载完整性校验](docs/webdav-download-verification.md)。
+### 文件空间
 
-### v0.4.7 UI / Responsive
+从收藏的目录进入整理预览，也能查看索引规模、扫描摘要和后台任务。
 
-- 项目拥有独立的 `/DESIGN.md`，视觉方向以 Linear / Supabase 的克制 surface、hairline hierarchy 为主，并吸收 Carbon 的高密度数据与状态表达。
-- Dashboard、Task Center、Plans、Scans、Advanced Dedupe、Quarantine、Audit、Indexes、Workflows、Organizer、Batch、Path Match、Rename、Settings、Login 与各类 Modal/Drawer 已迁移到统一视觉系统。
-- Desktop / Tablet / Mobile 使用统一响应式合同；数据密集页面在移动端使用专用 card/list 视图，不再强行压缩宽表格。
-- Light / Dark / System 主题继续支持；安全状态、Worker 状态、Plan 生命周期与危险操作门禁保持可见。
-- 前端 release regression：438 / 438 tests PASS、TypeScript typecheck PASS、production build PASS。
-- Runtime dependency audit：0 vulnerabilities。
-- Release Docker image 已在 CI 完成 linux/amd64 构建验证；正式 Docker Hub 推送与 Komodo/NAS 部署由发布者在 merge 后执行。
+![文件空间浅色界面，展示演示收藏、扫描统计和快捷工具](README.assets/file-space.webp)
 
+### 智能媒体整理
 
-1. **Organizer Profile 通用化体系 (v0.3.2-step2)**：
-   - 全面支持通用整理方案（Organizer Profiles）的**创建、编辑、克隆、删除、导入、导出、只读预览与生成执行计划**。
-   - **强大模板引擎**：支持 `{name}`, `{index}`, `{images}`, `{videos}`, `{files}`, `{folders}`, `{size}`, `{statistics}` 及 `{?videos: {videos}V}` 条件语法，前台提供实时渲染示例。
-   - **安全冲突检测与只读预览**：支持流式大目录分页，只读阶段绝不写盘，自动检测目标冲突、磁盘同名与路径越界。
-2. **可视化目录选择体系 (v0.3.2-step1)**：
-   - 全局接入现代化 **DirectoryPicker** 目录选择弹窗组件，彻底替换所有业务表单的手动绝对路径输入。
-   - **有界堆内存流式分页**：文件系统浏览基于 `heapq` 有界候选堆，彻底消除百千目录下的内存暴涨风险。
-   - **真·自然排序 (Natural Sort)**：目录与文件均按自然数字序排列（如 `folder1 < folder2 < folder10`）。
-   - **路径收藏与最近使用记录**：常用目录一键星标置顶，支持按用户隔离；最近使用路径自动记录与本地时区格式化显示。
-   - **严密白名单与路径穿越防御**：严格校验 `ALLOWED_ROOTS` 白名单边界，禁止符号链接越界访问与路径穿越。
+按目录查看可整理项和冲突。选择一项即可核对原路径、目标路径和分桶结果。
 
-1. **全新现代化企业级 Web 管理界面**：
-   - 升级为 **React + TypeScript + Vite + Ant Design 5** 架构，取代旧版 Bootstrap 页面。
-   - 包含 Dashboard 概览、文件索引、扫描去重、跨目录路径匹配、批量重命名、批量处理、Organizer 智能整理、执行计划、任务中心、审计日志与系统设置。
-   - 本地全量静态打包，**运行时严禁访问任何外部 CDN**，完全适配局域网 / 私有 NAS。
-2. **本地管理员认证与 Session 会话安全**：
-   - **Argon2id** 安全密码哈希算法。
-   - **HttpOnly + SameSite=Lax + Secure** Cookie 会话存储，服务端 SQLite 仅保存 Token SHA256 哈希，禁止将认证 Token 存入 localStorage。
-   - 支持防暴力破解频控锁定（15分钟5次失败限制）、CSRF/Origin 严格同源校验、修改密码自动吊销其他设备、多设备会话管理。
-   - 环境变量初始化：支持 `INITIAL_ADMIN_USERNAME` 与 `INITIAL_ADMIN_PASSWORD`，一旦数据库存在任何用户后永久忽略该环境变量，避免重启被覆盖。
-3. **视觉与主题体验**：
-   - 内置定制设计 NAS Favicon（SVG / ICO）与 Apple Touch Icon。
-   - 动态路由网页标题跟随。
-   - 完整支持 **浅色 (Light) / 深色 (Dark) / 跟随系统 (System)** 主题一键切换。
-4. **数据库自动备份与无损平滑迁移**：
-   - 无论 API 还是 Worker 谁先启动，在执行任何 schema mutation 前均自动备份原 SQLite 数据库至 `/config/backups/nas-file-center-YYYYMMDD-HHMMSS.db`。
-   - 完美兼容 v0.2 原有数据，**绝不要求删除已有数据库**。
-   - 100% 保留 ZFS 大 inode (`12164156718799206349`) 防溢出修复与只读安全防御机制。
+![智能媒体整理预览，展示目录状态及选中目录整理前后的路径](README.assets/media-organizer.webp)
 
----
+<details>
+<summary>工作流中心、深色任务中心和移动端截图</summary>
 
-## 1. 部署架构与配置 (Zoraxy + Komodo Stack)
+### 工作流中心
 
-### 推荐生产部署网络拓扑
+从扫描范围、文件筛选到重命名与移动，逐步核对归档规则并保存修订。
+
+![工作流编辑页面，显示扫描、筛选、重命名和移动步骤](README.assets/workflow.webp)
+
+### 任务中心
+
+查看 Worker 状态、实时进度和历史任务。桌面与移动端共用同一套操作入口。
+
+![任务中心深色桌面界面](README.assets/tasks-dark.webp)
+
+<img src="README.assets/tasks-mobile.webp" alt="窄屏下的任务中心卡片与底部导航" width="360">
+
+</details>
+
+## 功能一览
+
+| 功能 | 能做什么 |
+| --- | --- |
+| **文件空间与索引** | 查看可访问目录、收藏和最近使用，按索引检索文件。目录选择器支持路径导航和自然排序。 |
+| **智能媒体整理** | 递归预览整理单元，识别可归并的图片、视频与包装层，生成编号、分桶和路径映射。已整理目录、冲突和待确认项在预览中可见。 |
+| **精确去重** | 通过 fclones 扫描重复组，支持多根目录与跨目录比较。可按目录优先级、时间或均衡保留策略生成计划。高级去重也可在受支持的文件系统上选择硬链接或 Reflink。 |
+| **目录比较与文件巡检** | 按路径、文件名、主名或正则归一化匹配。用双目录差异定位缺失和不同项，用文件名巡检排查命名问题。 |
+| **媒体与下载完整性** | 记录媒体探测和基线校验状态。通过 WebDAV 对比远端与 NAS 的相对路径和 SHA256，逐项定位缺失或内容差异。 |
+| **批量重命名与目录整理方案** | 按正则、前后缀、补零或模板预览改名。可保存、克隆及导入导出整理方案，用于不同的目录统计和命名方式。 |
+| **工作流与计划任务** | 组合扫描、筛选、改名、移动等步骤，保存修订并预览。计划任务支持索引更新、重复扫描、媒体校验和指定的工作流版本。 |
+| **隔离区与压缩包恢复** | 检查隔离记录并恢复可恢复的文件。压缩包恢复可对支持的格式尝试提取，并区分已验证文件和未验证结果。 |
+| **任务与安全设置** | 查看 Worker 心跳、任务状态、审计日志和会话。设置保留策略与资源限制，并切换浅色、深色及跟随系统主题。 |
+
+### 媒体整理的默认布局
+
+同一整理单元内，图片每桶最多 **200 张**，视频每桶最多 **50 个**。图片、视频混合时分别归入 `P`、`V` 桶，每个桶独立从 `001` 编号。符合条件的小型单类单元可直接在当前层编号。
+
+例如，5 个文件在同一个作品目录时，混合整理的预览可以是：
+
 ```text
-用户浏览器 (HTTPS)
-   ↓
-https://file.kerwin.cloud
-   ↓
-Zoraxy 反向代理 (SSL Termination)
-   ↓ (Docker 内部网络 nginx_network)
-nas-file-center-api:8080 (容器内 HTTP 端口，禁止直接映射宿主机端口)
+海岸线随拍/
+├── P [3 12MiB]/
+│   ├── 001.jpg
+│   ├── 002.jpg
+│   └── 003.jpg
+└── V [2 96MiB]/
+    ├── 001.mp4
+    └── 002.mp4
 ```
 
-### `compose.komodo.yaml` (极空间 / Komodo Stack 推荐配置)
+桶名中的数量和大小取自实际文件。整理器会根据目录结构识别可去掉的包装层，并保留识别出的独立作品、分册或版本边界。目标重名和归属无法确认的情况可在预览中检查。
+
+### 版本 1.8.17
+
+本版为已整理图片桶上提和同名分册上提增加了 FUSE 兼容执行分支。兼容分支逐项校验目标文件，并在校验通过后清理对应的源目录。文件系统身份校验异常时会保留执行清单供排查。[ZOS / FUSE 兼容验证](docs/media-package-zfuse-compat.md)
+
+## 快速开始
+
+### 1. 准备配置
+
+准备一个允许应用管理的数据目录和一个独立的配置目录。下面以 Docker Compose 为例。
+
+```bash
+git clone https://github.com/JinHaocong/nas-file-center.git
+cd nas-file-center
+cp config.example.env .env
+```
+
+编辑 `.env`，把宿主机路径换成自己的路径，并设置首次登录使用的独立密码。可以先用一份小型演示目录体验只读预览。
+
+| 配置项 | 用途 |
+| --- | --- |
+| `HOST_DATA_DIR` | 要管理的宿主机目录，容器内显示为 `/data`。 |
+| `HOST_CONFIG_DIR` | SQLite 数据库、报告和迁移备份的持久化位置，挂载为 `/config`。API 与 Worker 共享此目录。 |
+| `INITIAL_ADMIN_USERNAME`、`INITIAL_ADMIN_PASSWORD` | 首次初始化管理员。数据库已有用户后，重部署不会用环境变量覆盖账号密码。 |
+| `DATA_MODE`、`ALLOW_MUTATION`、`ALLOW_DELETE` | 示例默认以 `ro`、`false`、`false` 启动。文件实际变更还需要相应的读写挂载和服务端权限。 |
+| `ALLOWED_ROOTS` | 容器内允许访问的目录。可把范围缩小到需要管理的共享目录。 |
+| `QUARANTINE_ROOT`、`PROTECT_LAST_FILE` | 隔离区位置和最后一份文件的保护策略。 |
+| `SESSION_COOKIE_SECURE` | HTTPS 部署保持 `true`。仅在本地 HTTP 测试时设为 `false`，否则浏览器可能不会发送登录 Cookie。 |
+
+### 2. 启动 API 和 Worker
+
+使用仓库自带的 Compose 在本机构建。
+
+```bash
+docker compose up -d --build
+docker compose ps
+```
+
+也可以使用已发布的镜像。新建本地 `compose.image.yaml`，为两个服务指定相同版本。
 
 ```yaml
 services:
-  nas-file-center-api:
-    image: kerwinjhc/nas-file-center:1.4.6
-    container_name: nas-file-center-api
-    volumes:
-      - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
-      - /tmp/zfsv3/sata11/15246330601/data:/data:ro
-    networks:
-      - nginx_network
-    environment:
-      - CONFIG_DIR=/config
-      - DATA_MOUNT=/data
-      - ALLOWED_ROOTS=/data
-      - QUARANTINE_ROOT=/data/.nas-file-center-trash
-      - ALLOW_MUTATION=false
-      - ALLOW_DELETE=false
-      - PROTECT_LAST_FILE=true
-      - FCLONES_BINARY=/usr/local/bin/fclones
-      - MTIME_REFRESH_DELAY_SECONDS=2
-      - SESSION_COOKIE_SECURE=true
-      - INITIAL_ADMIN_USERNAME=[[INITIAL_ADMIN_USERNAME]]
-      - INITIAL_ADMIN_PASSWORD=[[INITIAL_ADMIN_PASSWORD]]
-    healthcheck:
-      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health\")' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-    restart: unless-stopped
-
-  nas-file-center-worker:
-    image: kerwinjhc/nas-file-center:1.4.6
-    container_name: nas-file-center-worker
-    command:
-      - python
-      - -m
-      - app.worker
-    volumes:
-      - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
-      - /tmp/zfsv3/sata11/15246330601/data:/data:ro
-    networks:
-      - nginx_network
-    environment:
-      - CONFIG_DIR=/config
-      - DATA_MOUNT=/data
-      - ALLOWED_ROOTS=/data
-      - QUARANTINE_ROOT=/data/.nas-file-center-trash
-      - ALLOW_MUTATION=false
-      - ALLOW_DELETE=false
-      - PROTECT_LAST_FILE=true
-      - FCLONES_BINARY=/usr/local/bin/fclones
-      - MTIME_REFRESH_DELAY_SECONDS=2
-    depends_on:
-      nas-file-center-api:
-        condition: service_healthy
-    restart: unless-stopped
-
-networks:
-  nginx_network:
-    external: true
+  api:
+    image: kerwinjhc/nas-file-center:1.8.17
+    platform: linux/amd64
+  worker:
+    image: kerwinjhc/nas-file-center:1.8.17
+    platform: linux/amd64
 ```
 
-默认三重安全状态：
-- `/data:ro` (只读挂载)
-- `ALLOW_MUTATION=false`
-- `ALLOW_DELETE=false`
-
----
-
-> **Worker 任务中断/重启排查：** 任务提示 `Worker restarted while job was running`
-> 不代表 Docker 必然重启，也可能是 SQLite 写锁争用或 Worker 租约失效。
-> 查看 [Worker 心跳、重启与 NAS 排障手册](docs/worker-restart-diagnosis.md)，
-> 包含 Komodo/Docker Inspect、OOM、数据库写锁与恢复建议。
->
-## 2. 升级到 v1.4.6
-
-1. 在构建机器构建 `linux/amd64` 镜像并推送：
-   ```bash
-   docker buildx build \
-     --platform linux/amd64 \
-     -t kerwinjhc/nas-file-center:1.4.6 \
-     --push \
-     .
-   ```
-2. 在 Komodo / NAS 环境变量中配置管理员账号密码：
-   - `INITIAL_ADMIN_USERNAME=admin`
-   - `INITIAL_ADMIN_PASSWORD=YourSecurePassword123!`
-3. 在 Komodo / NAS 管理后台对 NasFileCenter 服务执行 **Pull / Redeploy**。
-4. 容器启动时会自动：
-   - 检查 `/config/app.db` 是否存在；
-   - 若存在旧版数据，自动在变更前备份至 `/config/backups/nas-file-center-*.db`；
-   - 自动增量迁移创建 `users` 与 `sessions` 表；
-   - 使用您提供的初始账号密码创建管理员（若未配置环境变量，禁止自动创建弱口令）。
-5. 打开域名访问 `https://file.kerwin.cloud`：
-   - 系统自动跳转至 `/login` 登录页；
-   - 输入管理员账号密码即可安全登录并使用全新 React Ant Design 5 界面。
-
----
-
-## 3. 功能操作指南
-
-### A. 概览与状态指示
-- 顶部导航栏直观显示 **只读安全模式 / 写入模式** 徽标与 **Worker 活跃状态**。
-- 支持一键切换浅色 / 深色 / 系统跟随主题，并提供修改管理员密码与安全登出入口。
-
-### B. 文件索引与路径匹配
-- **文件索引**：对几十 TB 存储目录建立轻量增量 SQLite 索引，秒级检索文件。
-- **路径匹配**：支持跨目录相对路径、文件名、去除后缀主名或正则表达式归一化匹配，直接从 `members[].path` 生成去重计划。
-
-### C. 精确扫描与去重计划
-- **新建扫描**：直接调用 Rust fclones 原生引擎，支持普通全量扫描与 A/B 跨目录隔离扫描。
-- **去重策略**：支持多根目录均衡保留 (`balanced-roots`)、最新 (`keep-newest`)、最旧 (`keep-oldest`)、首根目录优先、完整路径优先级与相对路径优先级。
-- **严格计划生命周期**：
-  `Draft (草稿)` → `Freeze (冻结不可变)` → `Validate (实时 SHA256 二次校验)` → `Ready (已就绪)` → `Execute (安全执行)`。
-  - **禁止未校验直接执行**：Draft 与 Frozen 状态禁止 Execute，必须先通过 Validate 达到 Ready 状态方可执行。
-  - 在只读安全模式下（`ALLOW_MUTATION=false`），执行按钮物理锁定。
-
-### D. 批量重命名与批量处理
-- **批量重命名**：提供正则表达式、前后缀、编号补零、父目录名拼接，后端逐项比对 `conflict` 与 `conflict_reason`，存在重名冲突时禁止生成计划。
-- **批量处理**：支持隔离 (`quarantine`)、`touch` 更新时间戳、跨目录移动与改名。
-
-### E. Organizer 智能整理
-- 深度识别照片/视频文件，按用户自定义 Profile 模板精确重算容量及媒体数量统计后缀并清除历史冗余尾巴，准确比对 `changed` 状态生成改名计划。
-
-### F. 隔离区核心与安全加固 (Quarantine Core & Hardening, v0.3.4-Gate1-hotfix1)
-- **原子级防覆盖移动与恢复**：采用底层系统调用 `renameat2(RENAME_NOREPLACE)` (Linux) 与 `renamex_np(RENAME_EXCL)` (macOS)，物理杜绝隔离与恢复阶段由于并发竞争或意外同名覆盖现有业务文件。
-- **符号链接攻击严密防御**：在解析前进行词法检查，禁止针对符号链接条目的危险清除，确保符号链接所指受害者文件在任何情况下绝对不受影响。
-- **缺失目标安全闭环 (Fail-Closed)**：清除时若磁盘目标缺失，立即转为 `inconsistent` 异常状态并返回 HTTP 409 状态冲突，严禁返回伪成功。
-- **目录隔离、恢复与清理**：完整支持目录树隔离（`content_hash=None`）、目录树原子还原（默认跳过冲突）以及非跟随符号链接的安全物理清理。
-- **服务启动自动对齐与崩溃恢复**：服务启动时独立事务对齐 `preparing`、`restoring` 和 `purging` 过渡态，确保异常断电或崩溃重启后数据自洽。
-- **保留根目录边界防护**：文件索引、fclones 扫描去重及 Organizer 统计均严密排除并剪枝隔离区目录，杜绝隔离内容被二次索引或去重误伤。
-- **外键关联与审计追踪**：`QuarantineEntry.task_id` 建立外键索引关联 `work_jobs.id`，具备完整的批处理任务溯源能力。
-
----
-
-## 4. 开发与本地测试验证
-
-### 自动化测试
 ```bash
-# 运行全部后端安全与业务测试
-PYTHONPATH=. pytest -v
+docker compose -f compose.yaml -f compose.image.yaml up -d --no-build --pull always
+```
 
-# 检查前端类型定义 (0 errors)
-cd frontend && npm run typecheck
+默认 Web 端口为 `8080`，可用 `WEB_PORT` 调整。打开 `http://localhost:8080` 登录。容器的 HTTP 探活路径为 `/health`，页面上的 Worker 状态则反映后台进程能否处理任务。
 
-# 构建前端生产产物 (0 errors)
+### 3. 在 NAS 或 Komodo 上升级
+
+1. 保留原 `/config` 挂载。数据库增量迁移在需要变更结构之前写入 `/config/backups/`。
+2. 把 API 和 Worker 的镜像标签同时更新为目标版本，拉取镜像并重新部署。
+3. 登录确认页面版本和 Worker 在线状态。整理规则更新后，从目标目录生成一份新预览。
+
+在 Komodo 中配置 API 和 Worker 两个服务，共用 `/config` 和 `/data` 挂载。API 使用镜像默认启动命令，Worker 的启动命令为 `python -m app.worker`。使用 HTTPS 反向代理时，把内网 API 服务转发到 `8080`，Worker 无需对外暴露端口。
+
+## 常用操作
+
+### 整理一个目录
+
+1. 打开「智能媒体整理」，选择媒体所在目录。选择目录后，系统自动启动递归预览。
+2. 查看可整理、已整理、冲突及待确认的数量。点开目录确认分桶和文件路径映射。
+3. 完成核对后，在允许执行的部署中确认整理。系统按当前预览中的可执行单元处理。
+4. 在结果页或任务中心查看成功、跳过、冲突和失败。遇到文件或目录被改动时，重新扫描对应范围。
+
+启用正式整理需要数据目录允许写入，并按执行入口开启 `ALLOW_MUTATION` 与 `ALLOW_DELETE`。只读部署也可以生成预览。
+
+### 扫描重复并生成去重计划
+
+1. 从「精确去重」选择扫描目录，等待 fclones 生成重复组。
+2. 查看候选文件、保留策略和预计可释放空间，按需修改待处理项。
+3. 生成执行计划，依次完成冻结和校验。计划校验会重新核对实际文件，适用的去重操作会核验完整内容哈希。
+4. 执行后查看审计记录与隔离区。支持恢复的隔离记录可以从隔离区操作。
+
+### 调整缩略图与任务保留
+
+- 在「系统设置 → 界面显示」切换「显示媒体缩略图」。该开关作用于当前浏览器中使用媒体缩略图的页面。关闭后使用文件类型图标。
+- 在「任务中心」查看智能整理报告盘点。删除任务时，满足安全条件的报告可由 Worker 回收。失败或中断任务的恢复资料会保留。
+- 遇到任务长时间停在运行中时，检查 Worker 心跳、任务日志以及 SQLite 锁等待。[Worker 与 NAS 排障](docs/worker-restart-diagnosis.md)
+
+## 架构与安全
+
+```text
+浏览器（React + TypeScript）
+             │
+        FastAPI 服务 ── SQLite 任务、计划与审计
+             │                     │
+        文件访问白名单         后台 Worker
+                                   │
+                    fclones 扫描 · ffprobe 探测 · 文件执行
+```
+
+- **扫描与执行分离。** fclones 负责发现重复，文件处置由应用的计划和 Worker 执行。
+- **确认范围可追溯。** 写入计划和媒体整理使用冻结清单及文件身份校验。执行时检测路径越界、目标占用和源数据变化。
+- **带边界的恢复。** 隔离、文件执行和后台任务分别记录恢复所需的信息。文件系统能力不足或校验冲突时，保留相关记录供核对。
+- **配置由部署端控制。** `/data` 挂载选项、允许根目录和变更权限由宿主机配置。Web 界面可查看安全状态，并管理会话和审计保留策略。
+
+## 本地开发
+
+开发环境使用 **Python 3.12+**、**Node.js 22** 和 npm。需要实际运行重复扫描或媒体探测时，本机还应提供 `fclones` 和 `ffmpeg` / `ffprobe`。Docker 镜像已包含这些工具。
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[test]'
+
+mkdir -p config sample-data
+export CONFIG_DIR="$PWD/config"
+export DATA_MOUNT="$PWD/sample-data"
+export ALLOWED_ROOTS="$DATA_MOUNT"
+export QUARANTINE_ROOT="$DATA_MOUNT/.nas-file-center-trash"
+export SESSION_COOKIE_SECURE=false
+# 首次运行时，在当前 shell 另外设置 INITIAL_ADMIN_USERNAME 和 INITIAL_ADMIN_PASSWORD。
+uvicorn app.main:app --host 127.0.0.1 --port 8080
+```
+
+在另一个终端使用相同的虚拟环境与环境变量运行 `python -m app.worker`。然后启动 Vite，在 `http://localhost:3000` 打开界面。Vite 会把 API 请求转发到本机的 FastAPI 服务。
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+开发验证命令如下。后端测试使用独立配置和测试数据目录。
+
+```bash
+test_root=$(mktemp -d)
+mkdir -p "$test_root/config" "$test_root/data"
+CONFIG_DIR="$test_root/config" DATA_MOUNT="$test_root/data" \
+  ALLOWED_ROOTS="$test_root/data" QUARANTINE_ROOT="$test_root/data/.trash" \
+  python -m pytest
+
+cd frontend
+npm test
+npm run typecheck
 npm run build
 ```
 
-### Docker 容器构建验证
-```bash
-docker buildx build \
-  --platform linux/amd64 \
-  -t nas-file-center:0.4.7 \
-  --load \
-  .
-```
+## 进一步阅读
 
-
-## Archive file recovery (experimental, administrator-only)
-
-The **压缩包恢复** tool supports best-effort ZIP / TAR / 7z / RAR file salvage with a same-directory unique result folder; original archives are left untouched. ZIP CRC and full image decode are distinguished from unverified extraction. The existing Worker/Task Center handles recovery jobs and cancellation. Defaults remain read-only: the archive parent must be explicitly writable and `ALLOW_MUTATION=true`.
-
-Read [archive recovery deployment, supported formats, limits and known security boundaries](docs/archive-recovery.md) before enabling this feature. Password-protected archives additionally require a shared tmpfs mount, with optional [Compose](compose.archive-recovery-secrets.yaml) or [Komodo](compose.komodo.archive-recovery-secrets.yaml) overlay. No generic damaged encrypted solid-stream recovery is claimed.
-
-
-Experimental AES-256-CBC + LZMA2 7z deep recovery is available for **intact, CRC-checked metadata** with independently decodable reset points and CRC-verifiable complete files; see [supported boundaries and limits](docs/archive-recovery.md#experimental-aes-256-cbc--lzma2-7z-deep-recovery). It does not reconstruct arbitrary encrypted solid streams.
+- [媒体整理报告、安全检查与恢复](docs/media-package-report-safety.md)
+- [ZOS / FUSE 挂载兼容与能力验证](docs/media-package-zfuse-compat.md)
+- [双目录差异](docs/directory-diff-v1.md) · [文件名巡检](docs/filename-quality-audit-v3.md)
+- [OpenList / WebDAV 下载完整性校验](docs/webdav-download-verification.md)
+- [压缩包恢复的支持格式、配置与限制](docs/archive-recovery.md)
+- [第三方组件及许可声明](THIRD_PARTY_NOTICES.md)
