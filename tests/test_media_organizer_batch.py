@@ -42,6 +42,39 @@ def _preview(client, settings, selection):
     return response.json()
 
 
+def test_gapped_numbered_media_leaves_are_renamed_independently(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    root = settings.data_mount / "Download/下载目录"
+    sources = {
+        "6/原视频.mp4": b"video",
+        "15/另一个视频.mp4": b"film",
+        "15/封面.jpg": b"cover",
+        "命名作品/001.mp4": b"existing",
+    }
+    for relative, payload in sources.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
+    preview = _preview(client, settings, root)
+    assert preview["summary"]["blocked_count"] == 0, preview
+    assert {row["unit"] for row in preview["units"] if row["status"] == "ready"} == {
+        str(root / "6"), str(root / "15"),
+    }
+    batch = _batch(client, preview)
+    assert _run_next(settings, batch)
+    result = client.get(f"/api/media-organizer/batches/{batch}").json()
+    assert result["summary"]["success_count"] == 2
+    assert {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()} == {
+        "6/001.mp4": b"video",
+        "15/P [1 5B]/001.jpg": b"cover",
+        "15/V [1 4B]/001.mp4": b"film",
+        "命名作品/001.mp4": b"existing",
+    }
+    fresh = _preview(client, settings, root)
+    assert fresh["summary"]["ready_count"] == fresh["summary"]["blocked_count"] == 0, fresh
+
+
 @pytest.mark.parametrize("scope", ["semantic", "luolcy_root", "luolcy_nested"])
 def test_old_video_bucket_is_split_at_its_owning_root(tmp_path, scope):
     client, settings, luolcy = _fixture(tmp_path)

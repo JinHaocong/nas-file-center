@@ -16,6 +16,81 @@ def _execute(client, settings, preview):
     return client.get(f"/api/media-organizer/batches/{job}").json()["summary"]
 
 
+def test_numbered_collection_scans_names_and_keeps_inner_classifications_local(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    scope = settings.data_mount / "Else/2602/260212/作者/Old/大合集"
+    put_files(scope, {
+        "1/爱可/2/V/视频.mp4": b"film",
+        "1/爱可/5/封面.jpg": b"first",
+        "1/爱可/6/封面.jpg": b"second",
+        "1/念念/原图.jpg": b"third",
+        "2/小新/2/p/主题甲/封面.jpg": b"topic a",
+        "2/小新/2/p/主题乙/封面.jpg": b"topic b",
+        "2/小新/2/v/视频.mp4": b"clip",
+        "2/彤彤/1/p/封面.jpg": b"photo",
+        "2/彤彤/1/v/视频.mp4": b"movie",
+        "2/彤彤/散图/001.jpg": b"separate",
+    })
+
+    preview = _preview(client, settings, scope)
+    assert preview["summary"]["ready_count"] == 8 and preview["summary"]["blocked_count"] == 0, preview
+    assert not {str(scope / "1"), str(scope / "2")} & {row["unit"] for row in preview["units"]}
+    assert _execute(client, settings, preview)["success_count"] == 8
+    assert {p.relative_to(scope).as_posix(): p.read_bytes() for p in scope.rglob("*") if p.is_file()} == {
+        "1/爱可/2/001.mp4": b"film",
+        "1/爱可/5/001.jpg": b"first",
+        "1/爱可/6/001.jpg": b"second",
+        "1/念念/001.jpg": b"third",
+        "2/小新/2/p/主题甲/001.jpg": b"topic a",
+        "2/小新/2/p/主题乙/001.jpg": b"topic b",
+        "2/小新/2/001.mp4": b"clip",
+        "2/彤彤/1/P [1 5B]/001.jpg": b"photo",
+        "2/彤彤/1/V [1 5B]/001.mp4": b"movie",
+        "2/彤彤/散图/001.jpg": b"separate",
+    }
+    fresh = _preview(client, settings, scope)
+    assert fresh["summary"]["ready_count"] == fresh["summary"]["blocked_count"] == 0, fresh
+
+
+def test_named_volumes_accept_a_work_with_legacy_p_v_leaves(tmp_path):
+    root = tmp_path / "2602/260225/作者"
+    put_files(root, {
+        "1/001 第一套 1V 1P/封面.jpg": b"photo",
+        "1/001 第一套 1V 1P/视频.mp4": b"film",
+        "1/002 第二套 1V 1P/封面.jpg": b"photo",
+        "1/002 第二套 1V 1P/视频.mp4": b"film",
+        "2/003 第三套 1V 1P/封面.jpg": b"photo",
+        "2/003 第三套 1V 1P/视频.mp4": b"film",
+        "2/004 第四套 1V 1P/P/封面.jpg": b"photo",
+        "2/004 第四套 1V 1P/V/视频.mp4": b"film",
+    })
+
+    rows = list(iter_organizing_previews(root, allowed_roots=[tmp_path], include_mapping=True))
+    assert len(rows) == 4 and all(row["status"] == "ready" for row in rows)
+    for row in rows:
+        unit = Path(row["unit"])
+        assert unit.parent.parent == root
+        assert all(Path(move["target"]).is_relative_to(unit) for move in row["_mapping_items"])
+
+
+@pytest.mark.parametrize("month_day", ["10-27", "02-31"])
+def test_numbered_volumes_recognize_verified_dated_post_titles(tmp_path, month_day):
+    root = tmp_path / "2601/260125/作者"
+    put_files(root, {
+        f"1/【2025-{month_day}】海边-1946128/封面.jpg": b"photo",
+        "1/【2025-10-31】树屋-1950386-【收费】/视频.mp4": b"film",
+        "3/【2025-11-02】远景-1951198/图片.png": b"still",
+        "3/【2025-11-03】庭院-1952001/视频.mp4": b"other",
+    })
+    rows = list(iter_organizing_previews(root, allowed_roots=[tmp_path], include_mapping=True))
+    blocked = {row["unit"] for row in rows if row["status"] == "blocked"}
+    if month_day == "02-31":
+        assert blocked == {str(root / "1"), str(root / "3")}
+    else:
+        assert not blocked
+        assert len(rows) == 4 and all(row["status"] == "ready" for row in rows)
+
+
 @pytest.mark.parametrize("wrapper", ["1", "07"])
 def test_titled_work_lifts_its_only_numbered_pv_wrapper(tmp_path, wrapper):
     client, settings, _ = _fixture(tmp_path)
