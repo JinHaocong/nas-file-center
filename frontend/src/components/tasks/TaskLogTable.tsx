@@ -27,11 +27,15 @@ export const TaskLogTable: React.FC<Props> = ({ taskId }) => {
   const [level, setLevel] = useState('all');
   const [expandedRowKeys, setExpandedRowKeys] = useState<readonly number[]>([]);
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch, isPlaceholderData } = useQuery({
     queryKey: ['taskLogs', String(taskId), page, pageSize, level],
     queryFn: () => tasksApi.getTaskLogs(taskId, {
       page, pageSize, level: level === 'all' ? undefined : level,
     }),
+    // A different task or log level must wait for its own total.
+    placeholderData: (previous, previousQuery) => previous && previousQuery?.queryKey[1] === String(taskId) &&
+      previousQuery.queryKey[4] === level
+      ? { items: [], total: previous.total, page, page_size: pageSize } : undefined,
   });
 
   const handleLevelChange = (val: string) => {
@@ -74,7 +78,7 @@ export const TaskLogTable: React.FC<Props> = ({ taskId }) => {
           加载日志失败: {error instanceof Error ? error.message : '网络异常'}
           <button type="button" onClick={() => refetch()}>重新加载</button>
         </div>
-      ) : isLoading ? (
+      ) : isLoading || isPlaceholderData ? (
         <div className="nfc-v2-task-loading" role="status">正在加载事件日志…</div>
       ) : items.length === 0 ? (
         <ConsoleEmpty title={level === 'all' ? '暂无事件日志' : '当前级别无匹配日志'} />
@@ -115,6 +119,7 @@ export const TaskLogTable: React.FC<Props> = ({ taskId }) => {
               const context = sanitizeContext(record.context);
               const hasContext = Boolean(context && Object.keys(context).length > 0);
               const expanded = expandedRowKeys.includes(record.id);
+              const contextId = 'nfc-log-context-' + record.id;
               return (
                 <React.Fragment key={record.id}>
                   <tr>
@@ -125,7 +130,7 @@ export const TaskLogTable: React.FC<Props> = ({ taskId }) => {
                     <td>
                       {hasContext ? (
                         <button type="button" aria-expanded={expanded}
-                          aria-controls={'nfc-log-context-' + record.id}
+                          aria-controls={expanded ? contextId : undefined}
                           className="nfc-v2-log-expand" onClick={() => toggleExpanded(record.id)}>
                           {expanded ? '收起' : '查看'}
                         </button>
@@ -134,7 +139,7 @@ export const TaskLogTable: React.FC<Props> = ({ taskId }) => {
                   </tr>
                   {hasContext && expanded && (
                     <tr className="nfc-v2-log-context-row">
-                      <td colSpan={5} id={'nfc-log-context-' + record.id}>
+                      <td colSpan={5} id={contextId}>
                         <pre className="nfc-code-block">{JSON.stringify(context, null, 2)}</pre>
                       </td>
                     </tr>

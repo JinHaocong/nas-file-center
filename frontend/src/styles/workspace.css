@@ -142,7 +142,8 @@
 
 @media (max-width: 767px) {
   .nfc-v2-confirm-dialog .nfc-console-button { min-height: 44px; }
-  .nfc-workspace-frame { display: block; }
+  /* Let the workspace surface reach the mobile dock on short pages. */
+  .nfc-workspace-frame { flex-direction: column; }
 }
 
 @media (prefers-reduced-motion: no-preference) {

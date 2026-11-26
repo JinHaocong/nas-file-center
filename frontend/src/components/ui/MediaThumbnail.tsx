@@ -106,13 +106,16 @@ export function MediaThumbnail({ path, kind, size = 'small', representativeFile 
   return <VisibleThumbnail key={url} url={url} kind={kind} size={size} />;
 }
 
-/** A single shared control for both Settings and the organizer gallery. */
-export function ThumbnailSwitch() {
+/** All thumbnail switches update the same display preference. */
+export function ThumbnailSwitch({ compact = false }: { compact?: boolean }) {
   const { showThumbnails, setShowThumbnails } = useDisplayPreferences();
   return (
-    <button type="button" role="switch" aria-checked={showThumbnails} className="nfc-thumbnail-switch"
+    <button type="button" role="switch" aria-checked={showThumbnails} aria-label="显示媒体缩略图"
+      title={compact ? '显示媒体缩略图' : undefined}
+      className={'nfc-thumbnail-switch' + (compact ? ' is-compact' : '')}
       onClick={() => setShowThumbnails(!showThumbnails)}>
-      <span>显示媒体缩略图</span><span className="nfc-thumbnail-track" aria-hidden="true" />
+      {compact ? <ConsoleIcon name={showThumbnails ? 'image' : 'image-off'} size={17} /> :
+        <><span>显示媒体缩略图</span><span className="nfc-thumbnail-track" aria-hidden="true" /></>}
     </button>
   );
 }

@@ -207,7 +207,7 @@ async function assertConfirm(page, effectiveTheme, width, label) {
       (ms.webkitBackdropFilter === undefined || ms.webkitBackdropFilter === 'none'),
     'Scrim applies blur');
     check(cs.backgroundColor === (effectiveTheme === 'dark' ?
-      'rgb(36, 36, 34)' : 'rgb(255, 255, 255)'), 'Dialog surface ' + cs.backgroundColor);
+      'rgb(35, 39, 34)' : 'rgb(255, 254, 250)'), 'Dialog surface ' + cs.backgroundColor);
     check(rect.left >= -2 && rect.right <= width + 2, 'Horizontal overflow');
     check(rect.top >= -2 && rect.bottom <= innerHeight + 2, 'Vertical overflow');
     const x = Math.max(1, Math.min(width - 1, rect.left + rect.width / 2));

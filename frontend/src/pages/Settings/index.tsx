@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { settingsApi, dataLifecycleApi, auditApi, quarantineApi, resourcePolicyApi } from '../../api/domain';
@@ -143,6 +143,21 @@ export const SettingsPage: React.FC = () => {
   const prepareTicket = useRef(0);
   const mountedRef = useRef(true);
 
+  /** 放弃本次清理预览，释放其准备状态并允许重新发起。 */
+  function discardRetentionPreparation() {
+    prepareTicket.current += 1;
+    pendingActions.current.delete('audit-prepare');
+    setPrepareApplyPending(false);
+  }
+
+  useLayoutEffect(() => {
+    if (activeSection === 'retention') return;
+    discardRetentionPreparation();
+    if (!pendingActions.current.has('audit-action')) {
+      setConfirmation(current => current?.kind === 'retention' ? null : current);
+    }
+  }, [activeSection]);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -167,6 +182,9 @@ export const SettingsPage: React.FC = () => {
   const { data: resourcePolicy, isLoading: policyLoading, refetch: refetchResourcePolicy } = useQuery({
     queryKey: ['resourcePolicy'], queryFn: resourcePolicyApi.getPolicy, enabled: !!isAdmin,
   });
+  const savedWindowTimezone = resourcePolicy?.active_window_timezone;
+  const windowTimezones = savedWindowTimezone && !COMMON_TIMEZONES.includes(savedWindowTimezone)
+    ? [...COMMON_TIMEZONES, savedWindowTimezone] : COMMON_TIMEZONES;
   const { data: sessionsData, isLoading: sessionsLoading, isError: sessionsError,
     refetch: refetchSessions } = useQuery({
     queryKey: ['activeSessions'], queryFn: authApi.listSessions,
@@ -281,7 +299,7 @@ export const SettingsPage: React.FC = () => {
       toast.error(checked.error || '保留天数无效');
       return;
     }
-    prepareTicket.current += 1;
+    discardRetentionPreparation();
     setConfirmation(current => current?.kind === 'retention' ? null : current);
     void runOnce('audit-save', () => savePolicyMutation.mutateAsync(retentionDaysInput)).catch(() => {});
   };
@@ -334,8 +352,11 @@ export const SettingsPage: React.FC = () => {
         toast.error(failure(error, '无法获取最新保留策略或清理预览，请重试'));
       }
     } finally {
-      pendingActions.current.delete('audit-prepare');
-      if (mountedRef.current) setPrepareApplyPending(false);
+      // 新预览可能已开始，只有当前请求能释放该准备状态。
+      if (mountedRef.current && ticket === prepareTicket.current) {
+        pendingActions.current.delete('audit-prepare');
+        setPrepareApplyPending(false);
+      }
     }
   };
 
@@ -665,7 +686,7 @@ export const SettingsPage: React.FC = () => {
                       <span>时区</span>
                       <select value={windowTimezoneInput} disabled={saveResourcePolicyMutation.isPending}
                         onChange={event => setWindowTimezoneInput(event.target.value)}>
-                        {COMMON_TIMEZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
+                        {windowTimezones.map(tz => <option key={tz} value={tz}>{tz}</option>)}
                       </select>
                     </label>
                     <label className="nfc-settings-control">

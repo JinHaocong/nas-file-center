@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Outlet, Navigate, useLocation } from 'react-router-dom';
+import { Outlet, Navigate, matchPath, useLocation } from 'react-router-dom';
 
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspaceMotion } from '../hooks/useWorkspaceMotion';
@@ -14,8 +14,10 @@ import { useResponsive } from '../hooks/useResponsive';
 /** Mount the workspace and preserve the actual opener across menu navigation. */
 export const MainLayout: React.FC = () => {
   const { isAuthenticated, loading } = useAuth();
-  const { isMobile } = useResponsive();
-  const { pathname } = useLocation();
+  const { isMobile, isDesktop } = useResponsive();
+  const { pathname, search } = useLocation();
+  const fileSpace = Boolean(matchPath('/dashboard', pathname)) && new URLSearchParams(search).get('view') !== 'overview';
+  const [fileToolbar, setFileToolbar] = useState<HTMLDivElement | null>(null);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
 
@@ -57,13 +59,16 @@ export const MainLayout: React.FC = () => {
   }
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
-  return <div className="nfc-app-shell nfc-v2-shell nfc-studio">
+  return <div className={'nfc-app-shell nfc-v2-shell nfc-studio' + (fileSpace ? ' nfc-file-space-shell' : '')}>
     <a className="nfc-v2-skip-link" href="#main-content">跳转到主要内容</a>
     <div className="nfc-app-main nfc-v2-main">
-      <Header isMobile={isMobile} navigationOpen={navigationOpen} onOpenNavigation={openNavigation} />
+      <Header isMobile={isMobile} navigationOpen={navigationOpen} onOpenNavigation={openNavigation}
+        fileToolbarRef={fileSpace && isDesktop ? setFileToolbar : undefined} />
       <div className="nfc-workspace-frame">
         <WorkspaceNavigation />
-        <main ref={main} className="nfc-page-content nfc-v2-page-content" id="main-content" tabIndex={-1}><Outlet /></main>
+        <main ref={main} className="nfc-page-content nfc-v2-page-content" id="main-content" tabIndex={-1}>
+          <Outlet context={fileSpace && isDesktop ? fileToolbar : null} />
+        </main>
       </div>
       {isMobile && <MobileDock moreOpen={navigationOpen} onMore={openNavigation} />}
     </div>

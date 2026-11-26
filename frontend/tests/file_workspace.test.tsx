@@ -6,6 +6,7 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import TestRenderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import { filesystemApi } from '../src/api/filesystem';
+import { MediaThumbnail } from '../src/components/ui/MediaThumbnail';
 import { DashboardPage } from '../src/pages/Dashboard';
 
 const root = '/development/library';
@@ -50,9 +51,14 @@ test('file workspace opens directories deliberately and Back restores the parent
 
   const params = () => new URLSearchParams(view.root.findByType('output').children.join(''));
   const entry = () => view.root.findByProps({ title: album, type: 'button' });
+  assert.equal(view.root.findByProps({ 'aria-label': '列表视图', type: 'button' }).props['aria-pressed'], true);
+  await act(async () => { view.root.findByProps({ 'aria-label': '网格视图', type: 'button' }).props.onClick(); });
+  assert.equal(view.root.findByProps({ 'aria-label': '网格视图', type: 'button' }).props['aria-pressed'], true);
   await act(async () => { entry().props.onClick(); await settle(); });
   assert.equal(params().get('selected'), album);
   assert.equal(params().get('directory'), null);
+  const inspector = view.root.findByProps({ 'aria-label': '目录详情', className: 'nfc-file-workspace-inspector' });
+  assert.deepEqual(inspector.findByType(MediaThumbnail).props, { path: album, kind: 'directory', size: 'cover' });
 
   await act(async () => { entry().props.onDoubleClick(); await settle(); });
   assert.equal(params().get('directory'), album);

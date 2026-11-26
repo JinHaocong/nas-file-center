@@ -88,6 +88,7 @@ const modeIcon = (mode: WorkflowMode) => {
 type PendingWorkflowConfirmation =
   | { kind: 'mode'; targetMode: WorkflowMode }
   | { kind: 'back' }
+  | { kind: 'revision'; revision: number }
   | { kind: 'rollback'; revision: number; expectedRevision: number };
 
 export const WorkflowBuilderPage: React.FC = () => {
@@ -285,6 +286,18 @@ export const WorkflowBuilderPage: React.FC = () => {
     else navigate('/workflows');
   };
 
+  /** Close the drawer after the editor allows navigation to a saved revision. */
+  function openHistoricalRevision(revision: number) {
+    setRevisionDrawerOpen(false);
+    navigate(`/workflows/${workflowId}?revision=${revision}`);
+  }
+
+  /** Keep the drawer and draft in place while a jump awaits confirmation. */
+  function handleRevisionJump(revision: number) {
+    if (isDirty) setConfirmation({ kind: 'revision', revision });
+    else openHistoricalRevision(revision);
+  }
+
   const confirmWorkflowAction = () => {
     if (!confirmation) return;
     if (confirmation.kind === 'mode') {
@@ -299,6 +312,11 @@ export const WorkflowBuilderPage: React.FC = () => {
     if (confirmation.kind === 'back') {
       setConfirmation(null);
       navigate('/workflows');
+      return;
+    }
+    if (confirmation.kind === 'revision') {
+      setConfirmation(null);
+      openHistoricalRevision(confirmation.revision);
       return;
     }
     if (rollbackInFlight.current || rollbackMutation.isPending) return;
@@ -552,17 +570,20 @@ export const WorkflowBuilderPage: React.FC = () => {
         open={confirmation !== null}
         onOpenChange={open => { if (!open && !rollbackMutation.isPending) setConfirmation(null); }}
         title={confirmation?.kind === 'mode' ? '切换工作流模式'
-          : confirmation?.kind === 'back' ? '未保存的更改' : '确认回滚历史版本'}
+          : confirmation?.kind === 'back' || confirmation?.kind === 'revision' ? '未保存的更改' : '确认回滚历史版本'}
         description={confirmation?.kind === 'mode'
           ? '切换到 ' + modeLabel(confirmation.targetMode) +
             ' 将重置流水线步骤为该模式的标准默认拓扑。确定切换吗？'
           : confirmation?.kind === 'back'
             ? '当前工作流存在未保存的修改，退出将丢失这些修改，确认返回吗？'
-            : '系统将基于历史版本 r' +
-              (confirmation?.kind === 'rollback' ? confirmation.revision : '') +
-              ' 的定义生成新修订版本并恢复至当前。'}
+            : confirmation?.kind === 'revision'
+              ? `确认后将丢弃未保存的修改并查看历史版本 r${confirmation.revision}。`
+              : '系统将基于历史版本 r' +
+                (confirmation?.kind === 'rollback' ? confirmation.revision : '') +
+                ' 的定义生成新修订版本并恢复至当前。'}
         confirmText={confirmation?.kind === 'mode' ? '确认重置并切换'
-          : confirmation?.kind === 'back' ? '确认退出' : '确认回滚'}
+          : confirmation?.kind === 'back' ? '确认退出'
+            : confirmation?.kind === 'revision' ? '确认跳转' : '确认回滚'}
         danger={confirmation?.kind !== 'mode'}
         busy={rollbackMutation.isPending && confirmation?.kind === 'rollback'}
         disabled={confirmation?.kind === 'mode' && !canSwitchMode}
@@ -577,6 +598,7 @@ export const WorkflowBuilderPage: React.FC = () => {
           isBuiltin={workflow.is_builtin}
           isArchived={isArchived}
           onClose={() => setRevisionDrawerOpen(false)}
+          onJumpToRevision={handleRevisionJump}
           onRollbackSuccess={() => refetch()}
         />
       )}

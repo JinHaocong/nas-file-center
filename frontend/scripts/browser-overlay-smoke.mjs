@@ -93,6 +93,7 @@ async function inspect(page, theme, width) {
     const dirOverlay = css('.nfc-v2-directory-overlay');
     const primary = css('.nfc-v2-directory-dialog .nfc-console-button-primary');
     const expected = theme === 'dark' ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
+    const scanPaper = theme === 'dark' ? 'rgb(35, 39, 34)' : 'rgb(255, 254, 250)';
     const expectedButtonText = theme === 'dark' ? 'rgb(32, 32, 31)' : 'rgb(255, 255, 255)';
     const errors = [];
     const check = (pass, message) => { if (!pass) errors.push(message); };
@@ -105,7 +106,7 @@ async function inspect(page, theme, width) {
         (overlay.webkitFilter === undefined || overlay.webkitFilter === 'none'),
         name + ' scrim has blur/filter: ' + overlay.filter + ' / ' + overlay.webkitFilter);
     }
-    check(scan.background === expected, 'Scan modal background: ' + scan.background);
+    check(scan.background === scanPaper, 'Scan modal background: ' + scan.background);
     check(directory.background === expected, 'Directory modal background: ' + directory.background);
     check(primary.color === expectedButtonText, 'Directory primary text: ' + primary.color);
     check(scanOverlay.z === 1190 && scan.z === 1191,

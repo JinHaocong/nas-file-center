@@ -12,6 +12,7 @@ interface Props {
   isMobile: boolean;
   navigationOpen: boolean;
   onOpenNavigation: React.MouseEventHandler<HTMLButtonElement>;
+  fileToolbarRef?: React.Ref<HTMLDivElement>;
 }
 
 /** Close a native disclosure and return keyboard focus to its visible trigger. */
@@ -22,7 +23,7 @@ function dismissMenu(menu: HTMLDetailsElement | null, restoreFocus = false) {
 }
 
 /** Global workspace navigation, session controls and live safety indicators. */
-export const Header: React.FC<Props> = ({ isMobile, navigationOpen, onOpenNavigation }) => {
+export const Header: React.FC<Props> = ({ isMobile, navigationOpen, onOpenNavigation, fileToolbarRef }) => {
   const { user, logout } = useAuth();
   const { mode, setMode } = useTheme();
   const location = useLocation();
@@ -62,28 +63,29 @@ export const Header: React.FC<Props> = ({ isMobile, navigationOpen, onOpenNaviga
   }, []);
 
   return <>
-    <header className="nfc-header nfc-v2-header" ref={header}>
+    <header className={'nfc-header nfc-v2-header' + (fileToolbarRef ? ' has-file-toolbar' : '')} ref={header}>
       <div className="nfc-header-left nfc-v2-header-left">
         <Link className="nfc-studio-brand" to="/dashboard" aria-label="NAS File Center 文件空间">
           <span className="nfc-studio-mark"><ConsoleIcon name="hard-drive" size={18} /></span>
           <strong>NAS File Center</strong>
         </Link>
-        <div className="nfc-v2-breadcrumb">
+        {!fileToolbarRef && <div className="nfc-v2-breadcrumb">
           <span>文件空间</span><ConsoleIcon name="chevron-right" size={13} />
           <strong>{navLabel(location.pathname, location.search)}</strong>
-        </div>
+        </div>}
       </div>
-      <nav className="nfc-studio-shortcuts" aria-label="常用页面" data-selected={tabIndex >= 0} style={tabStyle}>
-        {primaryDestinations.map(item => <Link key={item.path} to={item.path}
-          aria-current={selected === item.path ? 'page' : undefined}>{item.label}</Link>)}
-      </nav>
+      {fileToolbarRef ? <div className="nfc-header-file-toolbar" ref={fileToolbarRef} /> :
+        <nav className="nfc-studio-shortcuts" aria-label="常用页面" data-selected={tabIndex >= 0} style={tabStyle}>
+          {primaryDestinations.map(item => <Link key={item.path} to={item.path}
+            aria-current={selected === item.path ? 'page' : undefined}>{item.label}</Link>)}
+        </nav>}
       <div className="nfc-header-command-cluster">
         <div className="nfc-header-status" aria-label="系统安全与任务状态">
           <SafeModeBadge /><WorkerStatusBadge />
         </div>
         <button type="button" className="nfc-v2-icon-button nfc-header-nav-toggle" onClick={onOpenNavigation}
           aria-label="打开导航菜单" aria-haspopup="dialog" aria-expanded={navigationOpen} aria-keyshortcuts="Control+K Meta+K" title="所有工具">
-          <ConsoleIcon name="search" size={16} /><span>查找工具</span><kbd aria-hidden="true">{typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd>
+          <ConsoleIcon name={fileToolbarRef ? 'menu' : 'search'} size={16} /><span>查找工具</span><kbd aria-hidden="true">{typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd>
         </button>
         <details className="nfc-v2-dropdown">
           <summary className="nfc-v2-icon-button" aria-label="切换界面主题" title="切换主题">

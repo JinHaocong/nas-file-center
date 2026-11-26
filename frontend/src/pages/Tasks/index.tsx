@@ -93,7 +93,7 @@ export const TasksPage: React.FC = () => {
     }
   }
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching, isPlaceholderData } = useQuery({
     queryKey: ['tasksList', page, pageSize, statusFilter, jobTypeFilter],
     queryFn: () =>
       tasksApi.listTasks({
@@ -102,6 +102,10 @@ export const TasksPage: React.FC = () => {
         status: statusFilter === 'all' ? undefined : statusFilter,
         jobType: jobTypeFilter === 'all' ? undefined : jobTypeFilter,
       }),
+    // Keep same-filter pagination mounted without keeping operations from the previous page visible.
+    placeholderData: (previous, previousQuery) => previous && previousQuery?.queryKey[3] === statusFilter &&
+      previousQuery.queryKey[4] === jobTypeFilter
+      ? { items: [], total: previous.total, page, page_size: pageSize } : undefined,
     refetchInterval: (query) => {
       const items = query.state.data?.items || [];
       const hasActive = items.some(
@@ -246,7 +250,7 @@ export const TasksPage: React.FC = () => {
 
         {isError ? (
           <ConsoleEmpty title="暂时无法显示任务" description="请先恢复任务服务连接，已有任务不会受到影响。" />
-        ) : isLoading ? (
+        ) : isLoading || isPlaceholderData ? (
           <div className="nfc-v2-task-loading" role="status">正在加载任务列表…</div>
         ) : items.length === 0 ? (
           <ConsoleEmpty title={noItemsTitle} description={noItemsDescription} />

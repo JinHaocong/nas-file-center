@@ -388,6 +388,8 @@ try {
             visibleChars: visible.length,
             horizontalOverflow: document.documentElement.scrollWidth - window.innerWidth,
             mainRight: area?.right ?? null,
+            mainDocumentBottom: area ? area.bottom + window.scrollY : null,
+            viewportHeight: window.innerHeight,
             hasShell: Boolean(shell),
             busy: Boolean(main?.querySelector('.nfc-session-loading')),
             mobileHeader: header && identity && commandCluster && left && parentCrumb ? {
@@ -409,6 +411,8 @@ try {
         if (audit.busy) problems.push('Still showing session loading');
         if (audit.horizontalOverflow > 3) problems.push(
           'Document horizontal overflow: ' + audit.horizontalOverflow + 'px');
+        if (width <= 767 && !item.public && (audit.mainDocumentBottom ?? 0) < audit.viewportHeight - 2)
+          problems.push('Mobile workspace exposes the legacy canvas below short content');
         if (width <= 768 && !item.public) {
           const h = audit.mobileHeader;
           if (!h) problems.push('Mobile page header controls are missing');

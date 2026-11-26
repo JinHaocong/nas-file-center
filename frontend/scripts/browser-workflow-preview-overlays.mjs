@@ -140,7 +140,7 @@ async function assertPortal(page, effectiveTheme, width, label) {
       (os.webkitBackdropFilter === undefined || os.webkitBackdropFilter === 'none'),
     'Scrim must not blur');
     check(cs.backgroundColor === (effectiveTheme === 'dark' ?
-      'rgb(36, 36, 34)' : 'rgb(255, 255, 255)'), 'Dialog surface ' + cs.backgroundColor);
+      'rgb(35, 39, 34)' : 'rgb(255, 254, 250)'), 'Dialog surface ' + cs.backgroundColor);
     check(rect.left >= -2 && rect.right <= width + 2, 'Horizontal viewport overflow');
     check(rect.top >= -2 && rect.bottom <= innerHeight + 2, 'Vertical viewport overflow');
     const x = Math.max(1, Math.min(width - 1, rect.left + rect.width / 2));

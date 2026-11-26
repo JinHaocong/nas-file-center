@@ -21,7 +21,7 @@
 .nfc-reading-picker .nfc-directory-list-viewport[aria-busy='true'] .nfc-v2-directory-list { opacity: .6; }
 .nfc-reading-picker .nfc-v2-directory-list li.is-selected {
   box-shadow: inset 3px 0 var(--nfc-tint, var(--nfc-dialog-accent));
-  background: var(--nfc-tint-soft, var(--nfc-dialog-surface));
+  background: color-mix(in srgb, var(--nfc-tint-soft, var(--nfc-dialog-surface)) 90%, transparent);
 }
 .nfc-reading-picker .nfc-v2-directory-list li:not(.is-selected):hover { background-color: var(--nfc-dialog-surface); }
 .nfc-reading-picker .nfc-directory-pagination-row { min-height: 32px; }

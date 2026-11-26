@@ -24,6 +24,7 @@ interface RevisionDrawerProps {
   isBuiltin?: boolean;
   isArchived?: boolean;
   onClose: () => void;
+  onJumpToRevision?: (revision: number) => void;
   onRollbackSuccess: (res: WorkflowResponse) => void;
 }
 
@@ -79,7 +80,7 @@ const CopyableRevisionDigest: React.FC<{ sha: string }> = ({ sha }) => {
 /** Read-only historical inspection; only an authorized, confirmed rollback mutates data. */
 export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
   open, workflowId, currentRevision, isBuiltin = false, isArchived = false,
-  onClose, onRollbackSuccess,
+  onClose, onJumpToRevision, onRollbackSuccess,
 }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -130,11 +131,17 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
     onClose();
   };
 
-  const jumpToRevision = (revision: number) => {
+  /** Let the editor decide whether leaving its draft requires confirmation. */
+  function jumpToRevision(revision: number) {
     if (!Number.isSafeInteger(revision) || revision < 1 || !revisionNumbers.includes(revision)) return;
+    if (rollbackMutation.isPending || rollbackInFlight.current) return;
+    if (onJumpToRevision) {
+      onJumpToRevision(revision);
+      return;
+    }
     handleClose();
     navigate(`/workflows/${workflowId}?revision=${revision}`);
-  };
+  }
 
   const requestRollback = (revision: number) => {
     if (!isAllowedRollback(revision)) return;
