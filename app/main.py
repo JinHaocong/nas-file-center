@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import math
 from pathlib import Path
 from typing import Any
@@ -15,9 +16,11 @@ from app.download_verification.router import router as download_verification_rou
 from app.download_verification.router_sources import router as download_verification_sources_router
 from app.archive_recovery.router import router as archive_recovery_router
 from app.api.quarantine_bulk import router as quarantine_bulk_router
+from app.api.zspace_authorization import router as zspace_authorization_router
 from app.auth.dependencies import get_current_user
 from app.auth.rate_limiter import LoginRateLimiter
 from app.auth.router import router as auth_router
+from app.batch.zspace_authorization import ZSpaceAuthorization
 from app.config import Settings, get_settings
 from app.exceptions import PlanStaleError
 from app.quarantine.service_adapter import Gate6A2FileCenterService
@@ -44,16 +47,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     service = Gate6A2FileCenterService(settings)
     rate_limiter = LoginRateLimiter()
+    zspace_authorization = ZSpaceAuthorization(settings)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            zspace_authorization.close()
 
     # Disable default public docs/openapi URLs
     app = FastAPI(
         title="NAS File Center",
-        version="2.0.2",
+        version="2.0.3",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=lifespan,
     )
     app.state.service = service
+    app.state.zspace_authorization = zspace_authorization
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -142,6 +155,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(download_verification_router)
     app.include_router(api_router)
     app.include_router(media_organizer_router)
+    app.include_router(zspace_authorization_router)
 
     # React Frontend SPA Hosting (TASK-031-03)
     frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"

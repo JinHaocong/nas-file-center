@@ -153,3 +153,25 @@
   .nfc-settings-section-nav { gap: 2px; }
   .nfc-settings-section-nav button { min-height: 44px; padding-inline: 7px; font-size: 12px; }
 }
+.nfc-zspace-authorization-form {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.nfc-zspace-authorization-form > a { width: fit-content; text-decoration: none; }
+.nfc-zspace-authorization-form label { display: grid; gap: 6px; font-weight: 650; }
+.nfc-zspace-authorization-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 11px;
+  border: 1px solid var(--nfc-hairline);
+  border-radius: var(--nfc-radius-control);
+  background: var(--nfc-surface-1);
+  color: var(--nfc-text);
+}
+.nfc-zspace-authorization-form input:focus-visible {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: 2px;
+}
+.nfc-zspace-authorization-form > p { margin: 0; }

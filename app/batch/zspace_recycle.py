@@ -67,17 +67,27 @@ class ZSpaceRecycleClient:
         return self.remote_root + "/" + relative.as_posix()
 
     def _run(self, action: str, params: dict, *, confirm: bool = False):
-        args = [str(self.executable), "--profile", self.profile, "--timeout", str(_CLI_TIMEOUT),
-                "file", action, "--params", json.dumps(params, ensure_ascii=False)]
+        args = ["file", action, "--params", json.dumps(params, ensure_ascii=False)]
         if confirm:
             args.append("--yes")
+        return self.run_cli(*args)
+
+    def cli_arguments(self, *args: str) -> list[str]:
+        return [str(self.executable), "--profile", self.profile, "--timeout", str(_CLI_TIMEOUT), *args]
+
+    def cli_environment(self) -> dict[str, str]:
         # The official CLI needs its runtime and credential location, never the application's secrets.
         env = {key: os.environ[key] for key in _CLI_ENV if key in os.environ}
         if self.cli_home is not None:
             env["ZSPACE_CLI_HOME"] = str(self.cli_home)
+        return env
+
+    def run_cli(self, *args: str):
         try:
-            result = subprocess.run(args, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                    stderr=subprocess.DEVNULL, check=False, timeout=_CLI_TIMEOUT + 3)
+            result = subprocess.run(
+                self.cli_arguments(*args), env=self.cli_environment(), stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False, timeout=_CLI_TIMEOUT + 3,
+            )
         except subprocess.TimeoutExpired:
             raise ZSpaceRecycleError("极空间命令超时，回收结果待核对") from None
         except OSError:

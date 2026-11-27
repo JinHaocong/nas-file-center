@@ -125,6 +125,19 @@ test('leaving retention via browser Back discards the outstanding cleanup confir
   assert.equal(view.root.findByType(ConsoleConfirmDialog).props.open, false);
 });
 
+test('the safety tab offers ZSpace authorization to an administrator', async t => {
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    assert.equal(String(input), '/api/settings/zspace-authorization');
+    return Response.json({ status: 'needs_login' });
+  });
+  const { view } = await openSettings(t, '/settings#safety');
+  const buttons = () => view.root.findAllByType(ConsoleButton);
+  for (let attempt = 0; attempt < 30 && !buttons().some(button => button.props.children === '连接极空间'); attempt++) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); });
+  }
+  assert.ok(buttons().some(button => button.props.children === '连接极空间'));
+});
+
 test('a discarded cleanup preview cannot clear the pending state of a later request', async t => {
   const queries: Array<(preview: AuditRetentionPreview) => void> = [];
   t.mock.method(auditApi, 'getRetentionPreview', () => new Promise<AuditRetentionPreview>(resolve => { queries.push(resolve); }));

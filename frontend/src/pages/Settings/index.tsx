@@ -17,6 +17,7 @@ import {
   COMMON_TIMEZONES, validateResourcePolicyUpdate, getProfileDisplay,
 } from '../../components/settings/resource_policy';
 import { PageHeader } from '../../components/ui/PageHeader';
+import { ZSpaceAuthorization } from '../../components/settings/ZSpaceAuthorization';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ThumbnailSwitch } from '../../components/ui/MediaThumbnail';
 import { ActionBar } from '../../components/ui/ActionBar';
@@ -478,6 +479,7 @@ export const SettingsPage: React.FC = () => {
                 {settings?.allowed_roots.map((root, idx) => <CodePath value={root} key={idx} />)}
               </div> },
           ]} />
+          {isAdmin && <div className="nfc-settings-panel-body"><ZSpaceAuthorization /></div>}
         </DataPanel>}
 
         {activeSection === 'retention' && <DataPanel title="数据生命周期与审计保留策略" id="retention"
