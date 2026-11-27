@@ -14,6 +14,6 @@ export const zspaceAuthorizationApi = {
   status: () => api.get<{ status: ZSpaceAuthorizationStatus }>(endpoint),
   start: () => api.post<ZSpaceAuthorizationAttempt>(endpoint + '/start', {}),
   complete: (id: string, code: string) =>
-    api.post<{ status: 'authorized'; mapping_verified: boolean }>(endpoint + '/complete', { id, code }),
+    api.post<{ status: 'authorized' }>(endpoint + '/complete', { id, code }),
   cancel: (id: string) => api.delete<void>(endpoint + '/pending/' + encodeURIComponent(id)),
 };

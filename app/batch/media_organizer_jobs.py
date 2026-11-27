@@ -19,7 +19,7 @@ from app.batch.media_organizer_archive import PROMOTE_ARCHIVE_CHILDREN
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_organizer_planner import is_reserved_workspace
 from app.batch.media_organizer_recycle import (
-    PROBE_NAME, RECYCLE_DOWNLOAD_EXTRAS, identity as recycle_identity,
+    LEGACY_RECYCLE_PROBE_NAME, RECYCLE_DOWNLOAD_EXTRAS, identity as recycle_identity,
     iter_recycle_candidates, omit_recycle_files, zspace_client,
 )
 from app.batch.media_organizer_recycle_rules import check as check_recycle_candidate
@@ -363,7 +363,7 @@ def enqueue_batch(session_factory, settings: Settings, preview_id: int) -> dict:
         if summary.get("recycle_count"):
             client = zspace_client(settings)
             if client is None or client.binding_id() != summary.get("recycle_binding"):
-                raise ValueError("极空间回收配置已变化，请重新扫描")
+                raise ValueError("极空间回收预览已失效，请重新扫描")
         return _receipt(_new_job(session, settings, BATCH_KIND, {
             "selection": state["selection"], "preview_job_id": preview_id,
         }, units=summary["unit_count"]))
@@ -471,11 +471,11 @@ class MediaOrganizerPreviewHandler(TaskHandler):
         client = zspace_client(settings)
         extras = list(iter_recycle_candidates(selection, settings, check_cancelled)) if client else []
         if extras:
-            summary.update(recycle_count=len(extras), recycle_binding=client.verify_mapping())
+            summary.update(recycle_count=len(extras), recycle_binding=client.binding_id())
         omissions = frozenset(Path(row["unit"]) for row in extras)
         if client:
             summary["recycle_projection"] = True
-            omissions |= {settings.data_mount / PROBE_NAME}
+            omissions |= {settings.data_mount / LEGACY_RECYCLE_PROBE_NAME}
         with omit_recycle_files(omissions), _report_file(report / "units.jsonl") as stream:
             media = iter_organizing_previews(
                 selection, allowed_roots=settings.allowed_roots, quarantine_root=settings.quarantine_root,
@@ -667,12 +667,13 @@ class MediaOrganizerBatchHandler(TaskHandler):
         summary = _plan_summary(report)
         client = zspace_client(settings) if summary.get("recycle_count") else None
         if summary.get("recycle_count") and (
-            client is None or client.verify_mapping() != summary.get("recycle_binding")
+            client is None or client.binding_id() != summary.get("recycle_binding")
         ):
-            raise ValueError("极空间回收配置或绑定路径已变化，请重新扫描")
+            raise ValueError("极空间回收预览已失效，请重新扫描")
         checkpoint = json.loads(job.checkpoint_json or '{"schema_version":1}')
         previous_intent = checkpoint.get("_zspace_recycle_ordinal")
-        omissions = frozenset({settings.data_mount / PROBE_NAME}) if summary.get("recycle_projection") else frozenset()
+        omissions = (frozenset({settings.data_mount / LEGACY_RECYCLE_PROBE_NAME})
+                     if summary.get("recycle_projection") else frozenset())
         folder = settings.reports_dir / "organizer-v1-executions" / str(job.id)
         if client is not None:
             folder.mkdir(mode=0o750, parents=True, exist_ok=True)

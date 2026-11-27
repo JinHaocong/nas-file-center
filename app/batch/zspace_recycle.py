@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 import hashlib
@@ -13,7 +12,6 @@ import subprocess
 import time
 
 
-PROBE_NAME = ".nfc-zspace-recycle-probe"
 _CLI_TIMEOUT = 12
 _CONFIRM_TIMEOUT = 5.0
 _CLI_ENV = ("PATH", "HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR", "LANG", "LC_ALL",
@@ -102,61 +100,14 @@ class ZSpaceRecycleClient:
             raise ZSpaceRecycleError("极空间命令未确认成功")
         return payload["data"]
 
-    def _read_probe(self) -> bytes:
-        probe = self.local_root / PROBE_NAME
-        try:
-            if self.local_root.resolve(strict=True) != self.local_root:
-                raise ValueError
-            initial = probe.lstat()
-            if not stat.S_ISREG(initial.st_mode) or initial.st_size not in (64, 65) or initial.st_nlink != 1:
-                raise ValueError
-            fd = os.open(probe, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-            try:
-                opened = os.fstat(fd)
-                if not stat.S_ISREG(opened.st_mode) or _identity(initial) != _identity(opened):
-                    raise ValueError
-                content = os.read(fd, 66)
-                if _identity(os.fstat(fd)) != _identity(initial) or _identity(probe.lstat()) != _identity(initial):
-                    raise ValueError
-            finally:
-                os.close(fd)
-        except (OSError, RuntimeError, ValueError):
-            raise ZSpaceRecycleError("容器映射根的极空间验证标记缺失、无效或已变化") from None
-        if not re.fullmatch(rb"[0-9a-f]{64}\n?", content):
-            raise ZSpaceRecycleError("容器映射根的极空间验证标记格式无效")
-        return content
-
-    def _binding_id(self, probe: bytes) -> str:
+    def binding_id(self) -> str:
+        """Freeze the configured destination for the lifetime of the preview."""
         home = [str(self.cli_home)] if self.cli_home is not None else [
             str(Path.home()), os.environ.get("XDG_CONFIG_HOME", ""),
         ]
-        config = [str(self.executable), self.profile, str(self.local_root), self.remote_root,
-                  *home]
-        return hashlib.sha256(json.dumps(config).encode("utf-8") + b"\0" + probe).hexdigest()
-
-    def binding_id(self) -> str:
-        """Freeze the selected local configuration and probe without any NAS request."""
-        return self._binding_id(self._read_probe())
-
-    def verify_mapping(self) -> str:
-        """Use a bounded NAS read to prove the configured profile exposes the same root."""
-        expected = self._read_probe()
-        path = self.remote_path(self.local_root / PROBE_NAME)
-        data = self._run("read", {"path": path, "max_bytes": 66, "encoding": "base64"})
-        try:
-            if (not isinstance(data, dict) or data.get("path") != path or data.get("encoding") != "base64"
-                    or data.get("offset") != 0 or data.get("truncated") is not False
-                    or data.get("size") != len(expected) or data.get("bytes") != len(expected)):
-                raise ValueError
-            encoded = data.get("content")
-            if not isinstance(encoded, str) or len(encoded) > 88:
-                raise ValueError
-            observed = base64.b64decode(encoded, validate=True)
-            if observed != expected or self._read_probe() != expected:
-                raise ValueError
-        except ValueError:
-            raise ZSpaceRecycleError("极空间验证标记与容器路径不匹配") from None
-        return self._binding_id(expected)
+        config = [str(self.executable), self.profile, str(self.local_root), self.remote_root, *home]
+        # Version the fingerprint so older recycle previews must be renewed.
+        return "config-v1:" + hashlib.sha256(json.dumps(config).encode("utf-8")).hexdigest()
 
     def _local_identity(self, path: Path) -> tuple[int, int, int, int] | None:
         try:

@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.auth.password import hash_password
-from app.batch.zspace_recycle import PROBE_NAME
 from app.config import Settings
 from app.main import create_app
 from app.models import User
@@ -18,13 +17,12 @@ ENDPOINT = "/api/settings/zspace-authorization"
 ORIGIN = {"Origin": "http://testserver"}
 CODE = "TEST-DATA-1234-ABCD"
 AUTH_URL = "https://oauth.zconnect.cn/wbui/authorize?state=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb&client_id=ZspCli"
-MARKER = "ef" * 32 + "\n"
 
 
-def _fake_cli(path: Path, *, auth_url: str, expires: int, maps_to_data: bool) -> None:
+def _fake_cli(path: Path, *, auth_url: str, expires: int) -> None:
     path.write_text(
         f"#!{sys.executable}\n"
-        "import base64, json, os, sys\n"
+        "import json, os, sys\n"
         "from pathlib import Path\n"
         "args = sys.argv[1:]\n"
         "session = Path(os.environ['ZSPACE_CLI_HOME']) / 'fixture-authorized'\n"
@@ -44,16 +42,6 @@ def _fake_cli(path: Path, *, auth_url: str, expires: int, maps_to_data: bool) ->
         "    print(json.dumps({'ok':True,'data':{'token':code}}))\n"
         "elif args[-1] == 'status':\n"
         "    print(json.dumps({'ok':True,'data':{'logged_in':session.exists()}}))\n"
-        "elif args[-1] == 'doctor':\n"
-        "    assert session.exists()\n"
-        "    print(json.dumps({'ok':True,'data':{}}))\n"
-        "elif 'read' in args:\n"
-        "    assert session.exists()\n"
-        "    payload = json.loads(args[-1])\n"
-        f"    assert payload['path'] == '/sata11/my/data/{PROBE_NAME}'\n"
-        f"    data = {MARKER.encode()!r} if {maps_to_data!r} else b'0'*65\n"
-        "    print(json.dumps({'ok':True,'data':{'path':payload['path'],'offset':0,'size':len(data),"
-        "'bytes':len(data),'truncated':False,'encoding':'base64','content':base64.b64encode(data).decode()}}))\n"
         "else:\n"
         "    sys.exit(3)\n",
         encoding="utf-8",
@@ -61,15 +49,14 @@ def _fake_cli(path: Path, *, auth_url: str, expires: int, maps_to_data: bool) ->
     path.chmod(0o700)
 
 
-def _app(tmp_path: Path, *, mapped: bool = True, auth_url: str = AUTH_URL, expires: int = 180):
+def _app(tmp_path: Path, *, auth_url: str = AUTH_URL, expires: int = 180):
     cli = (tmp_path / "cli").resolve()
     profile = (tmp_path / "profile").resolve()
     profile.mkdir(mode=0o700)
     data = (tmp_path / "data").resolve()
     data.mkdir()
-    (data / PROBE_NAME).write_text(MARKER, encoding="ascii")
     config = (tmp_path / "config").resolve()
-    _fake_cli(cli, auth_url=auth_url, expires=expires, maps_to_data=mapped)
+    _fake_cli(cli, auth_url=auth_url, expires=expires)
     return create_app(Settings(
         _env_file=None, CONFIG_DIR=config, DATA_MOUNT=data,
         ALLOWED_ROOTS=str(data), QUARANTINE_ROOT=data / "quarantine",
@@ -85,10 +72,9 @@ def _login(client: TestClient, name: str = "admin"):
     }).status_code == 200
 
 
-@pytest.mark.parametrize("mapped", [True, False])
-def test_admin_authorizes_worker_with_one_time_code(tmp_path, monkeypatch, mapped):
+def test_admin_authorizes_worker_without_a_mapping_marker(tmp_path, monkeypatch):
     monkeypatch.setenv("NFC_TEST_SECRET", "do-not-pass-to-cli")
-    with TestClient(_app(tmp_path, mapped=mapped)) as client:
+    with TestClient(_app(tmp_path)) as client:
         assert client.get(ENDPOINT).status_code == 401
         _login(client)
         assert client.get(ENDPOINT).json() == {"status": "needs_login"}
@@ -101,7 +87,7 @@ def test_admin_authorizes_worker_with_one_time_code(tmp_path, monkeypatch, mappe
             "id": authorization["id"], "code": CODE,
         })
         assert result.status_code == 200, result.text
-        assert result.json() == {"status": "authorized", "mapping_verified": mapped}
+        assert result.json() == {"status": "authorized"}
         assert CODE not in result.text
         assert client.get(ENDPOINT).json() == {"status": "authorized"}
         duplicate = client.post(f"{ENDPOINT}/complete", headers=ORIGIN, json={

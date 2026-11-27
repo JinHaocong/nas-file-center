@@ -2,7 +2,7 @@
 
 面向自托管 NAS 的中文 Web 文件工具。可以从一个目录开始整理照片和视频，跨目录查找重复文件，或把反复执行的归档流程保存成工作流。扫描和媒体整理在后台运行，关闭页面后可以回到任务中心查看结果。
 
-**已发布镜像 `kerwinjhc/nas-file-center:2.0.3`** · `linux/amd64`
+**已发布镜像 `kerwinjhc/nas-file-center:2.0.4`** · `linux/amd64`
 
 [Docker Hub](https://hub.docker.com/r/kerwinjhc/nas-file-center/tags) · [镜像构建](https://github.com/JinHaocong/nas-file-center/actions/workflows/dockerhub-publish.yml) · [发布验证](https://github.com/JinHaocong/nas-file-center/actions/workflows/release-validation.yml)
 
@@ -152,10 +152,10 @@ docker compose ps
 ```yaml
 services:
   api:
-    image: kerwinjhc/nas-file-center:2.0.3
+    image: kerwinjhc/nas-file-center:2.0.4
     platform: linux/amd64
   worker:
-    image: kerwinjhc/nas-file-center:2.0.3
+    image: kerwinjhc/nas-file-center:2.0.4
     platform: linux/amd64
 ```
 
@@ -198,7 +198,7 @@ docker compose -f compose.yaml -f compose.image.yaml up -d --no-build --pull alw
 
 为 API 和 Worker 配置极空间官方 CLI、授权 profile 和目录映射后，智能媒体整理会在所选范围内单列待回收文件。适用于 Luolcy 和非 Luolcy 目录。 [配置示例](config.example.env)
 
-管理员可在「系统设置 → 安全状态 → 极空间授权」绑定或重新授权。打开极空间授权页，选定设备并授权，再把一次性授权码填回设置页。系统会保存 Worker 的授权会话，并核对目录映射。使用网页授权时，API 与 Worker 需要挂载同一份只读 CLI 和私有授权卷。
+管理员可在「系统设置 → 安全状态 → 极空间授权」绑定或重新授权。打开极空间授权页，选定设备并授权，再把一次性授权码填回设置页。使用网页授权时，API 与 Worker 需要挂载同一份只读 CLI 和私有授权卷。回收使用部署中配置的目录映射，极空间路径应对应容器的 `DATA_MOUNT`。
 
 - `.url` 快捷方式可回收。扩展名匹配不区分大小写。
 - `.txt` 仅回收完整内容为 HTTP(S) 链接或明确推广的普通文件。作品说明、提取码说明、字幕和媒体文件按原整理规则处理。

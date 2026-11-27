@@ -10,12 +10,13 @@ from typing import TYPE_CHECKING, Callable, Iterator
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_recycle_rules import check
-from app.batch.zspace_recycle import PROBE_NAME, ZSpaceRecycleClient
+from app.batch.zspace_recycle import ZSpaceRecycleClient
 
 if TYPE_CHECKING:
     from app.config import Settings
 
 RECYCLE_DOWNLOAD_EXTRAS = "recycle_download_extras"
+LEGACY_RECYCLE_PROBE_NAME = ".nfc-zspace-recycle-probe"
 _RECYCLE_DIRS = frozenset({".recycle", "#recycle", "@recycle", "@eadir", "@recently-snapshot"})
 _omitted: ContextVar[frozenset[Path]] = ContextVar("organizer_omitted_recycle_paths", default=frozenset())
 

@@ -18,25 +18,18 @@ def _configured_fixture(tmp_path, monkeypatch):
     cli = tmp_path / "zspace-fixture"
     cli.write_text(
         f"#!{sys.executable}\n"
-        "import base64, json, sys\n"
+        "import json, sys\n"
         "from pathlib import Path, PurePosixPath\n"
         f"data, trash = Path({str(data)!r}), Path({str(trash)!r})\n"
         "args = sys.argv[1:]\n"
         "payload = json.loads(args[args.index('--params') + 1])\n"
         "def path(value):\n"
         "    return data / PurePosixPath(value).relative_to('/sata11/my/data')\n"
-        "if 'read' in args:\n"
-        "    content = path(payload['path']).read_bytes()\n"
-        "    result = {'content': base64.b64encode(content).decode(), "
-        "'encoding': 'base64', 'path': payload['path'], 'offset': 0, 'truncated': False, "
-        "'size': len(content), 'bytes': len(content)}\n"
-        "else:\n"
-        "    assert 'delete' in args and '--yes' in args and not payload.get('select_all')\n"
-        "    assert str(payload.get('skip_bin', '0')) == '0' and len(payload['paths']) == 1\n"
-        "    source = path(payload['paths'][0])\n"
-        "    source.rename(trash / source.name)\n"
-        "    result = {}\n"
-        "print(json.dumps({'ok': True, 'data': result}))\n",
+        "assert 'delete' in args and '--yes' in args and not payload.get('select_all')\n"
+        "assert str(payload.get('skip_bin', '0')) == '0' and len(payload['paths']) == 1\n"
+        "source = path(payload['paths'][0])\n"
+        "source.rename(trash / source.name)\n"
+        "print(json.dumps({'ok': True, 'data': {}}))\n",
         encoding="utf-8",
     )
     cli.chmod(0o700)
@@ -44,7 +37,6 @@ def _configured_fixture(tmp_path, monkeypatch):
     monkeypatch.setenv("MEDIA_ORGANIZER_ZSPACE_REMOTE_ROOT", "/sata11/my/data")
     monkeypatch.setenv("MEDIA_ORGANIZER_ZSPACE_PROFILE", "fixture")
     client, settings, luolcy = _fixture(tmp_path)
-    (settings.data_mount / ".nfc-zspace-recycle-probe").write_text("8f" * 32 + "\n")
     return client, settings, luolcy, trash
 
 
@@ -125,16 +117,23 @@ def test_recycle_only_batch_reports_can_be_cleaned_without_touching_trash(tmp_pa
     assert (trash / "访问.url").read_bytes() == b"link"
 
 
-def test_changing_verified_nas_binding_requires_a_fresh_preview(tmp_path, monkeypatch):
+@pytest.mark.parametrize("cause", ["new_mapping", "legacy_binding"])
+def test_stale_recycle_binding_requires_a_fresh_preview(tmp_path, monkeypatch, cause):
     client, settings, _, trash = _configured_fixture(tmp_path, monkeypatch)
     unit = settings.data_mount / "演示目录"
     unit.mkdir()
     source = unit / "链接.url"
     source.write_bytes(b"link")
     preview = _preview(client, settings, unit)
-    marker = settings.data_mount / ".nfc-zspace-recycle-probe"
-    marker.write_text("ff" * 32 + "\n")
+    if cause == "new_mapping":
+        monkeypatch.setattr(settings, "media_organizer_zspace_remote_root", "/other-pool/my/data")
+    else:
+        summary = settings.reports_dir / "organizer-v1-previews" / preview["job_id"] / "summary.json"
+        record = json.loads(summary.read_text(encoding="utf-8"))
+        record["recycle_binding"] = "a" * 64
+        summary.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
     rejected = client.post(f"/api/media-organizer/previews/{preview['job_id']}/batches", json={})
     assert rejected.status_code == 409
+    assert "请重新扫描" in rejected.json()["detail"]
     assert source.is_file() and not list(trash.iterdir())

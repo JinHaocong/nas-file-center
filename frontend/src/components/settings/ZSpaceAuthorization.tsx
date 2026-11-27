@@ -121,9 +121,7 @@ export function ZSpaceAuthorization() {
       current.current = null;
       setAttempt(null);
       client.setQueryData(queryKey, { status: result.status });
-      setNotice(result.mapping_verified
-        ? '极空间授权完成，目录映射已验证。'
-        : '极空间授权完成。目录映射尚未通过验证，请检查 Worker 的回收配置。');
+      setNotice('极空间授权完成。');
     } catch (failure) {
       if (mounted.current) setError(getStructuredApiError(failure).message || '授权未完成，请重新获取链接。');
     } finally {
@@ -139,7 +137,7 @@ export function ZSpaceAuthorization() {
       <div className="nfc-settings-subpanel-header">
         <div>
           <strong id="nfc-zspace-authorization">极空间授权</strong>
-          <span>供 Worker 核对目录映射，并把整理时确认的附带文件送入极空间系统回收站。</span>
+          <span>供 Worker 把整理时确认的附带文件送入极空间系统回收站。</span>
         </div>
         <span className="nfc-kind-badge" role="status">
           {statusQuery.isPending ? '正在读取' : status ? statusLabels[status] : '状态读取失败'}

@@ -230,10 +230,4 @@ class ZSpaceAuthorization:
                 raise ZSpaceAuthorizationError(409, "极空间授权请求失败，请生成新链接并重试") from None
             finally:
                 self._discard()
-            try:
-                client.run_cli("doctor")
-                client.verify_mapping()
-                verified = True
-            except ZSpaceRecycleError:
-                verified = False
-            return {"status": "authorized", "mapping_verified": verified}
+            return {"status": "authorized"}

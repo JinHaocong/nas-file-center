@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import base64
+from dataclasses import replace
 import json
 from pathlib import Path
 import subprocess
@@ -8,7 +8,7 @@ import subprocess
 import pytest
 
 from app.batch import zspace_recycle
-from app.batch.zspace_recycle import PROBE_NAME, ZSpaceRecycleClient, ZSpaceRecycleError
+from app.batch.zspace_recycle import ZSpaceRecycleClient, ZSpaceRecycleError
 
 
 @pytest.fixture
@@ -30,6 +30,7 @@ def test_recycles_only_the_confirmed_native_path(tmp_path, monkeypatch):
     info = source.stat()
     calls = []
     sequence = []
+    monkeypatch.setenv("INITIAL_ADMIN_PASSWORD", "test-password")
 
     def native_cli(args, **kwargs):
         calls.append((args, kwargs))
@@ -47,64 +48,20 @@ def test_recycles_only_the_confirmed_native_path(tmp_path, monkeypatch):
     assert argv[argv.index("file"):] == ["file", "delete", "--params", argv[-2], "--yes"]
     assert json.loads(argv[-2]) == {"paths": ["/pool/my/data/摄影集/下载地址.url"]}
     assert not kwargs.get("shell")
+    assert "INITIAL_ADMIN_PASSWORD" not in kwargs["env"]
     assert sequence == ["fence", "native", "fence"]
     assert not source.exists()
 
 
-def test_mapping_probe_is_local_until_verified_and_profile_changes_change_binding(recycler, monkeypatch):
-    marker = b"b" * 64 + b"\n"
-    (recycler.local_root / PROBE_NAME).write_bytes(marker)
-    calls = []
+def test_recycle_binding_uses_only_deployment_configuration(recycler, monkeypatch):
+    def never_called(*args, **kwargs):
+        pytest.fail("binding the preview must not call the CLI")
 
-    def native_cli(args, **kwargs):
-        calls.append((args, kwargs))
-        response = {"ok": True, "data": {
-            "path": "/pool/my/data/" + PROBE_NAME, "offset": 0, "size": len(marker), "bytes": len(marker),
-            "truncated": False, "next_offset": None, "encoding": "base64",
-            "content": base64.b64encode(marker).decode("ascii"),
-        }}
-        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(response).encode())
-
-    monkeypatch.setattr(subprocess, "run", native_cli)
-    monkeypatch.setenv("INITIAL_ADMIN_PASSWORD", "test-password")
+    monkeypatch.setattr(subprocess, "run", never_called)
     binding = recycler.binding_id()
-    assert not calls
-    assert binding == recycler.verify_mapping()
-    [(argv, kwargs)] = calls
-    assert argv[argv.index("file"):-1] == ["file", "read", "--params"]
-    assert json.loads(argv[-1]) == {"path": "/pool/my/data/" + PROBE_NAME, "max_bytes": 66, "encoding": "base64"}
-    assert kwargs["env"]["ZSPACE_CLI_HOME"] == str(recycler.cli_home)
-    assert "INITIAL_ADMIN_PASSWORD" not in kwargs["env"]
-
-    alternative = ZSpaceRecycleClient(recycler.executable, "different", recycler.local_root, recycler.remote_root,
-                                      recycler.cli_home)
-    assert alternative.binding_id() != binding
-
-
-@pytest.mark.parametrize("payload", [
-    {"ok": True, "data": {"content": "A" * 88}},
-    {"ok": True, "data": {"content_base64": "not base64"}},
-    {"ok": True, "data": None},
-    {"ok": True, "data": {
-        "path": "/pool/my/data/" + PROBE_NAME, "offset": 0, "size": 100, "bytes": 64,
-        "truncated": True, "next_offset": 64, "encoding": "base64", "content": base64.b64encode(b"a" * 64).decode(),
-    }},
-])
-def test_mapping_probe_rejects_unconfirmed_remote_content(recycler, monkeypatch, payload):
-    (recycler.local_root / PROBE_NAME).write_bytes(b"a" * 64)
-    monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: subprocess.CompletedProcess(
-        args, 0, stdout=json.dumps(payload).encode(),
-    ))
-    with pytest.raises(ZSpaceRecycleError, match="验证标记与容器路径不匹配"):
-        recycler.verify_mapping()
-
-
-def test_mapping_refuses_symlinked_probe(recycler):
-    other = recycler.local_root / "marker"
-    other.write_bytes(b"a" * 64)
-    (recycler.local_root / PROBE_NAME).symlink_to(other)
-    with pytest.raises(ZSpaceRecycleError, match="验证标记缺失、无效或已变化"):
-        recycler.binding_id()
+    assert binding == replace(recycler).binding_id()
+    assert replace(recycler, remote_root="/another-pool/my/data").binding_id() != binding
+    assert replace(recycler, profile="different").binding_id() != binding
 
 
 @pytest.mark.parametrize("relative", ["../escaped.url", ".recycle/my/previous.url", "bad\\name.url", ""])
