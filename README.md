@@ -2,7 +2,7 @@
 
 面向自托管 NAS 的中文 Web 文件工具。可以从一个目录开始整理照片和视频，跨目录查找重复文件，或把反复执行的归档流程保存成工作流。扫描和媒体整理在后台运行，关闭页面后可以回到任务中心查看结果。
 
-**已发布镜像 `kerwinjhc/nas-file-center:2.0.1`** · `linux/amd64`
+**已发布镜像 `kerwinjhc/nas-file-center:2.0.2`** · `linux/amd64`
 
 [Docker Hub](https://hub.docker.com/r/kerwinjhc/nas-file-center/tags) · [镜像构建](https://github.com/JinHaocong/nas-file-center/actions/workflows/dockerhub-publish.yml) · [发布验证](https://github.com/JinHaocong/nas-file-center/actions/workflows/release-validation.yml)
 
@@ -152,10 +152,10 @@ docker compose ps
 ```yaml
 services:
   api:
-    image: kerwinjhc/nas-file-center:2.0.1
+    image: kerwinjhc/nas-file-center:2.0.2
     platform: linux/amd64
   worker:
-    image: kerwinjhc/nas-file-center:2.0.1
+    image: kerwinjhc/nas-file-center:2.0.2
     platform: linux/amd64
 ```
 
@@ -193,6 +193,14 @@ docker compose -f compose.yaml -f compose.image.yaml up -d --no-build --pull alw
 4. 在结果页或任务中心查看成功、跳过、冲突和失败。遇到文件或目录被改动时，重新扫描对应范围。
 
 启用正式整理需要数据目录允许写入，并按执行入口开启 `ALLOW_MUTATION` 与 `ALLOW_DELETE`。只读部署也可以生成预览。
+
+### 整理时回收下载附带文件
+
+为 API 和 Worker 配置极空间官方 CLI、授权 profile 和目录映射后，智能媒体整理会在所选范围内单列待回收文件。适用于 Luolcy 和非 Luolcy 目录。 [配置示例](config.example.env)
+
+- `.url` 快捷方式可回收。扩展名匹配不区分大小写。
+- `.txt` 仅回收完整内容为 HTTP(S) 链接或明确推广的普通文件。作品说明、提取码说明、字幕和媒体文件按原整理规则处理。
+- 在预览中查看文件名和回收原因，点「确认整理与回收」后由 Worker 送入极空间系统回收站。
 
 ### 扫描重复并生成去重计划
 

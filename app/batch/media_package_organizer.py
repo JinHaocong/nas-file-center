@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from app.batch.file_rename import _open_directory_nofollow
+from app.batch.media_organizer_recycle import omitted_from_organizer
 from app.batch.media_package_naming import (
     MEDIA_BUCKET_PATTERN, allocate_names, media_source_sort_key, numbered_name, organizer_extension,
 )
@@ -231,6 +232,7 @@ def _child_directories(
     files = []
     packages = {}
     count = 0
+    omitted_count = 0
     try:
         author_stat = os.fstat(fd) if include_loose_files else None
         with os.scandir(fd) as entries:
@@ -239,6 +241,9 @@ def _child_directories(
                     raise ValueError("Too many MediaPackage discovery entries in one directory")
                 if check_cancelled is not None and count % 256 == 0:
                     check_cancelled()
+                if omitted_from_organizer(directory / entry.name):
+                    omitted_count += 1
+                    continue
                 # Symlinked folders may point outside the protected resource
                 # hierarchy. Never silently treat them as resource packages.
                 if entry.is_symlink():
@@ -275,7 +280,7 @@ def _child_directories(
     if author_stat is not None:
         has_labelled_batch = any(_luolcy_batch_boundary(name) for name in packages)
         candidate = (
-            count == len(files) + len(packages)
+            count - omitted_count == len(files) + len(packages)
             and all(row["kind"] in {"P", "V"} for row in files)
             and (bool(files) or (not has_labelled_batch and any(
                 _oversized_video_bucket(name, MAX_VIDEOS_PER_GROUP)
@@ -502,6 +507,8 @@ def _luolcy_classification_inventory(
                 if check_cancelled is not None and count % 256 == 0:
                     check_cancelled()
                 path = folder / entry.name
+                if omitted_from_organizer(path):
+                    continue
                 info = entry.stat(follow_symlinks=False)
                 if info.st_dev != device or entry.name.casefold().startswith(".nfc-"):
                     return None
@@ -543,6 +550,8 @@ def _read_luolcy_author(
                 if check_cancelled is not None and count % 256 == 0:
                     check_cancelled()
                 path = author / entry.name
+                if omitted_from_organizer(path):
+                    continue
                 info = entry.stat(follow_symlinks=False)
                 if info.st_dev != device or entry.name.casefold().startswith(".nfc-"):
                     raise ValueError(f"Luolcy author contains an unreviewed entry: {path}")
@@ -582,6 +591,8 @@ def _luolcy_nested_buckets(
                         raise ValueError(f"Too many Luolcy buckets: {shell}")
                     if check_cancelled is not None:
                         check_cancelled()
+                    if omitted_from_organizer(shell / entry.name):
+                        continue
                     slot = _luolcy_bucket_slot(entry.name)
                     if not (slot and slot[0] == kind and entry.is_dir(follow_symlinks=False)):
                         break
@@ -724,6 +735,8 @@ def _walk_package(package: Path, *, directories: set[Path] | None = None):
                 directories.add(directory)
             with os.scandir(fd) as it:
                 for entry in it:
+                    if omitted_from_organizer(directory / entry.name):
+                        continue
                     if entry.name.casefold().startswith(".nfc-"):
                         raise ValueError(f"Reserved organizer workspace requires recovery: {directory / entry.name}")
                     if entry.is_symlink():
@@ -951,7 +964,8 @@ def plan_media_layout(
     relative_parts = (Path(item["path"]).relative_to(source).parts for item in items)
     source_directory_names = {parts[0].casefold() for parts in relative_parts if len(parts) > 1}
     with os.scandir(source) as entries:
-        occupied = {entry.name.casefold(): entry.name for entry in entries}
+        occupied = {entry.name.casefold(): entry.name for entry in entries
+                    if not omitted_from_organizer(source / entry.name)}
     legacy_numbered = sorted(
         original for folded, original in occupied.items()
         if re.fullmatch(r"(?:p|v)_[1-9][0-9]*", folded)

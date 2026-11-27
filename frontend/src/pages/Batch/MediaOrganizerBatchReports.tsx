@@ -46,6 +46,7 @@ const outcomes = {
 } satisfies Record<MediaBatchOutcome, { label: string; tone: string }>;
 const resultStatuses: readonly MediaBatchOutcome[] = ['success', 'skipped', 'conflict', 'failed'];
 const mappingKindLabels = { P: '图片', V: '视频', Other: '其他', Directory: '目录' };
+const recycleLabels = { url_shortcut: '网络快捷方式', links_only: '纯链接文本', promotion: '推广文本' };
 
 type OpenUnitDetails = (row: MediaBatchPreviewUnit, opener: HTMLButtonElement) => void;
 
@@ -88,6 +89,7 @@ function PreviewUnitDetails({ row, onDetails }: { row: MediaBatchPreviewUnit; on
 
 /** Name the actual media present without synthesizing a filename or destination. */
 function unitMediaLabel(row: MediaBatchPreviewUnit) {
+  if (row.recycle_reason) return recycleLabels[row.recycle_reason];
   if (row.operation === 'promote_repeated_archive_children') {
     if (row.sample_moves?.some(move => move.kind !== 'Directory')) {
       return `整体上提 ${row.needed_moves.toLocaleString()} 项内容`;
@@ -118,8 +120,8 @@ function UnitInspection({ row, onDetails, onClose, closeDisabled }: {
   return (
     <section className="nfc-unit-inspection" aria-label="所选目录整理详情" id="organizer-unit-inspection">
       <div className="nfc-unit-inspection-heading">
-        <h3><ConsoleIcon name="folder-open" size={19} />{unitName(row.unit)}</h3>
-        <StatusBadge status={previewTones[row.status]} label={previewLabels[row.status]} />
+        <h3><ConsoleIcon name={row.recycle_reason ? 'file-text' : 'folder-open'} size={19} />{unitName(row.unit)}</h3>
+        <StatusBadge status={previewTones[row.status]} label={row.recycle_reason ? '待回收' : previewLabels[row.status]} />
         {onClose && <button className="nfc-file-workspace-icon" type="button" aria-label="关闭整理详情"
           onClick={onClose} disabled={closeDisabled}>
           <ConsoleIcon name="x" size={16} />
@@ -128,7 +130,7 @@ function UnitInspection({ row, onDetails, onClose, closeDisabled }: {
       <CodePath value={row.unit} />
       <div className="nfc-unit-facts">
         <span>{unitMediaLabel(row)}</span>
-        {archiveLift ? <span>保留子目录内部结构</span> : <>
+        {row.recycle_reason ? <span>移入极空间回收站</span> : archiveLift ? <span>保留子目录内部结构</span> : <>
           {row.total_bytes !== undefined && <span>{formatBytes(row.total_bytes)}</span>}
           <span>移动 {row.needed_moves.toLocaleString()} · 改名 {row.renamed_count.toLocaleString()}</span>
           {row.wrapper_cleanup_count !== undefined && <span>清空旧分类 {row.wrapper_cleanup_count}</span>}
@@ -212,7 +214,8 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
         <strong>{summary.unit_count.toLocaleString()} 个整理单元</strong>
         <span>{summary.file_count.toLocaleString()} 个文件</span>
         {summary.total_bytes !== undefined && <span>{formatBytes(summary.total_bytes)}</span>}
-        <span>待整理 {summary.ready_count}</span><span>冲突 {summary.blocked_count}</span>
+        <span>待整理 {summary.ready_count - (summary.recycle_count ?? 0)}</span><span>冲突 {summary.blocked_count}</span>
+        {!!summary.recycle_count && <span>待回收 {summary.recycle_count}</span>}
         <span>已整理 {summary.already_organized_count}</span><span>跳过 {summary.skipped_count}</span>
         {!!summary.needs_assignment_count && <span>待归属作者 {summary.needs_assignment_count}</span>}
         </div>
@@ -241,11 +244,12 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
                     title={row.unit} aria-haspopup={isMobile ? 'dialog' : undefined}
                     aria-controls={selected?.unit === row.unit && (desktopOpen || sheetOpen) ? 'organizer-unit-inspection' : undefined}
                     onClick={() => selectUnit(row)}>
-                    <MediaThumbnail path={row.unit} kind="directory" size={listView ? 'small' : 'cover'} representativeFile={sample?.source} />
+                    <MediaThumbnail path={row.unit} kind={row.recycle_reason ? 'file' : 'directory'}
+                      size={listView ? 'small' : 'cover'} representativeFile={sample?.source} />
                     <span className="nfc-unit-caption">
                       <strong>{unitName(row.unit)}</strong>
                       <small>{unitMediaLabel(row)}</small>
-                      <StatusBadge status={previewTones[row.status]} label={previewLabels[row.status]} />
+                      <StatusBadge status={previewTones[row.status]} label={row.recycle_reason ? '待回收' : previewLabels[row.status]} />
                     </span>
                   </button>
                 </li>
@@ -261,7 +265,11 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
       ) : <ConsoleEmpty title="当前筛选没有整理单元" />}
       {footer}
       {action && <footer className="nfc-unit-confirmation">
-        <span><strong>{summary.ready_count.toLocaleString()} 个目录可整理</strong>
+        <span><strong>{summary.recycle_count === summary.ready_count
+          ? `${summary.recycle_count.toLocaleString()} 个附带文件移入极空间回收站`
+          : `${(summary.ready_count - (summary.recycle_count ?? 0)).toLocaleString()} 个目录可整理`}</strong>
+          {!!summary.recycle_count && summary.recycle_count !== summary.ready_count &&
+            ` · ${summary.recycle_count.toLocaleString()} 个附带文件移入极空间回收站`}
           {summary.blocked_count > 0 && ` · ${summary.blocked_count} 个冲突待核对`}</span>
         {action}
       </footer>}

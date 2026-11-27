@@ -23,6 +23,19 @@ class Settings(BaseSettings):
     media_package_fuse_compat_enabled: bool = Field(
         default=False, validation_alias="MEDIA_PACKAGE_FUSE_COMPAT_ENABLED",
     )
+    # Optional official ZSpace client and its personal-space mapping.
+    media_organizer_zspace_cli: Path | None = Field(
+        default=None, validation_alias="MEDIA_ORGANIZER_ZSPACE_CLI",
+    )
+    media_organizer_zspace_remote_root: str | None = Field(
+        default=None, validation_alias="MEDIA_ORGANIZER_ZSPACE_REMOTE_ROOT",
+    )
+    media_organizer_zspace_profile: str = Field(
+        default="default", validation_alias="MEDIA_ORGANIZER_ZSPACE_PROFILE",
+    )
+    media_organizer_zspace_cli_home: Path | None = Field(
+        default=None, validation_alias="MEDIA_ORGANIZER_ZSPACE_CLI_HOME",
+    )
     allowed_roots_raw: str = Field(default="/data", validation_alias="ALLOWED_ROOTS")
     allow_delete: bool = Field(default=False, validation_alias="ALLOW_DELETE")
     allow_mutation: bool = Field(default=False, validation_alias="ALLOW_MUTATION")

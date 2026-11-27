@@ -279,6 +279,7 @@ def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fen
     """Prove each originally ready unit finished and has no owned staging directory."""
     from app.batch.media_organizer_archive import PROMOTE_ARCHIVE_CHILDREN, _file_binding, _fingerprint, _valid_snapshot
     from app.batch.media_organizer_jobs import _selection
+    from app.batch.media_organizer_recycle import RECYCLE_DOWNLOAD_EXTRAS
     from app.batch.media_package_execution import _validate_frozen_manifest_body
 
     preview = _report_path(settings, PREVIEW, preview_plan["job_id"])
@@ -311,6 +312,10 @@ def _check_closed_batch(settings, job, preview_plan, execution_plan, events, fen
                 if event.get("status") != "success":
                     raise ValueError("整理仍有未完成的单元")
                 package = _selection(unit["unit"], settings)
+                if unit.get("operation") == RECYCLE_DOWNLOAD_EXTRAS:
+                    if event.get("operation") != RECYCLE_DOWNLOAD_EXTRAS or not package.is_relative_to(selection):
+                        raise ValueError("极空间回收结果与预览不一致")
+                    continue
                 name = f"{ordinal}.json"
                 if not package.is_relative_to(selection) or name not in execution_plan["files"]:
                     raise ValueError("整理范围或冻结清单不完整")

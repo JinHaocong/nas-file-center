@@ -15,6 +15,7 @@ from unicodedata import normalize
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_link_intent import LinkIntent
+from app.batch.media_organizer_recycle import omitted_from_organizer
 from app.batch.media_organizer_tree_lift import check_tree_lift, execute_tree_lift, validate_lift_layout
 from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, numbered_name
 from app.batch.media_package_organizer import MAX_DEPTH, MAX_FILES_PER_GROUP, MAX_PACKAGE_DIRECTORIES, MAX_PACKAGE_FILES, _classify
@@ -190,6 +191,8 @@ def _tree_content_digest(unit: Path, identity: list[int], protected_roots: tuple
                 tree.update(identity=current, directories={}, files={})
             with os.scandir(fd) as entries:
                 for entry in entries:
+                    if omitted_from_organizer(path / entry.name):
+                        continue
                     info = entry.stat(follow_symlinks=False)
                     if info.st_dev != identity[0] or entry.name.casefold().startswith(".nfc-"):
                         raise ValueError("重复归档包含跨设备目录或待恢复文件")

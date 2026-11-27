@@ -344,7 +344,7 @@ export function MediaOrganizerBatchEditor() {
           detailBusy={assignmentBusy}
           action={canConfirm && (
             <ConsoleButton variant="primary" disabled={busy} loading={action === 'confirm'}
-              onClick={confirmBatch}>确认整理全部</ConsoleButton>
+              onClick={confirmBatch}>{currentPreview.summary.recycle_count ? '确认整理与回收' : '确认整理全部'}</ConsoleButton>
           )}
           footer={<ConsolePagination page={previewPage.page} pageSize={previewPage.size}
             total={currentPreview.filtered_total} pageSizes={pageSizes}

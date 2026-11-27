@@ -49,6 +49,7 @@ export interface MediaBatchPreviewUnit {
   needed_moves: number;
   renamed_count: number;
   wrapper_cleanup_count?: number;
+  recycle_reason?: 'url_shortcut' | 'links_only' | 'promotion';
   total_proposals: number;
   mapping_id: string | null;
   loose_id?: string;
@@ -72,6 +73,7 @@ export interface MediaBatchPreview extends OrganizerJob, OrganizerReportPage {
     needed_moves: number;
     renamed_count: number;
     wrapper_cleanup_count?: number;
+    recycle_count?: number;
   } | null;
 }
 
@@ -106,7 +108,7 @@ export interface MediaBatchResult extends OrganizerJob, OrganizerReportPage {
   preview_job_id: OrganizerJobId;
   report_cleanup_status?: 'pending' | 'released' | 'missing';
   summary: Record<`${MediaBatchOutcome}_count`, number>;
-  items: Array<{ unit: string; status: MediaBatchOutcome; reason?: string | null }>;
+  items: Array<{ unit: string; status: MediaBatchOutcome; reason?: string | null; operation?: string }>;
 }
 
 const base = '/api/media-organizer';

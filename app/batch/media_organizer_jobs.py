@@ -7,7 +7,7 @@ import os
 import stat
 import time
 from contextlib import closing, nullcontext
-from itertools import islice
+from itertools import chain, islice
 from pathlib import Path
 from unicodedata import normalize
 from uuid import uuid4
@@ -18,6 +18,11 @@ from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_archive import PROMOTE_ARCHIVE_CHILDREN
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_organizer_planner import is_reserved_workspace
+from app.batch.media_organizer_recycle import (
+    PROBE_NAME, RECYCLE_DOWNLOAD_EXTRAS, identity as recycle_identity,
+    iter_recycle_candidates, omit_recycle_files, zspace_client,
+)
+from app.batch.media_organizer_recycle_rules import check as check_recycle_candidate
 from app.batch.media_package_organizer import APPEND_MEDIA_OPERATIONS, MAX_FILES_PER_GROUP, _validate_scope
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.batch.organizer_report_cleanup import archived_result, preview_unavailable, report_missing, report_reclaimed, report_state
@@ -157,12 +162,14 @@ def get_preview(session_factory, settings: Settings, job_id: int, *,
         }
     if result["status"] == "completed":
         report = _report_dir(settings, job_id)
-        result["summary"] = _plan_summary(report)
+        result["summary"] = {key: value for key, value in _plan_summary(report).items()
+                             if key not in ("recycle_binding", "recycle_projection")}
         offset = (page - 1) * page_size
         for unit in _rows(report / "units.jsonl"):
             if status_filter != "all" and unit["status"] != status_filter:
                 continue
             if offset <= result["filtered_total"] < offset + page_size:
+                unit.pop("recycle_identity", None)
                 result["units"].append(unit)
             result["filtered_total"] += 1
     return result
@@ -353,6 +360,10 @@ def enqueue_batch(session_factory, settings: Settings, preview_id: int) -> dict:
         summary = _plan_summary(_report_dir(settings, preview_id))
         if summary["ready_count"] == 0:
             raise ValueError("没有可以整理的单元")
+        if summary.get("recycle_count"):
+            client = zspace_client(settings)
+            if client is None or client.binding_id() != summary.get("recycle_binding"):
+                raise ValueError("极空间回收配置已变化，请重新扫描")
         return _receipt(_new_job(session, settings, BATCH_KIND, {
             "selection": state["selection"], "preview_job_id": preview_id,
         }, units=summary["unit_count"]))
@@ -403,6 +414,7 @@ def _preview_row(record: dict, report: Path) -> dict:
                 _write_json(stream, loose_file)
             _persist(stream)
     totals = record.get("totals", {})
+    recycling = record.get("operation") == RECYCLE_DOWNLOAD_EXTRAS
     return {
         "unit": record["unit"], "status": record["status"], "reason": record.get("reason"),
         "operation": record.get("operation"), "organizer_mode": record.get("organizer_mode"),
@@ -413,7 +425,9 @@ def _preview_row(record: dict, report: Path) -> dict:
            if record.get("luolcy_author_siblings") else {}),
         **({"luolcy_root_fingerprint": record["luolcy_root_fingerprint"]}
            if record.get("luolcy_root_fingerprint") is not None else {}),
-        "totals": totals, "total_files": sum(totals.values()),
+        "totals": totals, "total_files": 1 if recycling else sum(totals.values()),
+        **({"recycle_reason": record["recycle_reason"], "recycle_identity": record["recycle_identity"]}
+           if recycling else {}),
         "total_bytes": record.get("total_bytes", 0), "groups": record.get("groups", []),
         "needed_moves": record.get("actual_moves", 0),
         "renamed_count": record.get("renamed_count", 0),
@@ -454,12 +468,21 @@ class MediaOrganizerPreviewHandler(TaskHandler):
                 context.checkpoint()
                 last_check = now
 
-        with _report_file(report / "units.jsonl") as stream:
-            for record in iter_organizing_previews(
+        client = zspace_client(settings)
+        extras = list(iter_recycle_candidates(selection, settings, check_cancelled)) if client else []
+        if extras:
+            summary.update(recycle_count=len(extras), recycle_binding=client.verify_mapping())
+        omissions = frozenset(Path(row["unit"]) for row in extras)
+        if client:
+            summary["recycle_projection"] = True
+            omissions |= {settings.data_mount / PROBE_NAME}
+        with omit_recycle_files(omissions), _report_file(report / "units.jsonl") as stream:
+            media = iter_organizing_previews(
                 selection, allowed_roots=settings.allowed_roots, quarantine_root=settings.quarantine_root,
                 media_package_root=settings.media_package_root, check_cancelled=check_cancelled,
                 include_mapping=True,
-            ):
+            )
+            for record in chain(extras, media):
                 row = _preview_row(record, report)
                 _write_json(stream, row)
                 summary[f"{row['status']}_count"] += 1
@@ -603,6 +626,23 @@ def _archive_children_need_attention(context: JobContext, unit: str) -> bool:
         ).limit(1)) is not None
 
 
+def _finish_recycle(unit: dict, settings: Settings, client, fence, remember) -> tuple[str, str]:
+    """Validate the reviewed file before saving an intent and requesting native recycle."""
+    try:
+        source = _selection(unit["unit"], settings)
+        info = source.lstat()
+        if (client is None or info.st_nlink != 1 or recycle_identity(info) != unit.get("recycle_identity")
+                or not unit.get("recycle_reason") or check_recycle_candidate(source, info) != unit["recycle_reason"]):
+            return "conflict", "附带文件已变化，请重新扫描"
+        remember()
+        client.recycle(source, identity=unit["recycle_identity"][:4], fence=fence)
+        return "success", "已移入极空间回收站"
+    except FileNotFoundError:
+        return "conflict", "原文件已变化，请在极空间核对"
+    except (OSError, ValueError) as exc:
+        return "failed", str(exc)
+
+
 @register_handler
 class MediaOrganizerBatchHandler(TaskHandler):
     job_type = BATCH_KIND
@@ -624,7 +664,19 @@ class MediaOrganizerBatchHandler(TaskHandler):
             if preview.status != "completed" or bound["selection"] != str(selection):
                 raise ValueError("目录预览与批量整理范围不一致")
         report = _report_dir(settings, state["preview_job_id"])
+        summary = _plan_summary(report)
+        client = zspace_client(settings) if summary.get("recycle_count") else None
+        if summary.get("recycle_count") and (
+            client is None or client.verify_mapping() != summary.get("recycle_binding")
+        ):
+            raise ValueError("极空间回收配置或绑定路径已变化，请重新扫描")
+        checkpoint = json.loads(job.checkpoint_json or '{"schema_version":1}')
+        previous_intent = checkpoint.get("_zspace_recycle_ordinal")
+        omissions = frozenset({settings.data_mount / PROBE_NAME}) if summary.get("recycle_projection") else frozenset()
         folder = settings.reports_dir / "organizer-v1-executions" / str(job.id)
+        if client is not None:
+            folder.mkdir(mode=0o750, parents=True, exist_ok=True)
+            os.close(_open_directory_nofollow(folder))
         total = job.progress_total
         next_ordinal = job.progress_current
         if not 0 <= next_ordinal <= total:
@@ -643,6 +695,11 @@ class MediaOrganizerBatchHandler(TaskHandler):
                 pending.clear()
                 last_commit = time.monotonic()
 
+        def remember_recycle(ordinal: int) -> None:
+            """An interrupted remote action must not be submitted a second time."""
+            fence()
+            context.checkpoint(checkpoint_data={**checkpoint, "_zspace_recycle_ordinal": ordinal})
+
         count = 0
         with closing(_rows(report / "units.jsonl")) as units:
             for count, unit in enumerate(units, start=1):
@@ -656,14 +713,27 @@ class MediaOrganizerBatchHandler(TaskHandler):
                 if ready:
                     # Checkpoint the prefix before starting a frozen filesystem operation.
                     commit_pending()
-                if (ready and unit.get("operation") == PROMOTE_ARCHIVE_CHILDREN
+                recycling = unit.get("operation") == RECYCLE_DOWNLOAD_EXTRAS
+                if recycling and not ready:
+                    raise ValueError("回收记录不完整")
+                if recycling and previous_intent == ordinal:
+                    status, reason = "failed", "上次回收请求在确认结果前中断，请在极空间核对"
+                elif recycling:
+                    status, reason = _finish_recycle(
+                        unit, settings, client, fence, lambda: remember_recycle(ordinal),
+                    )
+                elif (ready and unit.get("operation") == PROMOTE_ARCHIVE_CHILDREN
                         and _archive_children_need_attention(context, unit["unit"])):
                     status, reason = "skipped", "归档内有未整理完成的子目录，已保留原位置"
                 else:
-                    status, reason = _finish_unit(
-                        unit, settings, folder / f"{ordinal}.json", job.id, fence, selection=selection,
-                    )
-                pending.append({"unit": unit["unit"], "status": status, "reason": reason})
+                    with omit_recycle_files(omissions):
+                        status, reason = _finish_unit(
+                            unit, settings, folder / f"{ordinal}.json", job.id, fence, selection=selection,
+                        )
+                pending.append({
+                    "unit": unit["unit"], "status": status, "reason": reason,
+                    **({"operation": RECYCLE_DOWNLOAD_EXTRAS} if recycling else {}),
+                })
                 if (ready or len(pending) >= RESULT_COMMIT_SIZE
                         or time.monotonic() - last_commit >= RESULT_COMMIT_INTERVAL):
                     commit_pending()

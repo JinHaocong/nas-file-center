@@ -15,6 +15,7 @@ from unicodedata import normalize
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_archive import is_repeated_archive, is_structural_media_wrapper, preview_repeated_archive
+from app.batch.media_organizer_recycle import omitted_from_organizer, organizer_omissions
 from app.batch.media_package_naming import MEDIA_BUCKET_PATTERN, numbered_name
 from app.batch.media_package_organizer import (
     MAX_DEPTH, MAX_FILES_PER_GROUP, MAX_PACKAGE_DIRECTORIES, MAX_PACKAGE_FILES, MAX_SCOPE_ENTRIES_PER_DIRECTORY,
@@ -302,7 +303,9 @@ def _entries(folder: Path, device: int) -> _DirectoryEntries:
         if info.st_dev != device:
             raise ValueError("Cross-device directory")
         inventory = _preview_inventory.get()
-        return inventory.read(folder, fd, info) if inventory is not None else _read_entries(fd)
+        rows = inventory.read(folder, fd, info) if inventory is not None else _read_entries(fd)
+        omitted = organizer_omissions()
+        return [(name, entry) for name, entry in rows if folder / name not in omitted] if omitted else rows
     finally:
         os.close(fd)
 
@@ -360,6 +363,8 @@ def _pure_wrapper(folder: Path, device: int, protected_roots: tuple[Path, ...],
                     for index, entry in enumerate(entries):
                         if index >= MAX_SCOPE_ENTRIES_PER_DIRECTORY or entry.name.casefold().startswith(".nfc-"):
                             return False
+                        if omitted_from_organizer(current / entry.name):
+                            continue
                         if entry.is_dir(follow_symlinks=False):
                             child = current / entry.name
                             if _protected(child, protected_roots) or not _is_wrapper(
@@ -1628,7 +1633,8 @@ def _fantia_tier_wrapper(post: Path, name: str, device: int, protected_roots: tu
             if os.fstat(fd).st_dev != device:
                 return False
             with os.scandir(fd) as siblings:
-                names = {entry.name for entry in islice(siblings, 3)}
+                names = set(islice((entry.name for entry in siblings
+                                    if not omitted_from_organizer(post / entry.name)), 3))
         finally:
             os.close(fd)
     except OSError:
