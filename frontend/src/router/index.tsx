@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { MainLayout } from '../layouts/MainLayout';
 import { LoginPage } from '../pages/Login';
 import { DashboardPage } from '../pages/Dashboard';
+import { CloudFilesPage } from '../pages/CloudFiles';
 import { IndexesPage } from '../pages/Indexes';
 import { MediaPage } from '../pages/Media';
 import { ArchiveRecoveryPage } from '../pages/ArchiveRecovery';
@@ -33,6 +34,7 @@ export const AppRouter: React.FC = () => {
       <Route path="/" element={<MainLayout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="cloud-files" element={<CloudFilesPage />} />
         <Route path="indexes" element={<IndexesPage />} />
         <Route path="media" element={<MediaPage />} />
         <Route path="archive-recovery" element={<ArchiveRecoveryPage />} />

@@ -6,7 +6,7 @@ import { SafeModeBadge } from './SafeModeBadge';
 import { WorkerStatusBadge } from './WorkerStatusBadge';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { ConsoleIcon } from './ui/ConsoleIcon';
-import { currentDestination, navLabel, primaryDestinations } from './layout/navItems';
+import { currentDestination, desktopDestinations, navLabel, primaryDestinations } from './layout/navItems';
 
 interface Props {
   isMobile: boolean;
@@ -28,8 +28,9 @@ export const Header: React.FC<Props> = ({ isMobile, navigationOpen, onOpenNaviga
   const { mode, setMode } = useTheme();
   const location = useLocation();
   const selected = currentDestination(location.pathname, location.search);
-  const tabIndex = primaryDestinations.findIndex(item => item.path === selected);
-  const tabStyle = { '--studio-active': Math.max(0, tabIndex) } as React.CSSProperties;
+  const shortcuts = isMobile ? primaryDestinations : desktopDestinations;
+  const tabIndex = shortcuts.findIndex(item => item.path === selected);
+  const tabStyle = { '--studio-active': Math.max(0, tabIndex), '--studio-slots': shortcuts.length } as React.CSSProperties;
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const header = useRef<HTMLElement>(null);
 
@@ -76,7 +77,7 @@ export const Header: React.FC<Props> = ({ isMobile, navigationOpen, onOpenNaviga
       </div>
       {fileToolbarRef ? <div className="nfc-header-file-toolbar" ref={fileToolbarRef} /> :
         <nav className="nfc-studio-shortcuts" aria-label="常用页面" data-selected={tabIndex >= 0} style={tabStyle}>
-          {primaryDestinations.map(item => <Link key={item.path} to={item.path}
+          {shortcuts.map(item => <Link key={item.path} to={item.path}
             aria-current={selected === item.path ? 'page' : undefined}>{item.label}</Link>)}
         </nav>}
       <div className="nfc-header-command-cluster">

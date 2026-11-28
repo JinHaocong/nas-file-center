@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import base64
-from http.client import HTTPException
+from contextlib import contextmanager
+from http.client import HTTPConnection, HTTPException, HTTPSConnection
 import json
 import math
 import os
@@ -10,6 +11,7 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from uuid import uuid4
 
@@ -35,6 +37,10 @@ _FAILURE_LABELS = (
 
 class RcloneError(ValueError):
     """An import problem safe to show in the task center."""
+
+
+class RcloneJobNotFound(RcloneError):
+    """An authoritative rclone response that the requested native job expired."""
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -111,29 +117,37 @@ class RcloneClient:
         self._opener = build_opener(ProxyHandler({}), _NoRedirect())
         self._groups: dict[int, tuple[str, str]] = {}
 
-    def _request(self, endpoint: str, payload: dict) -> dict:
+    def _message(self, payload: dict) -> tuple[bytes, dict[str, str]]:
         password = _read_password(self._password_file)
         basic_auth = base64.b64encode(f"{self._username}:{password}".encode("utf-8")).decode("ascii")
-        request = Request(self._origin + "/" + endpoint,
-                          data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                          headers={"Authorization": "Basic " + basic_auth, "Content-Type": "application/json",
-                                   "Accept": "application/json", "Accept-Encoding": "identity"},
-                          method="POST")
-        try:
-            with self._opener.open(request, timeout=10) as response:
-                if response.status != 200 or response.headers.get("Content-Encoding", "identity") != "identity":
-                    raise RcloneError("rclone 服务响应格式无效")
-                body = response.read(_MAX_RESPONSE + 1)
-        except HTTPError as exc:
-            exc.close()
-            if exc.code in (401, 403):
-                raise RcloneError("rclone 服务拒绝授权，请核对服务凭证") from None
-            if endpoint.startswith("job/") and exc.code == 404:
-                raise RcloneError("rclone 任务记录已不可用") from None
-            raise RcloneError("rclone 服务未接受本次请求") from None
-        except (OSError, HTTPException):
-            raise RcloneError("无法连接 rclone 服务") from None
-        if len(body) > _MAX_RESPONSE:
+        return json.dumps(payload).encode(), {
+            "Authorization": "Basic " + basic_auth, "Content-Type": "application/json",
+            "Accept": "application/json", "Accept-Encoding": "identity",
+        }
+
+    @staticmethod
+    def _http_error(endpoint: str, status: int, response) -> RcloneError:
+        if status in (401, 403):
+            return RcloneError("rclone 服务拒绝授权，请核对服务凭证")
+        if endpoint in ("job/status", "job/stop") and status in (404, 500):
+            try:
+                item = json.loads(response.read(4097))
+            except (ValueError, RecursionError):
+                item = None
+            if (isinstance(item, dict) and item.get("error") == "job not found"
+                    and item.get("path") in (endpoint, "/" + endpoint)):
+                return RcloneJobNotFound("rclone 任务记录已不可用")
+        if endpoint.startswith("job/") and status == 404:
+            return RcloneError("rclone 任务记录已不可用")
+        return RcloneError("rclone 服务未接受本次请求")
+
+    def _read_reply(self, endpoint: str, response, response_limit: int) -> dict:
+        if response.headers.get("Content-Encoding", "identity") != "identity":
+            raise RcloneError("rclone 服务响应格式无效")
+        if response.status != 200:
+            raise self._http_error(endpoint, response.status, response)
+        body = response.read(response_limit + 1)
+        if len(body) > response_limit:
             raise RcloneError("rclone 服务响应超过大小限制")
         try:
             result = json.loads(body)
@@ -142,6 +156,46 @@ class RcloneClient:
         if not isinstance(result, dict):
             raise RcloneError("rclone 服务响应格式无效")
         return result
+
+    def _request(self, endpoint: str, payload: dict, *, response_limit: int = _MAX_RESPONSE) -> dict:
+        body, headers = self._message(payload)
+        request = Request(self._origin + "/" + endpoint, data=body, headers=headers, method="POST")
+        try:
+            with self._opener.open(request, timeout=10) as response:
+                return self._read_reply(endpoint, response, response_limit)
+        except HTTPError as exc:
+            try:
+                raise self._http_error(endpoint, exc.code, exc) from None
+            finally:
+                exc.close()
+        except (OSError, HTTPException):
+            raise RcloneError("无法连接 rclone 服务") from None
+
+    @contextmanager
+    def _pinned_request(self):
+        """Keep identity checks and job actions on one direct daemon connection."""
+        origin = urlsplit(self._origin)
+        connection_class = HTTPSConnection if origin.scheme == "https" else HTTPConnection
+        connection = connection_class(origin.hostname, origin.port, timeout=10)
+        try:
+            connection.connect()
+            socket = connection.sock
+            connection.auto_open = False
+
+            def send(endpoint: str, payload: dict, *, response_limit: int = _MAX_RESPONSE) -> dict:
+                # A reused numeric native job ID may belong to a restarted daemon.
+                if socket is None or connection.sock is not socket:
+                    raise RcloneError("rclone 连接已中断，无法确认任务实例")
+                body, headers = self._message(payload)
+                connection.request("POST", "/" + endpoint, body=body, headers=headers)
+                with connection.getresponse() as response:
+                    return self._read_reply(endpoint, response, response_limit)
+
+            yield send
+        except (OSError, HTTPException):
+            raise RcloneError("rclone 任务连接已中断") from None
+        finally:
+            connection.close()
 
     def start_copy(self, source: str, destination: str) -> tuple[int, str]:
         """Start only a remote-to-local copy into a fresh staging directory."""

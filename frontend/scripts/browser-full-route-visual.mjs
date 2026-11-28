@@ -1,6 +1,6 @@
 /**
  * Final acceptance: actual React app on EVERY declared route, not a component mock.
- * 8 CI jobs × 4 effective theme modes × 25 routes = 800 real Chromium visits.
+ * 8 CI jobs × 4 effective theme modes × 26 routes = 832 real Chromium visits.
  * GET APIs are 100% synthetic; any outbound or mutating request fails closed.
  * Captures screenshot, route, page heading, render/runtime errors and viewport overflow.
  * Screenshot collection is evidence to REVIEW; it does not automatically approve UI.
@@ -21,6 +21,7 @@ import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './compu
 const routes = Object.freeze([
   { path: '/login', id: 'login', public: true },
   { path: '/dashboard', id: 'dashboard' },
+  { path: '/cloud-files', id: 'cloud-files' },
   { path: '/indexes', id: 'indexes' },
   { path: '/media', id: 'media' },
   { path: '/archive-recovery', id: 'archive-recovery' },
@@ -54,7 +55,7 @@ const tested = routes.map(r => r.template || r.path.slice(1));
 assert.equal(new Set(tested).size, tested.length, 'Duplicate visual route case');
 assert.deepEqual([...tested].sort(), [...declared].sort(),
   'Visual matrix must include every router path, including dynamic details');
-assert.equal(routes.length, 25);
+assert.equal(routes.length, 26);
 
 const width = Number(process.env.NFC_VISUAL_WIDTH);
 assert.ok(visualViewports.includes(width), 'Set NFC_VISUAL_WIDTH to one of the eight required widths');
@@ -105,6 +106,20 @@ const downloadRun = {
 const page = items => ({ items, total: items.length, page: 1, page_size: 50 });
 function fixture(path) {
   if (path === '/api/auth/me') return visualAdminFixture('full-site-visual-mock');
+  if (path === '/api/cloud-files/configuration') return {
+    enabled: true, writable: false, local_root: '/mock/library',
+    openlist: { enabled: true, name: 'OpenList', web_url: null },
+    rclone: { enabled: true, web_url: null },
+  };
+  if (path === '/api/cloud-files/entries') return { items: [
+    { name: '项目资料', kind: 'directory', size: null },
+    { name: '交付清单.pdf', kind: 'file', size: 2600000 },
+  ] };
+  if (path === '/api/cloud-files/transfers') return { items: [{
+    id: '1', provider: 'rclone', remote: '素材库', path: '', destination: '/mock/library',
+    names: ['拍摄备份'], status: 'running', progress: 68, speed: 12000000, error: null,
+    created_at: TS, native_ids: ['48'], files: [], can_cancel: false, can_delete: false,
+  }] };
   if (path === '/api/settings') return {
     ...visualSafeSettingsFixture(), protect_last_file: true, allowed_roots: ['/mock/library'],
     quarantine_root: '/mock/quarantine', fclones_binary: 'fclones',

@@ -10,9 +10,12 @@ export interface ConsoleNavGroup {
   items: ConsoleNavItem[];
 }
 
+const cloudFilesDestination: ConsoleNavItem = { path: '/cloud-files', label: '云端文件', icon: 'cloud' };
+
 export const consoleNavGroups: ConsoleNavGroup[] = [
   { label: '我的文件', items: [
     { path: '/dashboard', label: '文件空间', icon: 'hard-drive' },
+    cloudFilesDestination,
     { path: '/batch?operation=media-organize', label: '智能媒体整理', icon: 'folders' },
     { path: '/indexes', label: '文件索引', icon: 'database' },
     { path: '/media', label: '媒体完整性', icon: 'file-check' },
@@ -50,6 +53,9 @@ export const primaryDestinations: ConsoleNavItem[] = [
   { path: '/scans', label: '扫描', icon: 'layers' },
   { path: '/tasks', label: '记录', icon: 'clock' },
 ];
+
+/** Give the cloud workspace a desktop shortcut without crowding the phone dock. */
+export const desktopDestinations = [primaryDestinations[0], cloudFilesDestination, ...primaryDestinations.slice(1)];
 
 /** A reopened preview or batch belongs to media organization as well. */
 export function currentDestination(pathname: string, search: string): string {

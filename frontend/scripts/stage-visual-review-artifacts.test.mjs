@@ -29,7 +29,7 @@ function withFixture(fn) {
   finally { rmSync(fixtureData.root, { recursive: true, force: true }); }
 }
 
-test('stages eight and only eight exact-head artifacts into the 800-case input layout', () => {
+test('stages eight and only eight exact-head artifacts into the 832-case input layout', () => {
   withFixture(({ input, output }) => {
     assert.equal(stageVisualArtifacts(input, output, SHA), 8);
     assert.deepEqual(readdirSync(output).map(Number).sort((a, b) => a - b),
@@ -96,7 +96,7 @@ test('unified artifact job waits for all eight real Chromium jobs and preserves 
     'node scripts/stage-visual-review-artifacts.mjs',
     'node scripts/build-visual-review-pack.mjs',
     'actions/upload-artifact@v4',
-    'human-visual-review-800-${{ github.event.pull_request.head.sha || github.sha }}',
+    'human-visual-review-832-${{ github.event.pull_request.head.sha || github.sha }}',
     'if-no-files-found: error',
     'frontend/artifacts/full-route-visual/',
     'frontend/artifacts/visual-review-pack/',

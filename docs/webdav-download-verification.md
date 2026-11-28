@@ -1,28 +1,31 @@
 # 下载清单核对：可配置 AList / OpenList 来源
 
-## 云端复制到 NAS
+## 云端文件
 
-通过「下载完整性校验 → 云端复制到 NAS」选择 OpenList 子目录，再选 NAS 存放位置和新文件夹名称。Worker 在同一存放位置下创建唯一的临时目录，由 rclone 把数据写入临时目录。云端和 NAS 的路径、类型与大小清单一致后，Worker 将临时目录发布为新文件夹。若同名位置已存在，本次任务会提示冲突。
+在主导航打开「云端文件」。选择 OpenList 或 rclone，勾选同一目录内的文件和子文件夹，再选择 NAS 存放位置。NAS File Center 将请求交给对应服务。出现同名文件或目录时，页面会提示冲突。
 
-任务中心显示文件进度、速度和结果。完成后可以打开「核对下载结果」或「预览整理」。任务中断或发布失败时，可以在任务详情查看暂存路径，并核对 rclone 端状态。
+传输列表直接读取两个服务的原生任务。OpenList 复制文件夹时，原生子任务会随文件枚举逐项出现。rclone 通过原生传输统计提供单文件速度，近期记录受 rclone 服务实例和统计保留范围限制。OpenList 单文件速度由页面根据相邻两次进度更新估算，任务历史受 OpenList 的复制任务持久化设置控制。取消和记录清除调用对应服务。删除传输记录会保留文件。
 
 ### 部署配置
 
-1. 在「下载校验来源」创建 OpenList 来源。为 rclone 配置一个指向这个来源的 WebDAV remote，例如 `openlist-import`。remote 的浏览根与 OpenList 来源应一致，两个入口应看到相同的相对路径。建议使用能通过 `/dav/` 读取相应目录的只读账号。
-2. 让 Worker 能访问已启用认证的 rclone RC 接口。Docker 内网的地址示例是 `http://rclone:5533`。使用独立的受保护密码文件，由 Worker 只读挂载。RC 接口应仅对可信服务开放。
-3. 将同一份 NAS 目录以可写方式映射给 Worker 和 rclone。Worker 所见的 `/data/Download` 在 rclone 里可以是 `/nfc-import`。如果两边路径都叫 `/data/Download`，就把两个变量都设为这个值。rclone 运行账户需要能够写入 Worker 创建的私有暂存目录，例如两个容器使用同一个有效 UID。
-4. 为 API 和 Worker 设置以下配置。API 和 Worker 的映射值须一致，Worker 挂载密码文件，并开启 `ALLOW_MUTATION`。
+1. 为 API 配置一个已有的 NAS 存放根目录并开启 `ALLOW_MUTATION`。两种接入都应映射到同一份 NAS 目录。
+2. 接入 OpenList 时，在 OpenList 中将存放根目录登记为 **本地存储**，例如 `/NAS-Download`。选一个已配置的 OpenList 来源账号，允许读取云端来源、复制和写入目标存储。挂载路径以该账号能浏览到的 OpenList 路径为准。
+3. 接入 rclone 时，填写已有 RC 地址和账号，给 API 挂载私有密码文件，并设置 NAS 存放根在 rclone 容器中的路径。可通过远程存储白名单限制可浏览的云端来源。两个服务可以独立配置。
 
 | 变量 | 用途 |
 | --- | --- |
-| `CLOUD_COPY_SOURCE_ID` | 「下载校验来源」中已启用的 OpenList 来源 ID。 |
 | `CLOUD_COPY_LOCAL_ROOT` | NAS File Center 容器内已存在的可写导入根，例如 `/data/Download`。 |
 | `CLOUD_COPY_RCLONE_LOCAL_ROOT` | 同一个导入根在 rclone 容器里的路径。 |
-| `CLOUD_COPY_RCLONE_REMOTE` | 只读 WebDAV remote 的名称，填写名称即可。 |
 | `CLOUD_COPY_RCLONE_URL`、`CLOUD_COPY_RCLONE_USERNAME` | 内网 RC 地址与服务用户名。 |
-| `CLOUD_COPY_RCLONE_PASSWORD_FILE` | Worker 中私有密码文件的绝对路径。 |
+| `CLOUD_COPY_RCLONE_PASSWORD_FILE` | API 中私有密码文件的绝对路径。 |
+| `CLOUD_FILES_RCLONE_REMOTES` | 可选，逗号分隔的 rclone 远程存储名称。 |
+| `CLOUD_FILES_OPENLIST_SOURCE_ID` | 已启用的 OpenList 来源 ID，默认沿用 `CLOUD_COPY_SOURCE_ID`。 |
+| `CLOUD_FILES_OPENLIST_NAS_PATH` | 同一份 NAS 存放根在 OpenList 中的本地存储路径。 |
+| `CLOUD_FILES_OPENLIST_WEB_URL`、`CLOUD_FILES_RCLONE_WEB_URL` | 可选，浏览器能访问的原服务地址。 |
 
-复制完成时的清单核对检查路径、对象类型和大小。需要验证内容时，可再从任务详情发起严格 SHA256 校验。
+旧版 `CLOUD_COPY_RCLONE_REMOTE` 对应 2.0.5 的 WebDAV 复制接口。新版的 OpenList 复制直接调用 OpenList，rclone 使用自己的既有远程存储。
+
+需要检查复制后的内容时，可使用下方的下载完整性校验。
 
 ## 推荐使用：快速核对（默认）
 

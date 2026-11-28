@@ -63,6 +63,7 @@ import './styles/console-v2-archive-recovery.css';
  * Mobile repair loads first, then the existing route-scoped base owner to retain prior late-route precedence. */
 import './styles/console-v2-download-verification.css';
 import './styles/console-v2-download-verify.css';
+import './styles/console-v2-cloud-files.css';
 import './styles/console-v2-mobile-header.css';
 import './styles/console-v2-keyboard-navigation.css';
 import './styles/console-v2-studio.css';

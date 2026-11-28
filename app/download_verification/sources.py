@@ -9,6 +9,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, build_opener, ProxyHandler, HTTPHandler, HTTPSHandler
 from urllib.error import HTTPError, URLError
@@ -157,19 +158,28 @@ class AListAPIClient:
                 save_source_session(session_config_dir, session_secret_name, self.base, username, token)
 
     def _json(self, path: str, payload: dict) -> dict:
+        return cast(dict, self._request_json("POST", path, payload))
+
+    def _request_json(
+        self, method: str, path: str, payload: dict | None, *, allow_missing: bool = False,
+    ) -> dict | None:
+        """Send a request to a fixed endpoint, sharing login and bounded response handling."""
         headers = {"Content-Type": "application/json", "Accept": "application/json",
                    "Accept-Encoding": "identity"}
         if self._token:
             headers["Authorization"] = self._token
-        req = Request(self.base + path, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                      method="POST", headers=headers)
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
+        req = Request(self.base + path, data=body, method=method, headers=headers)
         try:
             with self._opener.open(req, timeout=30) as response:
                 if response.status != 200 or response.headers.get("Content-Encoding", "identity").lower() != "identity":
                     raise WebDAVError("SOURCE_API_UNAVAILABLE")
                 raw = response.read(MAX_RESPONSE_BYTES + 1)
         except HTTPError as exc:
-            if exc.code in (401, 403) and self._token and path == "/api/fs/list":
+            exc.close()
+            if allow_missing and exc.code == 404:
+                return None
+            if self._token and (exc.code == 401 or (exc.code == 403 and path == "/api/fs/list")):
                 if self._session_config_dir is not None:
                     clear_source_session(self._session_config_dir, self._session_secret_name)
                 raise WebDAVError("SOURCE_SESSION_EXPIRED") from None
@@ -184,8 +194,11 @@ class AListAPIClient:
             parsed = json.loads(raw)
         except (ValueError, UnicodeDecodeError):
             raise WebDAVError("SOURCE_INVALID_RESPONSE") from None
-        if not isinstance(parsed, dict) or parsed.get("code") != 200:
-            if self._token and path == "/api/fs/list":
+        if allow_missing and isinstance(parsed, dict) and parsed.get("code") == 404:
+            return None
+        code = parsed.get("code") if isinstance(parsed, dict) else None
+        if not isinstance(parsed, dict) or code != 200:
+            if self._token and (path == "/api/fs/list" or code == 401):
                 if self._session_config_dir is not None:
                     clear_source_session(self._session_config_dir, self._session_secret_name)
                 raise WebDAVError("SOURCE_SESSION_EXPIRED")

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { DirectoryPicker } from '../../components/DirectoryPicker';
 import { PageHeader } from '../../components/ui/PageHeader';
@@ -11,7 +11,6 @@ import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { RemoteDirectoryPicker } from './RemoteDirectoryPicker';
-import { CloudCopyWorkspace } from './CloudCopyWorkspace';
 
 import { downloadVerificationApi, type DownloadVerificationItem, type DownloadVerificationRun } from '../../api/downloadVerification';
 import { getStructuredApiError } from '../../api/errors';
@@ -72,7 +71,7 @@ interface VerificationSelection {
 /** A finished cloud copy links to a prefilled verification, which still starts on demand. */
 export function DownloadVerificationPage() {
   const [params] = useSearchParams();
-  if (params.get('view') === 'cloud-copy') return <CloudCopyWorkspace />;
+  if (params.get('view') === 'cloud-copy') return <Navigate to="/cloud-files" replace />;
   const source = params.get('source') ?? '';
   const selection: VerificationSelection = isSqliteId(source)
     ? { source, remote: params.get('remote') ?? '', directory: params.get('directory') ?? '' }
@@ -239,12 +238,8 @@ const DownloadVerificationWorkspace: React.FC<{ selection: VerificationSelection
     <div className="nfc-operations-page nfc-page-layout-workbench nfc-download-verify nfc-download-verify-page nfc-tool-workspace">
       <PageHeader title="下载完整性校验"
         description="核对 AList 或 OpenList 的来源清单与 NAS 下载目录。"
-        actions={<>
-          <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-down" size={16} />}
-            onClick={() => navigate('/download-verification?view=cloud-copy')}>云端复制到 NAS</ConsoleButton>
-          <ConsoleButton leadingIcon={<ConsoleIcon name="settings" size={16} />}
-            onClick={() => navigate('/download-sources')}>管理来源</ConsoleButton>
-        </>} />
+        actions={<ConsoleButton leadingIcon={<ConsoleIcon name="settings" size={16} />}
+          onClick={() => navigate('/download-sources')}>管理来源</ConsoleButton>} />
 
       <DataPanel title="新建下载核对">
         <div className="nfc-dv-workspace" aria-busy={start.isPending || undefined}>

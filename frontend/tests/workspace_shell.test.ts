@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { workspaceNavigationGroup, workspaceViewKey } from '../src/components/layout/navItems';
+import { navLabel, workspaceNavigationGroup, workspaceViewKey } from '../src/components/layout/navItems';
+
+test('cloud files has its own destination beside local files', () => {
+  assert.equal(navLabel('/cloud-files'), '云端文件');
+  assert.deepEqual(workspaceNavigationGroup('/cloud-files')?.items.slice(0, 2).map(item => item.path),
+    ['/dashboard', '/cloud-files']);
+});
 
 test('directory browsing and reopened organizer jobs use the page’s own directory rail', () => {
   assert.equal(workspaceNavigationGroup('/dashboard'), undefined);

@@ -48,7 +48,7 @@ function fixture() {
           },
         }),
         ...(nested && { workspaceScroll: {
-          overflowY: 'auto', maxScroll: scrolled ? 1800 : 0,
+          overflowY: 'auto', maxScroll: scrolled ? 1832 : 0,
           scrollable: scrolled, bottomReached: true,
           visibleHeight: 700, captured: scrolled,
         } }),
@@ -77,13 +77,13 @@ function fixture() {
   return { dir, input, output };
 }
 
-test('produces exactly 800 separately unapproved human decisions and an offline gallery', () => {
+test('produces exactly 832 separately unapproved human decisions and an offline gallery', () => {
   const f = fixture();
   try {
-    assert.equal(buildReviewPack(f.input, f.output, SHA), 800);
+    assert.equal(buildReviewPack(f.input, f.output, SHA), 832);
     const csv = readFileSync(join(f.output, 'review-worklist.csv'), 'utf8');
-    assert.equal(csv.trimEnd().split('\n').length, 801);
-    assert.equal((csv.match(/"UNREVIEWED"/g) || []).length, 800);
+    assert.equal(csv.trimEnd().split('\n').length, 833);
+    assert.equal((csv.match(/"UNREVIEWED"/g) || []).length, 832);
     const page = readFileSync(join(f.output, 'index.html'), 'utf8');
     assert.ok(page.includes(SHA));
     assert.ok(page.includes('manualReviewComplete: false'));
@@ -99,8 +99,8 @@ test('produces exactly 800 separately unapproved human decisions and an offline 
     assert.ok(page.includes('视口首屏截图（长页及内部滚动区仍需补充审查）'));
     assert.ok(page.includes('"capture":"FULL_PAGE"'));
     assert.ok(page.includes('"capture":"VIEWPORT"'));
-    assert.equal(csv.trimEnd().split('\n').filter(x => x.includes('"FULL_PAGE"')).length, 200);
-    assert.equal(csv.trimEnd().split('\n').filter(x => x.includes('"VIEWPORT"')).length, 600);
+    assert.equal(csv.trimEnd().split('\n').filter(x => x.includes('"FULL_PAGE"')).length, 208);
+    assert.equal(csv.trimEnd().split('\n').filter(x => x.includes('"VIEWPORT"')).length, 624);
     assert.ok(page.includes('../screenshots/360/login-light-dark-360.png'));
     assert.ok(page.includes('../screenshots/1920/settings-system-dark-1920.png'));
     assert.ok(!page.includes('__REVIEW_DATA__'));
@@ -113,9 +113,9 @@ test('produces exactly 800 separately unapproved human decisions and an offline 
     assert.equal(csv.trimEnd().split('\n').filter(x =>
       x.includes('workspace-bottom.png')).length, 4);
     assert.deepEqual([evidence.fullPageWidths, evidence.fullPageCases, evidence.viewportCases],
-      [[390, 1440], 200, 600]);
+      [[390, 1440], 208, 624]);
     assert.deepEqual([evidence.sourceHeadSha, evidence.automatedCases,
-      evidence.manualApproved, evidence.manualReviewComplete], [SHA, 800, 0, false]);
+      evidence.manualApproved, evidence.manualReviewComplete], [SHA, 832, 0, false]);
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });
 
@@ -263,7 +263,7 @@ test('rejects cropped expanded interaction states in both outer phone widths, in
         /Source editor complete mobile screenshot missing/);
       editor.sourceEditorScreenshotPixels.fullPage = true;
       writeFileSync(manifestPath, JSON.stringify(manifest));
-      assert.equal(buildReviewPack(f.input, f.output, SHA), 800);
+      assert.equal(buildReviewPack(f.input, f.output, SHA), 832);
     }
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });

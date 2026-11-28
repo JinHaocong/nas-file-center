@@ -24,12 +24,12 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(ROOT, 'browser-full-route-visual.mjs'), 'utf8');
 const cases = [...source.matchAll(/\{ path: '([^']+)', id: '([^']+)'/g)]
   .map(([, path, id]) => ({ path, id }));
-assert.equal(cases.length, 25, 'Route audit inventory is not 25; inspect before building review pack');
+assert.equal(cases.length, 26, 'Route audit inventory is not 26; inspect before building review pack');
 assert.equal(new Set(cases.map(x => x.path)).size, cases.length);
 assert.equal(new Set(cases.map(x => x.id)).size, cases.length);
 const WIDTHS = [...visualViewports];
 const THEMES = visualThemes.map(x => x.mode + '-' + x.system);
-assert.equal(WIDTHS.length * THEMES.length * cases.length, 800);
+assert.equal(WIDTHS.length * THEMES.length * cases.length, 832);
 
 export function buildReviewPack(rootDir, destination, expectedHeadSha) {
   assert.match(expectedHeadSha || '', /^[a-f0-9]{40}$/, 'Supply the exact GitHub artifact HEAD SHA');
@@ -147,7 +147,7 @@ export function buildReviewPack(rootDir, destination, expectedHeadSha) {
         status: 'UNREVIEWED', notes: '' });
     }
   }
-  assert.equal(rows.length, 800);
+  assert.equal(rows.length, 832);
   mkdirSync(output, { recursive: true });
   const csvValue = x => '"' + String(x).replaceAll('"', '""') + '"';
   const csv = [

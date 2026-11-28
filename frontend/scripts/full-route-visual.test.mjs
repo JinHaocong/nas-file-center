@@ -18,9 +18,9 @@ test('all declared React routes, including every parameterized detail page, have
   const covered = [...cases.matchAll(/path: '\/([^']+)'/g)]
     .map(x => x[1]).sort();
   const expected = covered.map(x => x.replace(/\/1(?=\/|$)/g, '/:id')).sort();
-  assert.equal(declared.length, 25);
+  assert.equal(declared.length, 26);
   assert.deepEqual(expected, declared);
-  assert.equal(new Set(covered).size, 25);
+  assert.equal(new Set(covered).size, 26);
 });
 
 test('8x4 safe Chrome visual suite has protected exact-head screenshot upload jobs', () => {

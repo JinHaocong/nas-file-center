@@ -393,7 +393,7 @@ jobs:
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: node scripts/stage-visual-review-artifacts.mjs visual-review-downloads artifacts/full-route-visual "$EXPECTED_SHA"
 
-      - name: Verify all 800 cases and build offline human review
+      - name: Verify all 832 cases and build offline human review
         working-directory: frontend
         env:
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -402,7 +402,7 @@ jobs:
       - name: Upload single bundled review gallery and screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: human-visual-review-800-${{ github.event.pull_request.head.sha || github.sha }}
+          name: human-visual-review-832-${{ github.event.pull_request.head.sha || github.sha }}
           retention-days: 14
           if-no-files-found: error
           path: |

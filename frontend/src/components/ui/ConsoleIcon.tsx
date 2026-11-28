@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   Activity, Archive, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, CalendarDays, Check,
-  CircleCheck, Copy, ChevronDown, ChevronRight, Clock3, Database,
+  CircleCheck, Cloud, Copy, ChevronDown, ChevronRight, Clock3, Database,
   FileCheck2, FileSearch, FileText, Folder, FolderOpen, Folders,
   GitCompareArrows, HardDrive, History, Image, ImageOff, Info, Layers3, LayoutDashboard, ListChecks,
   LockKeyhole, LogOut, Menu, Moon, PanelRight, Pencil, Play, Plus, RefreshCw,
@@ -26,6 +26,7 @@ const icons = {
   'chevron-down': ChevronDown,
   'chevron-right': ChevronRight,
   clock: Clock3,
+  cloud: Cloud,
   database: Database,
   'file-check': FileCheck2,
   'file-search': FileSearch,
