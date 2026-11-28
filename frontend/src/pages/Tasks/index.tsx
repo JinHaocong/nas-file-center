@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { tasksApi } from '../../api/tasks';
 import { useTitle } from '../../hooks/useTitle';
 import { sqliteIdText } from '../../utils/sqliteId';
@@ -13,6 +13,7 @@ import { TaskDeleteButton } from '../../components/tasks/TaskDeleteButton';
 import { TaskHistoryCleanupModal } from '../../components/tasks/TaskHistoryCleanupModal';
 import { OrganizerReportInventory } from '../../components/tasks/OrganizerReportInventory';
 import { getReportedTaskSpeed } from '../../components/tasks/task_utils';
+import { fileWorkspaceReturn } from '../../components/layout/navItems';
 import { useAuth } from '../../contexts/AuthContext';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
@@ -92,6 +93,7 @@ export const TasksPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const selectedTaskId = sqliteIdText(searchParams.get('task'));
+  const returnToFiles = fileWorkspaceReturn(location.state);
 
   /** Put drawer selection in the URL so reload and browser Back restore the shown record. */
   function openTaskDetail(taskId: TaskId, trigger?: HTMLButtonElement) {
@@ -104,7 +106,7 @@ export const TasksPage: React.FC = () => {
     next.set('task', nextId);
     setSearchParams(next, {
       replace: selectedTaskId !== null,
-      state: { taskFromList: selectedTaskId === null || location.state?.taskFromList === true },
+      state: { fileWorkspaceReturn: returnToFiles, taskFromList: selectedTaskId === null || location.state?.taskFromList === true },
     });
   }
 
@@ -117,7 +119,7 @@ export const TasksPage: React.FC = () => {
     if (searchParams.has('task')) {
       const next = new URLSearchParams(searchParams);
       next.delete('task');
-      setSearchParams(next, { replace: true });
+      setSearchParams(next, { replace: true, state: { fileWorkspaceReturn: returnToFiles } });
     }
   }
 
@@ -195,6 +197,10 @@ export const TasksPage: React.FC = () => {
         title="任务中心"
         actions={
           <ActionBar compact>
+            {returnToFiles && <Link className="nfc-console-button nfc-console-button-secondary nfc-console-button-sm"
+              to={returnToFiles} state={{ restoreFileWorkspace: true }}>
+              <ConsoleIcon name="arrow-left" size={16} />返回文件空间
+            </Link>}
             {user?.role === 'admin' && <OrganizerReportInventory />}
             <TaskHistoryCleanupModal
               onCleaned={() => {
@@ -338,6 +344,7 @@ export const TasksPage: React.FC = () => {
         open={selectedTaskId !== null}
         onClose={closeTaskDetail}
         onViewTask={openTaskDetail}
+        returnToFiles={returnToFiles}
         returnFocusFallback={taskQueueFocusTarget}
       />
     </div>

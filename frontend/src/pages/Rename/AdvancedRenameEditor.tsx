@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { batchApi, plansApi } from '../../api/domain';
@@ -14,6 +14,7 @@ import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { CodePath } from '../../components/ui/CodePath';
+import { commonDirectoryPrefix, PathPrefixDisclosure, usePathPrefix } from '../../components/ui/PathPrefixDisclosure';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
@@ -136,6 +137,8 @@ export const AdvancedRenameEditor: React.FC = () => {
   );
   const pages = getPaginationState(page, pageSize, proposals?.length || 0);
   const visible = (proposals || []).slice((pages.current - 1) * pageSize, pages.current * pageSize);
+  const prefix = useMemo(() => commonDirectoryPrefix(proposals?.flatMap(item => [item.source, item.target]) ?? []), [proposals]);
+  const paths = usePathPrefix(prefix);
   const status = (proposal: RenameProposal) => (
     <StatusBadge status={proposal.conflict ? 'failed' : 'completed'}
       label={proposal.conflict ? `冲突: ${proposal.conflict_reason || '目标已存在'}` : '安全'} />
@@ -211,10 +214,11 @@ export const AdvancedRenameEditor: React.FC = () => {
         </div>
       )}
       {proposals !== null && (
-        <DataPanel title="重命名 Preview"
-          description="逐项检查 source → target 与冲突状态；只有全量安全时才能生成 Plan。"
-          action={<span className="nfc-panel-count">{proposals.length} proposals</span>}
+        <DataPanel title="批量重命名预览"
+          description="核对原文件名、新文件名和冲突状态，确认后生成计划。"
+          action={<span className="nfc-panel-count">{proposals.length} 项</span>}
           className="nfc-panel-flush nfc-file-tool-result-panel" variant="dense">
+          <div className="nfc-path-table-prefix"><PathPrefixDisclosure {...paths} compact /></div>
           {visible.length === 0 ? (
             <ConsoleEmpty title="无重命名提议" description="可以修改规则并重新执行只读 Preview。" />
           ) : (
@@ -223,13 +227,13 @@ export const AdvancedRenameEditor: React.FC = () => {
                 <div className="nfc-v2-advanced-rename-table-scroll">
                   <table className="nfc-v2-advanced-rename-table">
                     <caption className="nfc-v2-advanced-rename-sr-only">高级重命名只读提议与冲突状态</caption>
-                    <thead><tr><th scope="col">原完整路径</th><th scope="col">重命名后目标路径</th><th scope="col">状态</th></tr></thead>
+                    <thead><tr><th scope="col">原文件名</th><th scope="col">新文件名</th><th scope="col">状态</th></tr></thead>
                     <tbody>{visible.map((proposal, index) => (
                       <tr key={proposal.source + ':' + index}>
-                        <td><CodePath value={proposal.source}/></td>
+                        <td><CodePath value={proposal.source} displayValue={paths.displayPath(proposal.source)} /></td>
                         <td><div className="nfc-target-path nfc-v2-advanced-rename-target">
                           <ConsoleIcon name="arrow-right" size={16}/>
-                          <CodePath value={proposal.target} muted={proposal.conflict}/>
+                          <CodePath value={proposal.target} displayValue={paths.displayPath(proposal.target)} muted={proposal.conflict} />
                         </div></td>
                         <td>{status(proposal)}</td>
                       </tr>
@@ -247,10 +251,10 @@ export const AdvancedRenameEditor: React.FC = () => {
                       </div>
                       <div className="nfc-plan-item-paths">
                         <div className="nfc-plan-item-path-row">
-                          <span>源路径</span><CodePath value={proposal.source}/>
+                          <span>源路径</span><CodePath value={proposal.source} displayValue={paths.displayPath(proposal.source)} />
                         </div>
                         <div className="nfc-plan-item-path-row">
-                          <span>目标</span><CodePath value={proposal.target} muted={proposal.conflict}/>
+                          <span>目标</span><CodePath value={proposal.target} displayValue={paths.displayPath(proposal.target)} muted={proposal.conflict} />
                         </div>
                       </div>
                       {proposal.conflict &&

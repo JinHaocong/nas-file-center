@@ -142,6 +142,8 @@ test('the selected directory shows reported path changes and full bucket destina
     kind: 'P' as const, bytes: 20,
   }));
   const unit = { ...readyUnit, status: 'ready' as const, sample_moves: [moves[4], ...moves.slice(0, 4)],
+    wrapper_cleanup_count: 1, wrapper_cleanup_paths: [`${readyUnit.unit}/incoming`],
+    preserved_directory_paths: [`${readyUnit.unit}/分册/01`, `${readyUnit.unit}/分册/02`],
     groups: [{ name: 'P [3 60B]', destination, count: 3, bytes: 60 }] };
   let view!: ReactTestRenderer;
   act(() => {
@@ -160,6 +162,21 @@ test('the selected directory shows reported path changes and full bucket destina
   assert.ok(!paths.includes(moves[3].source));
   assert.ok(!paths.includes(moves[4].source));
   assert.match(JSON.stringify(view.toJSON()), /查看完整映射/);
+  assert.ok(view.root.findByProps({ 'aria-label': '目录结构变化' }));
+  assert.match(JSON.stringify(view.toJSON()), /预计清理/);
+  const before = view.root.findByProps({ 'aria-label': '整理前目录树' });
+  const after = view.root.findByProps({ 'aria-label': '整理后目录树' });
+  for (const tree of [before, after]) {
+    assert.ok(tree.findByProps({ title: readyUnit.unit }));
+    for (const path of unit.preserved_directory_paths) assert.ok(tree.findByProps({ title: path }));
+  }
+  assert.match(JSON.stringify(view.toJSON()), /分册边界保留/);
+  const pathText = () => view.root.findAllByType('code')
+    .find(node => node.props.title === moves[0].source)?.children.join('');
+  assert.equal(pathText(), 'incoming/cover.jpg');
+  const disclosure = view.root.findByProps({ 'aria-expanded': false, 'aria-label': '展开公共路径' });
+  act(() => disclosure.props.onClick());
+  assert.equal(pathText(), moves[0].source);
 });
 
 /** Render a real route with a fresh query client. */
@@ -271,6 +288,29 @@ test('opening the batch result URL preserves the exact string job ID and loads t
   assert.equal(view.root.findByType(DirectoryPicker).props.value, selection);
   assert.match(JSON.stringify(view.toJSON()), /整理结果/);
   assert.match(JSON.stringify(view.toJSON()), /目标路径已存在/);
+});
+
+test('locating conflicts requests the first filtered result page and can restore all results', async t => {
+  const requests: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+    assert.equal(options.method, 'GET');
+    if (!url.includes('/batches/')) return Response.json(preview);
+    requests.push(url);
+    const query = new URL(url, 'http://synthetic.local').searchParams;
+    return Response.json(query.get('status_filter') === 'conflict'
+      ? { ...report, filtered_total: 1, items: [report.items[1]] } : report);
+  });
+  const { view, dispose } = await openBatch(`/batch?operation=media-organize&batch=${batchId}`);
+  t.after(dispose);
+  const button = () => view.root.findAllByType('button').find(node => node.props['aria-pressed'] !== undefined &&
+    node.findAllByType('span').some(span => ['定位冲突', '查看全部结果'].includes(span.children.join(''))))!;
+  await act(async () => { button().props.onClick(); await settle(); });
+  assert.ok(requests.some(url => url === `/api/media-organizer/batches/${batchId}?page=1&page_size=25&status_filter=conflict`));
+  const results = view.root.findByType('table').findAllByType('tbody')[0];
+  assert.equal(results.findAllByType('tr').length, 1);
+  assert.ok(results.findAllByType('code').some(code => code.props.title === blockedUnit.unit));
+  await act(async () => { button().props.onClick(); await settle(); });
+  assert.equal(view.root.findByType('table').findByType('tbody').findAllByType('tr').length, 2);
 });
 
 for (const [cleanup, message] of [
@@ -405,7 +445,7 @@ for (const width of [768, 1440]) {
     assert.ok(closeMapping);
     act(() => closeMapping.props.onClick());
     assert.equal(returnedFocus, true);
-    assert.equal(view.root.findAllByProps({ 'aria-label': '列表分页' }).length, 2);
+    assert.equal(view.root.findAllByProps({ 'aria-label': '列表分页' }).length, 1);
   });
 }
 
@@ -502,7 +542,7 @@ test('Luolcy loose files remain selected across pages and an existing package cr
     finishAssignment(Response.json({ plan_id: planId, status: 'draft', expected_changes: 2 }));
     await settle();
   });
-  assert.ok(view.root.findByType('a').props.href === `/plans/${planId}`);
+  assert.ok(view.root.findAllByType('a').some(link => link.props.href === `/plans/${planId}`));
   assert.match(JSON.stringify(view.toJSON()), /整理预览/);
 });
 
@@ -558,7 +598,7 @@ test('a Luolcy author with no packages requires a valid new package name', async
   act(() => input.props.onChange({ target: { value: '新建资源包' } }));
   await act(async () => { submit.props.onSubmit({ preventDefault() {} }); await settle(); });
   assert.deepEqual(drafts, [{ sources: [file], package_name: '新建资源包', new_package: true }]);
-  assert.equal(view.root.findByType('a').props.href, '/plans/51');
+  assert.ok(view.root.findAllByType('a').some(link => link.props.href === '/plans/51'));
 });
 
 test('a large assignment plan ID stays exact through detail, freeze, validate and confirmed execute', async t => {

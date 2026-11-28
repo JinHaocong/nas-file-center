@@ -9,6 +9,7 @@ import { TaskActionBar } from './TaskActionBar';
 import { TaskDeleteButton } from './TaskDeleteButton';
 import { MediaPackageRecoveryPanel } from './MediaPackageRecoveryPanel';
 import { ConsoleButton } from '../ui/ConsoleButton';
+import { ConsoleIcon } from '../ui/ConsoleIcon';
 import { CodePath } from '../ui/CodePath';
 import { ConsoleSheet } from '../ui/ConsoleSheet';
 import { StatusBadge } from '../ui/StatusBadge';
@@ -31,6 +32,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onViewTask?: (taskId: TaskId) => void;
+  returnToFiles?: string;
   returnFocusFallback?: () => HTMLElement | null;
 }
 
@@ -90,7 +92,7 @@ function revealTaskLogs(target: HTMLElement | null) {
   sheetBody.scrollTo({ top, behavior: reducedMotion ? 'instant' : 'smooth' });
 }
 
-export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onViewTask, returnFocusFallback }) => {
+export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onViewTask, returnFocusFallback, returnToFiles }) => {
   const logs = useRef<HTMLElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const lastTaskId = useRef<TaskId | null>(null);
@@ -129,7 +131,11 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
       title="任务详情"
       returnFocusFallback={returnFocusFallback}
       description={task ? taskTypeLabel(task.job_type) : undefined}
-      className="nfc-task-detail-drawer nfc-reading-sheet"
+      className={'nfc-task-detail-drawer nfc-reading-sheet' + (returnToFiles ? ' nfc-task-workspace-return' : '')}
+      footer={returnToFiles && <Link className="nfc-console-button nfc-console-button-primary"
+        to={returnToFiles} state={{ restoreFileWorkspace: true }}>
+        <ConsoleIcon name="arrow-left" size={16} />返回文件空间
+      </Link>}
       titleAside={task ? (
         <><span className="nfc-v2-task-id">#{task.id}</span><StatusBadge status={task.status} /></>
       ) : visibleTaskId ? <span className="nfc-v2-task-id">#{visibleTaskId}</span> : null}

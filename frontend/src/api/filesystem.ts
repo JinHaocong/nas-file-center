@@ -1,6 +1,13 @@
 import { api } from './client';
 import { DirectoryListResponse, FavoritePath, RecentPath, User } from '../types';
 
+export interface DirectoryOverview {
+  images: number;
+  videos: number;
+  files: number;
+  total_bytes: number;
+}
+
 /** Directory history belongs to the signed-in account; each recent list also has its own limit. */
 export function directoryHistoryKey(kind: 'favorites' | 'recent', userId: User['id'] | undefined, limit?: number) {
   const owner = ['filesystem', kind, userId ?? null] as const;
@@ -26,6 +33,12 @@ export const filesystemApi = {
       params.append('search', search.trim());
     }
     return api.get<DirectoryListResponse>(`/api/filesystem/list?${params.toString()}`);
+  },
+
+  /** Fetch an optional, bounded summary for the selected directory. */
+  directoryOverview: (path: string) => {
+    const params = new URLSearchParams({ path });
+    return api.get<{ overview: DirectoryOverview | null }>(`/api/filesystem/directory-overview?${params}`);
   },
 
   listFavorites: () => {

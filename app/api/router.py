@@ -17,6 +17,7 @@ from app.batch.media_sort import preview_media_sort
 from app.batch.directory_compare import compare_directories, verify_directory_pair
 from app.exceptions import PlanStaleError
 from app.execution.luolcy_assignment import LUOLCY_ASSIGNMENT_KIND
+from app.filesystem_overview import directory_overview
 from app.filters.schema import FilterPreviewRequest, FilterPreviewResponse
 from app.filters.validation import FilterValidationError
 from app.resource_control import ResourcePolicyValidationError
@@ -564,6 +565,15 @@ def list_filesystem(
         raise HTTPException(400, str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
+
+
+@router.get("/filesystem/directory-overview")
+def get_directory_overview(request: Request, response: Response, path: str = Query(min_length=1, max_length=8192)):
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        return {"overview": directory_overview(path, request.app.state.settings)}
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(403, "无权预览此目录") from exc
 
 
 @router.get("/filesystem/favorites")
@@ -2269,6 +2279,12 @@ def get_workflow(
     current_user: User = Depends(get_current_user),
 ):
     return request.app.state.service.workflow_service.get_workflow(workflow_id)
+
+
+@router.get("/workflows/{workflow_id}/latest-run")
+def latest_workflow_run(request: Request, workflow_id: int, current_user: User = Depends(get_current_user)):
+    service = request.app.state.service
+    return service.task_service.latest_workflow_run(workflow_id)
 
 
 @router.put("/workflows/{workflow_id}", response_model=WorkflowResponse)

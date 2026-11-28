@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Iterator
 
 from app.batch.file_rename import _open_directory_nofollow
-from app.batch.media_organizer_recycle_rules import check
+from app.batch.media_organizer_recycle_rules import check, recycle_file_reason
 from app.batch.zspace_recycle import ZSpaceRecycleClient
 
 if TYPE_CHECKING:
@@ -100,7 +100,7 @@ def iter_recycle_candidates(selection: Path, settings: Settings, checkpoint: Cal
                     if entry.is_dir(follow_symlinks=False):
                         children.append(path)
                         continue
-                    if path.suffix.casefold() not in {".url", ".txt"}:
+                    if recycle_file_reason(entry.name) is None:
                         continue
                     info = entry.stat(follow_symlinks=False)
                     if info.st_dev != device or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:

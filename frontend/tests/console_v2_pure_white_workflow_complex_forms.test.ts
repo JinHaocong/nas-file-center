@@ -21,7 +21,7 @@ describe('Pure White Stage 3B complex form details', () => {
     assert.doesNotMatch(step, /#8668d4|#e2ae52/);
     const source = read('src/components/workflows/StepCard.tsx');
     for (const token of [
-      'aria-expanded={expanded}', 'hidden={!expanded}', 'readOnly',
+      'aria-expanded={expanded}', 'aria-hidden={expanded ? undefined : true}', "{ inert: '' }", 'readOnly',
       'handleMoveUp', 'handleMoveDown', 'handleDelete',
     ]) assert.ok(source.includes(token), token);
   });

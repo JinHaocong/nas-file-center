@@ -67,7 +67,7 @@ export interface CloudTransfers {
   errors?: Partial<Record<CloudFileProvider, string>>;
 }
 
-export type CloudCopySubmission = (CloudTransfer & { skipped_names?: string[] }) | {
+export type CloudCopySubmission = (CloudTransfer & { submitted_count?: number; skipped_names?: string[] }) | {
   native_ids: [];
   submitted_count: 0;
   skipped_names: string[];

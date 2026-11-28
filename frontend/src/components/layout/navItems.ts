@@ -73,6 +73,13 @@ export function navLabel(pathname: string, search = ''): string {
   return consoleNavigation.find(item => item.path === destination)?.label ?? '文件空间';
 }
 
+/** Read the original file browser URL from an in-app organizer or task entry. */
+export function fileWorkspaceReturn(state: unknown): string | undefined {
+  if (!state || typeof state !== 'object' || !('fileWorkspaceReturn' in state)) return undefined;
+  const href = state.fileWorkspaceReturn;
+  return typeof href === 'string' && (href === '/dashboard' || href.startsWith('/dashboard?')) ? href : undefined;
+}
+
 /** Folder history has its own scroll position; selection and filter changes keep the current view. */
 export function workspaceViewKey(pathname: string, search: string): string {
   if (pathname !== '/dashboard') return pathname;

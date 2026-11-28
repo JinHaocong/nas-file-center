@@ -108,3 +108,21 @@
 @media (prefers-reduced-motion: reduce) {
   .nfc-v2-code-path * { animation-duration: 0.01ms; transition-duration: 0.01ms; }
 }
+
+.nfc-path-prefix-disclosure {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 7px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--studio-line);
+  border-radius: 7px;
+  background: var(--studio-ground);
+  color: var(--studio-muted);
+  font-size: 11px;
+}
+.nfc-path-prefix-disclosure > svg { flex: none; color: var(--nfc-tint); }
+.nfc-path-prefix-disclosure > .nfc-v2-code-path { flex: 1 1 130px; }
+.nfc-path-prefix-disclosure > .nfc-console-button { margin-inline-start: auto; }
+.nfc-path-table-prefix:has(.nfc-path-prefix-disclosure) { padding: 10px 12px; }

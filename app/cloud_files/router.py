@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from unicodedata import normalize
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.dependencies import require_admin_user
@@ -178,15 +179,21 @@ def _task(task_id, config, settings):
     return adapter, provider, native_id, instance, record, view
 
 
-def _submit(adapter, provider, remote, parts, items, target):
+def _require_copy_target(adapter, provider, parts, names, target):
+    """Complete read-only provider checks before starting any copy."""
     if provider == "openlist":
         if any(delimiter in str(value) for delimiter in ("](", ") to [")
-               for value in (*parts, target, *(item["name"] for item in items))):
+               for value in (*parts, target, *names)):
             raise HTTPException(422, "这批名称包含 OpenList 任务路径的分隔符，无法准确追踪原生任务。")
         adapter.require_destination(target.parts[1:])
+    else:
+        adapter.require_destination(target)
+
+
+def _submit(adapter, provider, remote, parts, items, target):
+    if provider == "openlist":
         return adapter.start(parts, tuple(item["name"] for item in items), target.parts[1:]), None
 
-    adapter.require_destination(target)
     submitted = []
     for item in items:
         try:
@@ -196,6 +203,15 @@ def _submit(adapter, provider, remote, parts, items, target):
         submitted.append({**ref, "name": item["name"], "status": "queued", "files": [],
                           "source": "/".join(parts), "remote": remote})
     return submitted, None
+
+
+def _confirmed_copy_names(provider, parts, requested, target, records):
+    """Count selected objects rather than recursive or unlinked provider tasks."""
+    if provider == "rclone":
+        return requested[:len(records)]
+    confirmed_paths = {(record.get("source_path"), record.get("destination_path")) for record in records}
+    return [name for name in requested
+            if (str(PurePosixPath("/", *parts, name)), str(target / name)) in confirmed_paths]
 
 
 @router.get("/configuration")
@@ -250,15 +266,24 @@ def start_transfer(request: Request, payload: NewTransfer):
         pending = [name for name in names if name not in skipped]
         if not pending:
             return {"native_ids": [], "submitted_count": 0, "skipped_names": skipped}
+        _require_copy_target(adapter, payload.provider, parts, pending, target)
+    except _UPSTREAM_ERRORS:
+        return JSONResponse(status_code=502, content={"error": {
+            "code": "CLOUD_COPY_NOT_SUBMITTED", "message": "联系云端服务时预检失败，这批复制还未提交。",
+        }})
+    try:
         records, message = _submit(adapter, payload.provider, payload.remote, parts,
                                    [listed[name] for name in pending], target)
     except _UPSTREAM_ERRORS:
-        raise _upstream() from None
+        raise HTTPException(502, "提交结果未确认，请查看原生传输列表。") from None
     if not records:
         raise HTTPException(502, message or "原生服务未返回任务编号，请查看对应服务的传输列表。")
+    confirmed = _confirmed_copy_names(payload.provider, parts, pending, target, records)
+    if not message and len(confirmed) < len(pending):
+        message = "部分提交结果未确认，请查看对应服务的传输列表。"
     view = transfer_view(payload.provider, records[0], config, destination=str(destination))
     view.update(native_ids=[record["id"] for record in records],
-                names=pending, error=message, submitted_count=len(records), skipped_names=skipped)
+                names=confirmed or view["names"], error=message, submitted_count=len(confirmed), skipped_names=skipped)
     return view
 
 

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { batchApi, plansApi } from '../../api/domain';
@@ -14,6 +14,7 @@ import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
 import { CodePath } from '../../components/ui/CodePath';
+import { commonDirectoryPrefix, PathPrefixDisclosure, usePathPrefix } from '../../components/ui/PathPrefixDisclosure';
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
@@ -145,6 +146,8 @@ export const ImmediateRenameEditor: React.FC<Props> = ({ kind }) => {
   );
   const pages = getPaginationState(page, pageSize, proposals?.length ?? 0);
   const visible = proposals?.slice((pages.current - 1) * pageSize, pages.current * pageSize) || [];
+  const prefix = useMemo(() => commonDirectoryPrefix(proposals?.flatMap(item => [item.source, item.target]) ?? []), [proposals]);
+  const paths = usePathPrefix(prefix);
   const renderStatus = (item: RenameProposal) => (
     <StatusBadge status={item.conflict ? 'failed' : 'completed'}
       label={item.conflict ? item.conflict_reason || '命名冲突' : '安全'} />
@@ -247,6 +250,7 @@ export const ImmediateRenameEditor: React.FC<Props> = ({ kind }) => {
           description={`仅显示名称会变化的一级${label}；无匹配项表示无需重命名。`}
           action={<span className="nfc-panel-count">{proposals.length} 个{label}</span>}
           className="nfc-panel-flush nfc-file-tool-result-panel" variant="dense">
+          <div className="nfc-path-table-prefix"><PathPrefixDisclosure {...paths} compact /></div>
           {visible.length === 0 ? (
             <ConsoleEmpty title={`没有需要重命名的一级${label}`} description="更换规则后可重新执行只读 Preview。" />
           ) : (
@@ -258,10 +262,10 @@ export const ImmediateRenameEditor: React.FC<Props> = ({ kind }) => {
                     <thead><tr><th scope="col">原{label}</th><th scope="col">新{label}</th><th scope="col">预览状态</th></tr></thead>
                     <tbody>{visible.map((item, i) => (
                       <tr key={item.source + ':' + i}>
-                        <td><CodePath value={item.source}/></td>
+                        <td><CodePath value={item.source} displayValue={paths.displayPath(item.source)} /></td>
                         <td><div className="nfc-target-path nfc-v2-immediate-target">
                           <ConsoleIcon name="arrow-right" size={15}/>
-                          <CodePath value={item.target} muted={item.conflict}/>
+                          <CodePath value={item.target} displayValue={paths.displayPath(item.target)} muted={item.conflict} />
                         </div></td>
                         <td>{renderStatus(item)}</td>
                       </tr>
@@ -278,8 +282,10 @@ export const ImmediateRenameEditor: React.FC<Props> = ({ kind }) => {
                         {renderStatus(item)}
                       </div>
                       <div className="nfc-plan-item-paths">
-                        <div className="nfc-plan-item-path-row"><span>原{label}</span><CodePath value={item.source}/></div>
-                        <div className="nfc-plan-item-path-row"><span>目标</span><CodePath value={item.target} muted={item.conflict}/></div>
+                        <div className="nfc-plan-item-path-row"><span>原{label}</span>
+                          <CodePath value={item.source} displayValue={paths.displayPath(item.source)} /></div>
+                        <div className="nfc-plan-item-path-row"><span>目标</span>
+                          <CodePath value={item.target} displayValue={paths.displayPath(item.target)} muted={item.conflict} /></div>
                       </div>
                       {item.conflict && <p className="nfc-mobile-record-error">{item.conflict_reason}</p>}
                     </article>

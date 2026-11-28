@@ -22,22 +22,12 @@
   border-radius: var(--nfc-panel-radius);
 }
 
-.nfc-tool-workflow-nav,
 .nfc-tool-filter-strip {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
-}
-
-.nfc-tool-workflow-nav {
-  padding: 4px;
-  width: fit-content;
-  max-width: 100%;
-  background: var(--tool-soft);
-  border: 1px solid var(--tool-border);
-  border-radius: var(--nfc-radius-control);
 }
 
 .nfc-tool-workspace .nfc-workflow-editor-layout {
@@ -261,7 +251,8 @@
 
 @media (min-width: 1200px) {
   .nfc-studio .nfc-app-main .nfc-tool-workspace .nfc-workflow-editor-layout {
-    grid-template-columns: minmax(254px, 30%) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 24%);
+    gap: 16px;
   }
 
   .nfc-tool-settings-layout {

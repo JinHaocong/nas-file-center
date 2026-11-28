@@ -127,7 +127,8 @@ def test_native_rclone_ids_file_speeds_cancel_and_delete_record(cloud_app, monke
 
 
 
-def test_openlist_calls_native_jobs_and_does_not_write_a_nfc_transfer_table(cloud_app, monkeypatch):
+@pytest.mark.parametrize("partial", [False, True])
+def test_openlist_calls_native_jobs_and_does_not_write_a_nfc_transfer_table(cloud_app, monkeypatch, partial):
     import sqlite3
     from app.cloud_files import router
 
@@ -138,6 +139,7 @@ def test_openlist_calls_native_jobs_and_does_not_write_a_nfc_transfer_table(clou
         "provider": "openlist", "name": "Fixture OpenList", "base_url": "http://openlist:5244",
     }).status_code == 201
     native = {}
+    names = ["相册", "补充目录"] if partial else ["相册"]
 
     class Provider:
         def __init__(self, source, config):
@@ -148,11 +150,10 @@ def test_openlist_calls_native_jobs_and_does_not_write_a_nfc_transfer_table(clou
 
         def entries(self, path):
             assert path == ()
-            return [{"name": "NAS-Download", "kind": "directory", "size": None},
-                    {"name": "相册", "kind": "directory", "size": None}]
+            return [{"name": name, "kind": "directory", "size": None} for name in ["NAS-Download", *names]]
 
-        def start(self, path, names, destination):
-            assert (path, names, destination) == ((), ("相册",), ("NAS-Download",))
+        def start(self, path, selected, destination):
+            assert (path, selected, destination) == ((), tuple(names), ("NAS-Download",))
             native["native-root"] = {"id": "native-root", "name": "相册", "status": "running",
                                      "progress": None, "source_path": "/相册", "destination_path": "/NAS-Download/相册",
                                      "is_directory": True, "total_bytes": None}
@@ -176,12 +177,15 @@ def test_openlist_calls_native_jobs_and_does_not_write_a_nfc_transfer_table(clou
 
     monkeypatch.setattr(router, "OpenListProvider", Provider)
     source_list = client.get("/api/cloud-files/entries", params={"provider":"openlist"}).json()["items"]
-    assert [entry["name"] for entry in source_list] == ["相册"]
+    assert [entry["name"] for entry in source_list] == names
     response = client.post("/api/cloud-files/transfers", json={
-        "provider":"openlist","names":["相册"],"path":"","destination":str(landing),
+        "provider":"openlist","names":names,"path":"","destination":str(landing),
     })
     assert response.status_code == 202, response.text
-    assert response.json()["id"] == "openlist.native-root"
+    receipt = response.json()
+    assert receipt["id"] == "openlist.native-root"
+    assert receipt["submitted_count"] == 1 and receipt["names"] == ["相册"]
+    assert bool(receipt["error"]) is partial
     path = "/api/cloud-files/transfers/openlist.native-file"
     row = client.get(path).json()
     assert row["destination"] == str(landing / "相册")
@@ -204,6 +208,51 @@ def test_bad_destinations_fail_before_any_native_submission(cloud_app):
     assert start_rclone(client, landing, names=["../original"]).status_code == 422
     settings.allow_mutation = False
     assert start_rclone(client, landing).status_code == 403
+
+
+@pytest.mark.parametrize("failure_stage", ["preflight", "first_submission", "second_submission"])
+def test_native_receipt_distinguishes_unsubmitted_and_unconfirmed_requests(cloud_app, monkeypatch, failure_stage):
+    from app.cloud_files import router
+    from app.cloud_copy.rclone import RcloneError
+
+    client, _, landing = cloud_app
+    attempts = []
+
+    class Provider:
+        def __init__(self, **kwargs):
+            pass
+
+        def remotes(self):
+            return ["PikPak WebDAV"]
+
+        def entries(self, remote, path):
+            return [{"name": "封面.jpg", "kind": "file", "size": 100},
+                    {"name": "视频", "kind": "directory", "size": None}]
+
+        def require_destination(self, destination):
+            if failure_stage == "preflight":
+                raise RcloneError("fixture")
+
+        def start(self, remote, path, name, is_directory, destination):
+            attempts.append(name)
+            if failure_stage == "first_submission" or len(attempts) == 2:
+                raise RcloneError("fixture")
+            return {"id": "9007199254740993", "instance": "test-instance"}
+
+    monkeypatch.setattr(router, "RcloneProvider", Provider)
+    response = start_rclone(client, landing)
+    if failure_stage == "preflight":
+        assert response.status_code == 502 and not attempts
+        assert response.json()["error"]["code"] == "CLOUD_COPY_NOT_SUBMITTED"
+    elif failure_stage == "first_submission":
+        assert response.status_code == 502 and attempts == ["封面.jpg"]
+        assert "未确认" in response.json()["detail"]
+    else:
+        assert response.status_code == 202 and attempts == ["封面.jpg", "视频"]
+        body = response.json()
+        assert body["submitted_count"] == 1 and body["names"] == ["封面.jpg"]
+        assert body["native_ids"] == ["9007199254740993"]
+        assert "未确认" in body["error"]
 
 
 def test_rclone_reuses_existing_folder_and_skips_existing_file(cloud_app, monkeypatch):

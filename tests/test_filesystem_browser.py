@@ -117,6 +117,40 @@ def test_directory_browser_and_recents_keep_distinct_trailing_space_names(tmp_pa
     assert {item["path"] for item in recent.json()["items"]} == {str(plain.resolve()), str(spaced.resolve())}
 
 
+def test_directory_overview_counts_real_nested_media_and_excludes_unsafe_paths(tmp_path: Path, monkeypatch):
+    app, data_dir, settings = _create_test_app(tmp_path, allow_mutation=False)
+    directory = data_dir / "海岸公路 "
+    nested = directory / "相机原图"
+    nested.mkdir(parents=True)
+    (nested / "DSC_0431.JPG").write_bytes(b"abc")
+    (directory / ".mov").write_bytes(b"video")
+    (directory / "说明.txt").write_bytes(b"note")
+    (directory / "jpg").touch()
+    excluded = directory / "@eaDir"
+    excluded.mkdir()
+    (excluded / "thumbnail.png").write_bytes(b"preview")
+    (directory / "linked.jpg").symlink_to(nested / "DSC_0431.JPG")
+    (directory / "linked child").symlink_to(nested, target_is_directory=True)
+    (data_dir / "alias").symlink_to(directory, target_is_directory=True)
+    os.mkfifo(directory / "pipe.mp4")
+    settings.quarantine_root.mkdir(exist_ok=True)
+    client = _get_auth_client(app)
+    url = "/api/filesystem/directory-overview"
+
+    response = client.get(url, params={"path": str(directory)})
+    assert response.status_code == 200
+    assert response.json() == {"overview": {"images": 1, "videos": 1, "files": 4, "total_bytes": 12}}
+    assert response.headers["cache-control"] == "private, no-store"
+    assert TestClient(app).get(url, params={"path": str(directory)}).status_code == 401
+    for unsafe in [data_dir / "alias", settings.quarantine_root, tmp_path / "out", directory / ".."]:
+        assert client.get(url, params={"path": str(unsafe)}).status_code == 403
+    assert client.get(url, params={"path": str(data_dir)}).json() == {"overview": None}
+    assert client.get(url, params={"path": str(data_dir / "missing")}).json() == {"overview": None}
+
+    monkeypatch.setattr("app.filesystem_overview.MAX_ENTRIES", 1)
+    assert client.get(url, params={"path": str(directory)}).json() == {"overview": None}
+
+
 def test_list_filesystem_default_root_and_custom_subroot(tmp_path: Path):
     # 1. When path is omitted, backend defaults to allowed_roots[0]
     app1, data_dir, _ = _create_test_app(tmp_path)

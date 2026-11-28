@@ -5,6 +5,7 @@ import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
 import { CodePath } from '../../components/ui/CodePath';
+import { commonDirectoryPrefix, PathPrefixDisclosure, usePathPrefix } from '../../components/ui/PathPrefixDisclosure';
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
@@ -153,6 +154,7 @@ export const DirectoryDiffPage: React.FC = () => {
   };
 
   const visible = filterDirectoryDiffRows(result?.items || [], filter);
+  const paths = usePathPrefix(result ? commonDirectoryPrefix([result.root_a, result.root_b]) : undefined);
   const pages = getPaginationState(page, pageSize, visible.length);
   const visiblePage = visible.slice((pages.current - 1) * pageSize, pages.current * pageSize);
 
@@ -171,6 +173,14 @@ export const DirectoryDiffPage: React.FC = () => {
       aria-label={'SHA256 校验 ' + row.relative_path}
       onClick={() => { void verifyRow(row); }}>SHA256</ConsoleButton>
   ) : <span className="nfc-v2-directory-diff-muted">—</span>;
+
+  /** Align both sides under one relative path and make absence explicit. */
+  function side(kind: DirectoryDiffRow['kind_a'], size: DirectoryDiffRow['size_a']) {
+    return kind ? <span className="nfc-directory-diff-side">
+      <strong>{kind === 'directory' ? '目录' : '文件'}</strong>
+      {kind === 'file' && <small>{formatDirectoryDiffSize(size)}</small>}
+    </span> : <span className="nfc-directory-diff-side is-missing">缺失</span>;
+  }
 
   return (
     <div className="nfc-operations-page nfc-directory-diff-page nfc-page-layout-workbench nfc-v2-directory-diff nfc-tool-workspace">
@@ -215,11 +225,21 @@ export const DirectoryDiffPage: React.FC = () => {
             ' 项；排除符号链接 A ' + result.skipped_symlinks_a +
             ' / B ' + result.skipped_symlinks_b + ' 个'}
           action={<span className="nfc-panel-count">{visible.length} / {result.total} 路径</span>}>
-          <div className="nfc-form-grid nfc-v2-directory-diff-roots">
-            <div><strong>目录 A</strong><CodePath value={result.root_a} /></div>
-            <div><strong>目录 B</strong><CodePath value={result.root_b} /></div>
+          <div className="nfc-directory-diff-path-context">
+            <PathPrefixDisclosure {...paths} compact />
+            <div className="nfc-form-grid nfc-v2-directory-diff-roots">
+              <div><strong><ConsoleIcon name="folder-open" size={14} />目录 A · 来源</strong>
+                <CodePath value={result.root_a} displayValue={paths.displayPath(result.root_a)} /></div>
+              <div><strong><ConsoleIcon name="folder-open" size={14} />目录 B · 对照</strong>
+                <CodePath value={result.root_b} displayValue={paths.displayPath(result.root_b)} /></div>
+            </div>
           </div>
           <ActionBar className="nfc-v2-directory-diff-actions">
+            <ConsoleButton size="sm" aria-pressed={filter === 'differences'}
+              leadingIcon={<ConsoleIcon name="git-compare" size={15} />}
+              onClick={() => { setFilter(filter === 'differences' ? 'all' : 'differences'); setPage(1); }}>
+              {filter === 'differences' ? '查看全部路径' : '查看差异项'}
+            </ConsoleButton>
             <label className="nfc-v2-directory-diff-filter">
               <span>筛选结果</span>
               <select value={filter}
@@ -251,20 +271,16 @@ export const DirectoryDiffPage: React.FC = () => {
                     <caption>目录差异与单项 SHA256 校验结果</caption>
                     <thead><tr>
                       <th scope="col">相对路径</th>
-                      <th scope="col">A 类型</th>
-                      <th scope="col">B 类型</th>
-                      <th scope="col">A 大小</th>
-                      <th scope="col">B 大小</th>
+                      <th scope="col">目录 A</th>
+                      <th scope="col">目录 B</th>
                       <th scope="col">结果</th>
                       <th scope="col">校验</th>
                     </tr></thead>
                     <tbody>{visiblePage.map(row => (
                       <tr key={row.relative_path}>
                         <td><CodePath value={row.relative_path} /></td>
-                        <td>{row.kind_a === 'file' ? '文件' : row.kind_a === 'directory' ? '目录' : '—'}</td>
-                        <td>{row.kind_b === 'file' ? '文件' : row.kind_b === 'directory' ? '目录' : '—'}</td>
-                        <td>{formatDirectoryDiffSize(row.size_a)}</td>
-                        <td>{formatDirectoryDiffSize(row.size_b)}</td>
+                        <td>{side(row.kind_a, row.size_a)}</td>
+                        <td>{side(row.kind_b, row.size_b)}</td>
                         <td>{badge(row)}</td>
                         <td>{verifyAction(row)}</td>
                       </tr>
@@ -282,8 +298,8 @@ export const DirectoryDiffPage: React.FC = () => {
                       </div>
                       <CodePath value={row.relative_path} />
                       <div className="nfc-mobile-record-facts">
-                        <span>A：{formatDirectoryDiffSize(row.size_a)} ({row.kind_a || '缺失'})</span>
-                        <span>B：{formatDirectoryDiffSize(row.size_b)} ({row.kind_b || '缺失'})</span>
+                        <span>目录 A：{side(row.kind_a, row.size_a)}</span>
+                        <span>目录 B：{side(row.kind_b, row.size_b)}</span>
                       </div>
                     </article>
                   ))}

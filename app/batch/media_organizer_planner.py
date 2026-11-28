@@ -2595,6 +2595,13 @@ def _semantic_previews(
                 # A local plan owns only its explicit buckets, so discovery
                 # still needs to visit pure wrappers left outside that plan.
                 children.extend((child, depth + 1, None) for child in pure_wrappers if child.name not in claimed)
+            if row["status"] == "ready":
+                # These branches are visited as separate units. The current
+                # unit leaves their directory boundaries in place.
+                preserved = sorted(str(child) for child, _, _ in children
+                                   if child.name in numbered or child.name in numbered_containers)
+                if preserved:
+                    row["preserved_directory_paths"] = preserved[:10]
             yield row
         children.sort(key=lambda entry: (str(entry[0]).casefold(), str(entry[0])), reverse=True)
         if (unit.parent.is_relative_to(selection) and (

@@ -7,6 +7,7 @@ type MediaKind = 'P' | 'V' | 'Other';
 type MediaUnitStatus = 'ready' | 'blocked' | 'already_organized' | 'skipped' | 'needs_assignment';
 export type MediaPreviewFilter = MediaUnitStatus | 'all';
 export type MediaBatchOutcome = 'success' | 'skipped' | 'conflict' | 'failed';
+export type MediaBatchResultFilter = MediaBatchOutcome | 'all';
 
 interface OrganizerJobReceipt {
   job_id: OrganizerJobId;
@@ -49,7 +50,9 @@ export interface MediaBatchPreviewUnit {
   needed_moves: number;
   renamed_count: number;
   wrapper_cleanup_count?: number;
-  recycle_reason?: 'url_shortcut' | 'links_only' | 'promotion';
+  wrapper_cleanup_paths?: string[];
+  preserved_directory_paths?: string[];
+  recycle_reason?: 'url_shortcut' | 'links_only' | 'promotion' | 'text_file';
   total_proposals: number;
   mapping_id: string | null;
   loose_id?: string;
@@ -155,6 +158,9 @@ export const mediaOrganizerBatchApi = {
   startBatch: (previewId: OrganizerJobId) =>
     api.post<OrganizerJobReceipt>(`${base}/previews/${previewId}/batches`, {}),
   /** Read the durable progress and paginated outcomes of one batch. */
-  getBatch: (id: OrganizerJobId, page: number, pageSize: number) =>
-    api.get<MediaBatchResult>(`${base}/batches/${id}?${pagination(page, pageSize)}`),
+  getBatch: (id: OrganizerJobId, page: number, pageSize: number, status: MediaBatchResultFilter = 'all') => {
+    const query = pagination(page, pageSize);
+    if (status !== 'all') query.set('status_filter', status);
+    return api.get<MediaBatchResult>(`${base}/batches/${id}?${query}`);
+  },
 };

@@ -160,6 +160,65 @@
 .nfc-workflow-builder-page .nfc-workflow-definition-rail .nfc-form-grid {
   grid-template-columns: minmax(0, 1fr);
 }
+.nfc-workflow-builder-page .nfc-v2-workflow-notices:empty { display: none; }
+.nfc-workflow-builder-page .nfc-workflow-revision-facts {
+  display: grid;
+  margin: 0;
+  font-size: 12px;
+}
+.nfc-workflow-revision-facts > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding-block: 8px;
+  border-bottom: 1px solid var(--studio-line);
+}
+.nfc-workflow-revision-facts dt { color: var(--studio-muted); }
+.nfc-workflow-revision-facts dd {
+  margin: 0;
+  font-weight: 700;
+  text-align: end;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.nfc-workflow-definition-disclosure { margin-block-start: 6px; }
+.nfc-workflow-definition-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  color: var(--nfc-tint);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+.nfc-workflow-definition-disclosure > summary::-webkit-details-marker { display: none; }
+.nfc-workflow-definition-disclosure > summary > span { flex: 1; }
+.nfc-workflow-definition-disclosure[open] > summary > svg:last-child { rotate: 180deg; }
+.nfc-workflow-definition-disclosure > .nfc-v2-workflow-form { padding-block: 8px 0; }
+.nfc-workflow-definition-disclosure .nfc-workflow-mode-option { min-height: 50px; }
+.nfc-workflow-latest-run {
+  margin-block-start: 8px;
+  padding-block-start: 12px;
+  border-top: 1px solid var(--studio-line);
+  scroll-margin-block-start: 85px;
+  font-size: 12px;
+}
+.nfc-workflow-latest-run > header { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-block-end: 9px; }
+.nfc-workflow-latest-run h3 { margin: 0; font-size: 13px; }
+.nfc-workflow-latest-run p { margin: 0; color: var(--studio-muted); }
+.nfc-workflow-run-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  color: var(--nfc-tint);
+  font-weight: 700;
+  text-decoration: none;
+}
+.nfc-workflow-run-link:hover { text-decoration: underline; }
 .nfc-workflow-builder-page .nfc-v2-workflow-mode-choice {
   display: flex;
   align-items: center;
@@ -185,7 +244,7 @@
 }
 .nfc-workflow-builder-page .nfc-workflow-step-list {
   display: grid;
-  gap: 5px;
+  gap: 3px;
 }
 .nfc-workflow-builder-page .nfc-workflow-definition-rail .nfc-data-panel-header,
 .nfc-workflow-builder-page .nfc-workflow-pipeline-canvas .nfc-data-panel-header {

@@ -344,6 +344,18 @@
 }
 
 .nfc-task-detail-drawer .nfc-v2-task-inspector { gap: 12px; }
+.nfc-task-workspace-return .nfc-v2-sheet-footer {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  padding: 10px var(--nfc-sheet-inset) max(10px, env(safe-area-inset-bottom));
+  border-block-start: 1px solid var(--studio-line);
+  background: var(--nfc-overlay-chrome);
+}
+.nfc-task-workspace-return .nfc-v2-sheet-footer > a { text-decoration: none; }
+@media (min-width: 768px) {
+  .nfc-v2-sheet.nfc-overlay-drawer.nfc-task-workspace-return { width: min(520px, calc(100vw - 24px)); }
+}
 .nfc-task-detail-drawer .nfc-v2-task-inspector .nfc-overlay-section-header {
   display: block;
   min-height: 0;

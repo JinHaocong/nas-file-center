@@ -1,3 +1,4 @@
+import json
 import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
@@ -6,7 +7,7 @@ from sqlalchemy import select
 from app.auth.password import hash_password
 from app.config import Settings
 from app.main import create_app
-from app.models import BatchPlan, BatchPlanItem, IndexRoot, IndexedPath, User, Workflow
+from app.models import BatchPlan, BatchPlanItem, IndexRoot, IndexedPath, User, Workflow, WorkJob
 from app.service import FileCenterService
 
 
@@ -114,6 +115,37 @@ def workflow_test_env(tmp_path: Path):
         "media": media,
         "service": service,
     }
+
+
+def test_latest_scheduled_workflow_run_is_scoped_to_workflow_and_keeps_exact_task_id(workflow_test_env):
+    env = workflow_test_env
+    admin = env["admin_client"]
+    create = admin.post("/api/workflows", json={
+        "name": "Latest run",
+        "definition": {"schema_version": 1, "mode": "file", "steps": [
+            {"id": "scan", "type": "scan", "root_ids": [env["root_id"]]},
+        ]},
+    })
+    assert create.status_code == 201
+    workflow = create.json()["id"]
+    endpoint = f"/api/workflows/{workflow}/latest-run"
+    assert admin.get(endpoint).json() is None
+    with env["service"].SessionLocal() as session:
+        for task, kind, owner in [
+            (9007199254740993, "workflow-scheduled", workflow),
+            (9007199254740994, "workflow-scheduled", workflow),
+            (9007199254740995, "workflow-scheduled", workflow + 1),
+            (9007199254740996, "fclones-scan", workflow),
+        ]:
+            session.add(WorkJob(id=task, kind=kind, status="running", progress_current=46, progress_total=100,
+                                state_json=json.dumps({"workflow_id": owner, "workflow_revision": 1})))
+        session.add(WorkJob(id=9007199254740997, kind="workflow-scheduled", state_json="{malformed"))
+        session.commit()
+    assert env["unauth_client"].get(endpoint).status_code == 401
+    response = env["member_client"].get(endpoint)
+    assert response.status_code == 200
+    assert response.json()["id"] == "9007199254740994"
+    assert response.json()["progress"]["percent"] == 46
 
 
 def test_workflow_rbac(workflow_test_env):

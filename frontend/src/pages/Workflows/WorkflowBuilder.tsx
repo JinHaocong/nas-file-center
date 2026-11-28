@@ -3,7 +3,7 @@ import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { workflowApi } from '../../api/workflows';
 import { getStructuredApiError } from '../../api/errors';
@@ -28,9 +28,13 @@ import { canConfirmWorkflowModeReset, canConfirmWorkflowRollback, validateWorkfl
 import { createDefaultOrganizerSnapshot } from '../../utils/organizerDefaults';
 import { createDefaultDedupeScorerConfig } from '../../utils/dedupeConfig';
 import { createInitialScanStep, parseWorkflowRevisionQuery } from '../../utils/workflowRevisionParser';
+import { formatDateTime } from '../../utils/format';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
+import { StatusBadge } from '../../components/ui/StatusBadge';
+import { TaskProgress } from '../../components/tasks/TaskProgress';
+import { sqliteIdText } from '../../utils/sqliteId';
 
 const defaultStepsForMode = (mode: WorkflowMode): WorkflowStep[] => {
   if (mode === 'file') return [createInitialScanStep('step_scan_1')];
@@ -103,8 +107,8 @@ export const WorkflowBuilderPage: React.FC = () => {
   const { user } = useAuth();
   const formId = React.useId();
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const definitionRef = useRef<HTMLElement>(null);
-  const pipelineRef = useRef<HTMLElement>(null);
+  const definitionRef = useRef<HTMLDetailsElement>(null);
+  const latestRunRef = useRef<HTMLElement>(null);
   const previewRef = useRef<HTMLElement>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -122,6 +126,14 @@ export const WorkflowBuilderPage: React.FC = () => {
     queryFn: () => workflowApi.getWorkflow(workflowId),
     enabled: !isNew && Boolean(workflowId),
   });
+  const latestRun = useQuery({
+    queryKey: ['workflowLatestRun', id],
+    queryFn: () => workflowApi.latestRun(id!),
+    enabled: !isNew && Boolean(workflow),
+    refetchInterval: query => ['queued', 'running', 'cancel_requested'].includes(query.state.data?.status ?? '') ? 3000 : 15000,
+  });
+  const latestTask = latestRun.data;
+  const latestTaskId = sqliteIdText(latestTask?.id);
 
   const parsedRevision = parseWorkflowRevisionQuery(revisionQuery, workflow?.current_revision);
   const isHistoricalView = parsedRevision.isValid && parsedRevision.isHistorical;
@@ -236,6 +248,7 @@ export const WorkflowBuilderPage: React.FC = () => {
     const values = validateWorkflowBasicFields(name, description);
     if (values.nameError) {
       setNameError(values.nameError);
+      if (definitionRef.current) definitionRef.current.open = true;
       nameInputRef.current?.focus();
       return;
     }
@@ -391,11 +404,12 @@ export const WorkflowBuilderPage: React.FC = () => {
   }
 
   const versionLabel = isNew
-    ? 'unsaved'
+    ? '未保存'
     : isHistoricalView
-    ? `historical r${targetRevision}`
-    : `r${workflow?.current_revision}`;
+    ? `第 ${targetRevision} 版`
+    : `第 ${workflow?.current_revision} 版`;
   const hasPreview = !isNew && workflow && (!isHistoricalView || Boolean(historicalRevisionData));
+  const scanStep = steps.find(step => step.type === 'scan');
 
   return (
     <div className="nfc-operations-page nfc-workflow-builder-grid nfc-workflow-builder-page nfc-page-layout-workbench nfc-tool-workspace">
@@ -403,8 +417,7 @@ export const WorkflowBuilderPage: React.FC = () => {
         title={isNew ? '新建工作流' : workflow?.name || `工作流 #${workflowId}`}
         description={
           <div className="nfc-plan-header-meta">
-            <span className="nfc-kind-badge">{versionLabel}</span>
-            <span className="nfc-kind-badge">{modeLabel(mode)}</span>
+            <span>工作流中心 / {isNew ? '新建工作流' : '工作流详情'}</span>
             {isArchived && <span className="nfc-status-badge nfc-status-danger"><span className="nfc-status-dot" />已归档</span>}
             {isBuiltin && <span className="nfc-kind-badge">内置 · 只读</span>}
             {isDirty && <span className="nfc-status-badge nfc-status-warning"><span className="nfc-status-dot" />未保存修改</span>}
@@ -436,12 +449,17 @@ export const WorkflowBuilderPage: React.FC = () => {
                 onClick={() => setRevisionDrawerOpen(true)}>版本历史</ConsoleButton>
             )}
             {canEdit && (
-              <ConsoleButton variant="primary" leadingIcon={<ConsoleIcon name="check" size={16} />}
+              <ConsoleButton variant={!hasPreview || isDirty ? 'primary' : 'secondary'} leadingIcon={<ConsoleIcon name="check" size={16} />}
                 loading={saveMutation.isPending} disabled={!isDirty && !isNew}
                 onClick={handleSave}>
                 {isNew ? '创建工作流' : '保存新版本'}
               </ConsoleButton>
             )}
+            {hasPreview && <ConsoleButton variant={isDirty ? 'secondary' : 'primary'}
+              leadingIcon={<ConsoleIcon name="file-search" size={16} />}
+              onClick={() => focusWorkflowSection(previewRef.current)}>预览工作流</ConsoleButton>}
+            {!isNew && <ConsoleButton variant="ghost" leadingIcon={<ConsoleIcon name="activity" size={16} />}
+              onClick={() => focusWorkflowSection(latestRunRef.current)}>最近执行</ConsoleButton>}
           </ActionBar>
         }
       />
@@ -470,78 +488,10 @@ export const WorkflowBuilderPage: React.FC = () => {
         )}
       </div>
 
-      <nav className="nfc-tool-workflow-nav" aria-label="工作流编辑区导航">
-        <ConsoleButton size="sm" variant="ghost" leadingIcon={<ConsoleIcon name="settings" size={15} />}
-          onClick={() => focusWorkflowSection(definitionRef.current)}>设置</ConsoleButton>
-        <ConsoleButton size="sm" variant="ghost" leadingIcon={<ConsoleIcon name="list-checks" size={15} />}
-          onClick={() => focusWorkflowSection(pipelineRef.current)}>执行步骤</ConsoleButton>
-        {hasPreview && <ConsoleButton size="sm" variant="ghost" leadingIcon={<ConsoleIcon name="file-search" size={15} />}
-          onClick={() => focusWorkflowSection(previewRef.current)}>执行预览</ConsoleButton>}
-      </nav>
-
       <div className="nfc-workflow-editor-layout">
-        <aside className="nfc-workflow-definition-rail" ref={definitionRef} tabIndex={-1} aria-label="工作流设置">
+        <section className="nfc-workflow-pipeline-canvas" aria-label="执行步骤">
           <DataPanel
-        title="工作流设置"
-        className="nfc-complex-form-panel"
-      >
-        <form className="nfc-v2-workflow-form" noValidate
-          onSubmit={(event) => { event.preventDefault(); handleSave(); }}>
-          <div className="nfc-form-grid">
-            <div className="nfc-v2-workflow-field">
-              <label htmlFor={formId + '-name'}>工作流名称 <span aria-hidden="true">*</span></label>
-              <input ref={nameInputRef} id={formId + '-name'} type="text" value={name}
-                disabled={!canEdit} required
-                placeholder="例如：下载目录自动整理归档流 / 相册清理流"
-                aria-invalid={Boolean(nameError)}
-                aria-describedby={nameError ? formId + '-name-error' : undefined}
-                onChange={(event) => {
-                  setName(event.target.value);
-                  setNameError('');
-                  setIsDirty(true);
-                }} />
-              {nameError && <span id={formId + '-name-error'}
-                className="nfc-v2-workflow-field-error" role="alert">{nameError}</span>}
-            </div>
-            <div className="nfc-v2-workflow-field">
-              <label htmlFor={formId + '-description'}>工作流描述</label>
-              <textarea id={formId + '-description'} rows={2} value={description}
-                disabled={!canEdit} placeholder="描述处理逻辑、边界和目标场景..."
-                onChange={(event) => {
-                  setDescription(event.target.value);
-                  setIsDirty(true);
-                }} />
-            </div>
-          </div>
-          <fieldset className="nfc-v2-workflow-mode-fieldset" disabled={!canSwitchMode}
-            aria-describedby={formId + '-mode-help'}>
-            <legend>工作流模式 <span aria-hidden="true">*</span></legend>
-            <p id={formId + '-mode-help'} className="nfc-v2-workflow-field-help">
-              {!canSwitchMode ? '当前状态或权限下工作流模式不可修改'
-                : '切换模式将重置步骤为该模式标准拓扑'}
-            </p>
-            <div className="nfc-workflow-mode-grid">
-              {workflowModes.map(option => (
-                <label key={option}
-                  className={'nfc-workflow-mode-option nfc-v2-workflow-mode-choice' +
-                    (mode === option ? ' is-selected' : '')}>
-                  <input type="radio" name={formId + '-mode'} value={option}
-                    checked={mode === option} disabled={!canSwitchMode}
-                    onChange={() => handleModeChange(option)} />
-                  {modeIcon(option)}
-                  <span>{modeLabel(option)}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-        </form>
-          </DataPanel>
-        </aside>
-
-        <section className="nfc-workflow-pipeline-canvas" aria-label="执行步骤" ref={pipelineRef} tabIndex={-1}>
-          <DataPanel
-            title="执行步骤"
-            description="从上往下执行，预览使用已保存的版本。"
+            title="执行步骤" variant="dense"
             action={<span className="nfc-panel-count">{steps.length} 步{!canEdit && ' · 只读'}</span>}
           >
             <StepList
@@ -553,6 +503,85 @@ export const WorkflowBuilderPage: React.FC = () => {
             />
           </DataPanel>
         </section>
+
+        <aside className="nfc-workflow-definition-rail" aria-label="工作流设置">
+          <DataPanel title={isHistoricalView ? '历史修订' : '当前修订'} variant="dense"
+            action={<span className="nfc-panel-count">{versionLabel}</span>}>
+            <dl className="nfc-workflow-revision-facts">
+              {scanStep && <div><dt>扫描范围</dt><dd>{scanStep.subpath || `${scanStep.root_ids.length} 个根目录`}</dd></div>}
+              <div><dt>执行模式</dt><dd>{modeLabel(mode)}</dd></div>
+              {workflow && <div><dt>{isHistoricalView ? '版本时间' : '修改时间'}</dt>
+                <dd>{formatDateTime(isHistoricalView ? historicalRevisionData?.created_at : workflow.updated_at)}</dd></div>}
+            </dl>
+            <details className="nfc-workflow-definition-disclosure" ref={definitionRef} open={isNew || undefined}>
+              <summary><ConsoleIcon name="settings" size={15} /><span>工作流设置</span><ConsoleIcon name="chevron-down" size={14} /></summary>
+              <form className="nfc-v2-workflow-form" noValidate
+                onSubmit={(event) => { event.preventDefault(); handleSave(); }}>
+                <div className="nfc-form-grid">
+                  <div className="nfc-v2-workflow-field">
+                    <label htmlFor={formId + '-name'}>工作流名称 <span aria-hidden="true">*</span></label>
+                    <input ref={nameInputRef} id={formId + '-name'} type="text" value={name}
+                      disabled={!canEdit} required
+                      placeholder="例如：下载目录自动整理归档流 / 相册清理流"
+                      aria-invalid={Boolean(nameError)}
+                      aria-describedby={nameError ? formId + '-name-error' : undefined}
+                      onChange={(event) => {
+                        setName(event.target.value);
+                        setNameError('');
+                        setIsDirty(true);
+                      }} />
+                    {nameError && <span id={formId + '-name-error'}
+                      className="nfc-v2-workflow-field-error" role="alert">{nameError}</span>}
+                  </div>
+                  <div className="nfc-v2-workflow-field">
+                    <label htmlFor={formId + '-description'}>工作流描述</label>
+                    <textarea id={formId + '-description'} rows={2} value={description}
+                      disabled={!canEdit} placeholder="描述处理逻辑、边界和目标场景..."
+                      onChange={(event) => {
+                        setDescription(event.target.value);
+                        setIsDirty(true);
+                      }} />
+                  </div>
+                </div>
+                <fieldset className="nfc-v2-workflow-mode-fieldset" disabled={!canSwitchMode}
+                  aria-describedby={formId + '-mode-help'}>
+                  <legend>工作流模式 <span aria-hidden="true">*</span></legend>
+                  <p id={formId + '-mode-help'} className="nfc-v2-workflow-field-help">
+                    {!canSwitchMode ? '当前状态或权限下工作流模式不可修改'
+                      : '切换模式将重置步骤为该模式标准拓扑'}
+                  </p>
+                  <div className="nfc-workflow-mode-grid">
+                    {workflowModes.map(option => (
+                      <label key={option}
+                        className={'nfc-workflow-mode-option nfc-v2-workflow-mode-choice' +
+                          (mode === option ? ' is-selected' : '')}>
+                        <input type="radio" name={formId + '-mode'} value={option}
+                          checked={mode === option} disabled={!canSwitchMode}
+                          onChange={() => handleModeChange(option)} />
+                        {modeIcon(option)}
+                        <span>{modeLabel(option)}</span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              </form>
+            </details>
+            {!isNew && <section className="nfc-workflow-latest-run" ref={latestRunRef} aria-labelledby={`${formId}-latest-run`} tabIndex={-1}>
+              <header>
+                <h3 id={`${formId}-latest-run`}>最近一次执行</h3>
+                {latestTask && <StatusBadge status={latestTask.status} />}
+              </header>
+              {latestTask ? <>
+                <TaskProgress progress={latestTask.progress} status={latestTask.status} compact />
+                {latestTaskId && <Link className="nfc-workflow-run-link" to={'/tasks?' + new URLSearchParams({ task: latestTaskId })}>
+                  查看任务 <ConsoleIcon name="arrow-right" size={14} />
+                </Link>}
+              </> : latestRun.isError
+                ? <p role="status">无法读取执行记录</p>
+                : <p>{latestRun.isPending ? '正在读取…' : '暂无计划任务执行记录'}</p>}
+            </section>}
+          </DataPanel>
+        </aside>
       </div>
 
       {hasPreview && <section className="nfc-tool-workflow-preview" aria-label="执行预览" ref={previewRef} tabIndex={-1}>

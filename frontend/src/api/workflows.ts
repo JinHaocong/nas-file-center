@@ -1,5 +1,6 @@
 import { api } from './client';
 import type { PlanId } from '../types';
+import type { TaskItem } from '../types/task';
 import {
   WorkflowListItem,
   WorkflowResponse,
@@ -25,6 +26,9 @@ export const workflowApi = {
   getWorkflow: async (id: number): Promise<WorkflowResponse> => {
     return api.get<WorkflowResponse>(`/api/workflows/${id}`);
   },
+
+  /** Read the latest scheduled task for this workflow. */
+  latestRun: (id: string) => api.get<TaskItem | null>(`/api/workflows/${encodeURIComponent(id)}/latest-run`),
 
   getRevision: async (id: number, revision: number): Promise<WorkflowRevisionResponse> => {
     return api.get<WorkflowRevisionResponse>(`/api/workflows/${id}/revisions/${revision}`);

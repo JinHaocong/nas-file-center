@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 
@@ -14,7 +14,7 @@ import { cloudFilesApi, type CloudFileProvider, type CloudFilesConfiguration, ty
 import { getStructuredApiError } from '../../api/errors';
 
 import { formatDateTime } from '../../utils/format';
-import { displayBytes, displaySpeed, estimateOpenListSpeed, isLiveTransfer,
+import { describeCloudFile, displayBytes, displaySpeed, estimateOpenListSpeed, isLiveTransfer,
   nativeTransferPage, providerLabel, statusLabel, verificationPage } from './presentation';
 
 export const cloudTransfersKey = ['cloud-files', 'transfers'] as const;
@@ -37,6 +37,7 @@ interface Props {
   configuration: CloudFilesConfiguration;
   openId: string | null;
   onOpen: (id: string | null) => void;
+  focusRequest: { id: string | null } | null;
   activity: ReturnType<typeof useCloudTransferList>;
   onInteract: () => void;
   onCollapse: () => void;
@@ -87,38 +88,45 @@ function transferName(transfer: CloudTransfer): string {
     : transfer.names[0] || '云端复制';
 }
 
-/** Render real percentages as progress and keep unknown progress explicit. */
-function TransferProgress({ value, label }: { value: number | null; label: string }) {
-  const progress = typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
+/** Ignore unavailable or invalid percentages instead of inventing a denominator. */
+function displayPercent(value: number | null): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
     ? Math.round(value) : null;
-  return progress === null
+}
+
+/** Render actual progress and keep unknown progress explicit. */
+function TransferProgress({ value, label }: { value: number | null; label: string }) {
+  return value === null
     ? <span className="nfc-cloud-files-muted">进度待确认</span>
     : <div className="nfc-cloud-transfer-progress">
-      <ProgressMotionTrack value={progress}>
-        <progress className="nfc-v2-native-progress" max={100} value={progress} aria-label={label} />
+      <ProgressMotionTrack value={value}>
+        <progress className="nfc-v2-native-progress" max={100} value={value} aria-label={label} />
       </ProgressMotionTrack>
-      <span aria-hidden="true">{progress}%</span>
     </div>;
 }
 
 /** Keep the filename and its parent readable when a transfer spans several levels. */
 function TransferFileRow({ file }: { file: CloudTransferFile }) {
   const slash = file.name.lastIndexOf('/');
+  const name = file.name.slice(slash + 1);
+  const percent = displayPercent(file.progress);
+  const normal = file.status === 'running' || file.status === 'completed';
   return <li>
     <div className="nfc-cloud-transfer-file-heading">
       <div className="nfc-cloud-transfer-file-name">
-        <ConsoleIcon name="file-text" size={15} />
+        <ConsoleIcon name={describeCloudFile(name).icon} size={14} />
         <div>
-          <strong>{file.name.slice(slash + 1)}</strong>
+          <strong>{name}</strong>
           {slash > 0 && <small>{file.name.slice(0, slash)}</small>}
         </div>
       </div>
-      <StatusBadge status={file.status} label={statusLabel[file.status]} />
+      {normal && percent !== null ? <span className="nfc-cloud-file-percent">{percent}%</span>
+        : <StatusBadge status={file.status} label={statusLabel[file.status]} />}
     </div>
-    <TransferProgress value={file.progress} label={file.name + '复制进度'} />
+    <TransferProgress value={percent} label={file.name + '复制进度'} />
     <div className="nfc-cloud-transfer-file-metrics">
       <span>{displayBytes(file.bytes)} / {displayBytes(file.total_bytes)}</span>
-      {file.speed !== null && <span>{displaySpeed(file.speed, file.speed_estimated)}</span>}
+      {file.speed !== null && <span className="nfc-cloud-transfer-file-speed">{displaySpeed(file.speed, file.speed_estimated)}</span>}
     </div>
   </li>;
 }
@@ -128,20 +136,6 @@ function TransferDetails({ transfer, configuration }: { transfer: CloudTransfer;
   const [page, setPage] = useState(1);
   const webUrl = nativeTransferPage(transfer.provider, configuration[transfer.provider].web_url);
   return <div className="nfc-cloud-transfer-details">
-    <dl className="nfc-cloud-transfer-fields">
-      <div><dt>NAS 目标</dt><dd><CodePath value={transfer.destination} /></dd></div>
-      <div><dt>原生任务编号</dt><dd>{transfer.native_ids.length ? transfer.native_ids.join('、') : '—'}</dd></div>
-      <div><dt>创建时间</dt><dd>{formatDateTime(transfer.created_at)}</dd></div>
-    </dl>
-    {(webUrl || (transfer.status === 'completed' && transfer.verification)) && (
-      <div className="nfc-cloud-transfer-links">
-        {webUrl && <a target="_blank" rel="noopener noreferrer" href={webUrl}>
-          打开 {providerLabel[transfer.provider]} 传输页 <ConsoleIcon name="arrow-right" size={13} />
-        </a>}
-        {transfer.status === 'completed' && transfer.verification &&
-          <Link to={verificationPage(transfer.verification)}>下载完整性校验</Link>}
-      </div>
-    )}
     {transfer.files.length === 0
       ? <p className="nfc-cloud-files-muted">服务暂未提供单文件进度。</p>
       : <>
@@ -155,6 +149,23 @@ function TransferDetails({ transfer, configuration }: { transfer: CloudTransfer;
             显示更多文件（{page * filePageSize} / {transfer.files.length}）
           </ConsoleButton>}
       </>}
+    <details className="nfc-cloud-transfer-metadata">
+      <summary>传输信息</summary>
+      <dl className="nfc-cloud-transfer-fields">
+        <div><dt>NAS 目标</dt><dd><CodePath value={transfer.destination} /></dd></div>
+        <div><dt>原生任务编号</dt><dd>{transfer.native_ids.length ? transfer.native_ids.join('、') : '—'}</dd></div>
+        <div><dt>创建时间</dt><dd>{formatDateTime(transfer.created_at)}</dd></div>
+      </dl>
+    </details>
+    {(webUrl || (transfer.status === 'completed' && transfer.verification)) && (
+      <div className="nfc-cloud-transfer-links">
+        {webUrl && <a target="_blank" rel="noopener noreferrer" href={webUrl}>
+          打开 {providerLabel[transfer.provider]} 传输页 <ConsoleIcon name="arrow-right" size={13} />
+        </a>}
+        {transfer.status === 'completed' && transfer.verification &&
+          <Link to={verificationPage(transfer.verification)}>下载完整性校验</Link>}
+      </div>
+    )}
   </div>;
 }
 
@@ -174,7 +185,7 @@ export function useCloudTransferList(enabled: boolean, recent: RecentTransfer[])
 }
 
 /** Show live transfer details and guard mutations against stale permissions. */
-export function TransferLedger({ configuration, openId, onOpen, activity, onInteract,
+export function TransferLedger({ configuration, openId, onOpen, focusRequest, activity, onInteract,
   onCollapse, onDismissReceipt }: Props) {
   const client = useQueryClient();
   const idPrefix = useId();
@@ -183,10 +194,26 @@ export function TransferLedger({ configuration, openId, onOpen, activity, onInte
   const [visibleCount, setVisibleCount] = useState(filePageSize);
   const [refreshing, setRefreshing] = useState(false);
   const inFlight = useRef(false);
+  const pane = useRef<HTMLElement>(null);
+  const scrollRegion = useRef<HTMLDivElement>(null);
   const { list, waiting, transfers } = activity;
   const openSummary = transfers.find(transfer => transfer.id === openId);
   const visible = transfers.slice(0, visibleCount);
   if (openSummary && !visible.includes(openSummary)) visible.push(openSummary);
+  useLayoutEffect(() => {
+    const region = scrollRegion.current;
+    if (!region || !focusRequest) return;
+    if (window.matchMedia('(max-width: 860px)').matches) pane.current?.scrollIntoView({ block: 'start' });
+    const row = focusRequest.id && region.querySelector<HTMLElement>(`[data-transfer-id="${CSS.escape(focusRequest.id)}"]`);
+    if (row) {
+      const bounds = row.getBoundingClientRect();
+      const viewport = region.getBoundingClientRect();
+      if (bounds.top < viewport.top || bounds.bottom > viewport.bottom) region.scrollTop += bounds.top - viewport.top;
+      row.focus({ preventScroll: true });
+    } else {
+      region.focus({ preventScroll: true });
+    }
+  }, [focusRequest]);
   const detail = useQuery({
     queryKey: [...cloudTransfersKey, openId], queryFn: () => cloudFilesApi.detail(openId!),
     enabled: openId !== null, retry: false,
@@ -248,15 +275,15 @@ export function TransferLedger({ configuration, openId, onOpen, activity, onInte
   const liveCount = transfers.filter(transfer => isLiveTransfer(transfer.status)).length;
   const cancelling = action?.kind === 'cancel';
   const providerErrors = Object.entries(list.data?.errors || {}) as [CloudFileProvider, string][];
-  return <section id="nfc-cloud-files-transfers" className="nfc-cloud-files-ledger" aria-labelledby="nfc-cloud-transfer-title"
+  return <section ref={pane} id="nfc-cloud-files-transfers" className="nfc-cloud-files-ledger" aria-labelledby="nfc-cloud-transfer-title"
     onFocusCapture={onInteract}>
     <header className="nfc-cloud-ledger-header">
       <div className="nfc-cloud-ledger-title">
         <ConsoleIcon name="activity" size={16} />
         <h2 id="nfc-cloud-transfer-title">传输任务</h2>
-        {liveCount > 0 && <span className="nfc-cloud-ledger-count">{liveCount} 个进行中</span>}
       </div>
       <div className="nfc-cloud-ledger-controls">
+        {liveCount > 0 && <span className="nfc-cloud-ledger-count">{liveCount} 个进行中</span>}
         <ConsoleButton size="sm" variant="ghost" disabled={list.isFetching} loading={refreshing} aria-label="刷新传输任务"
           leadingIcon={<ConsoleIcon name="refresh" size={16} />}
           onClick={() => { void refreshTransfers(); }} />
@@ -264,7 +291,7 @@ export function TransferLedger({ configuration, openId, onOpen, activity, onInte
           leadingIcon={<ConsoleIcon name="x" size={16} />} />
       </div>
     </header>
-    <div className="nfc-cloud-transfer-scroll" role="region" aria-label="传输任务列表" tabIndex={0}>
+    <div ref={scrollRegion} className="nfc-cloud-transfer-scroll" role="region" aria-label="传输任务列表" tabIndex={0}>
       {list.isPending && <p className="nfc-cloud-files-muted nfc-cloud-ledger-message" role="status">正在读取传输任务…</p>}
       {list.isError && <p className="nfc-cloud-files-error nfc-cloud-ledger-message" role="alert">无法刷新传输任务，请重试。</p>}
       {providerErrors.map(([provider, message]) => (
@@ -280,22 +307,24 @@ export function TransferLedger({ configuration, openId, onOpen, activity, onInte
           const updated = expanded && observed?.id === transfer.id ? observed : transfer;
           const title = transferName(updated);
           const detailId = idPrefix + '-' + transfer.id;
-          const source = updated.remote || providerLabel[updated.provider];
+          const source = updated.remote ? providerLabel[updated.provider] + ' · ' + updated.remote : providerLabel[updated.provider];
           const native = updated.native_ids[0];
+          const percent = displayPercent(updated.progress);
           return (
-            <li className="nfc-cloud-transfer-row" key={transfer.id}>
+            <li className="nfc-cloud-transfer-row" key={transfer.id} data-transfer-id={transfer.id} tabIndex={-1}>
               <div className="nfc-cloud-transfer-heading">
-                <div><strong>{title}</strong>
-                  <span className="nfc-cloud-files-muted">{source}{native ? ' · #' + native : ''}</span>
+                <div><strong title={native ? '原生任务 #' + native : undefined}>{title}</strong>
+                  <span className="nfc-cloud-files-muted">{source}</span>
                 </div>
                 <StatusBadge status={updated.status} label={statusLabel[updated.status]} />
               </div>
-              <div className="nfc-cloud-transfer-summary" data-has-speed={updated.speed !== null}>
-                <TransferProgress value={updated.progress} label={title + '整笔复制进度'} />
+              {(percent !== null || updated.speed !== null) && <div className="nfc-cloud-transfer-summary">
+                {percent !== null && <span className="nfc-cloud-files-muted">{percent}%</span>}
                 {updated.speed !== null && <span className="nfc-cloud-transfer-speed">
                   {displaySpeed(updated.speed, updated.speed_estimated)}
                 </span>}
-              </div>
+              </div>}
+              <TransferProgress value={percent} label={title + '整笔复制进度'} />
               {updated.error && <p className="nfc-cloud-files-error">{updated.error}</p>}
               <div className="nfc-cloud-transfer-actions">
                 <ConsoleButton size="sm" variant="ghost" aria-expanded={expanded} aria-controls={detailId}

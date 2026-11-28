@@ -22,7 +22,7 @@ from app.batch.media_organizer_recycle import (
     LEGACY_RECYCLE_PROBE_NAME, RECYCLE_DOWNLOAD_EXTRAS, identity as recycle_identity,
     iter_recycle_candidates, omit_recycle_files, zspace_client,
 )
-from app.batch.media_organizer_recycle_rules import check as check_recycle_candidate
+from app.batch.media_organizer_recycle_rules import matches_reviewed_candidate
 from app.batch.media_package_organizer import APPEND_MEDIA_OPERATIONS, MAX_FILES_PER_GROUP, _validate_scope
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.batch.organizer_report_cleanup import archived_result, preview_unavailable, report_missing, report_reclaimed, report_state
@@ -369,7 +369,8 @@ def enqueue_batch(session_factory, settings: Settings, preview_id: int) -> dict:
         }, units=summary["unit_count"]))
 
 
-def get_batch(session_factory, settings: Settings, job_id: int, *, page: int, page_size: int) -> dict:
+def get_batch(session_factory, settings: Settings, job_id: int, *, page: int, page_size: int,
+              status_filter: str = "all") -> dict:
     with session_factory() as session:
         job, state = _job(session, BATCH_KIND, job_id)
         archived = report_state(job)
@@ -381,7 +382,10 @@ def get_batch(session_factory, settings: Settings, job_id: int, *, page: int, pa
         where = (TaskEvent.job_id == job_id, TaskEvent.event_type == RESULT_EVENT)
         status = func.json_extract(TaskEvent.context_json, "$.status")
         counts = dict(session.execute(select(status, func.count()).where(*where).group_by(status)).all())
-        events = session.scalars(select(TaskEvent.context_json).where(*where).order_by(
+        event_query = select(TaskEvent.context_json).where(*where)
+        if status_filter != "all":
+            event_query = event_query.where(status == status_filter)
+        events = session.scalars(event_query.order_by(
             TaskEvent.id,
         ).offset((page - 1) * page_size).limit(page_size))
         summary = archived_result(job) if not counts else None
@@ -389,7 +393,8 @@ def get_batch(session_factory, settings: Settings, job_id: int, *, page: int, pa
             **_receipt(job), "selection": state["selection"], "error": job.error_text,
             "preview_job_id": str(state["preview_job_id"]), "progress": _progress(job),
             "summary": summary or {f"{name}_count": counts.get(name, 0) for name in RESULT_STATUSES},
-            "items": [json.loads(event) for event in events], "filtered_total": sum(counts.values()),
+            "items": [json.loads(event) for event in events],
+            "filtered_total": sum(counts.values()) if status_filter == "all" else counts.get(status_filter, 0),
             **({"report_cleanup_status": cleanup_status} if cleanup_status else {}),
             "page": page, "page_size": page_size,
         }
@@ -414,6 +419,8 @@ def _preview_row(record: dict, report: Path) -> dict:
                 _write_json(stream, loose_file)
             _persist(stream)
     totals = record.get("totals", {})
+    cleanup_paths = record.get("wrapper_cleanup", [])
+    preserved_paths = record.get("preserved_directory_paths", [])
     recycling = record.get("operation") == RECYCLE_DOWNLOAD_EXTRAS
     return {
         "unit": record["unit"], "status": record["status"], "reason": record.get("reason"),
@@ -431,7 +438,9 @@ def _preview_row(record: dict, report: Path) -> dict:
         "total_bytes": record.get("total_bytes", 0), "groups": record.get("groups", []),
         "needed_moves": record.get("actual_moves", 0),
         "renamed_count": record.get("renamed_count", 0),
-        "wrapper_cleanup_count": len(record.get("wrapper_cleanup", [])),
+        "wrapper_cleanup_count": len(cleanup_paths),
+        **({"wrapper_cleanup_paths": cleanup_paths[:10]} if cleanup_paths else {}),
+        **({"preserved_directory_paths": preserved_paths} if preserved_paths else {}),
         "total_proposals": len(mapping), "mapping_id": mapping_id,
         **({"loose_id": loose_id} if loose_id is not None else {}),
         "sample_moves": mapping[:10], "truncated": len(mapping) > 10,
@@ -632,7 +641,7 @@ def _finish_recycle(unit: dict, settings: Settings, client, fence, remember) -> 
         source = _selection(unit["unit"], settings)
         info = source.lstat()
         if (client is None or info.st_nlink != 1 or recycle_identity(info) != unit.get("recycle_identity")
-                or not unit.get("recycle_reason") or check_recycle_candidate(source, info) != unit["recycle_reason"]):
+                or not matches_reviewed_candidate(source, info, unit.get("recycle_reason"))):
             return "conflict", "附带文件已变化，请重新扫描"
         remember()
         client.recycle(source, identity=unit["recycle_identity"][:4], fence=fence)

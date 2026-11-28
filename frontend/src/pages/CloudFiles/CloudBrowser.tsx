@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import * as Dialog from '@radix-ui/react-dialog';
 
@@ -9,20 +9,21 @@ import { ConsoleCheckbox } from '../../components/ui/ConsoleCheckbox';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { ConsoleSelect } from '../../components/ui/ConsoleSelect';
+import { CloudCopyNotice } from './CloudCopyNotice';
 
 import { cloudFilesApi, type CloudCopySubmission, type CloudEntry, type CloudFileProvider } from '../../api/cloudFiles';
 import { getStructuredApiError } from '../../api/errors';
 
-import { displayBytes } from './presentation';
+import { cloudSubmissionRejected, describeCloudFile, displayBytes } from './presentation';
 
 const selectionLimit = 30;
 const pageSize = 60;
 const sortNames = new Intl.Collator('zh-CN', { numeric: true });
 
 /** Show the directory affordance separately from the file type. */
-function CloudEntryIcon({ kind }: { kind: CloudEntry['kind'] }) {
-  return <span className="nfc-cloud-entry-icon" data-kind={kind}>
-    <ConsoleIcon name={kind === 'directory' ? 'folder' : 'file-text'} size={15} />
+function CloudEntryIcon({ icon }: { icon: ReturnType<typeof describeCloudFile>['icon'] }) {
+  return <span className="nfc-cloud-entry-icon" data-kind={icon === 'folder' ? 'directory' : undefined}>
+    <ConsoleIcon name={icon} size={14} />
   </span>;
 }
 
@@ -31,11 +32,18 @@ interface Props {
   name: string;
   localRoot: string;
   writable: boolean;
-  onSubmitted: (receipt: CloudCopySubmission) => void;
+  sourceTabs: ReactNode;
+  transferToggle: ReactNode;
+  receiptNotice: ReactNode;
+  onSubmitted: (receipt: CloudCopySubmission, destination: string) => void;
+  onSubmitStart: () => void;
+  onSubmitFinish: () => void;
+  onViewTransfers: () => void;
 }
 
 /** Browse one provider and submit the visible selection to an allowed NAS directory. */
-export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted }: Props) {
+export function CloudBrowser({ provider, name, localRoot, writable, sourceTabs, transferToggle, receiptNotice,
+  onSubmitted, onSubmitStart, onSubmitFinish, onViewTransfers }: Props) {
   const [remoteChoice, setRemoteChoice] = useState('');
   const [path, setPath] = useState('');
   const [search, setSearch] = useState('');
@@ -45,14 +53,16 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
   const [copyOpen, setCopyOpen] = useState(false);
   const [copyStep, setCopyStep] = useState<'review' | 'target'>('review');
   const [pickerBusy, setPickerBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [skippedCount, setSkippedCount] = useState(0);
+  const [failure, setFailure] = useState<{ message: string; retryable: boolean } | null>(null);
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const locationRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const selectionFocus = useRef<HTMLInputElement | null>(null);
   const copyTrigger = useRef<HTMLButtonElement>(null);
   const targetButton = useRef<HTMLButtonElement>(null);
   const targetHeading = useRef<HTMLHeadingElement>(null);
+  const failureAction = useRef<HTMLButtonElement>(null);
+  const focusAfterRetry = useRef(false);
   const focusCopyStep = useRef(false);
   const lastReview = useRef<CloudEntry[]>([]);
   const inFlight = useRef(false);
@@ -88,9 +98,9 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
   }, [names, entries]);
   const selected = useMemo(() => selectedEntries.map(entry => entry.name), [selectedEntries]);
 
-  const start = useMutation({ mutationFn: cloudFilesApi.start });
+  const start = useMutation({ mutationFn: cloudFilesApi.start, retry: false });
   const insideRoot = isWithinDirectoryRoots(destination, [localRoot]);
-  const canReview = writable && canBrowse && browse.isSuccess && !browse.isFetching &&
+  const canReview = writable && canBrowse && browse.isSuccess && !browse.isFetching && !unconfirmed &&
     selected.length > 0 && selected.length <= selectionLimit;
   const canStart = canReview && insideRoot;
   const dialogBusy = start.isPending || (copyStep === 'target' && pickerBusy);
@@ -100,10 +110,16 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
 
   useLayoutEffect(() => {
     if (copyOpen) lastReview.current = selectedEntries;
-    if (!copyOpen || !focusCopyStep.current) return;
-    focusCopyStep.current = false;
-    (copyStep === 'target' ? targetHeading.current : targetButton.current)?.focus({ preventScroll: true });
-  }, [copyOpen, copyStep, selectedEntries]);
+    if (copyOpen && focusCopyStep.current) {
+      focusCopyStep.current = false;
+      (copyStep === 'target' ? targetHeading.current : targetButton.current)?.focus({ preventScroll: true });
+    }
+    if (!start.isPending && focusAfterRetry.current) {
+      focusAfterRetry.current = false;
+      if (failureAction.current) failureAction.current.focus({ preventScroll: true });
+      else restoreSelectionFocus();
+    }
+  }, [copyOpen, copyStep, selectedEntries, start.isPending, failure]);
 
   /** Move keyboard focus before removing a selection action or after a copy completes. */
   function restoreSelectionFocus() {
@@ -130,29 +146,43 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
     setPath(next);
     setSearch('');
     setPage(1);
-    setNames([]);
-    setError('');
-    setSkippedCount(0);
+    clearSelection();
     listRef.current?.scrollTo({ top: 0 });
     locationRef.current?.focus({ preventScroll: true });
   }
 
-  /** A response may fail after the provider has accepted it, so never retry automatically. */
+  /** Require a fresh selection after an unconfirmed native submission. */
+  function clearSelection() {
+    setNames([]);
+    setFailure(null);
+    setUnconfirmed(false);
+  }
+
+  /** Keep the selected paths and destination if the request failed or needs reconciliation. */
   async function submit() {
     if (!canStart || inFlight.current) return;
     inFlight.current = true;
-    setError('');
-    setSkippedCount(0);
+    onSubmitStart();
     try {
       const receipt = await start.mutateAsync({ provider, remote, path, names: selected, destination });
       setCopyOpen(false);
-      setNames([]);
-      setSkippedCount(receipt.skipped_names?.length ?? 0);
-      onSubmitted(receipt);
-    } catch (failure) {
-      setError(getStructuredApiError(failure).message || '提交状态暂时无法确认，请先查看传输任务。');
+      if ('id' in receipt && receipt.error) {
+        setFailure(null);
+        setUnconfirmed(true);
+      } else {
+        clearSelection();
+      }
+      onSubmitted(receipt, destination);
+    } catch (error) {
+      const response = getStructuredApiError(error);
+      const retryable = cloudSubmissionRejected(response);
+      setCopyOpen(false);
+      setUnconfirmed(!retryable);
+      setFailure({ message: response.message, retryable });
     } finally {
       inFlight.current = false;
+      focusAfterRetry.current = !copyOpen;
+      onSubmitFinish();
     }
   }
 
@@ -162,20 +192,21 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
       if (open) {
         focusCopyStep.current = false;
         setCopyStep('review');
-        setError('');
       }
       setCopyOpen(open);
     }}>
       <section id="nfc-cloud-files-browser" className="nfc-cloud-files-browser" aria-label="云端目录">
-        <div className="nfc-cloud-files-browser-tools">
-          {provider === 'rclone' && (
-            <div className="nfc-cloud-files-remote">
-              {remotes.isPending && <p className="nfc-cloud-files-muted" role="status">正在读取远程存储…</p>}
+        <div className="nfc-cloud-provider-switch">
+          {sourceTabs}
+          <div className="nfc-cloud-source-actions">
+            {provider === 'rclone' && <div className="nfc-cloud-files-remote">
+              {remotes.isPending && <span className="nfc-cloud-files-muted" role="status">正在读取远程存储…</span>}
               {remotes.isError && <div className="nfc-cloud-files-failure" role="alert">
-                <span>无法读取 rclone 远程存储。</span>
+                <span>无法读取远程存储。</span>
                 <ConsoleButton size="sm" onClick={() => { void remotes.refetch(); }}>重试</ConsoleButton>
               </div>}
-              {remotes.isSuccess && (availableRemotes?.length ? (
+              {remotes.isSuccess && (availableRemotes?.length ? <>
+                <ConsoleIcon name="cloud" size={15} />
                 <ConsoleSelect id="nfc-cloud-files-remote" label="远程存储" value={remote || ''}
                   disabled={start.isPending}
                   options={[
@@ -183,10 +214,24 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
                     ...availableRemotes.map(item => ({ label: item.name, value: item.name })),
                   ]}
                   onChange={value => { setRemoteChoice(value); openDirectory(''); }} />
-              ) : <ConsoleEmpty title="没有可用的远程存储" />)}
-            </div>
-          )}
-          {canBrowse && <>
+              </> : <span className="nfc-cloud-files-muted">没有可用的远程存储</span>)}
+            </div>}
+            {transferToggle}
+          </div>
+        </div>
+        {receiptNotice}
+        {failure && <CloudCopyNotice tone={failure.retryable ? 'error' : 'warning'}
+          title={failure.retryable ? '复制未提交' : '提交结果待确认'}
+          action={failure.retryable ? <ConsoleButton ref={failureAction} size="sm" loading={start.isPending}
+            disabled={!canStart} leadingIcon={<ConsoleIcon name="refresh" size={15} />}
+            onClick={() => { void submit(); }}>重试复制</ConsoleButton>
+            : <ConsoleButton ref={failureAction} size="sm" onClick={onViewTransfers}
+              leadingIcon={<ConsoleIcon name="activity" size={15} />}>查看传输</ConsoleButton>}>
+          <span>{failure.retryable ? failure.message + ' 已保留所选项目与 NAS 目标。'
+            : '已保留所选项目与 NAS 目标。请先核对原生传输，确认后可清除选择再提交。'}</span>
+        </CloudCopyNotice>}
+        {canBrowse && <>
+          <div className="nfc-cloud-files-browser-tools">
             <div className="nfc-cloud-files-toolbar">
               <nav ref={locationRef} tabIndex={-1} className="nfc-cloud-files-crumb"
                 aria-label="当前云端位置">
@@ -221,12 +266,12 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
                   onClick={() => { void browse.refetch(); }} />
               </div>
             </div>
-          </>}
-        </div>
-        {canBrowse && <>
-          <div className="nfc-cloud-files-columns" aria-hidden="true"><span>名称</span><span>大小</span></div>
+          </div>
           <div ref={listRef} className="nfc-cloud-files-list-area" role="region" aria-label="云端文件列表" tabIndex={0}
             aria-busy={browse.isFetching || undefined}>
+            <div className="nfc-cloud-files-columns" aria-hidden="true">
+              <span>名称</span><span className="nfc-cloud-file-type">类型</span><span>大小</span>
+            </div>
             {browse.isPending && <p role="status" className="nfc-cloud-files-muted">正在读取目录…</p>}
             {browse.isError && <div className="nfc-cloud-files-failure" role="alert">
               <span>{getStructuredApiError(browse.error).message || '无法读取此目录。'}</span>
@@ -238,24 +283,29 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
               <ul className="nfc-cloud-files-entries" aria-label="目录中的文件和文件夹">
                 {matched.slice(0, page * pageSize).map(entry => {
                   const checked = selected.includes(entry.name);
+                  const { icon, label: type } = describeCloudFile(entry.name, entry.kind === 'directory');
                   return <li key={entry.name} className={checked ? 'is-selected' : undefined}>
                     <label className="nfc-cloud-selection-hit">
                       <ConsoleCheckbox checked={checked} aria-label={'选择 ' + entry.name}
                         disabled={!writable || start.isPending || (!checked && selected.length >= selectionLimit)}
                         onFocus={event => { selectionFocus.current = event.currentTarget; }}
-                        onCheckedChange={checked => setNames(previous => checked
-                          ? selected.length >= selectionLimit ? previous : [...new Set([...previous, entry.name])]
-                          : previous.filter(name => name !== entry.name))} />
+                        onCheckedChange={checked => {
+                          if (!unconfirmed) setFailure(null);
+                          setNames(previous => checked
+                            ? selected.length >= selectionLimit ? previous : [...new Set([...previous, entry.name])]
+                            : previous.filter(name => name !== entry.name));
+                        }} />
                     </label>
                     {entry.kind === 'directory' ? (
                       <button className="nfc-cloud-file-name" type="button" disabled={start.isPending}
                         onClick={() => openDirectory(parts.concat(entry.name).join('/'))}>
-                        <CloudEntryIcon kind={entry.kind} /><span>{entry.name}</span>
+                        <CloudEntryIcon icon={icon} /><span>{entry.name}</span>
                         <ConsoleIcon name="chevron-right" size={14} className="nfc-cloud-file-chevron" />
                       </button>
                     ) : <span className="nfc-cloud-file-name">
-                      <CloudEntryIcon kind={entry.kind} /><span>{entry.name}</span>
+                      <CloudEntryIcon icon={icon} /><span>{entry.name}</span>
                     </span>}
+                    <small className="nfc-cloud-file-type">{type}</small>
                     <small className="nfc-cloud-file-size">{entry.kind === 'directory' ? '—' : displayBytes(entry.size)}</small>
                   </li>;
                 })}
@@ -266,28 +316,32 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
               </ConsoleButton>}
             </>)}
           </div>
-          {selected.length > 0 ? <footer className="nfc-cloud-files-destination nfc-cloud-selection-actions">
+          {selected.length > 0 ? <footer className="nfc-cloud-files-destination nfc-cloud-selection-actions"
+            data-retry={failure?.retryable || undefined}>
             <div className="nfc-cloud-files-submit">
               <div className="nfc-cloud-selection-status">
                 <small className="nfc-cloud-files-muted" role="status">
                   已选 {selected.length} 项{selected.length === selectionLimit && '（单次上限）'}
+                  {failure && <span className="nfc-cloud-destination-caption"> · 目标 {destination}</span>}
                 </small>
                 <ConsoleButton size="sm" variant="ghost" disabled={start.isPending}
                   onClick={() => {
-                    setNames([]);
+                    clearSelection();
                     restoreSelectionFocus();
                   }}>清除选择</ConsoleButton>
               </div>
               <Dialog.Trigger asChild>
-                <ConsoleButton ref={copyTrigger} variant="primary" disabled={!canReview || start.isPending}
-                  leadingIcon={<ConsoleIcon name="arrow-down" size={17} />}>复制到 NAS</ConsoleButton>
+                <ConsoleButton ref={copyTrigger} variant={failure?.retryable ? 'ghost' : 'primary'}
+                  disabled={!canReview || start.isPending} leadingIcon={<ConsoleIcon name="arrow-down" size={17} />}>
+                  {failure?.retryable ? '调整复制选项' : '复制到 NAS'}
+                </ConsoleButton>
               </Dialog.Trigger>
             </div>
           </footer> : <footer className="nfc-cloud-files-destination nfc-cloud-idle-footer">
             <small className="nfc-cloud-files-muted" role="status">
-              {!writable ? '只读模式' : skippedCount > 0 ? '已跳过 ' + skippedCount + ' 个已有文件'
-                : (search ? matched.length + ' 项匹配' : entries.length + ' 项')}
+              {!writable ? '只读模式' : (search ? matched.length + ' 项匹配' : entries.length + ' 项')}
             </small>
+            {unconfirmed && <ConsoleButton size="sm" variant="ghost" onClick={clearSelection}>清除选择</ConsoleButton>}
           </footer>}
         </>}
         <Dialog.Portal>
@@ -299,6 +353,11 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
               if (!dialogBusy && copyStep === 'target') showCopyStep('review');
             }}
             onCloseAutoFocus={event => {
+              if (failureAction.current && !failureAction.current.disabled) {
+                event.preventDefault();
+                failureAction.current.focus({ preventScroll: true });
+                return;
+              }
               if (copyTrigger.current?.isConnected && !copyTrigger.current.disabled) return;
               event.preventDefault();
               restoreSelectionFocus();
@@ -319,7 +378,11 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
               <h3 className="nfc-cloud-copy-step-title" ref={targetHeading} tabIndex={-1}>选择 NAS 目录</h3>
               <DirectoryPickerModal open={copyOpen} inline={{ rootPath: localRoot, onBusyChange: setPickerBusy }}
                 initialPath={insideRoot ? destination : localRoot} selectedValues={destination}
-                onConfirm={value => { if (typeof value === 'string') setDestination(value); }}
+                onConfirm={value => {
+                  if (typeof value !== 'string') return;
+                  if (destination !== value) setFailure(null);
+                  setDestination(value);
+                }}
                 onCancel={() => showCopyStep('review')} />
             </> : <>
               <div className="nfc-cloud-copy-content">
@@ -327,7 +390,7 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
                   <h3 id="nfc-cloud-copy-selected">已选 {reviewEntries.length} 项</h3>
                   <ul className="nfc-cloud-copy-selection">
                     {reviewEntries.map(entry => <li key={entry.name}>
-                      <CloudEntryIcon kind={entry.kind} />
+                      <CloudEntryIcon icon={describeCloudFile(entry.name, entry.kind === 'directory').icon} />
                       <span>{entry.name}</span>
                       <small className="nfc-cloud-file-size">{entry.kind === 'directory' ? '文件夹' : displayBytes(entry.size)}</small>
                     </li>)}
@@ -343,7 +406,6 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
                   {destination && !insideRoot &&
                     <p role="alert" className="nfc-cloud-files-error">请选择 {localRoot} 内的目录。</p>}
                 </section>
-                {error && <p role="alert" className="nfc-cloud-files-error">{error}</p>}
               </div>
               <footer className="nfc-cloud-copy-actions">
                 <Dialog.Close asChild><ConsoleButton disabled={start.isPending}>取消</ConsoleButton></Dialog.Close>

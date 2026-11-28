@@ -123,37 +123,42 @@ export const StepCard: React.FC<StepCardProps> = ({
           <ConsoleIcon name="chevron-right" size={18} className="nfc-v2-step-chevron" />
         </button>
       </header>
-      <div id={editorId} hidden={!expanded} className="nfc-workflow-step-editor nfc-v2-step-editor">
-        {(expanded || hasOpened) && (
-          <>
-            {step.type === 'scan' && <ScanStepEditor step={step} onChange={handleChange} readOnly={readOnly} mode={mode} />}
-            {step.type === 'filter' && <FilterStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
-            {step.type === 'rename' && <RenameStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
-            {step.type === 'move' && <MoveStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
-            {step.type === 'touch' && <TouchStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
-            {step.type === 'quarantine' && <QuarantineStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
-            {step.type === 'organize' && <OrganizerStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
-            {step.type === 'dedupe' && <DedupeStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
-            {step.type === 'single_child_wrapper_collapse' &&
-              <SingleChildWrapperCollapseStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
-          </>
-        )}
-        {!readOnly && expanded && (canMoveUp || canMoveDown || canDelete) && (
-          <div className="nfc-step-actions nfc-v2-step-actions" role="group" aria-label="步骤操作">
-            {canMoveUp && (
-              <ConsoleButton size="sm" variant="ghost" title="上移步骤" aria-label="上移步骤"
-                onClick={handleMoveUp} leadingIcon={<ConsoleIcon name="arrow-up" size={16} />}>上移</ConsoleButton>
+      <div id={editorId} className="nfc-v2-step-reveal" aria-hidden={expanded ? undefined : true}
+        {...(expanded ? {} : { inert: '' })}>
+        <div className="nfc-v2-step-clip">
+          <div className="nfc-workflow-step-editor nfc-v2-step-editor">
+            {(expanded || hasOpened) && (
+              <>
+                {step.type === 'scan' && <ScanStepEditor step={step} onChange={handleChange} readOnly={readOnly} mode={mode} />}
+                {step.type === 'filter' && <FilterStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
+                {step.type === 'rename' && <RenameStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
+                {step.type === 'move' && <MoveStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
+                {step.type === 'touch' && <TouchStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
+                {step.type === 'quarantine' && <QuarantineStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
+                {step.type === 'organize' && <OrganizerStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
+                {step.type === 'dedupe' && <DedupeStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
+                {step.type === 'single_child_wrapper_collapse' &&
+                  <SingleChildWrapperCollapseStepEditor step={step} onChange={handleChange} readOnly={readOnly} />}
+              </>
             )}
-            {canMoveDown && (
-              <ConsoleButton size="sm" variant="ghost" title="下移步骤" aria-label="下移步骤"
-                onClick={handleMoveDown} leadingIcon={<ConsoleIcon name="arrow-down" size={16} />}>下移</ConsoleButton>
-            )}
-            {canDelete && (
-              <ConsoleButton size="sm" variant="danger" title="删除步骤" aria-label="删除步骤"
-                onClick={handleDelete} leadingIcon={<ConsoleIcon name="trash" size={16} />}>删除</ConsoleButton>
+            {!readOnly && expanded && (canMoveUp || canMoveDown || canDelete) && (
+              <div className="nfc-step-actions nfc-v2-step-actions" role="group" aria-label="步骤操作">
+                {canMoveUp && (
+                  <ConsoleButton size="sm" variant="ghost" title="上移步骤" aria-label="上移步骤"
+                    onClick={handleMoveUp} leadingIcon={<ConsoleIcon name="arrow-up" size={16} />}>上移</ConsoleButton>
+                )}
+                {canMoveDown && (
+                  <ConsoleButton size="sm" variant="ghost" title="下移步骤" aria-label="下移步骤"
+                    onClick={handleMoveDown} leadingIcon={<ConsoleIcon name="arrow-down" size={16} />}>下移</ConsoleButton>
+                )}
+                {canDelete && (
+                  <ConsoleButton size="sm" variant="danger" title="删除步骤" aria-label="删除步骤"
+                    onClick={handleDelete} leadingIcon={<ConsoleIcon name="trash" size={16} />}>删除</ConsoleButton>
+                )}
+              </div>
             )}
           </div>
-        )}
+        </div>
       </div>
     </section>
   );

@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { plansApi } from '../../api/domain';
 import { getStructuredApiError } from '../../api/errors';
+import { organizerJobId } from '../../api/mediaOrganizerBatch';
 import { useTitle } from '../../hooks/useTitle';
 import { splitLines } from '../../utils/format';
 import { type BatchOperation, buildBatchDraft } from '../../utils/batchDraftSafety';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
+import { fileWorkspaceReturn } from '../../components/layout/navItems';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
@@ -38,6 +40,7 @@ function opensMediaOrganizer(params: URLSearchParams): boolean {
 export const BatchPage: React.FC = () => {
   useTitle('批量处理');
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const toast = useConsoleToast();
   const [name, setName] = useState('批量处理');
@@ -120,6 +123,9 @@ export const BatchPage: React.FC = () => {
   };
 
   const isMedia = operation === 'media-sort' || operation === 'media-organize';
+  const returnToFiles = operation === 'media-organize' ? fileWorkspaceReturn(location.state) : undefined;
+  const organizerTask = operation === 'media-organize' &&
+    (organizerJobId(searchParams, 'batch') ?? organizerJobId(searchParams, 'preview'));
   const tool = operations.find(item => item.op === operation);
   const scopeCount = operation === 'move' || operation === 'rename' ? splitLines(mappingsText).length : paths.length;
   const toolChooser = (
@@ -159,8 +165,19 @@ export const BatchPage: React.FC = () => {
     </details>
   );
   return (
-    <div className="nfc-operations-page nfc-batch-page nfc-page-layout-workbench nfc-v2-batch">
-      <PageHeader title={tool?.title ?? '批量处理'} actions={toolChooser} />
+    <div className="nfc-operations-page nfc-batch-page nfc-page-layout-workbench nfc-v2-batch"
+      data-media-organizer={operation === 'media-organize' || undefined}>
+      <PageHeader title={tool?.title ?? '批量处理'} actions={<ActionBar compact>
+        {returnToFiles && <Link className="nfc-console-button nfc-console-button-secondary nfc-console-button-sm"
+          to={returnToFiles} state={{ restoreFileWorkspace: true }}>
+          <ConsoleIcon name="arrow-left" size={16} />返回文件空间
+        </Link>}
+        {organizerTask && <Link className="nfc-console-button nfc-console-button-ghost nfc-console-button-sm"
+          to={'/tasks?' + new URLSearchParams({ task: organizerTask })} state={{ fileWorkspaceReturn: returnToFiles }}>
+          <ConsoleIcon name="activity" size={16} />查看任务
+        </Link>}
+        {toolChooser}
+      </ActionBar>} />
 
       {!isMedia && <div className="nfc-batch-authoring">
         <DataPanel title="操作范围" description="核对路径后生成执行计划。"

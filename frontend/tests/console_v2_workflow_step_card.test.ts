@@ -34,7 +34,7 @@ describe('Console v2 StepCard native UI and unchanged workflow definitions', () 
     for (const token of [
       '<section', '<header', '<button type="button"', 'aria-expanded={expanded}',
       'aria-controls={editorId}', 'const editorId = useId()',
-      'hidden={!expanded}', 'onClick={onToggle}',
+      "{ inert: '' }", 'aria-hidden={expanded ? undefined : true}', 'onClick={onToggle}',
       'ConsoleButton', '<ConsoleIcon',
       'if (!readOnly && canMoveUp) onMoveUp()',
       'if (!readOnly && canMoveDown) onMoveDown()',
@@ -93,5 +93,12 @@ describe('Console v2 StepCard native UI and unchanged workflow definitions', () 
       '@media (prefers-reduced-motion: reduce)',
     ]) assert.ok(css.includes(token), token);
     assert.ok(main.includes("import './styles/console-v2-workflow-step-card.css';"));
+  });
+
+  test('the editor opens in place with a height transition respecting reduced motion', () => {
+    const css = read('src/styles/console-v2-workflow-step-card.css');
+    assert.match(css, /\.nfc-v2-step-reveal\s*\{[^}]*grid-template-rows:\s*0fr;[^}]*transition:[^;]*grid-template-rows/);
+    assert.match(css, /\.is-expanded\s*>\s*\.nfc-v2-step-reveal\s*\{\s*grid-template-rows:\s*1fr;/);
+    assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.nfc-v2-step-reveal[\s\S]*?transition:\s*none/);
   });
 });

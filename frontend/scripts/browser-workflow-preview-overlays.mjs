@@ -69,6 +69,11 @@ async function ready() {
 function readFixture(path) {
   if (path === '/api/auth/me') return { id: 1, username: 'workflow-visual-admin', role: 'admin' };
   if (path === '/api/settings') return { allow_mutation: true, allow_delete: false };
+  if (path === '/api/workflows/41/latest-run') return {
+    id: '9007199254740994', job_type: 'workflow-scheduled', status: 'running',
+    progress: { current: 46, total: 100, percent: 46, message: null },
+  };
+  if (/^\/api\/workflows\/(42|43)\/latest-run$/.test(path)) return null;
   if (path === '/api/indexes') return {
     items: [{ id: 1, root: '/visual-fixture', files: 2, folders: 3,
       created_at: '2026-10-12T09:00:00Z', last_indexed_at: null,
@@ -216,9 +221,20 @@ try {
         await page.goto(BASE_URL + url, { waitUntil: 'domcontentloaded' });
         await page.getByRole('heading', { name: /Visual Workflow #/ }).first().waitFor();
       };
+      /** Reveal the editor settings before exercising the name field. */
+      const openSettings = async () => {
+        const field = page.getByLabel('工作流名称');
+        if (!await field.isVisible()) await page.locator('.nfc-workflow-definition-disclosure > summary').click();
+        return field;
+      };
       try {
         // Legacy File Preview: no Draft without authoritative saved Preview.
         await goto('/workflows/41');
+        const latest = page.getByRole('region', { name: '最近一次执行' });
+        const latestLink = latest.getByRole('link', { name: '查看任务' });
+        await latestLink.waitFor();
+        assert.equal(await latestLink.getAttribute('href'), '/tasks?task=9007199254740994');
+        assert.equal(await latest.locator('progress').getAttribute('value'), '46');
         const legacy = page.locator('.nfc-v2-legacy-preview');
         const legacyDraft = legacy.getByRole('button', { name: '生成计划草稿' });
         assert.equal(await legacyDraft.isDisabled(), true, 'File Draft needs Preview');
@@ -242,7 +258,7 @@ try {
         await waitForEnabled(page, '生成计划草稿');
 
         // Editing saved definition must disable Preview and Generate Draft; no Save click.
-        await page.getByLabel('工作流名称').fill('Unsaved Visual Workflow');
+        await (await openSettings()).fill('Unsaved Visual Workflow');
         assert.equal(await legacy.getByRole('button', { name: '生成预览' }).isDisabled(), true,
           'Dirty file workflow must not Preview');
         assert.equal(await legacyDraft.isDisabled(), true, 'Dirty file workflow must not Draft');
@@ -250,7 +266,7 @@ try {
 
         // Historical view is revision-bound and read-only, but can Preview.
         await goto('/workflows/41?revision=1');
-        assert.equal(await page.getByLabel('工作流名称').isDisabled(), true,
+        assert.equal(await (await openSettings()).isDisabled(), true,
           'Historical revision cannot edit');
         const historical = page.locator('.nfc-v2-legacy-preview');
         await historical.getByRole('button', { name: '生成预览' }).click();
@@ -287,7 +303,7 @@ try {
         await page.screenshot({ path: resolve(OUT, 'utility-confirm-' + label + '.png') });
         await page.keyboard.press('Escape');
         await confirm.waitFor({ state: 'hidden' });
-        await page.getByLabel('工作流名称').fill('Dirty Utility Visual');
+        await (await openSettings()).fill('Dirty Utility Visual');
         assert.equal(await utility.getByRole('button', { name: '生成预览' }).isDisabled(), true,
           'Dirty Utility workflow must not Preview');
         assert.equal(await utilityDraft.isDisabled(), true, 'Dirty Utility workflow must not Draft');
@@ -295,7 +311,7 @@ try {
         // Archived definitions remain strictly read-only.
         await goto('/workflows/43');
         const locked = page.locator('.nfc-v2-legacy-preview');
-        assert.equal(await page.getByLabel('工作流名称').isDisabled(), true);
+        assert.equal(await (await openSettings()).isDisabled(), true);
         assert.equal(await locked.getByRole('button', { name: '生成预览' }).isDisabled(), true);
         assert.equal(await locked.getByRole('button', { name: '生成计划草稿' }).isDisabled(), true);
         assert.ok((await page.innerText('body')).includes('已归档'));

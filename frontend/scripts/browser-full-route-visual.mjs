@@ -168,6 +168,7 @@ function fixture(path) {
   if (path === '/api/plans/1') return fixturePlan;
   if (path === '/api/plans') return page([fixturePlan]);
   if (path === '/api/workflows/1') return fixtureWorkflow;
+  if (path === '/api/workflows/1/latest-run') return null;
   if (path === '/api/workflows/1/revisions') return [];
   if (path === '/api/workflows') return [fixtureWorkflow];
   if (path === '/api/download-verifications/sources/1/browse') return {
@@ -1457,6 +1458,29 @@ try {
           }
           await tab.getByRole('button', { name: '取消' }).click();
         }
+        if (item.id === 'cloud-files' && width === 1440 && themeLabel === 'light-dark') {
+          const rail = tab.getByRole('navigation', { name: '主导航', exact: true });
+          const collapse = rail.getByRole('button', { name: '收起主导航', exact: true });
+          await collapse.waitFor({ timeout: 5000 });
+          await collapse.focus();
+          await tab.keyboard.press('Enter');
+          const expand = rail.getByRole('button', { name: '展开主导航', exact: true });
+          assert.equal(await expand.getAttribute('aria-expanded'), 'false');
+          assert.equal(await expand.evaluate(node => document.activeElement === node), true);
+          await rail.getByRole('link', { name: '任务中心', exact: true }).click();
+          await tab.getByRole('heading', { name: '任务中心', exact: true }).waitFor();
+          assert.equal(await rail.getByRole('link', { name: '任务中心', exact: true }).getAttribute('aria-current'), 'page');
+          await tab.reload({ waitUntil: 'domcontentloaded' });
+          await expand.waitFor({ timeout: 5000 });
+          await expand.click();
+          await rail.getByRole('link', { name: '文件空间', exact: true }).click();
+          await tab.locator('.nfc-file-workspace-entries').waitFor();
+          assert.equal(await collapse.getAttribute('aria-expanded'), 'true');
+          // Return the isolated browser context to the automatic route default.
+          await tab.evaluate(() => localStorage.removeItem('nfc_navigation_compact'));
+          await tab.goto(BASE + item.path, { waitUntil: 'domcontentloaded' });
+          await collapse.waitFor({ timeout: 5000 });
+        }
         if (item.id === 'dashboard') {
           // Exercise the actual global shortcut, result list and return target after capturing the page.
           const opener = tab.getByRole('button', { name: '打开导航菜单' });
@@ -1484,7 +1508,7 @@ try {
         }
         const headerCollision = await tab.evaluate(() => {
           const bounds = Array.from(document.querySelectorAll(
-            '.nfc-v2-header > :is(.nfc-v2-header-left, .nfc-header-file-toolbar, .nfc-header-command-cluster)',
+            '.nfc-v2-header > :is(.nfc-v2-header-left, .nfc-header-command-cluster)',
           )).map(node => node.getBoundingClientRect()).filter(rect => rect.width > 0);
           return bounds.slice(1).some((rect, index) => bounds[index].right > rect.left + 1);
         });

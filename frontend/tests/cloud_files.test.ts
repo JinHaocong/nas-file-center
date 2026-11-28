@@ -2,9 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { cloudFilesApi, type CloudTransfer, type CloudTransferFile } from '../src/api/cloudFiles';
-import { displaySpeed, estimateOpenListSpeed, nativeTransferPage } from '../src/pages/CloudFiles/presentation';
+import { getStructuredApiError } from '../src/api/errors';
+import { cloudSubmissionRejected, displaySpeed, estimateOpenListSpeed, formatCloudSubmission, nativeTransferPage } from '../src/pages/CloudFiles/presentation';
 
 const jobId = 'rclone.example-instance.90071992547409933';
+const cloudTransfer: CloudTransfer = {
+  id: jobId, provider: 'rclone', remote: 'PikPak', path: '相册', destination: '/data/Download',
+  names: ['片段 01.mp4', '片段 02.mp4'], status: 'queued', progress: null, speed: null,
+  error: null, created_at: '', native_ids: ['90071992547409933', '90071992547409934'], files: [],
+  can_cancel: true, can_delete: false,
+};
 
 test('the native file API preserves a multi-select with provider names and task IDs intact', async context => {
   const calls: { url: URL; method: string | undefined; body: unknown }[] = [];
@@ -40,6 +47,27 @@ test('a selection made entirely of existing files returns a skip receipt without
   });
   assert.equal('id' in receipt, false);
   assert.deepEqual(receipt, skipped);
+});
+
+test('copy result text separates confirmed submit counts, skipped existing files and uncertainty', () => {
+  assert.equal(formatCloudSubmission({ ...cloudTransfer, submitted_count: 2, skipped_names: ['封面.jpg'] }),
+    '已提交 2 项，已跳过 1 个已有文件');
+  assert.equal(formatCloudSubmission({ ...cloudTransfer, error: '部分提交结果未确认', submitted_count: 1 }),
+    '已确认提交 1 项，部分提交结果待确认');
+  assert.equal(formatCloudSubmission({ native_ids: [], submitted_count: 0, skipped_names: ['封面.jpg'] }),
+    '已跳过 1 个已有文件');
+  assert.equal(formatCloudSubmission(cloudTransfer), '复制任务已提交');
+});
+
+test('only a known pre-submit copy failure permits the same selection to be retried immediately', async context => {
+  context.mock.method(globalThis, 'fetch', async () => Response.json({
+    error: { code: 'CLOUD_COPY_NOT_SUBMITTED', message: '预检失败' },
+  }, { status: 502 }));
+  await assert.rejects(cloudFilesApi.start(cloudTransfer), error => cloudSubmissionRejected(getStructuredApiError(error)));
+  assert.equal(cloudSubmissionRejected({ status: 409, message: '目标冲突' }), true);
+  assert.equal(cloudSubmissionRejected({ status: 502, message: '无法确认' }), false);
+  assert.equal(cloudSubmissionRejected({ status: 503, message: '反向代理暂不可用' }), false);
+  assert.equal(cloudSubmissionRejected({ status: 0, message: '网络断开' }), false);
 });
 
 test('OpenList individual file estimates use byte deltas and preserve missing measurements', () => {

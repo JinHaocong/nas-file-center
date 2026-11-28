@@ -4,7 +4,7 @@ import {
   CircleCheck, Cloud, Copy, ChevronDown, ChevronRight, Clock3, Database,
   FileCheck2, FileSearch, FileText, Folder, FolderOpen, Folders,
   GitCompareArrows, HardDrive, History, Image, ImageOff, Info, Layers3, LayoutDashboard, ListChecks,
-  LockKeyhole, LogOut, Menu, Moon, PanelRight, Pencil, Play, Plus, RefreshCw,
+  LockKeyhole, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, PanelRight, Pencil, Play, Plus, RefreshCw,
   Search, Settings, ShieldCheck, SlidersHorizontal, Star, Sun, Trash2,
   Terminal, UserRound, Workflow, X, Zap,
 } from 'lucide-react';
@@ -47,6 +47,8 @@ const icons = {
   'log-out': LogOut,
   menu: Menu,
   moon: Moon,
+  'panel-left-close': PanelLeftClose,
+  'panel-left-open': PanelLeftOpen,
   'panel-right': PanelRight,
   pencil: Pencil,
   play: Play,

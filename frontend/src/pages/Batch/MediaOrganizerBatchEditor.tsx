@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 
 import { DirectoryPicker } from '../../components/DirectoryPicker';
 import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
+import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { DataPanel } from '../../components/ui/DataPanel';
 import {
@@ -15,7 +16,7 @@ import { MediaOrganizerLooseFilesReport } from './MediaOrganizerLooseFilesReport
 
 import { getStructuredApiError } from '../../api/errors';
 import {
-  mediaOrganizerBatchApi, organizerJobId, type MediaBatchPreviewUnit,
+  mediaOrganizerBatchApi, organizerJobId, type MediaBatchPreviewUnit, type MediaBatchResultFilter,
   type MediaPreviewFilter, type OrganizerJobId,
 } from '../../api/mediaOrganizerBatch';
 import type { TaskStatus } from '../../types/task';
@@ -38,8 +39,11 @@ function OrganizerFilters({ value, counts, onChange, disabled }: {
 }) {
   const bar = useRef<HTMLDivElement>(null);
   const active = useRef<HTMLButtonElement>(null);
+  const more = useRef<HTMLDetailsElement>(null);
   const [highlight, setHighlight] = useState<FilterHighlight | null>(null);
   const hasUnassigned = Boolean(counts.needs_assignment) || value === 'needs_assignment';
+  const primary = value === 'all' || value === 'blocked';
+  const options = previewFilters.filter(([key]) => key !== 'needs_assignment' || hasUnassigned);
 
   useLayoutEffect(() => {
     const button = active.current;
@@ -58,18 +62,38 @@ function OrganizerFilters({ value, counts, onChange, disabled }: {
     observer.observe(container);
     for (const candidate of container.querySelectorAll('button')) observer.observe(candidate);
     return () => observer.disconnect();
-  }, [value, hasUnassigned]);
+  }, [value]);
 
-  return <div ref={bar} className="nfc-organizer-workspace-filters" id="media-organizer-batch-filter"
-    data-highlight={Boolean(highlight)} role="group" aria-label="筛选状态">
-    {highlight && <span aria-hidden="true" className="nfc-organizer-filter-highlight" style={{
-      width: highlight.width, height: highlight.height, transform: `translate(${highlight.x}px, ${highlight.y}px)`,
-    }} />}
-    {previewFilters.filter(([key]) => key !== 'needs_assignment' || hasUnassigned)
-      .map(([key, label]) => <button key={key} ref={value === key ? active : undefined} type="button"
-        data-preview-filter={key} aria-pressed={value === key} disabled={disabled} onClick={() => onChange(key)}>
-        {label} <span>{counts[key] ?? 0}</span>
-      </button>)}
+  /** Select from the main filters or close the expanded list after choosing a secondary status. */
+  function filterButton([key, label]: (typeof previewFilters)[number], isPrimary: boolean) {
+    return <button key={key} ref={isPrimary && value === key ? active : undefined} type="button"
+      data-preview-filter={key} aria-pressed={value === key} disabled={disabled} onClick={() => {
+        if (!isPrimary && more.current?.open) {
+          more.current.open = false;
+          more.current.querySelector('summary')?.focus();
+        }
+        onChange(key);
+      }}>
+      {label} <span>{counts[key] ?? 0}</span>
+    </button>;
+  }
+
+  return <div className="nfc-organizer-filter-controls" role="group" aria-label="筛选状态"
+    id="media-organizer-batch-filter">
+    <div ref={bar} className="nfc-organizer-workspace-filters" data-highlight={primary && Boolean(highlight)}>
+      {primary && highlight && <span aria-hidden="true" className="nfc-organizer-filter-highlight" style={{
+        width: highlight.width, height: highlight.height, transform: `translate(${highlight.x}px, ${highlight.y}px)`,
+      }} />}
+      {options.filter(([key]) => key === 'all' || key === 'blocked').map(option => filterButton(option, true))}
+    </div>
+    <details ref={more} className="nfc-organizer-more-filters">
+      <summary><ConsoleIcon name="sliders" size={14} />
+        {primary ? '更多筛选' : options.find(([key]) => key === value)?.[1]}
+      </summary>
+      <div className="nfc-organizer-workspace-filters">
+        {options.filter(([key]) => key !== 'all' && key !== 'blocked').map(option => filterButton(option, false))}
+      </div>
+    </details>
   </div>;
 }
 
@@ -81,6 +105,7 @@ function isActive(status?: TaskStatus): boolean {
 /** Select an organizing scope, review its preview, then submit the entire scope once. */
 export function MediaOrganizerBatchEditor() {
   const [params, setParams] = useSearchParams();
+  const { state: routeState } = useLocation();
   const savedPreviewId = organizerJobId(params, 'preview');
   const batchId = organizerJobId(params, 'batch');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -90,7 +115,10 @@ export function MediaOrganizerBatchEditor() {
   const [problem, setProblem] = useState('');
   const [previewPage, setPreviewPage] = useState({ page: 1, size: 25 });
   const [filter, setFilter] = useState<MediaPreviewFilter>('all');
-  const [resultPage, setResultPage] = useState({ page: 1, size: 25 });
+  const [resultView, setResultView] = useState<{
+    id: OrganizerJobId; page: number; size: number; filter: MediaBatchResultFilter;
+  }>();
+  const resultPage = resultView?.id === batchId ? resultView : { page: 1, size: 25, filter: 'all' as const };
   const [assignmentBusy, setAssignmentBusy] = useState(false);
   const [assignmentDraft, setAssignmentDraft] = useState<{
     previewId: OrganizerJobId; detailId: string; planId: string;
@@ -104,8 +132,8 @@ export function MediaOrganizerBatchEditor() {
   useEffect(() => () => { inFlight.current?.abort(); }, []);
 
   const resultQuery = useQuery({
-    queryKey: ['mediaOrganizerBatch', batchId, resultPage.page, resultPage.size],
-    queryFn: () => mediaOrganizerBatchApi.getBatch(batchId!, resultPage.page, resultPage.size),
+    queryKey: ['mediaOrganizerBatch', batchId, resultPage.page, resultPage.size, resultPage.filter],
+    queryFn: () => mediaOrganizerBatchApi.getBatch(batchId!, resultPage.page, resultPage.size, resultPage.filter),
     enabled: batchId !== null,
     placeholderData: (previous, query) => query?.queryKey[1] === batchId ? previous : undefined,
     refetchInterval: query => {
@@ -132,8 +160,8 @@ export function MediaOrganizerBatchEditor() {
       const next = new URLSearchParams(current);
       next.set('batch', existingBatchId);
       return next;
-    }, { replace: true });
-  }, [batchId, existingBatchId, setParams]);
+    }, { replace: true, state: routeState });
+  }, [batchId, existingBatchId, routeState, setParams]);
 
   const suggestedPaths = params.has('preview') || params.has('batch') || params.has('execution')
     ? [] : params.getAll('directory');
@@ -178,7 +206,7 @@ export function MediaOrganizerBatchEditor() {
       if (previewJobId) next.set('preview', previewJobId);
       if (batchJobId) next.set('batch', batchJobId);
       return next;
-    }, { replace: true });
+    }, { replace: true, state: routeState });
   }
 
   /** Keep the selected directory and apply its new preview only after successful submission. */
@@ -190,7 +218,7 @@ export function MediaOrganizerBatchEditor() {
     setFilter('all');
     setInspectedUnit(null);
     setDetails(null);
-    setResultPage({ page: 1, size: 25 });
+    setResultView(undefined);
     setSelectedPath(null);
     showJobs(receipt.job_id);
   }
@@ -311,7 +339,7 @@ export function MediaOrganizerBatchEditor() {
     <>
       <section className="nfc-organizer-scope" aria-label="整理目录">
         <div className="nfc-organizer-scope-controls">
-          <strong>整理目录</strong>
+          <strong><ConsoleIcon name="folder-open" size={16} />整理范围</strong>
           <DirectoryPicker value={selection} onChange={chooseDirectory} disabled={busy}
             allowManualInput={false} placeholder="选择媒体所在的目录" />
           {selection && <ConsoleButton variant="secondary" disabled={busy}
@@ -340,15 +368,29 @@ export function MediaOrganizerBatchEditor() {
       )}
 
       {currentResult ? (
-        <MediaOrganizerResultReport report={currentResult}>
-          {currentResult.filtered_total > 0 && <ConsolePagination page={resultPage.page} pageSize={resultPage.size}
+        <MediaOrganizerResultReport report={currentResult} conflictsOnly={resultPage.filter === 'conflict'}
+          pending={resultQuery.isPlaceholderData}
+          onToggleConflicts={() => {
+            if (batchId) setResultView({
+              id: batchId, page: 1, size: resultPage.size, filter: resultPage.filter === 'conflict' ? 'all' : 'conflict',
+            });
+          }}>
+          {!resultQuery.isPlaceholderData && currentResult.filtered_total > 0 && <ConsolePagination
+            page={resultPage.page} pageSize={resultPage.size}
             total={currentResult.filtered_total} pageSizes={pageSizes}
-            onChange={(page, size) => setResultPage({ page, size })} />}
+            onChange={(page, size) => {
+              if (batchId) setResultView({ id: batchId, page, size, filter: resultPage.filter });
+            }} />}
         </MediaOrganizerResultReport>
       ) : batchId && selectedPath === null && (
         <DataPanel title="整理结果" variant="dense" className={panelClass}>
           {resultQuery.isError ? (
-            <p role="alert">{getStructuredApiError(resultQuery.error).message || '无法读取整理结果'}</p>
+            <>
+              <p role="alert">{getStructuredApiError(resultQuery.error).message || '无法读取整理结果'}</p>
+              {resultPage.filter !== 'all' && <ConsoleButton size="sm" onClick={() => setResultView(undefined)}>
+                查看全部结果
+              </ConsoleButton>}
+            </>
           ) : <p role="status">正在读取整理进度…</p>}
         </DataPanel>
       )}
@@ -358,13 +400,15 @@ export function MediaOrganizerBatchEditor() {
           detail={detailReport} onDismissDetails={() => setDetails(null)} pending={previewQuery.isPlaceholderData}
           detailBusy={assignmentBusy}
           action={canConfirm && (
-            <ConsoleButton variant="primary" disabled={busy} loading={action === 'confirm'}
+            <ConsoleButton size="sm" variant="primary" disabled={busy} loading={action === 'confirm'}
+              aria-label={recycleCount ? '确认整理与回收' : '确认整理全部'}
+              leadingIcon={<ConsoleIcon name="arrow-right" size={15} />}
               onClick={event => {
                 event?.currentTarget.focus({ preventScroll: true });
                 reviewBatch(true);
-              }}>{recycleCount ? '确认整理与回收' : '确认整理全部'}</ConsoleButton>
+              }}>{recycleCount ? '确认整理与回收' : '确认整理'}</ConsoleButton>
           )}
-          footer={<ConsolePagination page={previewPage.page} pageSize={previewPage.size}
+          footer={currentPreview.filtered_total > pageSizes[0] && <ConsolePagination page={previewPage.page} pageSize={previewPage.size}
             total={currentPreview.filtered_total} pageSizes={pageSizes}
             onChange={(page, size) => {
               if (assignmentBusy) return;

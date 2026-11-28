@@ -4,6 +4,8 @@ import { copyExactText, readClipboardWriter } from '../../utils/clipboard';
 
 interface CodePathProps {
   value?: string | null;
+  /** An optional reading label. The title and clipboard always use the full value. */
+  displayValue?: string;
   muted?: boolean;
 }
 
@@ -27,7 +29,7 @@ function copyUsingSelection(value: string): boolean {
 }
 
 /** Read-only filesystem path display: show and copy the exact server-provided string. */
-export const CodePath: React.FC<CodePathProps> = ({ value, muted = false }) => {
+export const CodePath: React.FC<CodePathProps> = ({ value, displayValue, muted = false }) => {
   const textRef = React.useRef<HTMLElement>(null);
   const disclosureRef = React.useRef<HTMLButtonElement>(null);
   const copyButtonRef = React.useRef<HTMLButtonElement>(null);
@@ -65,7 +67,7 @@ export const CodePath: React.FC<CodePathProps> = ({ value, muted = false }) => {
       observer?.disconnect();
       if (!observer && typeof window !== 'undefined') window.removeEventListener('resize', measure);
     };
-  }, [value, expanded]);
+  }, [value, displayValue, expanded]);
 
   React.useEffect(() => {
     setExpandedValue(null);
@@ -100,7 +102,9 @@ export const CodePath: React.FC<CodePathProps> = ({ value, muted = false }) => {
     <span className={'nfc-code-path nfc-v2-code-path' + (muted ? ' nfc-code-path-muted' : '') +
       (expanded ? ' is-expanded' : '')}>
       <span className="nfc-path-reading-row">
-        <code className="nfc-v2-code-path-value" id={textId} ref={textRef} title={value}>{value}</code>
+        <code className="nfc-v2-code-path-value" id={textId} ref={textRef} title={value}>
+          {expanded ? value : displayValue ?? value}
+        </code>
         {(clipped || expanded) && <button type="button" ref={disclosureRef} className="nfc-path-disclosure"
           aria-label={expanded ? '收起完整路径' : '展开完整路径'} aria-expanded={expanded} aria-controls={textId}
           onClick={() => setExpandedValue(expanded ? null : value)}>

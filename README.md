@@ -2,7 +2,7 @@
 
 面向自托管 NAS 的中文 Web 文件工具。可以从一个目录开始整理照片和视频，跨目录查找重复文件，或把反复执行的归档流程保存成工作流。扫描和媒体整理在后台运行，关闭页面后可以回到任务中心查看结果。
 
-**已发布镜像 `kerwinjhc/nas-file-center:2.0.8`** · `linux/amd64`
+**已发布镜像 `kerwinjhc/nas-file-center:2.0.9`** · `linux/amd64`
 
 [Docker Hub](https://hub.docker.com/r/kerwinjhc/nas-file-center/tags) · [镜像构建](https://github.com/JinHaocong/nas-file-center/actions/workflows/dockerhub-publish.yml) · [发布验证](https://github.com/JinHaocong/nas-file-center/actions/workflows/release-validation.yml)
 
@@ -112,7 +112,7 @@
 
 桶名中的数量和大小取自实际文件。整理器会根据目录结构识别可去掉的包装层，并保留识别出的独立作品、分册或版本边界。目标重名和归属无法确认的情况可在预览中检查。
 
-桌面支持浅色、深色和跟随系统主题。文件空间在打开存储根目录时按需加载存储模型。浏览器不支持 WebGL 或启用减少动态效果时，使用静态预览。
+桌面支持浅色、深色和跟随系统主题。文件空间在打开存储根目录时按需加载白色机身的 3D 预览，鼠标在整张卡片内移动时可转动机身。触屏、启用减少动态效果或 WebGL 不可用时显示同一机身的静态渲染。
 
 ## 快速开始
 
@@ -152,10 +152,10 @@ docker compose ps
 ```yaml
 services:
   api:
-    image: kerwinjhc/nas-file-center:2.0.8
+    image: kerwinjhc/nas-file-center:2.0.9
     platform: linux/amd64
   worker:
-    image: kerwinjhc/nas-file-center:2.0.8
+    image: kerwinjhc/nas-file-center:2.0.9
     platform: linux/amd64
 ```
 
@@ -204,8 +204,7 @@ docker compose -f compose.yaml -f compose.image.yaml up -d --no-build --pull alw
 
 管理员可在「系统设置 → 安全状态 → 极空间授权」绑定或重新授权。打开极空间授权页，选定设备并授权，再把一次性授权码填回设置页。使用网页授权时，API 与 Worker 需要挂载同一份只读 CLI 和私有授权卷。回收使用部署中配置的目录映射，极空间路径应对应容器的 `DATA_MOUNT`。
 
-- `.url` 快捷方式可回收。扩展名匹配不区分大小写。
-- `.txt` 仅回收完整内容为 HTTP(S) 链接或明确推广的普通文件。作品说明、提取码说明、字幕和媒体文件按原整理规则处理。
+- 所选目录内，以 `.txt` 或 `.url` 结尾的普通文件都会列入回收预览，扩展名匹配不区分大小写。
 - 在预览中查看文件名和回收原因，点「确认整理与回收」后由 Worker 送入极空间系统回收站。
 
 ### 扫描重复并生成去重计划

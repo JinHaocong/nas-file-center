@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import TestRenderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import { filesystemApi } from '../src/api/filesystem';
@@ -51,6 +51,10 @@ test('file workspace opens directories deliberately and Back restores the parent
 
   const params = () => new URLSearchParams(view.root.findByType('output').children.join(''));
   const entry = () => view.root.findByProps({ title: album, type: 'button' });
+  const workspaceWindow = view.root.findByProps({ className: 'nfc-file-workspace-window' });
+  assert.equal(workspaceWindow.findByProps({ 'aria-label': '文件空间工具' }).type, 'div');
+  assert.equal(workspaceWindow.findByProps({ 'aria-label': '文件列表' }).type, 'div');
+  assert.equal(view.root.findByType('h1').children.join(''), '文件空间');
   assert.equal(view.root.findByProps({ 'aria-label': '列表视图', type: 'button' }).props['aria-pressed'], true);
   await act(async () => { view.root.findByProps({ 'aria-label': '网格视图', type: 'button' }).props.onClick(); });
   assert.equal(view.root.findByProps({ 'aria-label': '网格视图', type: 'button' }).props['aria-pressed'], true);
@@ -106,4 +110,94 @@ test('reading another page keeps pagination mounted without enabling old entries
   await act(async () => { resolveNext(); await settle(); });
   assert.equal(view.root.findByProps({ 'aria-label': '列表分页' }), paginator);
   assert.equal(view.root.findByProps({ title: root + '/第二页.jpg', type: 'button' }).props.disabled, false);
+});
+
+test('returning from organizer restores the exact file workspace and its independent list position', async t => {
+  const origin = '/dashboard?' + new URLSearchParams({ directory: root, search: '照片', selected: album });
+  t.mock.method(filesystemApi, 'listDirectory', async () => ({
+    path: root, parent: null, items: [{ name: '照片 & 旅行 ', path: album, type: 'directory' as const }],
+    page: 1, page_size: 50, total: 1, has_more: false, allowed_roots: [root],
+  }));
+  t.mock.method(filesystemApi, 'listFavorites', async () => ({ items: [] }));
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { title: '' } });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), { innerWidth: 1440 }) });
+  const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  let scroller: { scrollTop: number };
+  let view!: ReactTestRenderer;
+  function Organizer() {
+    const location = useLocation();
+    const navigate = useNavigate();
+    return <button onClick={() => navigate(location.state.fileWorkspaceReturn, { state: { restoreFileWorkspace: true } })}>回到原位</button>;
+  }
+  t.after(() => {
+    act(() => view.unmount());
+    query.clear();
+    Reflect.deleteProperty(globalThis, 'document');
+    Reflect.deleteProperty(globalThis, 'window');
+  });
+  await act(async () => {
+    view = TestRenderer.create(<MemoryRouter initialEntries={[origin]}>
+      <QueryClientProvider client={query}><Routes>
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/batch" element={<Organizer />} />
+      </Routes></QueryClientProvider>
+    </MemoryRouter>, {
+      createNodeMock: element => element.props.className === 'nfc-file-workspace-list-scroll'
+        ? (scroller = { scrollTop: 0 }) : null,
+    });
+    await settle();
+  });
+  await act(settle);
+
+  const launch = view.root.findAllByType(Link).find(link => link.props.className === 'nfc-file-workspace-action');
+  assert.deepEqual(launch?.props.state, { fileWorkspaceReturn: origin });
+  scroller!.scrollTop = 220;
+  const anchor = launch!.findByType('a');
+  await act(async () => {
+    anchor.props.onClick({ button: 0, preventDefault() {} });
+    await settle();
+  });
+  const resume = view.root.findAllByType('button').find(button => button.children.join('') === '回到原位');
+  assert.ok(resume);
+  await act(async () => { resume.props.onClick(); await settle(); });
+  assert.equal(view.root.findByProps({ title: album, type: 'button' }).props['aria-pressed'], true);
+  assert.equal(view.root.findByProps({ 'aria-label': '搜索当前目录' }).props.value, '照片');
+  assert.equal(scroller!.scrollTop, 220);
+});
+
+test('the folder inspector uses the selected directory overview and skips unbounded root summaries', async t => {
+  const paths: string[] = [];
+  t.mock.method(filesystemApi, 'listDirectory', async () => ({
+    path: root, parent: null, items: [{ name: '照片 & 旅行 ', path: album, type: 'directory' as const }],
+    page: 1, page_size: 50, total: 1, has_more: false, allowed_roots: [root],
+  }));
+  t.mock.method(filesystemApi, 'listFavorites', async () => ({ items: [] }));
+  t.mock.method(filesystemApi, 'directoryOverview', async (path: string) => {
+    paths.push(path);
+    return { overview: { images: 268, videos: 2, files: 272, total_bytes: 3072 } };
+  });
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { title: '' } });
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), { innerWidth: 1440 }) });
+  const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  let view!: ReactTestRenderer;
+  t.after(() => {
+    act(() => view.unmount());
+    query.clear();
+    Reflect.deleteProperty(globalThis, 'document');
+    Reflect.deleteProperty(globalThis, 'window');
+  });
+  await act(async () => {
+    view = TestRenderer.create(<MemoryRouter initialEntries={['/dashboard']}>
+      <QueryClientProvider client={query}><DashboardPage /></QueryClientProvider>
+    </MemoryRouter>);
+    await settle();
+  });
+  await act(settle);
+  assert.deepEqual(paths, []);
+  await act(async () => { view.root.findByProps({ title: album, type: 'button' }).props.onClick(); await settle(); });
+  await act(settle);
+  assert.deepEqual(paths, [album]);
+  const inspector = view.root.findByProps({ className: 'nfc-file-workspace-inspector' });
+  assert.ok(inspector.findAllByType('dd').some(node => node.children.join('') === '268 张图 · 2 段视频'));
+  assert.ok(inspector.findAllByType('dd').some(node => node.children.join('') === '3.00 KB'));
 });

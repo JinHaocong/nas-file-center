@@ -25,7 +25,7 @@ interface WorkspaceEntriesProps {
   selectedRef: RefObject<HTMLButtonElement>;
   openOnClick: boolean;
   onOpen: (path: string) => void;
-  onInspect: (entry: DirectoryItem) => void;
+  onInspect: (entry: DirectoryItem, trigger?: HTMLButtonElement) => void;
 }
 
 /** Use the same selection and directory navigation semantics in both presentation modes. */
@@ -37,11 +37,11 @@ export function WorkspaceEntries({ entries, list, pending, selectedPath, selecte
   ].filter(group => group.rows.length);
 
   return <div className={'nfc-file-workspace-entries' + (list ? ' is-list' : '')} aria-busy={pending || undefined}>
-    {groups.map(({ label, rows }, index) => <section key={label} aria-label={label}>
+    {list && <div className="nfc-file-workspace-column-head" aria-hidden="true">
+      <span>名称</span><span>类型</span><span>大小</span><span>修改时间</span>
+    </div>}
+    {groups.map(({ label, rows }) => <section key={label} aria-label={label}>
       <h2 className="nfc-file-workspace-group-title">{label}<span>{rows.length.toLocaleString()} 项</span></h2>
-      {list && index === 0 && <div className="nfc-file-workspace-column-head" aria-hidden="true">
-        <span>名称</span><span>类型</span><span>大小</span><span>修改时间</span>
-      </div>}
       <ul className="nfc-file-workspace-group-list" aria-label={label + '列表'}>
         {rows.map(entry => {
           const directory = entry.type === 'directory';
@@ -51,7 +51,7 @@ export function WorkspaceEntries({ entries, list, pending, selectedPath, selecte
           return <li key={entry.path}>
             <button type="button" title={entry.path} aria-pressed={selected} data-kind={entry.type}
               disabled={pending} ref={selected ? selectedRef : undefined}
-              onClick={() => openOnClick && directory ? onOpen(entry.path) : onInspect(entry)}
+              onClick={event => openOnClick && directory ? onOpen(entry.path) : onInspect(entry, event?.currentTarget)}
               onDoubleClick={directory ? () => onOpen(entry.path) : undefined}
               onKeyDown={event => {
                 if (event.key === 'Enter' && directory) {

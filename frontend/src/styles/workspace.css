@@ -13,20 +13,34 @@
 @media (min-width: 1200px) {
   .nfc-workspace-frame { overflow: hidden; }
   .nfc-workspace-navigation {
-    display: grid;
+    display: flex;
     flex: 0 0 clamp(158px, 11.8vw, 184px);
-    align-content: start;
+    flex-direction: column;
     align-self: stretch;
-    gap: 12px;
     min-inline-size: 0;
-    overflow-y: auto;
+    min-block-size: 0;
+    border-inline-end: 1px solid var(--studio-line);
+    background: color-mix(in srgb, var(--studio-soft) 74%, var(--studio-ground));
+    color: var(--studio-muted);
+  }
+  .nfc-workspace-navigation-controls {
+    display: flex;
+    flex: 0 0 43px;
+    align-items: center;
+    padding-inline: 10px;
+    border-block-end: 1px solid var(--studio-line);
+  }
+  .nfc-workspace-navigation-scroll {
+    display: grid;
+    flex: 1 1 auto;
+    align-content: start;
+    gap: 12px;
+    min-block-size: 0;
+    overflow: hidden auto;
     overscroll-behavior: contain;
     scrollbar-width: thin;
     scrollbar-color: var(--nfc-tint-line) transparent;
     padding: 12px 9px;
-    border-inline-end: 1px solid var(--studio-line);
-    background: color-mix(in srgb, var(--studio-soft) 74%, var(--studio-ground));
-    color: var(--studio-muted);
   }
   .nfc-workspace-navigation-group {
     display: grid;
@@ -76,6 +90,8 @@
   }
   .nfc-workspace-navigation[data-compact='true'] {
     flex-basis: 55px;
+  }
+  .nfc-workspace-navigation[data-compact='true'] .nfc-workspace-navigation-scroll {
     gap: 7px;
     padding: 9px 6px;
   }
@@ -108,7 +124,7 @@
   isolation: isolate;
   inline-size: 100%;
   min-inline-size: 0;
-  block-size: 112px;
+  block-size: 144px;
   overflow: hidden;
   border: 1px solid var(--studio-line);
   border-radius: 12px;
@@ -119,9 +135,10 @@
   inset: 0;
   inline-size: 100%;
   block-size: 100%;
+  pointer-events: none;
 }
 .nfc-storage-preview-fallback {
-  background: center 52% / auto 92% no-repeat url('../assets/storage-unit.webp');
+  background: center / auto 100% no-repeat url('../assets/storage-unit.webp');
 }
 .nfc-storage-preview canvas { opacity: 0; }
 .nfc-storage-preview[data-webgl="true"] canvas { opacity: 1; }
@@ -222,6 +239,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  .nfc-workspace-navigation { transition: flex-basis 180ms var(--nfc-motion-ease); }
   .nfc-workspace-navigation-group > a {
     transition: background-color 150ms var(--nfc-motion-ease), color 150ms var(--nfc-motion-ease);
   }

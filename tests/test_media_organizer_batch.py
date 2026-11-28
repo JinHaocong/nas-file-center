@@ -800,6 +800,8 @@ def test_batch_organizes_numbered_siblings_and_local_media_without_crossing_boun
                       titled_work, photo_container, titled_photos}
     preview = _preview(client, settings, selection)
     assert {Path(row["unit"]) for row in preview["units"] if row["status"] == "ready"} == expected_ready
+    download_preview = next(row for row in preview["units"] if row["unit"] == str(download))
+    assert download_preview["preserved_directory_paths"] == [str(download / "1"), str(download / "2")]
     author_preview = next(row for row in preview["units"] if row["unit"] == str(author))
     assert author_preview["totals"] == {"P": 0, "V": 201, "Other": 0}
     assert [group["count"] for group in author_preview["groups"]] == [50, 50, 50, 50, 1]
@@ -898,6 +900,15 @@ def test_preview_conflict_and_stale_unit_leave_unrelated_unit_executable(tmp_pat
     assert {item["unit"]: item["status"] for item in report["items"]} == {
         str(ambiguous): "conflict", str(first): "conflict", str(second): "success",
     }
+    response = client.get(f"/api/media-organizer/batches/{batch_id}", params={
+        "status_filter": "conflict", "page": 2, "page_size": 1,
+    })
+    assert response.status_code == 200
+    conflicts = response.json()
+    assert conflicts["summary"] == report["summary"]
+    assert conflicts["filtered_total"] == 2
+    assert conflicts["items"] == [item for item in report["items"] if item["status"] == "conflict"][1:]
+    assert client.get(f"/api/media-organizer/batches/{batch_id}", params={"status_filter": "other"}).status_code == 422
     assert target.read_bytes() == b"foreign"
     assert (first / "cover.JPG").read_bytes() == b"cover"
     assert (ambiguous / "protected.jpg").read_bytes() == b"protected"

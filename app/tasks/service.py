@@ -2,7 +2,7 @@ from datetime import datetime
 import inspect
 import json
 from typing import Any
-from sqlalchemy import Integer, delete, func, or_, select, text
+from sqlalchemy import Integer, case, delete, func, or_, select, text
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from app.batch.organizer_report_cleanup import (
@@ -240,6 +240,16 @@ class TaskService:
                 # A one-time tmpfs reference is a secret capability, not task UI data.
                 data["payload"].pop("secret_token", None)
             return data
+
+    def latest_workflow_run(self, workflow_id: int) -> dict | None:
+        """Read the latest scheduled task for this workflow without exposing its inputs."""
+        with self.SessionLocal() as session:
+            state = case((func.json_valid(WorkJob.state_json) == 1, WorkJob.state_json), else_="{}")
+            job = session.scalar(select(WorkJob).where(
+                WorkJob.kind == "workflow-scheduled",
+                func.json_extract(state, "$.workflow_id") == workflow_id,
+            ).order_by(WorkJob.id.desc()).limit(1))
+            return {**format_task(job), "id": str(job.id)} if job else None
 
     def pause_task(self, task_id: int) -> dict:
         def _transition(session: Session, job: WorkJob, now: datetime):

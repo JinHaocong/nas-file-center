@@ -10,8 +10,10 @@ import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { ConsoleSheet } from '../../components/ui/ConsoleSheet';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { MediaThumbnail, ThumbnailSwitch } from '../../components/ui/MediaThumbnail';
+import { commonDirectoryPrefix, PathPrefixDisclosure, usePathPrefix } from '../../components/ui/PathPrefixDisclosure';
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { StatusBadge } from '../../components/ui/StatusBadge';
+import { OrganizerStructure } from './OrganizerStructure';
 
 import { getStructuredApiError } from '../../api/errors';
 import {
@@ -46,28 +48,24 @@ const outcomes = {
 } satisfies Record<MediaBatchOutcome, { label: string; tone: string }>;
 const resultStatuses: readonly MediaBatchOutcome[] = ['success', 'skipped', 'conflict', 'failed'];
 const mappingKindLabels = { P: '图片', V: '视频', Other: '其他', Directory: '目录' };
-const recycleLabels = { url_shortcut: '网络快捷方式', links_only: '纯链接文本', promotion: '推广文本' };
+const recycleLabels = { url_shortcut: '网络快捷方式', links_only: '纯链接文本', promotion: '推广文本', text_file: 'TXT 文本文件' };
 
 type OpenUnitDetails = (row: MediaBatchPreviewUnit, opener: HTMLButtonElement) => void;
 
 /** Render each unit's destinations, reasons and detail actions in either layout. */
-function PreviewUnitDetails({ row, onDetails }: { row: MediaBatchPreviewUnit; onDetails: OpenUnitDetails }) {
+function PreviewUnitDetails({ row, onDetails, groupsShown = false }: {
+  row: MediaBatchPreviewUnit; onDetails: OpenUnitDetails; groupsShown?: boolean;
+}) {
   const reason = ['blocked', 'needs_assignment', 'skipped'].includes(row.status) ? row.reason : null;
-  if (!row.groups.length && !row.conflicts.length && !reason && !row.loose_id) return null;
+  const showGroups = !groupsShown && row.groups.length > 0;
+  if (!showGroups && !row.conflicts.length && !reason && !row.loose_id) return null;
 
   return (
     <div className="nfc-v2-batch-organizer-unit-detail">
-      {row.groups.length > 0 && <section className="nfc-organizer-destinations" aria-label="目标分类">
-        <h4>目标分类</h4>
-        <ul>
-          {row.groups.map(group => (
-            <li key={group.destination}>
-              <div><strong>{group.name}</strong><small>{group.count.toLocaleString()} 个 · {formatBytes(group.bytes)}</small></div>
-              <CodePath value={group.destination} />
-            </li>
-          ))}
-        </ul>
-      </section>}
+      {showGroups && <details className="nfc-organizer-destinations">
+        <summary>查看全部目标分类（{row.groups.length.toLocaleString()}）</summary>
+        <OrganizerDestinations groups={row.groups} />
+      </details>}
       {row.conflicts.length > 0 ? row.conflicts.map((conflict, index) => {
         const target = conflict.target ?? conflict.directory;
         return (
@@ -85,6 +83,18 @@ function PreviewUnitDetails({ row, onDetails }: { row: MediaBatchPreviewUnit; on
       )}
     </div>
   );
+}
+
+/** Keep the full destination list available below the compact structure preview. */
+function OrganizerDestinations({ groups }: { groups: MediaBatchPreviewUnit['groups'] }) {
+  return <ul className="nfc-organizer-destinations">
+    {groups.map(group => (
+      <li key={group.destination}>
+        <div><strong>{group.name}</strong><small>{group.count.toLocaleString()} 个 · {formatBytes(group.bytes)}</small></div>
+        <CodePath value={group.destination} />
+      </li>
+    ))}
+  </ul>;
 }
 
 /** Name the actual media present without synthesizing a filename or destination. */
@@ -116,45 +126,71 @@ function UnitInspection({ row, onDetails, onClose, closeDisabled }: {
   closeDisabled: boolean;
 }) {
   const samples = row.sample_moves?.filter(move => move.source !== move.target).slice(0, 3) ?? [];
+  const paths = usePathPrefix(commonDirectoryPrefix(samples.flatMap(move => [move.source, move.target])));
   const archiveLift = row.operation === 'promote_repeated_archive_children';
+  const hasFacts = row.status === 'ready' && !row.recycle_reason && samples.length > 0;
   const mappingAction = row.mapping_id && (
-    <ConsoleButton size="sm" variant="secondary" onClick={event => onDetails(row, event.currentTarget)}>
+    <ConsoleButton size="sm" variant="ghost" onClick={event => onDetails(row, event.currentTarget)}>
       查看完整映射（{row.total_proposals.toLocaleString()}）
     </ConsoleButton>
   );
   return (
     <section className="nfc-unit-inspection" aria-label="所选目录整理详情" id="organizer-unit-inspection">
-      <div className="nfc-unit-inspection-heading">
-        <h3><ConsoleIcon name={row.recycle_reason ? 'file-text' : 'folder-open'} size={19} />{unitName(row.unit)}</h3>
-        <StatusBadge status={previewTones[row.status]} label={row.recycle_reason ? '待回收' : previewLabels[row.status]} />
-        {onClose && <button className="nfc-file-workspace-icon" type="button" aria-label="关闭整理详情"
-          onClick={onClose} disabled={closeDisabled}>
-          <ConsoleIcon name="x" size={16} />
-        </button>}
-      </div>
-      <CodePath value={row.unit} />
-      <div className="nfc-unit-facts">
-        <span>{unitMediaLabel(row)}</span>
-        {row.recycle_reason ? <span>移入极空间回收站</span> : archiveLift ? <span>保留子目录内部结构</span> : <>
-          {row.total_bytes !== undefined && <span>{formatBytes(row.total_bytes)}</span>}
-          <span>移动 {row.needed_moves.toLocaleString()} · 改名 {row.renamed_count.toLocaleString()}</span>
-          {row.wrapper_cleanup_count !== undefined && <span>清空旧分类 {row.wrapper_cleanup_count}</span>}
-        </>}
-      </div>
+      <header className="nfc-organizer-inspection-header">
+        <div>
+          <h3 title={row.unit}>{unitName(row.unit)}</h3>
+          <p>
+            <span>{unitMediaLabel(row)}</span>
+            {row.recycle_reason ? <span>移入极空间回收站</span> : archiveLift
+              ? <span>保留子目录内部结构</span>
+              : row.total_bytes !== undefined && <span>{formatBytes(row.total_bytes)}</span>}
+          </p>
+        </div>
+        <div className="nfc-organizer-inspection-actions">
+          <StatusBadge status={previewTones[row.status]} label={row.recycle_reason ? '待回收' : previewLabels[row.status]} />
+          {onClose && <button className="nfc-file-workspace-icon" type="button" aria-label="关闭整理详情"
+            onClick={onClose} disabled={closeDisabled}>
+            <ConsoleIcon name="x" size={16} />
+          </button>}
+        </div>
+      </header>
+      <OrganizerStructure unit={row} />
       {samples.length > 0 && <section className="nfc-organizer-path-samples">
         <div className="nfc-organizer-path-samples-heading">
-          <h4>{archiveLift ? '目录上提示例' : '文件路径调整示例'}</h4>
+          <h4>{archiveLift ? '目录上提示例' : '路径变化示例'}</h4>
           {mappingAction}
         </div>
-        {samples.map(sample => (
-          <dl className="nfc-unit-path-comparison" key={sample.source}>
-            <div><dt>整理前</dt><dd><CodePath value={sample.source} /></dd></div>
-            <div><dt><ConsoleIcon name="arrow-down" size={13} />整理后</dt><dd><CodePath value={sample.target} /></dd></div>
-          </dl>
-        ))}
+        <div className="nfc-organizer-sample-list">
+          <PathPrefixDisclosure {...paths} compact />
+          <ul aria-label="源路径与目标路径">
+            {samples.map(sample => (
+              <li className="nfc-organizer-sample-row" key={sample.source}>
+                <CodePath value={sample.source} displayValue={paths.displayPath(sample.source)} />
+                <ConsoleIcon className="nfc-organizer-sample-arrow" name="arrow-right" size={13} />
+                <CodePath value={sample.target} displayValue={paths.displayPath(sample.target)} />
+              </li>
+            ))}
+          </ul>
+        </div>
       </section>}
       {samples.length === 0 && mappingAction}
-      <PreviewUnitDetails row={row} onDetails={onDetails} />
+      {hasFacts ? (
+        <details className="nfc-organizer-unit-facts">
+          <summary>更多整理信息</summary>
+          <CodePath value={row.unit} />
+          <div className="nfc-unit-facts">
+            <span>移动 {row.needed_moves.toLocaleString()} · 改名 {row.renamed_count.toLocaleString()}</span>
+            {row.wrapper_cleanup_count !== undefined && <span>清空旧分类 {row.wrapper_cleanup_count}</span>}
+          </div>
+          {row.total_proposals > (row.sample_moves?.length ?? 0) &&
+            <p className="nfc-organizer-structure-note">目录结构根据预览示例和目标分类展示。</p>}
+          {row.groups.length > 0 && <>
+            <h4>全部目标分类（{row.groups.length.toLocaleString()}）</h4>
+            <OrganizerDestinations groups={row.groups} />
+          </>}
+        </details>
+      ) : <div className="nfc-organizer-unit-path"><CodePath value={row.unit} /></div>}
+      <PreviewUnitDetails row={row} onDetails={onDetails} groupsShown={hasFacts} />
     </section>
   );
 }
@@ -214,39 +250,46 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
   </>;
 
   return (
-    <DataPanel title="整理预览" variant="dense" className={panelClass + ' nfc-organizer-workspace-report'} action={
-      <div className="nfc-organizer-workspace-view-actions">
-        <div className="nfc-file-workspace-view" role="group" aria-label="整理预览显示方式">
-          <button type="button" aria-label="网格视图" aria-pressed={!listView} disabled={!showThumbnails}
-            onClick={() => setView('grid')}><ConsoleIcon name="layout-dashboard" size={16} /></button>
-          <button type="button" aria-label="列表视图" aria-pressed={listView}
-            onClick={() => setView('list')}><ConsoleIcon name="list-checks" size={16} /></button>
-        </div>
-        <ThumbnailSwitch />
-      </div>}>
-      <div className="nfc-unit-summarybar">
-        <div className="nfc-unit-summary">
-        <strong>{summary.unit_count.toLocaleString()} 个整理单元</strong>
-        <span>{summary.file_count.toLocaleString()} 个文件</span>
-        {summary.total_bytes !== undefined && <span>{formatBytes(summary.total_bytes)}</span>}
-        <span>待整理 {summary.ready_count - (summary.recycle_count ?? 0)}</span><span>冲突 {summary.blocked_count}</span>
-        {!!summary.recycle_count && <span>待回收 {summary.recycle_count}</span>}
-        <span>已整理 {summary.already_organized_count}</span><span>跳过 {summary.skipped_count}</span>
-        {!!summary.needs_assignment_count && <span>待归属作者 {summary.needs_assignment_count}</span>}
-        </div>
-        <details className="nfc-unit-totals">
-        <summary>变更统计</summary>
-        <div className="nfc-unit-facts">
-          {summary.totals && <span>图片 {summary.totals.P} · 视频 {summary.totals.V} · 其他 {summary.totals.Other}</span>}
-          <span>预计移动 {summary.needed_moves.toLocaleString()}</span>
-          <span>预计改名 {summary.renamed_count.toLocaleString()}</span>
-          {summary.wrapper_cleanup_count !== undefined && <span>预计清空旧分类 {summary.wrapper_cleanup_count}</span>}
-        </div>
-        </details>
-      </div>
-      {children}
-      {pending ? <p className="nfc-file-workspace-loading" role="status">正在读取此页预览…</p> : preview.units.length > 0 ? (
-        <div className={'nfc-organizer-workspace-body' + (desktopOpen ? ' has-inspector' : '')}>
+    <section className="nfc-organizer-workspace-report nfc-v2-batch-organizer-report" aria-label="整理预览工作台">
+      <div className={'nfc-organizer-workspace-body' + (desktopOpen ? ' has-inspector' : '')}>
+        <div className="nfc-organizer-workspace-list">
+          <header className="nfc-organizer-preview-header">
+            <div className="nfc-organizer-preview-heading">
+              <h2>整理预览</h2>
+              <details className="nfc-organizer-preview-options">
+                <summary aria-label="预览显示与统计" title="预览显示与统计">
+                  <ConsoleIcon name="sliders" size={15} />
+                </summary>
+                <div className="nfc-organizer-preview-options-panel">
+                  <div className="nfc-organizer-workspace-view-actions">
+                    <div className="nfc-file-workspace-view" role="group" aria-label="整理预览显示方式">
+                      <button type="button" aria-label="网格视图" aria-pressed={!listView} disabled={!showThumbnails}
+                        onClick={() => setView('grid')}><ConsoleIcon name="layout-dashboard" size={15} /></button>
+                      <button type="button" aria-label="列表视图" aria-pressed={listView}
+                        onClick={() => setView('list')}><ConsoleIcon name="list-checks" size={15} /></button>
+                    </div>
+                    <ThumbnailSwitch />
+                  </div>
+                  <div className="nfc-unit-facts" aria-label="变更统计">
+                    <span>{summary.unit_count.toLocaleString()} 个整理单元 · {summary.file_count.toLocaleString()} 个文件</span>
+                    {summary.total_bytes !== undefined && <span>{formatBytes(summary.total_bytes)}</span>}
+                    <span>待整理 {summary.ready_count - (summary.recycle_count ?? 0)}</span>
+                    <span>冲突 {summary.blocked_count}</span>
+                    {!!summary.recycle_count && <span>待回收 {summary.recycle_count}</span>}
+                    <span>已整理 {summary.already_organized_count}</span>
+                    <span>跳过 {summary.skipped_count}</span>
+                    {!!summary.needs_assignment_count && <span>待归属作者 {summary.needs_assignment_count}</span>}
+                    {summary.totals && <span>图片 {summary.totals.P} · 视频 {summary.totals.V} · 其他 {summary.totals.Other}</span>}
+                    <span>预计移动 {summary.needed_moves.toLocaleString()}</span>
+                    <span>预计改名 {summary.renamed_count.toLocaleString()}</span>
+                    {summary.wrapper_cleanup_count !== undefined && <span>预计清空旧分类 {summary.wrapper_cleanup_count}</span>}
+                  </div>
+                </div>
+              </details>
+            </div>
+            {children}
+          </header>
+          {pending ? <p className="nfc-file-workspace-loading" role="status">正在读取此页预览…</p> : preview.units.length > 0 ? (
           <ul className={'nfc-unit-gallery' + (listView ? ' is-compact' : '')} role="list" aria-label="逐目录整理预览">
             {preview.units.map(row => {
               const sample = row.sample_moves?.find(move => move.kind === 'P') ??
@@ -263,7 +306,9 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
                       size={listView ? 'small' : 'cover'} representativeFile={sample?.source} />
                     <span className="nfc-unit-caption">
                       <strong>{unitName(row.unit)}</strong>
-                      <small>{unitMediaLabel(row)}</small>
+                      <small>{row.status === 'blocked'
+                        ? conflictLabels[row.conflicts[0]?.reason] ?? row.reason ?? '需要核对目标路径'
+                        : unitMediaLabel(row)}</small>
                       <StatusBadge status={previewTones[row.status]} label={row.recycle_reason ? '待回收' : previewLabels[row.status]} />
                     </span>
                   </button>
@@ -271,24 +316,26 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
               );
             })}
           </ul>
-          {desktopOpen && <aside key={selectedKey} className="nfc-organizer-workspace-inspector" aria-label="整理详情">{inspector}</aside>}
-          {isMobile && selectionKey !== null && <ConsoleSheet open={sheetOpen} onClose={closeInspection} title="整理详情"
-            className="nfc-organizer-workspace-sheet" dismissDisabled={detailBusy}>
-            {inspector}
-          </ConsoleSheet>}
+          ) : <ConsoleEmpty title="当前筛选没有整理单元" />}
+          {footer && <div className="nfc-organizer-preview-pagination">{footer}</div>}
         </div>
-      ) : <ConsoleEmpty title="当前筛选没有整理单元" />}
-      {footer}
+        {desktopOpen && <aside key={selectedKey} className="nfc-organizer-workspace-inspector" aria-label="整理详情">{inspector}</aside>}
+      </div>
+      {isMobile && selectionKey !== null && <ConsoleSheet open={sheetOpen} onClose={closeInspection} title="整理详情"
+        className="nfc-organizer-workspace-sheet" dismissDisabled={detailBusy}>
+        {inspector}
+      </ConsoleSheet>}
       {action && <footer className="nfc-unit-confirmation">
         <span><strong>{summary.recycle_count === summary.ready_count
           ? `${summary.recycle_count.toLocaleString()} 个附带文件移入极空间回收站`
           : `${(summary.ready_count - (summary.recycle_count ?? 0)).toLocaleString()} 个目录可整理`}</strong>
           {!!summary.recycle_count && summary.recycle_count !== summary.ready_count &&
             ` · ${summary.recycle_count.toLocaleString()} 个附带文件移入极空间回收站`}
-          {summary.blocked_count > 0 && ` · ${summary.blocked_count} 个冲突待核对`}</span>
+          {summary.blocked_count > 0 && ` · ${summary.blocked_count} 处冲突`}
+          {summary.already_organized_count > 0 && ` · ${summary.already_organized_count} 项已整理`}</span>
         {action}
       </footer>}
-    </DataPanel>
+    </section>
   );
 }
 
@@ -307,6 +354,7 @@ export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClos
     queryKey: ['mediaOrganizerMapping', previewId, mappingId, page, pageSize],
     queryFn: () => mediaOrganizerBatchApi.getMapping(previewId, mappingId, page, pageSize),
   });
+  const paths = usePathPrefix(commonDirectoryPrefix(data?.moves.flatMap(move => [move.source, move.target]) ?? []));
   const records = data && <ul className="nfc-v2-batch-organizer-records" role="list" aria-label="媒体文件位置调整明细">
     {data.moves.map(move => (
       <li key={move.source}>
@@ -315,8 +363,8 @@ export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClos
           {move.kind !== 'Directory' && <span>{formatBytes(move.bytes)}</span>}
         </div>
         <dl className="nfc-v2-batch-organizer-paths">
-          <div><dt>源路径</dt><dd><CodePath value={move.source} /></dd></div>
-          <div><dt>目标路径</dt><dd><CodePath value={move.target} /></dd></div>
+          <div><dt>源路径</dt><dd><CodePath value={move.source} displayValue={paths.displayPath(move.source)} /></dd></div>
+          <div><dt>目标路径</dt><dd><CodePath value={move.target} displayValue={paths.displayPath(move.target)} /></dd></div>
         </dl>
       </li>
     ))}
@@ -337,6 +385,7 @@ export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClos
           <p className="nfc-v2-batch-error" role="alert">{getStructuredApiError(error).message || '无法读取完整映射'}</p>
         ) : data ? (
           <>
+            <PathPrefixDisclosure {...paths} />
             <ResponsiveDataView
               desktop={embedded ? records : <div className="nfc-v2-batch-media-scroll">
                 <table className="nfc-v2-batch-media-table">
@@ -346,8 +395,9 @@ export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClos
                   <tbody>{data.moves.map(move => (
                     <tr key={move.source}>
                       <td>{move.kind === 'Directory' ? mappingKindLabels.Directory : move.kind}</td>
-                      <td><CodePath value={move.source} /></td>
-                      <td><CodePath value={move.target} /></td><td>{move.kind === 'Directory' ? '—' : formatBytes(move.bytes)}</td>
+                      <td><CodePath value={move.source} displayValue={paths.displayPath(move.source)} /></td>
+                      <td><CodePath value={move.target} displayValue={paths.displayPath(move.target)} /></td>
+                      <td>{move.kind === 'Directory' ? '—' : formatBytes(move.bytes)}</td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -364,9 +414,12 @@ export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClos
 }
 
 /** Display durable progress and the success, skip, conflict and failure counts. */
-export function MediaOrganizerResultReport({ report, children }: {
+export function MediaOrganizerResultReport({ report, children, conflictsOnly, onToggleConflicts, pending }: {
   report: MediaBatchResult;
   children: React.ReactNode;
+  conflictsOnly: boolean;
+  onToggleConflicts: () => void;
+  pending: boolean;
 }) {
   const cleanupMessage = {
     pending: '报告明细已排队回收，整理结果会保留。',
@@ -374,7 +427,12 @@ export function MediaOrganizerResultReport({ report, children }: {
     missing: '报告文件已不存在，整理结果已保留。',
   };
   return (
-    <DataPanel title="整理结果" variant="dense" className={panelClass}>
+    <DataPanel title="整理结果" variant="dense" className={panelClass}
+      action={(report.summary.conflict_count > 0 && !['released', 'missing'].includes(report.report_cleanup_status ?? '')) &&
+        <ConsoleButton size="sm" variant="secondary" aria-pressed={conflictsOnly}
+          leadingIcon={<ConsoleIcon name={conflictsOnly ? 'list-checks' : 'search'} size={15} />}
+          loading={pending}
+          onClick={onToggleConflicts}>{conflictsOnly ? '查看全部结果' : '定位冲突'}</ConsoleButton>}>
       <TaskProgress status={report.status} progress={{ ...report.progress, percent: null }} />
       {report.error && <p className="nfc-v2-batch-error" role="alert">{report.error}</p>}
       {report.report_cleanup_status && <p className="nfc-form-note" role="status">
@@ -385,7 +443,7 @@ export function MediaOrganizerResultReport({ report, children }: {
           <span key={status}>{outcomes[status].label} <strong>{report.summary[`${status}_count`].toLocaleString()}</strong></span>
         ))}
       </div>
-      {report.items.length > 0 && (
+      {pending ? <p className="nfc-file-workspace-loading" role="status">正在读取结果…</p> : report.items.length > 0 ? (
         <ResponsiveDataView
           desktop={<div className="nfc-v2-batch-media-scroll">
             <table className="nfc-v2-batch-media-table">
@@ -410,7 +468,7 @@ export function MediaOrganizerResultReport({ report, children }: {
             ))}
           </ul>}
         />
-      )}
+      ) : conflictsOnly && !report.report_cleanup_status && <ConsoleEmpty title="没有可查看的冲突结果" />}
       {children}
     </DataPanel>
   );

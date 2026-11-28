@@ -10,6 +10,7 @@ interface Props {
   children: React.ReactNode;
   className?: string;
   titleAside?: React.ReactNode;
+  footer?: React.ReactNode;
   dismissDisabled?: boolean;
   returnFocusFallback?: () => HTMLElement | null;
 }
@@ -17,7 +18,7 @@ interface Props {
 /** Right-aligned Radix sheet with controlled close and accessible focus behavior. */
 export const ConsoleSheet: React.FC<Props> = ({
   open, onClose, title, description, children, className = '',
-  titleAside, dismissDisabled = false, returnFocusFallback,
+  titleAside, footer, dismissDisabled = false, returnFocusFallback,
 }) => {
   // Controlled Sheets have no Dialog.Trigger, so remember the active launcher
   // before the portal moves keyboard focus into the inspector.
@@ -72,6 +73,7 @@ export const ConsoleSheet: React.FC<Props> = ({
             </Dialog.Close>
           </header>
           <div className="nfc-v2-sheet-body">{children}</div>
+          {footer && <footer className="nfc-v2-sheet-footer">{footer}</footer>}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

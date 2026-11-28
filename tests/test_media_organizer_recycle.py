@@ -41,7 +41,7 @@ def _configured_fixture(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["semantic", "luolcy"])
-def test_one_confirm_recycles_only_reviewed_download_extras(tmp_path, monkeypatch, mode):
+def test_one_confirm_recycles_every_reviewed_txt_and_url(tmp_path, monkeypatch, mode):
     client, settings, luolcy, trash = _configured_fixture(tmp_path, monkeypatch)
     root = settings.data_mount / "Else" if mode == "semantic" else luolcy
     unit = root / "2611/261127/作者/作品 8G"
@@ -51,22 +51,25 @@ def test_one_confirm_recycles_only_reviewed_download_extras(tmp_path, monkeypatc
         "访问.URL": b"[InternetShortcut]\nURL=https://example.com\n",
         "地址.txt": b"https://example.com/share\n",
         "作品说明.txt": "这一套有室外场景和花絮。".encode(),
+        ".URL": b"",
+        "空.TXT": b"",
+        "字幕.srt": b"subtitle",
     }.items():
         (unit / name).write_bytes(content)
 
     preview = _preview(client, settings, unit)
-    assert preview["summary"].get("recycle_count") == 2
-    assert {Path(row["unit"]).name for row in preview["units"] if row.get("recycle_reason")} == {
-        "访问.URL", "地址.txt",
-    }
+    recycled = {"访问.URL", "地址.txt", "作品说明.txt", ".URL", "空.TXT"}
+    assert preview["summary"].get("recycle_count") == len(recycled)
+    assert {Path(row["unit"]).name for row in preview["units"] if row.get("recycle_reason")} == recycled
     assert not list(trash.iterdir())
     batch = _batch(client, preview)
     assert _run_next(settings, batch)
     result = client.get(f"/api/media-organizer/batches/{batch}").json()
     assert result["summary"]["failed_count"] == result["summary"]["conflict_count"] == 0
-    assert {file.name for file in trash.iterdir()} == {"访问.URL", "地址.txt"}
-    assert all(file.name not in {"访问.URL", "地址.txt"} for file in unit.rglob("*"))
-    assert [file.read_bytes() for file in unit.rglob("作品说明.txt")] == ["这一套有室外场景和花絮。".encode()]
+    assert {file.name for file in trash.iterdir()} == recycled
+    assert all(file.name not in recycled for file in unit.rglob("*"))
+    assert (trash / "作品说明.txt").read_bytes() == "这一套有室外场景和花絮。".encode()
+    assert [file.read_bytes() for file in unit.rglob("*.srt")] == [b"subtitle"]
     assert [file.read_bytes() for file in unit.rglob("*.jpg")] == [b"photo"]
 
 
