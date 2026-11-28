@@ -62,7 +62,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Disable default public docs/openapi URLs
     app = FastAPI(
         title="NAS File Center",
-        version="2.0.9",
+        version="2.0.10",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
