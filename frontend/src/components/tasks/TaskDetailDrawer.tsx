@@ -14,6 +14,7 @@ import { TaskActionBar } from './TaskActionBar';
 import { TaskDeleteButton } from './TaskDeleteButton';
 import { MediaPackageRecoveryPanel } from './MediaPackageRecoveryPanel';
 import { ConsoleButton } from '../ui/ConsoleButton';
+import { CodePath } from '../ui/CodePath';
 import { ConsoleSheet } from '../ui/ConsoleSheet';
 import { StatusBadge } from '../ui/StatusBadge';
 import type { TaskId } from '../../types/task';
@@ -62,6 +63,9 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
 
   const sourceLink = task && taskSourceLink(task);
   const originalTaskId = sqliteIdText(task?.retry_of);
+  const cloudCopy = task?.job_type === 'cloud-copy' ? task : undefined;
+  const importedDirectory = cloudCopy?.payload?.local_root;
+  const pendingDirectory = cloudCopy?.payload?.staging_path;
 
   return (
     <ConsoleSheet open={open} onClose={onClose}
@@ -117,6 +121,12 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
             <TaskActionBar key={task.id} task={task} onViewTask={onViewTask} />
             <div className="nfc-task-evidence-links">
               {sourceLink && <Link className="nfc-task-origin-link" to={sourceLink.href}>{sourceLink.label}</Link>}
+              {cloudCopy?.status === 'completed' && typeof importedDirectory === 'string' && (
+                <Link className="nfc-task-origin-link"
+                  to={'/batch?' + new URLSearchParams({ operation: 'media-organize', directory: importedDirectory })}>
+                  预览整理
+                </Link>
+              )}
               {originalTaskId && (onViewTask ? (
                 <button type="button" className="nfc-task-origin-link"
                   onClick={() => onViewTask(originalTaskId)}>原任务 #{originalTaskId}</button>
@@ -132,6 +142,16 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
                 )}
             </div>
           </section>
+
+          {cloudCopy && typeof importedDirectory === 'string' && (
+            <section className="nfc-overlay-section">
+              <header className="nfc-overlay-section-header"><div><h3>NAS 目标目录</h3></div></header>
+              <CodePath value={importedDirectory} />
+              {cloudCopy.status !== 'completed' && typeof pendingDirectory === 'string' && (
+                <p className="nfc-v2-task-muted">暂存路径 <CodePath value={pendingDirectory} /></p>
+              )}
+            </section>
+          )}
 
           <section className="nfc-overlay-section">
             <header className="nfc-overlay-section-header">

@@ -46,6 +46,7 @@ const JOB_TYPE_OPTIONS = [
   { label: taskTypeLabel('media-analysis'), value: 'media-analysis' },
   { label: taskTypeLabel('media-integrity-verify'), value: 'media-integrity-verify' },
   { label: taskTypeLabel('download-verify-webdav'), value: 'download-verify-webdav' },
+  { label: taskTypeLabel('cloud-copy'), value: 'cloud-copy' },
 ];
 
 const QUICK_STATUS_OPTIONS = [

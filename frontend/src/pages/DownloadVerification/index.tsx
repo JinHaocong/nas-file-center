@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { DirectoryPicker } from '../../components/DirectoryPicker';
 import { PageHeader } from '../../components/ui/PageHeader';
@@ -11,11 +11,13 @@ import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { RemoteDirectoryPicker } from './RemoteDirectoryPicker';
+import { CloudCopyWorkspace } from './CloudCopyWorkspace';
 
 import { downloadVerificationApi, type DownloadVerificationItem, type DownloadVerificationRun } from '../../api/downloadVerification';
 import { getStructuredApiError } from '../../api/errors';
 
 import { useTitle } from '../../hooks/useTitle';
+import { isSqliteId } from '../../utils/sqliteId';
 
 const verdict: Record<string, string> = {
   METADATA_IDENTICAL: '快速清单一致（未校验内容）',
@@ -61,13 +63,30 @@ const displayJob = (state: string) =>
      queued: '排队中', running: '执行中', paused: '已暂停',
      cancel_requested: '取消中', unknown: '任务记录不存在' } as Record<string, string>)[state] || state;
 
-export const DownloadVerificationPage: React.FC = () => {
+interface VerificationSelection {
+  source: string | null;
+  remote: string;
+  directory: string;
+}
+
+/** A finished cloud copy links to a prefilled verification, which still starts on demand. */
+export function DownloadVerificationPage() {
+  const [params] = useSearchParams();
+  if (params.get('view') === 'cloud-copy') return <CloudCopyWorkspace />;
+  const source = params.get('source') ?? '';
+  const selection: VerificationSelection = isSqliteId(source)
+    ? { source, remote: params.get('remote') ?? '', directory: params.get('directory') ?? '' }
+    : { source: null, remote: '', directory: '' };
+  return <DownloadVerificationWorkspace key={JSON.stringify(selection)} selection={selection} />;
+}
+
+const DownloadVerificationWorkspace: React.FC<{ selection: VerificationSelection }> = ({ selection }) => {
   useTitle('下载完整性校验');
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const [sourceId, setSourceId] = useState<number | null>(null);
-  const [remoteRoot, setRemoteRoot] = useState('');
-  const [localRoot, setLocalRoot] = useState('');
+  const [sourceId, setSourceId] = useState(selection.source);
+  const [remoteRoot, setRemoteRoot] = useState(selection.remote);
+  const [localRoot, setLocalRoot] = useState(selection.directory);
   const [pickerOpen, setPickerOpen] = useState(false);
   const opener = useRef<HTMLButtonElement | null>(null);
   const reportOpener = useRef<HTMLButtonElement | null>(null);
@@ -95,8 +114,9 @@ export const DownloadVerificationPage: React.FC = () => {
     queryKey: ['download-verify-sources'], queryFn: downloadVerificationApi.sources,
   });
   const sourceList = sources.data?.items || [];
-  const selectedSource = sourceList.find(source => source.id === sourceId) || sourceList[0];
-  const chosenId = selectedSource?.id ?? null;
+  const selectedSource = sourceId === null ? sourceList[0] : sourceList.find(source =>
+    (source.id_text ?? String(source.id)) === sourceId);
+  const chosenId = selectedSource ? selectedSource.id_text ?? selectedSource.id : null;
   const runs = useQuery({
     queryKey: ['download-verify-runs', historyPage],
     queryFn: () => downloadVerificationApi.list(historyPage),
@@ -157,7 +177,7 @@ export const DownloadVerificationPage: React.FC = () => {
       void qc.invalidateQueries({ queryKey: ['download-verify-runs'] });
     },
   });
-  const changeSource = (id: number) => {
+  const changeSource = (id: string) => {
     setSourceId(id);
     setRemoteRoot('');
     setPickerOpen(false);
@@ -219,8 +239,12 @@ export const DownloadVerificationPage: React.FC = () => {
     <div className="nfc-operations-page nfc-page-layout-workbench nfc-download-verify nfc-download-verify-page nfc-tool-workspace">
       <PageHeader title="下载完整性校验"
         description="核对 AList 或 OpenList 的来源清单与 NAS 下载目录。"
-        actions={<ConsoleButton leadingIcon={<ConsoleIcon name="settings" size={16} />}
-          onClick={() => navigate('/download-sources')}>管理来源</ConsoleButton>} />
+        actions={<>
+          <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-down" size={16} />}
+            onClick={() => navigate('/download-verification?view=cloud-copy')}>云端复制到 NAS</ConsoleButton>
+          <ConsoleButton leadingIcon={<ConsoleIcon name="settings" size={16} />}
+            onClick={() => navigate('/download-sources')}>管理来源</ConsoleButton>
+        </>} />
 
       <DataPanel title="新建下载核对">
         <div className="nfc-dv-workspace" aria-busy={start.isPending || undefined}>
@@ -229,12 +253,12 @@ export const DownloadVerificationPage: React.FC = () => {
             <div className="nfc-dv-control-row">
               <select id="nfc-dv-source" value={chosenId ?? ''}
                 onChange={event => {
-                  const source = sourceList.find(item => String(item.id) === event.target.value);
-                  if (source) changeSource(source.id);
+                  if (event.target.value) changeSource(event.target.value);
                 }}
                 disabled={sourceList.length === 0 || start.isPending}>
                 {sourceList.length === 0 && <option value="">尚未添加来源</option>}
-                {sourceList.map(source => <option key={source.id} value={source.id}>
+                {sourceList.length > 0 && !selectedSource && <option value="">请选择来源</option>}
+                {sourceList.map(source => <option key={source.id_text ?? source.id} value={source.id_text ?? source.id}>
                   {source.name} · {source.provider === 'alist' ? 'AList' : 'OpenList'}
                 </option>)}
               </select>

@@ -30,6 +30,7 @@ export interface DownloadVerificationItem {
 export interface Page<T> { items: T[]; page: number; page_size: number; total: number }
 export interface VerificationSource {
   id: number;
+  id_text?: string;
   name: string;
   provider: 'alist' | 'openlist';
   base_url: string;
@@ -57,10 +58,10 @@ export const downloadVerificationApi = {
   deleteSource: (id: number) => api.delete<{ disabled: boolean }>('/api/download-verifications/sources/' + id),
   authenticate: (id: number, otp_code: string) =>
     api.post<{ authenticated: boolean }>('/api/download-verifications/sources/' + id + '/authenticate', { otp_code }),
-  browse: (id: number, path: string) =>
+  browse: (id: number | string, path: string) =>
     api.get<RemoteDirectory>('/api/download-verifications/sources/' + id + '/browse?path=' + encodeURIComponent(path)),
   configuration: () => api.get<{ configured: boolean; endpoint: string; mode: string; read_only: boolean }>('/api/download-verifications/configuration'),
-  start: (remote_root: string, local_root: string, source_id?: number, mode: 'metadata' | 'strict_sha256' = 'metadata') =>
+  start: (remote_root: string, local_root: string, source_id?: number | string, mode: 'metadata' | 'strict_sha256' = 'metadata') =>
     api.post<{ id: number; work_job_id: number; job_status: string }>('/api/download-verifications',
       { remote_root, local_root, source_id, mode }),
   list: (page = 1) => api.get<Page<DownloadVerificationRun>>('/api/download-verifications?page=' + page + '&page_size=50'),

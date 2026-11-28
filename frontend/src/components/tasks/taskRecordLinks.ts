@@ -2,8 +2,18 @@ import type { TaskDetail } from '../../types/task';
 import { sqliteIdText } from '../../utils/sqliteId';
 
 /** Link only to records actually identified by this job's backend payload. */
-export function taskSourceLink(task: Pick<TaskDetail, 'id' | 'job_type' | 'payload'>): { href: string; label: string } | null {
+export function taskSourceLink(task: Pick<TaskDetail, 'id' | 'job_type' | 'payload'> & Partial<Pick<TaskDetail, 'status'>>):
+  { href: string; label: string } | null {
   const payload = task.payload || {};
+  if (task.job_type === 'cloud-copy' && task.status === 'completed') {
+    const source = sqliteIdText(payload.source_id);
+    const remote = payload.remote_root;
+    const directory = payload.local_root;
+    if (source && typeof remote === 'string' && typeof directory === 'string') {
+      return { href: '/download-verification?' + new URLSearchParams({ source, remote, directory }),
+        label: '核对下载结果' };
+    }
+  }
   if (task.job_type === 'batch-plan-execute' || task.job_type === 'media-sort-plan-stage') {
     const id = sqliteIdText(payload.plan_id);
     return id ? { href: '/plans/' + id, label: '查看来源计划 #' + id } : null;

@@ -42,7 +42,7 @@ class SourceUpdate(BaseModel):
 
 
 def _public(s: DownloadVerificationSource) -> dict:
-    return {"id": s.id, "name": s.name, "provider": s.provider,
+    return {"id": s.id, "id_text": str(s.id), "name": s.name, "provider": s.provider,
             "base_url": s.base_url, "username": s.username,
             "has_password": bool(s.secret_file), "revision": s.revision, "active": s.active}
 

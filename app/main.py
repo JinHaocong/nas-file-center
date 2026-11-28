@@ -21,6 +21,7 @@ from app.auth.dependencies import get_current_user
 from app.auth.rate_limiter import LoginRateLimiter
 from app.auth.router import router as auth_router
 from app.batch.zspace_authorization import ZSpaceAuthorization
+from app.cloud_copy.router import router as cloud_copy_router
 from app.config import Settings, get_settings
 from app.exceptions import PlanStaleError
 from app.quarantine.service_adapter import Gate6A2FileCenterService
@@ -59,7 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Disable default public docs/openapi URLs
     app = FastAPI(
         title="NAS File Center",
-        version="2.0.4",
+        version="2.0.5",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -153,6 +154,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(archive_recovery_router)
     app.include_router(download_verification_sources_router)
     app.include_router(download_verification_router)
+    app.include_router(cloud_copy_router)
     app.include_router(api_router)
     app.include_router(media_organizer_router)
     app.include_router(zspace_authorization_router)

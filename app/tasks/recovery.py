@@ -44,6 +44,7 @@ RESOURCE_CONTROLLED_JOB_KINDS: tuple[str, ...] = (
     "fclones-scan",
     "workflow-scheduled",
     "download-verify-webdav",
+    "cloud-copy",
 )
 
 

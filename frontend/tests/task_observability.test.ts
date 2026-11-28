@@ -18,6 +18,22 @@ import {
   formatHeartbeatAge,
 } from '../src/utils/format';
 import { taskSourceLink } from '../src/components/tasks/taskRecordLinks';
+
+test('a completed cloud copy opens verification with its exact source and destination', () => {
+  const task = {
+    id: '47', job_type: 'cloud-copy', status: 'completed' as const,
+    payload: { source_id: '9007199254740993', remote_root: 'PikPak/相册 & 视频',
+      local_root: '/data/Download/相册 & 视频' },
+  };
+  const link = taskSourceLink(task);
+  assert.ok(link);
+  const url = new URL(link.href, 'https://nfc.invalid');
+  assert.equal(url.pathname, '/download-verification');
+  assert.equal(url.searchParams.get('source'), task.payload.source_id);
+  assert.equal(url.searchParams.get('remote'), task.payload.remote_root);
+  assert.equal(url.searchParams.get('directory'), task.payload.local_root);
+  assert.equal(taskSourceLink({ ...task, status: 'failed' }), null);
+});
 import { sqliteIdText } from '../src/utils/sqliteId';
 import { scansApi } from '../src/api/domain';
 import { tasksApi } from '../src/api/tasks';

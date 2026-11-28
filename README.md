@@ -2,7 +2,7 @@
 
 面向自托管 NAS 的中文 Web 文件工具。可以从一个目录开始整理照片和视频，跨目录查找重复文件，或把反复执行的归档流程保存成工作流。扫描和媒体整理在后台运行，关闭页面后可以回到任务中心查看结果。
 
-**已发布镜像 `kerwinjhc/nas-file-center:2.0.4`** · `linux/amd64`
+**已发布镜像 `kerwinjhc/nas-file-center:2.0.5`** · `linux/amd64`
 
 [Docker Hub](https://hub.docker.com/r/kerwinjhc/nas-file-center/tags) · [镜像构建](https://github.com/JinHaocong/nas-file-center/actions/workflows/dockerhub-publish.yml) · [发布验证](https://github.com/JinHaocong/nas-file-center/actions/workflows/release-validation.yml)
 
@@ -152,10 +152,10 @@ docker compose ps
 ```yaml
 services:
   api:
-    image: kerwinjhc/nas-file-center:2.0.4
+    image: kerwinjhc/nas-file-center:2.0.5
     platform: linux/amd64
   worker:
-    image: kerwinjhc/nas-file-center:2.0.4
+    image: kerwinjhc/nas-file-center:2.0.5
     platform: linux/amd64
 ```
 
@@ -193,6 +193,10 @@ docker compose -f compose.yaml -f compose.image.yaml up -d --no-build --pull alw
 4. 在结果页或任务中心查看成功、跳过、冲突和失败。遇到文件或目录被改动时，重新扫描对应范围。
 
 启用正式整理需要数据目录允许写入，并按执行入口开启 `ALLOW_MUTATION` 与 `ALLOW_DELETE`。只读部署也可以生成预览。
+
+### 从 OpenList 复制到 NAS
+
+在「下载完整性校验 → 云端复制到 NAS」选择一个云端子目录和 NAS 存放位置，再确认新文件夹名称。复制进度和出错原因在任务中心查看。完成后可从该任务打开「核对下载结果」或「预览整理」。[部署配置](docs/webdav-download-verification.md#云端复制到-nas)
 
 ### 整理时回收下载附带文件
 

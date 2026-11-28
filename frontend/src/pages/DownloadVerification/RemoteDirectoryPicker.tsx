@@ -8,7 +8,7 @@ import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 
 interface Props {
   open: boolean;
-  sourceId: number | null;
+  sourceId: number | string | null;
   sourceName: string;
   initialPath: string;
   onClose: () => void;
