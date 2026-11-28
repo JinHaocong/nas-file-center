@@ -28,6 +28,7 @@ from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.batch.organizer_report_cleanup import archived_result, preview_unavailable, report_missing, report_reclaimed, report_state
 from app.config import Settings
 from app.execution.luolcy_assignment import LUOLCY_ASSIGNMENT_KIND
+from app.maintenance.organizer import archived_page
 from app.models import TaskEvent, WorkJob, utcnow
 from app.path_safety import validate_mutation_destination
 from app.tasks.context import JobContext
@@ -372,6 +373,8 @@ def enqueue_batch(session_factory, settings: Settings, preview_id: int) -> dict:
 def get_batch(session_factory, settings: Settings, job_id: int, *, page: int, page_size: int,
               status_filter: str = "all") -> dict:
     with session_factory() as session:
+        # Hold one read snapshot across the checkpoint and the live event suffix.
+        session.execute(text("BEGIN"))
         job, state = _job(session, BATCH_KIND, job_id)
         archived = report_state(job)
         cleanup_status = archived.get("status") if archived.get("status") == "pending" else None
@@ -379,6 +382,16 @@ def get_batch(session_factory, settings: Settings, job_id: int, *, page: int, pa
             cleanup_status = "released"
         elif cleanup_status is None and report_missing(settings, PREVIEW_KIND, state["preview_job_id"]):
             cleanup_status = "missing"
+        metadata = {
+            **_receipt(job), "selection": state["selection"], "error": job.error_text,
+            "preview_job_id": str(state["preview_job_id"]), "progress": _progress(job),
+            **({"report_cleanup_status": cleanup_status} if cleanup_status else {}),
+            "page": page, "page_size": page_size,
+        }
+        cold = archived_page(session, job, settings.history_archives_dir, page=page,
+                             page_size=page_size, status_filter=status_filter)
+        if cold is not None:
+            return {**metadata, **cold}
         where = (TaskEvent.job_id == job_id, TaskEvent.event_type == RESULT_EVENT)
         status = func.json_extract(TaskEvent.context_json, "$.status")
         counts = dict(session.execute(select(status, func.count()).where(*where).group_by(status)).all())
@@ -390,13 +403,10 @@ def get_batch(session_factory, settings: Settings, job_id: int, *, page: int, pa
         ).offset((page - 1) * page_size).limit(page_size))
         summary = archived_result(job) if not counts else None
         return {
-            **_receipt(job), "selection": state["selection"], "error": job.error_text,
-            "preview_job_id": str(state["preview_job_id"]), "progress": _progress(job),
+            **metadata,
             "summary": summary or {f"{name}_count": counts.get(name, 0) for name in RESULT_STATUSES},
             "items": [json.loads(event) for event in events],
             "filtered_total": sum(counts.values()) if status_filter == "all" else counts.get(status_filter, 0),
-            **({"report_cleanup_status": cleanup_status} if cleanup_status else {}),
-            "page": page, "page_size": page_size,
         }
 
 

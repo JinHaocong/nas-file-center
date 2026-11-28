@@ -10,6 +10,7 @@ from app.batch.organizer_report_cleanup import (
 )
 from app.config import Settings
 from app.exceptions import StateConflictError
+from app.maintenance.task_journal_cleanup import purge_released_task_journals, remember_task_journals
 from app.models import BatchPlan, ScanJob, TaskEvent, WorkJob, WorkerState, utcnow
 from app.tasks.handlers import get_job_capabilities
 from app.tasks.logging import log_task_event
@@ -481,8 +482,11 @@ class TaskService:
                 _dismiss_task(job)
                 return {"deleted": True, "id": _public_id(job)}
 
+            remember_task_journals(session, [task_id])
             session.execute(delete(TaskEvent).where(TaskEvent.job_id == task_id))
             session.delete(job)
+            session.flush()
+            purge_released_task_journals(session)
             return {"deleted": True, "id": _public_id(job)}
 
         return atomic_task_transition(self.SessionLocal, task_id, _transition)
@@ -520,17 +524,19 @@ class TaskService:
                 retain_stmt = retain_stmt.where(~report_task_filter())
             retained = session.scalars(retain_stmt)
             dismissed = sum(_dismiss_task(job) for job in retained)
-            del_stmt = delete(WorkJob).where(
+            deletable = select(WorkJob.id).where(
                 WorkJob.status.in_(target_statuses),
                 ~_preserved_organizer_history(),
                 (WorkJob.kind != "media_package-package-execute") |
                 (WorkJob.status != "failed"),
             )
             if self.report_settings is not None:
-                del_stmt = del_stmt.where(~report_task_filter())
+                deletable = deletable.where(~report_task_filter())
             # Failed media-package execution records retain the only durable
             # link between an interrupted stage and its frozen manifest.
-            result = session.execute(del_stmt)
+            remember_task_journals(session, deletable)
+            result = session.execute(delete(WorkJob).where(WorkJob.id.in_(deletable)))
+            purge_released_task_journals(session)
             count = result.rowcount + dismissed + report_dismissed
             session.commit()
             return {"deleted_count": count, **({"report_cleanup": report_counts} if report_dismissed else {})}

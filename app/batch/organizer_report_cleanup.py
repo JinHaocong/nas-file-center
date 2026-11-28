@@ -26,7 +26,7 @@ RESULT = "media_organizer_unit_result"
 KEY = "organizer_report_cleanup"
 KEY_BYTES = "reclaimed_bytes"
 _RECLAIMED_BYTES = "organizer_report_reclaimed_bytes"
-_ARCHIVED_SUMMARY = "organizer_archived_result"
+ARCHIVED_SUMMARY = "organizer_archived_result"
 _NAMESPACES = {PREVIEW: "organizer-v1-previews", BATCH: "organizer-v1-executions"}
 _PREVIEW_FILE = re.compile(r"(?:summary\.json|units\.jsonl|(?:loose-)?[0-9a-f]{64}\.jsonl)")
 _EXECUTION_ORDINAL = r"(?:0|[1-9][0-9]*)"
@@ -43,6 +43,10 @@ def _object(raw):
     except (TypeError, ValueError):
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def organizer_checkpoint(job):
+    return _object(job.checkpoint_json)
 
 
 def report_state(job):
@@ -65,7 +69,7 @@ def report_reclaimed(job):
 
 def archived_result(job):
     """Keep summaries from older versions that had already discarded result events."""
-    return (_object(job.checkpoint_json).get(_ARCHIVED_SUMMARY)
+    return (_object(job.checkpoint_json).get(ARCHIVED_SUMMARY)
             or report_state(job).get("summary"))
 
 
@@ -77,7 +81,7 @@ def _forget_marker(job, *, reclaimed=None):
     elif marker.get("status") == "released":
         checkpoint[_RECLAIMED_BYTES] = marker.get(KEY_BYTES, 0)
         if job.kind == BATCH and marker.get("summary"):
-            checkpoint[_ARCHIVED_SUMMARY] = marker["summary"]
+            checkpoint[ARCHIVED_SUMMARY] = marker["summary"]
     job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
 
 
@@ -116,7 +120,8 @@ def _has_references(session, preview_id, *, except_job=None, active_only=False):
     return session.scalar(jobs.limit(1)) is not None or session.scalar(plans.limit(1)) is not None
 
 
-def _closed_counts(session, job):
+def closed_result_counts(session, job, archived_counts=None):
+    """Verify every unit closed successfully, including any previously archived prefix."""
     if (job.progress_total <= 0 or job.progress_current != job.progress_total
             or job.error_text or job.error_code):
         return None
@@ -124,6 +129,8 @@ def _closed_counts(session, job):
     counts = dict(session.execute(select(status, func.count()).where(
         TaskEvent.job_id == job.id, TaskEvent.event_type == RESULT,
     ).group_by(status)).all())
+    for state, count in (archived_counts or {}).items():
+        counts[state] = counts.get(state, 0) + count
     if (set(counts) - {"success", "skipped"} or not counts.get("success")
             or sum(counts.values()) != job.progress_total):
         return None
@@ -150,7 +157,7 @@ def _eligible(session, job):
     marker = report_state(preview)
     if marker and marker.get("owner") != str(job.id):
         return None
-    counts = _closed_counts(session, job)
+    counts = closed_result_counts(session, job)
     return (preview, counts) if counts is not None else None
 
 

@@ -4,14 +4,15 @@ import errno
 import json
 import os
 import stat
+import zlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator, NamedTuple
 
-from sqlalchemy import select, text
+from sqlalchemy import inspect, null, select, text
 
 from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 from app.exceptions import StateConflictError
-from app.models import OperationJournal, QuarantineEntry, utcnow
+from app.models import OperationJournal, QuarantineEntry, QuarantineUnlinkEvidence, utcnow
 from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
 
 
@@ -603,10 +604,42 @@ def _positive_generation(value: Any) -> int | None:
     return int(value)
 
 
+class UnlinkJournalRecord(NamedTuple):
+    id: int
+    before_json: str
+    after_json: str
+
+
+def pack_unlink_evidence(before: str, after: str) -> bytes:
+    """Preserve both original JSON strings, including legacy formatting."""
+    return zlib.compress(json.dumps([before, after], ensure_ascii=True).encode())
+
+
+def _entry_journal_rows(session: Any, entry_id: int) -> Iterator[UnlinkJournalRecord]:
+    # sqlite3 legacy transaction control does not begin a transaction for SELECT.
+    # Pin the schema inspection and row query together on the first migration.
+    connection = session.connection()
+    if not connection.connection.driver_connection.in_transaction:
+        connection.exec_driver_sql("BEGIN")
+    hot = select(
+        OperationJournal.id, OperationJournal.before_json, OperationJournal.after_json,
+        null().label("packed"),
+    ).where(OperationJournal.operation == OPERATION_ID)
+    evidence = QuarantineUnlinkEvidence
+    if inspect(connection).has_table(evidence.__tablename__):
+        compact = select(evidence.id, null(), null(), evidence.payload).where(evidence.entry_id == entry_id)
+        # Use one SQLite snapshot so moving an epoch cannot duplicate or hide it.
+        hot = hot.union_all(compact)
+    for row_id, before, after, packed in session.execute(hot.order_by("id")):
+        if packed is not None:
+            before, after = json.loads(zlib.decompress(packed))
+        yield UnlinkJournalRecord(row_id, before, after)
+
+
 def _journal_epochs_for_entry(
     session: Any,
     entry_id: int,
-) -> list[tuple[int | None, list[tuple[OperationJournal, dict[str, Any]]]]]:
+) -> list[tuple[int | None, list[tuple[UnlinkJournalRecord, dict[str, Any]]]]]:
     """Return chronological Gate6-A2 authority epochs for one numeric entry id.
 
     OperationJournal intentionally outlives QuarantineEntry metadata. SQLite can
@@ -618,21 +651,13 @@ def _journal_epochs_for_entry(
     generation is not assumed globally unique across all future incarnations of the
     same numeric entry id.
     """
-    rows = list(
-        session.scalars(
-            select(OperationJournal)
-            .where(OperationJournal.operation == OPERATION_ID)
-            .order_by(OperationJournal.id.asc())
-        )
-    )
-
     epochs: list[
-        tuple[int | None, list[tuple[OperationJournal, dict[str, Any]]]]
+        tuple[int | None, list[tuple[UnlinkJournalRecord, dict[str, Any]]]]
     ] = []
     current_generation: int | None = None
-    current_records: list[tuple[OperationJournal, dict[str, Any]]] | None = None
+    current_records: list[tuple[UnlinkJournalRecord, dict[str, Any]]] | None = None
 
-    for row in rows:
+    for row in _entry_journal_rows(session, entry_id):
         try:
             payload = json.loads(row.before_json or "{}")
         except (TypeError, json.JSONDecodeError):
@@ -679,7 +704,7 @@ def _journal_records_for_entry(
     entry_id: int,
     *,
     attempt_generation: int | None = None,
-) -> list[tuple[OperationJournal, dict[str, Any]]]:
+) -> list[tuple[UnlinkJournalRecord, dict[str, Any]]]:
     """Return Gate6-A2 records for the latest authority epoch in a generation.
 
     Legacy intent/terminal rows may omit the generation; they inherit it from the
@@ -713,7 +738,7 @@ def _journal_records_for_entry(
 
 
 def _journal_epoch_terminal_purged(
-    records: list[tuple[OperationJournal, dict[str, Any]]],
+    records: list[tuple[UnlinkJournalRecord, dict[str, Any]]],
     *,
     entry_id: int,
     attempt_generation: int,
@@ -988,10 +1013,10 @@ def _find_path_intent(
     frozen: dict[str, Any],
     *,
     attempt_generation: int,
-) -> OperationJournal | None:
+) -> UnlinkJournalRecord | None:
     role = str(frozen.get("role") or "")
     path = str(_absolute_lexical(frozen.get("path", "")))
-    matches: list[OperationJournal] = []
+    matches: list[UnlinkJournalRecord] = []
     for row, payload in _journal_records_for_entry(
         session,
         entry_id,
@@ -1115,11 +1140,18 @@ def _mark_path_complete(
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
         row = session.get(OperationJournal, journal_id)
-        if row is None or row.operation != OPERATION_ID:
-            session.rollback()
+        compact = None
+        if row is not None and row.operation == OPERATION_ID:
+            before_json = row.before_json
+        elif row is None and inspect(session.connection()).has_table(QuarantineUnlinkEvidence.__tablename__):
+            compact = session.get(QuarantineUnlinkEvidence, journal_id)
+            if compact is None or compact.entry_id != entry_id:
+                raise StateConflictError("UNLINK_RECOVERY_INTENT_INVALID: intent row disappeared")
+            before_json, _ = json.loads(zlib.decompress(compact.payload))
+        else:
             raise StateConflictError("UNLINK_RECOVERY_INTENT_INVALID: intent row disappeared")
         try:
-            before = json.loads(row.before_json or "{}")
+            before = json.loads(before_json or "{}")
         except (TypeError, json.JSONDecodeError) as exc:
             session.rollback()
             raise StateConflictError("UNLINK_RECOVERY_INTENT_INVALID: intent row malformed") from exc
@@ -1135,7 +1167,7 @@ def _mark_path_complete(
         ):
             session.rollback()
             raise StateConflictError("UNLINK_RECOVERY_INTENT_INVALID: intent row identity changed")
-        row.after_json = _json_dumps(
+        after_json = _json_dumps(
             {
                 "phase": "unlinked",
                 "purge_semantics": SEMANTICS_VERSION,
@@ -1145,6 +1177,10 @@ def _mark_path_complete(
                 "path": str(_absolute_lexical(frozen.get("path", ""))),
             }
         )
+        if compact is not None:
+            compact.payload = pack_unlink_evidence(before_json, after_json)
+        else:
+            row.after_json = after_json
         session.commit()
 
 

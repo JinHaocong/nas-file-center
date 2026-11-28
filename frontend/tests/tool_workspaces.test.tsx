@@ -143,6 +143,7 @@ test('a discarded cleanup preview cannot clear the pending state of a later requ
   t.mock.method(auditApi, 'getRetentionPreview', () => new Promise<AuditRetentionPreview>(resolve => { queries.push(resolve); }));
   const { view } = await openSettings(t, '/settings#retention');
   const apply = () => view.root.findAllByType(ConsoleButton).find(button => button.props.children === '执行审计清理')!;
+  const auditDialog = () => view.root.findAllByType(ConsoleConfirmDialog).find(dialog => dialog.props.danger)!;
   const switchTo = (tab: string) => act(() => view.root.findByProps({ id: 'settings-tab-' + tab }).props.onClick());
   act(() => { apply().props.onClick(); });
   switchTo('appearance');
@@ -152,11 +153,54 @@ test('a discarded cleanup preview cannot clear the pending state of a later requ
   assert.equal(queries.length, 2);
   await act(async () => { queries[0](previewWithCount(1)); });
   assert.equal(apply().props.loading, true);
-  assert.equal(view.root.findByType(ConsoleConfirmDialog).props.open, false);
+  assert.equal(auditDialog().props.open, false);
   await act(async () => { queries[1](previewWithCount(2)); });
   assert.equal(apply().props.loading, false);
-  assert.equal(view.root.findByType(ConsoleConfirmDialog).props.open, true);
-  assert.match(renderToStaticMarkup(view.root.findByType(ConsoleConfirmDialog).props.description), /预计清理 <strong[^>]*>2<\/strong>/);
+  assert.equal(auditDialog().props.open, true);
+  assert.match(renderToStaticMarkup(auditDialog().props.description), /预计清理 <strong[^>]*>2<\/strong>/);
+});
+
+test('database maintenance previews space and refreshes after a confirmed archive', async t => {
+  const requests: string[] = [];
+  let journalRows = 12;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, init?: RequestInit) => {
+    requests.push(`${init?.method ?? 'GET'} ${input}`);
+    if (String(input).endsWith('/archive')) {
+      assert.deepEqual(JSON.parse(String(init?.body)), { kind: 'operation_journal' });
+      journalRows = 0;
+      return Response.json({ rows: 12, files: ['operation-journal-example.json.gz'] });
+    }
+    return Response.json({
+      database: {
+        database_bytes: 8000000, wal_bytes: 4000000, reusable_bytes: 1000000,
+        estimated_reclaimable_bytes: 5000000, wal_retained_limit_bytes: 67108864, active_jobs: 0,
+      },
+      task_events: { jobs: 0, rows: 0 },
+      operation_journal: { rows: journalRows },
+      policy: { automatic: false, task_event_retention_days: 30, operation_journal_retention_days: 90 },
+    });
+  });
+  const { view } = await openSettings(t, '/settings#retention');
+  const archiveButton = () => view.root.findAllByType(ConsoleButton)
+    .find(button => button.props.children === '归档一批操作流水');
+  for (let attempt = 0; attempt < 30 && !archiveButton(); attempt++) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); });
+  }
+  assert.equal(archiveButton()?.props.disabled, false);
+  act(() => archiveButton()!.props.onClick());
+  const dialog = view.root.findAllByType(ConsoleConfirmDialog).find(candidate => !candidate.props.danger)!;
+  assert.equal(dialog.props.open, true);
+  assert.deepEqual(requests, ['GET /api/database-maintenance']);
+  await act(async () => { dialog.props.onConfirm(); });
+  for (let attempt = 0; attempt < 30 && !archiveButton()?.props.disabled; attempt++) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); });
+  }
+  assert.deepEqual(requests, [
+    'GET /api/database-maintenance',
+    'POST /api/database-maintenance/archive',
+    'GET /api/database-maintenance',
+  ]);
+  assert.equal(archiveButton()?.props.disabled, true);
 });
 
 test('the enabled resource window renders its saved IANA time zone outside the common list', async t => {

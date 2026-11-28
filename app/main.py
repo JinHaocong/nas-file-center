@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.router import router as api_router
+from app.api.database_maintenance import router as database_maintenance_router
 from app.api.media_organizer import router as media_organizer_router
 from app.download_verification.router import router as download_verification_router
 from app.download_verification.router_sources import router as download_verification_sources_router
@@ -158,6 +159,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(cloud_copy_router)
     app.include_router(cloud_files_router)
     app.include_router(api_router)
+    app.include_router(database_maintenance_router)
     app.include_router(media_organizer_router)
     app.include_router(zspace_authorization_router)
 

@@ -5,15 +5,23 @@ import logging
 import os
 from pathlib import Path
 import signal
+import sqlite3
 import threading
 import time
 from typing import Any
 
 from sqlalchemy import select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings, get_settings
 from app.db import create_engine_and_session, init_db
+from app.maintenance.database import (
+    MaintenanceConflict, MaintenanceRecoveryRequired, reclaim_idle_database_space,
+    remove_verified_maintenance_backups,
+)
+from app.maintenance.history import archive_history_batch
+from app.maintenance.organizer import purge_dismissed_organizer_logs
 from app.scheduler.dispatch import run_scheduler_tick
 from app.models import BatchPlanItem, ScanJob, WorkJob, utcnow
 from app.tasks.context import JobContext
@@ -568,9 +576,16 @@ def worker_loop(
     last_scheduler_tick_minute = None
     next_report_cleanup = 0.0
     next_report_marker_prune = 0.0
+    next_history_archive = 0.0
+    next_idle_maintenance = 0.0
+    space_recovery_available = True
+    auto_archive = getattr(settings, "history_archive_auto_enabled", False)
 
     def fence_reports():
         renew_and_assert_worker_lease(SessionLocal, worker_id)
+
+    def fence_maintenance(session):
+        assert_active_worker_lease(session, worker_id, now=utcnow())
 
     try:
         while True:
@@ -637,6 +652,26 @@ def worker_loop(
                     logger.exception("Organizer report cleanup will retry")
                 next_report_cleanup = time.monotonic() + poll_seconds
 
+            if auto_archive and time.monotonic() >= next_history_archive:
+                archive_delay = 3600
+                try:
+                    archived = archive_history_batch(
+                        settings, SessionLocal, "operation_journal", fence=fence_maintenance,
+                    )
+                except JobLeaseLost:
+                    acquired = False
+                    continue
+                except MaintenanceConflict:
+                    archive_delay = 60
+                except (OperationalError, OSError, ValueError):
+                    logger.exception("Operation journal archive batch failed")
+                    archive_delay = 60
+                else:
+                    if archived["rows"]:
+                        logger.info("Archived %s operation journal rows", archived["rows"])
+                        archive_delay = 60
+                next_history_archive = time.monotonic() + archive_delay
+
             try:
                 claimed_id = claim_next_job(engine, SessionLocal, worker_id=worker_id)
             except JobLeaseLost:
@@ -644,6 +679,30 @@ def worker_loop(
                 continue
 
             if claimed_id is None:
+                if time.monotonic() >= next_idle_maintenance:
+                    next_idle_maintenance = time.monotonic() + 60
+                    try:
+                        remove_verified_maintenance_backups(settings.backups_dir)
+                    except OSError:
+                        logger.exception("Verified temporary backup cleanup will retry")
+                    try:
+                        purged = purge_dismissed_organizer_logs(
+                            SessionLocal, settings, fence=fence_maintenance,
+                        )
+                        if purged["rows"]:
+                            logger.info("Purged %s log rows for dismissed organizer tasks", purged["rows"])
+                        if space_recovery_available:
+                            reclaim_idle_database_space(
+                                settings.database_path, fence=fence_reports,
+                            )
+                    except JobLeaseLost:
+                        acquired = False
+                        continue
+                    except MaintenanceRecoveryRequired:
+                        space_recovery_available = False
+                        logger.exception("Database space recovery requires inspection")
+                    except (MaintenanceConflict, OperationalError, sqlite3.Error, OSError, ValueError):
+                        logger.exception("Idle database maintenance will retry")
                 time.sleep(poll_seconds)
                 continue
 

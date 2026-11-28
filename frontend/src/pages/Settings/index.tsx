@@ -18,6 +18,7 @@ import {
 } from '../../components/settings/resource_policy';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { ZSpaceAuthorization } from '../../components/settings/ZSpaceAuthorization';
+import { DatabaseMaintenance } from '../../components/settings/DatabaseMaintenance';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ThumbnailSwitch } from '../../components/ui/MediaThumbnail';
 import { ActionBar } from '../../components/ui/ActionBar';
@@ -587,6 +588,7 @@ export const SettingsPage: React.FC = () => {
                 { label: '立即清空说明', value: '管理员可忽略保留期直接清空历史；系统固定保留 1 条 audit.clear 自审计记录' },
               ]} />
             </section>
+            {isAdmin && <DatabaseMaintenance />}
           </div>
         </DataPanel>}
 

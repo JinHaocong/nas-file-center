@@ -31,6 +31,7 @@ from app.execution.verifier import verify_duplicate_pair
 from app.indexing.indexer import IndexedEntry, iter_root
 from app.indexing.matcher import match_entries
 from app.job_queue import enqueue_index_work, enqueue_scan_work
+from app.maintenance.task_journal_cleanup import JOURNAL_WATERMARK, purge_released_task_journals
 from app.models import (
     AuditEvent,
     BatchPlan,
@@ -3530,6 +3531,8 @@ class FileCenterService:
 
             session.execute(delete(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id))
             session.delete(plan)
+            session.flush()
+            purge_released_task_journals(session)
             session.commit()
             result = {
                 "deleted": True,
@@ -3573,6 +3576,7 @@ class FileCenterService:
 
             session.execute(delete(BatchPlanItem).where(BatchPlanItem.plan_id.in_(plan_ids)))
             session.execute(delete(BatchPlan).where(BatchPlan.id.in_(plan_ids)))
+            purge_released_task_journals(session)
             session.commit()
             return {"deleted_count": len(plan_ids)}
 
@@ -3741,7 +3745,7 @@ class FileCenterService:
         page_size = max(1, min(int(page_size), 500))
         offset = (page - 1) * page_size
         with self.SessionLocal() as session:
-            stmt = select(OperationJournal)
+            stmt = select(OperationJournal).where(OperationJournal.operation != JOURNAL_WATERMARK)
             if operation:
                 stmt = stmt.where(OperationJournal.operation == operation)
             if plan_id is not None:

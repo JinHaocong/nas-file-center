@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     ffprobe_binary: str = Field(default="ffprobe", validation_alias="FFPROBE_BINARY")
     fclones_threads: str | None = Field(default=None, validation_alias="FCLONES_THREADS")
     verification_hash: str = Field(default="sha256", validation_alias="VERIFICATION_HASH")
+    history_archive_auto_enabled: bool = Field(default=False, validation_alias="HISTORY_ARCHIVE_AUTO_ENABLED")
+    task_event_retention_days: int = Field(default=30, ge=1, le=3650, validation_alias="TASK_EVENT_RETENTION_DAYS")
+    operation_journal_retention_days: int = Field(default=90, ge=1, le=3650, validation_alias="OPERATION_JOURNAL_RETENTION_DAYS")
     mtime_refresh_delay_seconds: float = Field(default=2.0, validation_alias="MTIME_REFRESH_DELAY_SECONDS")
     initial_admin_username: str | None = Field(default=None, validation_alias="INITIAL_ADMIN_USERNAME")
     initial_admin_password: str | None = Field(default=None, validation_alias="INITIAL_ADMIN_PASSWORD")
@@ -118,6 +121,10 @@ class Settings(BaseSettings):
     @property
     def backups_dir(self) -> Path:
         return self.config_dir / "backups"
+
+    @property
+    def history_archives_dir(self) -> Path:
+        return self.config_dir / "history-archives"
 
     @property
     def logs_dir(self) -> Path:

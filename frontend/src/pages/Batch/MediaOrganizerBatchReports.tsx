@@ -438,6 +438,7 @@ export function MediaOrganizerResultReport({ report, children, conflictsOnly, on
       {report.report_cleanup_status && <p className="nfc-form-note" role="status">
         {cleanupMessage[report.report_cleanup_status]}
       </p>}
+      {report.results_archived && <p className="nfc-form-note">整理明细已归档，可继续分页查看。</p>}
       <div className="nfc-v2-batch-media-stats" role="status">
         {resultStatuses.map(status => (
           <span key={status}>{outcomes[status].label} <strong>{report.summary[`${status}_count`].toLocaleString()}</strong></span>

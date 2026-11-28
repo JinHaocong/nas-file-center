@@ -11,6 +11,7 @@ from sqlalchemy import Engine, create_engine, delete, event, func, inspect, sele
 from sqlalchemy.orm import sessionmaker
 
 from app.auth.password import hash_password
+from app.maintenance.database import WAL_RETAINED_LIMIT_BYTES
 from app.models import Base, FilterPolicy, IndexRoot, IndexedPath, MediaAsset, OrganizerProfile, User, Workflow, WorkflowRevision, WorkJob
 from app.download_verification.models import DownloadVerificationRun, DownloadVerificationItem, DownloadVerificationSource  # Register additive tables before create_all
 
@@ -41,7 +42,11 @@ def create_engine_and_session(db_path: Path | str):
     @event.listens_for(engine, "connect")
     def _sqlite_pragmas(dbapi_connection, _connection_record):
         cursor = dbapi_connection.cursor()
+        if db_path.is_file() and db_path.stat().st_size == 0:
+            # For a new file this must happen before SQLite writes its WAL-mode header.
+            cursor.execute("PRAGMA auto_vacuum=INCREMENTAL")
         cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute(f"PRAGMA journal_size_limit={WAL_RETAINED_LIMIT_BYTES}")
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA busy_timeout=5000")

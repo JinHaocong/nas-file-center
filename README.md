@@ -225,6 +225,28 @@ docker compose -f compose.yaml -f compose.image.yaml up -d --no-build --pull alw
 - 在「任务中心」查看智能整理报告盘点。删除任务时，满足安全条件的报告可由 Worker 回收。失败或中断任务的恢复资料会保留。
 - 遇到任务长时间停在运行中时，检查 Worker 心跳、任务日志以及 SQLite 锁等待。[Worker 与 NAS 排障](docs/worker-restart-diagnosis.md)
 
+### 维护数据库
+
+管理员可以在 **设置 → 保留策略 → 数据库维护** 查看主库、WAL、空闲页和可归档记录数，也可以手动归档一批。归档写入配置目录下的 `history-archives/`，以带校验的 gzip 文件保存。备份时请同时保留这个目录。已归档的智能整理结果仍可分页查看。隔离区清除流水只有在对应的恢复证据已保存到独立存储并通过完整性条件时，才会移出主流水表。
+
+首次归档前请保留一份数据库备份。需要回滚应用镜像时，使用与旧版匹配的归档前数据库备份。
+
+删除任务时会一并清理普通日志和仅属于该任务的操作流水。仍被计划、撤销或恢复引用的流水会保留，依赖消失后再清理。智能整理的普通日志由 Worker 在报告收尾后分批永久清理，保留任务结果摘要和恢复证据。
+
+Worker 空闲时，在主库可回收空闲页达到 8 MiB 后分批将空间还给磁盘。旧库首次达到阈值时会切换到增量回收模式。WAL 重置时最多保留 64 MiB，运行中的大事务可能暂时超过该值。
+
+手动归档仍可按保留期使用。整理明细和操作流水的默认归档保留期分别为 30 天和 90 天，可用 `TASK_EVENT_RETENTION_DAYS` 和 `OPERATION_JOURNAL_RETENTION_DAYS` 配置。在 API 和 Worker 使用相同的保留期。在两者设置 `HISTORY_ARCHIVE_AUTO_ENABLED=true` 可额外开启操作流水的定期归档。
+
+如需立即回收空间，可在 Compose 目录停止服务后执行离线压缩。命令会取得 SQLite 独占锁，校验临时备份，压缩主库并截断 WAL。完整性校验成功时自动删除本次临时备份，校验失败时保留回退文件。
+
+```bash
+docker compose stop worker api
+docker compose run --rm --no-deps --entrypoint python api -m app.maintenance compact --apply
+docker compose up -d api worker
+```
+
+在 Komodo 中使用栈内实际服务名。将最后一条启动命令用于恢复服务，即使压缩命令报错。压缩前后占用会写到命令输出。临时空间不足时，可用 `--backup-dir` 将备份写到容器内挂载的另一块盘。临时维护容器应使用与部署相同的镜像和配置卷。
+
 ## 架构与安全
 
 ```text

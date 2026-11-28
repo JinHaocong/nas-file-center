@@ -505,6 +505,15 @@ class OrganizerProfile(Base):
     user: Mapped[User | None] = relationship(back_populates="organizer_profiles")
 
 
+class QuarantineUnlinkEvidence(Base):
+    __tablename__ = "quarantine_unlink_evidence"
+    __table_args__ = (Index("ix_quarantine_unlink_evidence_entry_id", "entry_id", "id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    entry_id: Mapped[int] = mapped_column(nullable=False)
+    payload: Mapped[bytes] = mapped_column(nullable=False)
+
+
 class OperationJournal(Base):
     __tablename__ = "operation_journal"
     __table_args__ = (
@@ -532,6 +541,15 @@ class OperationJournal(Base):
 
     created_at: Mapped[datetime] = mapped_column(default=utcnow, nullable=False)
 
+
+
+class PendingTaskJournalDeletion(Base):
+    """Records journal ownership across task deletion while a plan still needs it."""
+    __tablename__ = "pending_task_journal_deletions"
+
+    journal_id: Mapped[int] = mapped_column(
+        ForeignKey("operation_journal.id", ondelete="CASCADE"), primary_key=True, autoincrement=False,
+    )
 
 
 class Workflow(Base):

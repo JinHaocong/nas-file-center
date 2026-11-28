@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.dependencies import require_admin_user
 from app.batch import media_organizer_jobs as jobs
+from app.maintenance.archive_files import HistoryArchiveUnavailable
 
 router = APIRouter(
     prefix="/api/media-organizer", tags=["media-organizer"],
@@ -113,3 +114,5 @@ def read_batch(request: Request, job_id: int,
                               status_filter=status_filter)
     except KeyError as exc:
         raise HTTPException(404, "找不到此整理任务") from exc
+    except HistoryArchiveUnavailable as exc:
+        raise HTTPException(503, "整理归档暂不可读，请检查配置目录 history-archives 中的归档文件") from exc
