@@ -14,8 +14,9 @@ export interface ConsoleCheckboxProps extends Omit<
  * eligible selection or triggers a mutation on its own.
  */
 export const ConsoleCheckbox = React.forwardRef<HTMLInputElement, ConsoleCheckboxProps>(
-  ({ checked, onCheckedChange, disabled = false, ...props }, ref) => (
+  ({ checked, onCheckedChange, disabled = false, className = '', ...props }, ref) => (
     <input {...props} ref={ref} type="checkbox" checked={checked} disabled={disabled}
+      className={['nfc-console-checkbox-input', className].filter(Boolean).join(' ')}
       onChange={event => {
         // A stale or programmatically dispatched change must not bypass native
         // disabled fieldsets or a temporarily inert/aria-disabled form region.

@@ -1,5 +1,8 @@
 import React from 'react';
 import dayjs from 'dayjs';
+
+import { ProgressMotionTrack } from '../ui/ProgressMotionTrack';
+
 import type { TaskProgress as TaskProgressType, TaskStatus } from '../../types/task';
 import { computeProgressPercentage, calculateTaskEta } from './task_utils';
 
@@ -54,8 +57,10 @@ export const TaskProgress: React.FC<Props> = ({
       <div className={'nfc-task-progress nfc-task-progress-bar nfc-v2-progress-' + tone +
         (showDetails ? ' is-detailed' : '') + (size === 'small' ? ' is-small' : '')}>
         <div className="nfc-v2-progress-track">
-          <progress className="nfc-v2-native-progress" max={100} value={percent}
-            aria-label="任务完成进度">{percent}%</progress>
+          <ProgressMotionTrack value={percent}>
+            <progress className="nfc-v2-native-progress" max={100} value={percent}
+              aria-label="任务完成进度">{percent}%</progress>
+          </ProgressMotionTrack>
           <span className="nfc-v2-progress-percent">{percent}%</span>
         </div>
         {meta(

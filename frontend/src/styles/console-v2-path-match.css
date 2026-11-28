@@ -85,3 +85,21 @@
   }
   .nfc-path-match-form > :is(.nfc-file-tool-primary-actions, .nfc-v2-path-match-patterns) { grid-column: 1 / -1; }
 }
+.nfc-v2-path-match-scope:focus-within { border-color: var(--nfc-tint-line); }
+.nfc-v2-path-match-patterns {
+  padding: 12px;
+  margin-top: 9px;
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-radius-control);
+  background: var(--studio-ground);
+}
+.nfc-v2-path-match-table tbody tr:focus-within { background: var(--nfc-pm-soft); }
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-path-match-scope { transition: border-color 160ms ease; }
+  .nfc-v2-path-match-table tbody tr { transition: background-color 160ms ease; }
+  .nfc-v2-path-match-patterns { animation: nfc-path-match-options-arrive 170ms var(--nfc-motion-ease) both; }
+  @keyframes nfc-path-match-options-arrive {
+    from { opacity: .6; transform: translateY(-3px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}

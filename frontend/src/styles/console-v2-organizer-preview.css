@@ -29,7 +29,8 @@
 .nfc-v2-organizer-filter label { display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:8px 12px;
   cursor:pointer;background:var(--nfc-opv-paper);color:var(--nfc-opv-text);
   border:1px solid var(--nfc-opv-line);border-radius:8px;font-size:12px;font-weight:600; }
-.nfc-v2-organizer-filter label.is-selected { border-color:var(--nfc-hairline-strong);color:var(--nfc-opv-text);background:var(--nfc-opv-soft); }
+.nfc-v2-organizer-filter label.is-selected { border-color:var(--nfc-tint-line);color:var(--nfc-tint);background:var(--nfc-tint-soft); }
+.nfc-v2-organizer-filter label:not(.is-selected):has(input:enabled):hover { background:var(--nfc-opv-soft); }
 .nfc-v2-organizer-filter label:focus-within { outline:2px solid var(--nfc-opv-accent);outline-offset:2px; }
 .nfc-v2-organizer-filter input { accent-color:var(--nfc-opv-accent);width:16px;height:16px; }
 .nfc-v2-organizer-filter label:has(input:disabled) { cursor:progress;opacity:.75; }
@@ -62,6 +63,10 @@
   .nfc-v2-organizer-filter { width:100%; }
   .nfc-v2-organizer-stage-notice { margin-inline:0; }
   .nfc-v2-organizer-preview-digest { overflow-wrap:anywhere; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-organizer-filter label { transition:background-color 140ms ease,border-color 140ms ease,color 140ms ease; }
+  .nfc-v2-organizer-proposal-table tbody tr { transition:background-color 140ms ease; }
 }
 @media (prefers-reduced-motion:reduce) {
   .nfc-v2-organizer-preview *, .nfc-v2-organizer-preview *::before,

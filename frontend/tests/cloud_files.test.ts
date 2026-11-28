@@ -19,6 +19,7 @@ test('the native file API preserves a multi-select with provider names and task 
   };
   await cloudFilesApi.entries(batch.provider, batch.remote, batch.path);
   const accepted = await cloudFilesApi.start(batch);
+  assert.ok('id' in accepted);
   await cloudFilesApi.cancel(accepted.id);
   await cloudFilesApi.remove(accepted.id);
   assert.equal(calls[0].url.pathname, '/api/cloud-files/entries');
@@ -29,6 +30,16 @@ test('the native file API preserves a multi-select with provider names and task 
   assert.equal(calls[2].url.pathname, '/api/cloud-files/transfers/' + jobId + '/cancel');
   assert.equal(calls[3].url.pathname, '/api/cloud-files/transfers/' + jobId);
   assert.deepEqual(calls.map(call => call.method), ['GET', 'POST', 'POST', 'DELETE']);
+});
+
+test('a selection made entirely of existing files returns a skip receipt without a task ID', async context => {
+  const skipped = { native_ids: [], submitted_count: 0, skipped_names: ['说明.pdf'] };
+  context.mock.method(globalThis, 'fetch', async () => Response.json(skipped, { status: 202 }));
+  const receipt = await cloudFilesApi.start({
+    provider: 'rclone', remote: 'PikPak', path: '', names: skipped.skipped_names, destination: '/data/Download',
+  });
+  assert.equal('id' in receipt, false);
+  assert.deepEqual(receipt, skipped);
 });
 
 test('OpenList individual file estimates use byte deltas and preserve missing measurements', () => {

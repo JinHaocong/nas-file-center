@@ -238,7 +238,7 @@ export const FilenameAuditPage: React.FC = () => {
         </div>
       </DataPanel>
       <details className="nfc-v2-filename-notice nfc-page-alert">
-        <summary>查看巡检和修复规则</summary>
+        <summary><ConsoleIcon name="info" size={16} />查看巡检和修复规则</summary>
         <p>重复扩展名、双扩展名、Unicode 和 Windows 兼容性问题需要人工判断。只对首尾普通空格提供修复建议，创建计划后还需冻结与校验。</p>
       </details>
       {result && (

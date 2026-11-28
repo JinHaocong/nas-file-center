@@ -654,6 +654,8 @@
 [data-theme='dark'] .nfc-v2-dialog-overlay {
   background: rgba(0, 0, 0, .64);
 }
+/* Retain the open geometry until Radix finishes the closing animation. */
+.nfc-v2-dialog[data-state='closed'],
 .nfc-v2-dialog[data-state='open'] {
   position: fixed;
   top: 50%;
@@ -661,10 +663,38 @@
   margin: 0;
   transform: translate(-50%, -50%);
   z-index: 1101;
-  animation: nfc-v2-fade-in var(--nfc-motion-normal) var(--nfc-motion-ease) backwards;
 }
-.nfc-v2-dialog[data-state='closed'] { pointer-events: none; }
+:is(.nfc-v2-dialog, .nfc-overlay-modal, .nfc-overlay-drawer, .nfc-v2-dialog-overlay)[data-state='closed'] {
+  pointer-events: none !important;
+  interactivity: inert;
+}
+@supports not (interactivity: inert) {
+  /* Legacy browsers must not leave a closing confirm button in the tab order. */
+  :is(.nfc-v2-dialog, .nfc-overlay-modal, .nfc-overlay-drawer)[data-state='closed'] > * {
+    visibility: hidden;
+  }
+}
 .nfc-v2-dialog:focus-visible { outline: 3px solid var(--nfc-tint); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  :is(.nfc-v2-dialog, .nfc-overlay-modal)[data-state='open'] {
+    animation: nfc-modal-arrive 182ms var(--nfc-motion-ease) both;
+  }
+  :is(.nfc-v2-dialog, .nfc-overlay-modal)[data-state='closed'] {
+    animation: nfc-modal-dismiss 128ms ease-in both;
+  }
+  .nfc-v2-dialog-overlay[data-state='open'] {
+    animation: nfc-modal-scrim-arrive 155ms ease-out both;
+  }
+  .nfc-v2-dialog-overlay[data-state='closed'] {
+    animation: nfc-modal-scrim-dismiss 128ms ease-in both;
+  }
+}
+
+@keyframes nfc-modal-arrive { from { opacity: 0; translate: 0 7px; scale: .99; } }
+@keyframes nfc-modal-dismiss { to { opacity: 0; translate: 0 5px; scale: .995; } }
+@keyframes nfc-modal-scrim-arrive { from { opacity: 0; } }
+@keyframes nfc-modal-scrim-dismiss { to { opacity: 0; } }
 
 /* Phase 2B — accessible native administrator dialog & feedback. */
 .nfc-v2-dialog {

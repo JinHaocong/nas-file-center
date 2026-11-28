@@ -1,5 +1,6 @@
 from pathlib import PurePosixPath
 import os
+import stat
 from typing import Annotated, Literal
 from unicodedata import normalize
 
@@ -7,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.dependencies import require_admin_user
+from app.batch.directory_compare import _open_directory_relative
 from app.cloud_copy.handler import CloudCopyError, _protected, _reserved_parts, open_destination_parent, require_new_folder
 from app.cloud_copy.rclone import RcloneError
 from app.download_verification.webdav import WebDAVError, relative_parts, segment
@@ -100,18 +102,56 @@ def _selection(values):
     return names
 
 
-def _validate_destination(config, settings, destination, names):
+def _guard_existing_tree(parent_fd: int, name: str, device: int) -> None:
+    """rclone can traverse an existing directory link even with Links disabled."""
+    pending = [(name,)]
+    while pending:
+        parts = pending.pop()
+        directory_fd = _open_directory_relative(parent_fd, parts)
+        try:
+            with os.scandir(directory_fd) as entries:
+                for entry in entries:
+                    info = entry.stat(follow_symlinks=False)
+                    if info.st_dev != device or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+                        raise HTTPException(409, "已有目录含有链接、特殊文件或其他挂载，无法合并复制。")
+                    if stat.S_ISDIR(info.st_mode):
+                        pending.append((*parts, entry.name))
+        finally:
+            os.close(directory_fd)
+
+
+def _validate_destination(config, settings, destination, names, *, reuse=False, kinds=None):
     try:
         with open_destination_parent(config, settings, destination, names[0]) as (path, fd):
-            requested = set(map(_case_key, names))
+            requested = {_case_key(name): name for name in names}
+            skipped = []
+            device = os.fstat(fd).st_dev
             for name in names:
                 if _protected(path / name, settings):
                     raise HTTPException(422, "目标文件位于系统保留目录。")
-                require_new_folder(fd, name)
+                if not reuse:
+                    require_new_folder(fd, name)
             with os.scandir(fd) as existing:
-                if any(_case_key(item.name) in requested for item in existing):
-                    raise HTTPException(409, "NAS 目标位置已有同名文件或目录。")
-            return path
+                for item in existing:
+                    expected = requested.get(_case_key(item.name))
+                    if expected is None:
+                        continue
+                    if not reuse or expected != item.name:
+                        raise HTTPException(409, "NAS 目标位置已有同名文件或目录。")
+                    info = item.stat(follow_symlinks=False)
+                    is_dir = stat.S_ISDIR(info.st_mode)
+                    if info.st_dev != device or not (is_dir or stat.S_ISREG(info.st_mode)):
+                        raise HTTPException(409, "同名目标是链接、特殊文件或其他挂载。")
+                    if kinds is None:
+                        continue
+                    if is_dir != (kinds[expected] == "directory"):
+                        raise HTTPException(409, "同名目标的文件和目录类型冲突。")
+                    if is_dir:
+                        _guard_existing_tree(fd, expected, info.st_dev)
+                    else:
+                        skipped.append(expected)
+            skipped_set = set(skipped)
+            return path, [name for name in names if name in skipped_set]
     except CloudCopyError as exc:
         raise HTTPException(409, str(exc)) from None
     except (OSError, RuntimeError, ValueError):
@@ -194,7 +234,8 @@ def start_transfer(request: Request, payload: NewTransfer):
         raise HTTPException(503, "请先配置 NAS 存放根目录。")
     parts = _source_parts(payload.provider, config, payload.path)
     names = _selection(payload.names)
-    destination = _validate_destination(config, settings, payload.destination, names)
+    reuse = payload.provider == "rclone"
+    destination, _ = _validate_destination(config, settings, payload.destination, names, reuse=reuse)
     try:
         adapter = _adapter(payload.provider, config, settings)
         listed = {item["name"]: item for item in _entries(
@@ -204,16 +245,20 @@ def start_transfer(request: Request, payload: NewTransfer):
             raise HTTPException(409, "云端文件列表已变化，请刷新后重新选择。")
         provider_root = config.rclone_root if payload.provider == "rclone" else config.openlist_root
         target = provider_root / destination.relative_to(config.local_root)
-        _validate_destination(config, settings, payload.destination, names)
+        _, skipped = _validate_destination(config, settings, payload.destination, names, reuse=reuse,
+                                            kinds={name: listed[name]["kind"] for name in names})
+        pending = [name for name in names if name not in skipped]
+        if not pending:
+            return {"native_ids": [], "submitted_count": 0, "skipped_names": skipped}
         records, message = _submit(adapter, payload.provider, payload.remote, parts,
-                                   [listed[name] for name in names], target)
+                                   [listed[name] for name in pending], target)
     except _UPSTREAM_ERRORS:
         raise _upstream() from None
     if not records:
         raise HTTPException(502, message or "原生服务未返回任务编号，请查看对应服务的传输列表。")
     view = transfer_view(payload.provider, records[0], config, destination=str(destination))
     view.update(native_ids=[record["id"] for record in records],
-                names=list(names), error=message, submitted_count=len(records))
+                names=pending, error=message, submitted_count=len(records), skipped_names=skipped)
     return view
 
 

@@ -272,7 +272,9 @@ class RcloneProvider(RcloneClient):
     def start(self, remote: str, path: tuple[str, ...], name: str, is_directory: bool, destination: Path) -> dict:
         _validate_destination(destination)
         name = _literal_path((name,))
-        settings = {"Immutable": True, "DryRun": False, "Links": False, "MaxDuration": _COPY_MAX_DURATION}
+        settings = {"Immutable": True, "IgnoreExisting": True, "NoCheckDest": False,
+                    "NoUpdateModTime": True, "NoUpdateDirModTime": True,
+                    "DryRun": False, "Links": False, "MaxDuration": _COPY_MAX_DURATION}
         if is_directory:
             endpoint = "sync/copy"
             payload = {"srcFs": _literal_fs(remote, (*path, name)), "dstFs": str(destination),

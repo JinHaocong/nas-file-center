@@ -88,7 +88,9 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
   const toast = useConsoleToast();
   const rollbackInFlight = useRef(false);
   const definitionOpener = useRef<HTMLButtonElement | null>(null);
-  const [inspectRevision, setInspectRevision] = useState<WorkflowRevisionResponse | null>(null);
+  const [openRevision, setInspectRevision] = useState<WorkflowRevisionResponse | null>(null);
+  const leavingRevision = useRef<WorkflowRevisionResponse | null>(null);
+  const inspectRevision = openRevision ?? leavingRevision.current;
   const [rollbackIntent, setRollbackIntent] = useState<RollbackIntent | null>(null);
 
   const { data: revisions, isLoading, isError, error, refetch } = useQuery({
@@ -168,6 +170,7 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
       <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="file-text" size={15} />}
         onClick={event => {
           definitionOpener.current = event.currentTarget;
+          leavingRevision.current = record;
           setInspectRevision(record);
         }}>查看</ConsoleButton>
       {record.revision !== currentRevision && (
@@ -244,13 +247,14 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
         )}
       </ConsoleSheet>
 
-      <Dialog.Root open={inspectRevision !== null} onOpenChange={next => {
+      <Dialog.Root open={openRevision !== null} onOpenChange={next => {
         if (!next) setInspectRevision(null);
       }}>
         <Dialog.Portal>
           <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-revision-inspect-overlay" />
           <Dialog.Content className="nfc-v2-dialog nfc-v2-revision-inspect nfc-overlay-modal nfc-reading-dialog"
             onCloseAutoFocus={event => {
+              leavingRevision.current = null;
               const opener = definitionOpener.current;
               definitionOpener.current = null;
               if (!opener?.isConnected || opener.disabled) return;

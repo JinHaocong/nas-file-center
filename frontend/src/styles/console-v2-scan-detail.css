@@ -48,6 +48,12 @@
 .nfc-v2-group-expand:focus-visible { outline: 3px solid var(--v2-indigo); outline-offset: 2px; }
 .nfc-v2-group-expand[aria-expanded='true'] svg { transform: rotate(90deg); }
 .nfc-v2-groups-table .nfc-v2-group-member-row td { padding: 0; background: var(--v2-canvas); }
+.nfc-v2-groups-table tbody tr:has(.nfc-v2-group-expand[aria-expanded='true']) {
+  background: color-mix(in srgb, var(--nfc-tint-soft) 55%, var(--studio-paper));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-groups-table tbody tr { transition: background-color 160ms ease; }
+}
 .nfc-v2-duplicate-member-table { padding: 14px 21px; max-width: 100%; overflow-x: auto; }
 .nfc-v2-group-member-table { width: 100%; min-width: 660px; border-collapse: collapse; font-size: 11.5px; }
 .nfc-v2-group-member-table th { padding: 10px 12px; color: var(--v2-muted); background: var(--v2-canvas); }

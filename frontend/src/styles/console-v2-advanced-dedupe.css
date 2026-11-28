@@ -18,6 +18,12 @@
 .nfc-v2-dedupe-table { font-variant-numeric:tabular-nums; }
 .nfc-v2-dedupe-table tbody tr:hover,
 .nfc-v2-dedupe-table tbody tr:focus-within { background: var(--nfc-surface-2); }
+.nfc-v2-dedupe-table tbody tr:has(input[type='checkbox']:checked) {
+  background: color-mix(in srgb, var(--nfc-tint-soft) 55%, var(--studio-paper));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-dedupe-table tbody tr { transition: background-color 160ms ease; }
+}
 .nfc-v2-dedupe-table td:nth-child(2) { min-width: 260px; max-width: 440px; overflow-wrap: anywhere; }
 .nfc-v2-dedupe-table td:nth-child(3) { max-width: 230px; overflow-wrap: anywhere; }
 .nfc-v2-dedupe-table td:nth-child(6) { max-width: 220px; overflow-wrap: anywhere; }

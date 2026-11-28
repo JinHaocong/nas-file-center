@@ -1,5 +1,6 @@
 /* Single-item Restore/Purge uses the shared confirm scrim (1300).
    Radix mounts this dialog outside the shell. Keep the content above the scrim. */
+.nfc-v2-quarantine-dialog.nfc-v2-dialog[data-state='closed'],
 .nfc-v2-quarantine-dialog.nfc-v2-dialog[data-state='open'] { z-index:1301; }
 .nfc-v2-quarantine-dialog {
   --nfc-q-paper:var(--nfc-surface-1,#fff);

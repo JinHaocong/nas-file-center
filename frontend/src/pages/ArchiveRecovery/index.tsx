@@ -166,13 +166,16 @@ export const ArchiveRecoveryPage: React.FC = () => {
           }} />
         </div>
         <div className="nfc-archive-recovery-filter-row"><ActionBar>
-          <input aria-label="按文件名筛选" placeholder="搜索压缩包" value={search}
-            onChange={event => { setSearch(event.target.value); setPage(1); }} />
+          <label className="nfc-archive-search">
+            <ConsoleIcon name="search" size={16} />
+            <input type="search" aria-label="按文件名筛选" placeholder="搜索压缩包" value={search}
+              onChange={event => { setSearch(event.target.value); setPage(1); }} />
+          </label>
           <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
             onClick={() => { void listing.refetch(); }}>刷新</ConsoleButton>
         </ActionBar></div>
         {listing.isError && <p role="alert">目录读取失败：{getStructuredApiError(listing.error).message}</p>}
-        {listing.isLoading && <p>读取目录中…</p>}
+        {listing.isLoading && <p className="nfc-archive-recovery-empty" role="status">读取目录中…</p>}
         <div className="nfc-mobile-record-list nfc-archive-recovery-file-list" aria-label="可恢复的压缩包文件">
           {!listing.isLoading && !listing.isError && archiveRows.length === 0 && <p className="nfc-archive-recovery-empty">当前目录没有匹配的压缩包，可以切换目录或手动输入文件路径。</p>}
           {archiveRows.map(entry => (
@@ -186,8 +189,9 @@ export const ArchiveRecoveryPage: React.FC = () => {
                 start.reset();
                 // Keep the running/completed WorkJob visible even when browsing.
               }}>
-              <ConsoleIcon name="archive" size={18} /> {entry.name}
-              {selected === entry.path && <strong> ✓ 已选择</strong>}
+              <span className="nfc-archive-file-icon"><ConsoleIcon name="archive" size={16} /></span>
+              <span className="nfc-archive-file-name">{entry.name}</span>
+              {selected === entry.path && <strong><ConsoleIcon name="check" size={13} />已选择</strong>}
             </button>
           ))}
         </div>

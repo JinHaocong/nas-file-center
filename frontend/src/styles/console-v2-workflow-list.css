@@ -29,6 +29,10 @@
 .nfc-v2-workflow-table td { padding: 12px 13px; border-bottom: 1px solid var(--nfc-wfl-line); color: var(--nfc-wfl-text); vertical-align: middle; }
 .nfc-v2-workflow-table tbody tr:last-child td { border-bottom: 0; }
 .nfc-v2-workflow-table tbody tr:hover { background: var(--nfc-wfl-soft); }
+.nfc-v2-workflow-table tbody tr:focus-within { background: var(--nfc-wfl-soft); }
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-workflow-table tbody tr { transition: background-color 160ms ease; }
+}
 .nfc-v2-workflow-table .nfc-workflow-name { color: var(--nfc-wfl-text); text-align: left; }
 .nfc-v2-workflow-table .nfc-workflow-name:hover { color: var(--nfc-tint); }
 .nfc-v2-workflow-table td:first-child { width: 30%; }

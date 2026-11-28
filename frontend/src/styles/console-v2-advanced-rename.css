@@ -7,14 +7,27 @@
   --nfc-adv-line: var(--nfc-hairline);
   --nfc-adv-accent: var(--nfc-accent);
 }
-.nfc-v2-rename-mode { display:flex;flex-wrap:wrap;gap:7px;margin:0 0 19px; }
-.nfc-v2-rename-mode label { display:inline-flex;align-items:center;gap:8px;min-height:42px;
-  box-sizing:border-box;padding:10px 14px;border:1px solid var(--nfc-adv-line);
-  border-radius:9px;color:var(--nfc-adv-muted);background:var(--nfc-adv-surface);
+.nfc-v2-rename-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 3px;
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-radius-control);
+  background: var(--studio-soft);
+}
+.nfc-v2-rename-mode label { position:relative;display:inline-flex;align-items:center;gap:8px;min-height:38px;
+  box-sizing:border-box;padding:10px 14px;border:1px solid transparent;
+  border-radius:7px;color:var(--nfc-adv-muted);background:transparent;
   font-size:12px;font-weight:650;cursor:pointer; }
-.nfc-v2-rename-mode label.is-selected { color:var(--nfc-adv-accent);
-  border-color:var(--nfc-adv-accent);background:var(--nfc-adv-soft); }
-.nfc-v2-rename-mode input { accent-color:var(--nfc-adv-accent);width:16px;height:16px; }
+.nfc-v2-rename-mode label:hover { color:var(--nfc-tint); }
+.nfc-v2-rename-mode label.is-selected {
+  color:var(--nfc-tint);border-color:var(--nfc-tint-line);background:var(--studio-paper);
+}
+.nfc-v2-rename-mode input { position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%); }
 .nfc-v2-advanced-rename { display:grid;gap:16px;min-width:0; }
 .nfc-v2-advanced-rename-form { display:grid;gap:16px; }
 .nfc-v2-advanced-rename-field { display:grid;gap:7px;min-width:0;
@@ -46,7 +59,7 @@
 .nfc-v2-advanced-rename-table td { border-bottom:1px solid var(--nfc-adv-line);
   padding:12px 13px;vertical-align:middle; }
 .nfc-v2-advanced-rename-table tr:last-child td { border-bottom:0; }
-.nfc-v2-advanced-rename-table tbody tr:hover { background:var(--nfc-adv-soft); }
+.nfc-v2-advanced-rename-table tbody tr:is(:hover, :focus-within) { background:var(--nfc-adv-soft); }
 .nfc-v2-advanced-rename-target { display:flex;align-items:center;gap:8px;min-width:0; }
 .nfc-v2-advanced-rename-target svg { flex:0 0 auto;color:var(--nfc-adv-muted); }
 .nfc-v2-advanced-rename-sr-only { position:absolute;width:1px;height:1px;overflow:hidden;
@@ -62,11 +75,17 @@
   --nfc-adv-line:var(--nfc-hairline);--nfc-adv-accent:var(--nfc-accent);
 }
 @media (max-width:767px) {
-  .nfc-v2-rename-mode { display:grid;grid-template-columns:1fr; }
-  .nfc-v2-rename-mode label { min-height:44px; }
+  .nfc-studio .nfc-v2-rename-page > .nfc-v2-rename-mode {
+    display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;box-sizing:border-box;
+  }
+  .nfc-v2-rename-mode label { min-height:44px;padding-inline:3px;text-align:center; }
   .nfc-v2-advanced-rename .nfc-form-grid { grid-template-columns:1fr; }
   .nfc-v2-advanced-rename-field > input,
   .nfc-v2-advanced-rename .nfc-console-button { min-height:44px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-rename-mode label { transition:color 140ms ease,background-color 140ms ease,border-color 140ms ease; }
+  .nfc-v2-advanced-rename-table tbody tr { transition:background-color 140ms ease; }
 }
 @media (prefers-reduced-motion:reduce) {
   .nfc-v2-rename-page * { transition:none;animation:none;scroll-behavior:auto; }

@@ -49,7 +49,7 @@ export function WorkspaceEntries({ entries, list, pending, selectedPath, selecte
           const modified = workspaceEntryModified(entry.mtime_ns);
           const size = entry.size == null ? undefined : formatBytes(entry.size);
           return <li key={entry.path}>
-            <button type="button" title={entry.path} aria-pressed={selected}
+            <button type="button" title={entry.path} aria-pressed={selected} data-kind={entry.type}
               disabled={pending} ref={selected ? selectedRef : undefined}
               onClick={() => openOnClick && directory ? onOpen(entry.path) : onInspect(entry)}
               onDoubleClick={directory ? () => onOpen(entry.path) : undefined}

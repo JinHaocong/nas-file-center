@@ -24,6 +24,13 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
   // opener before Radix moves focus into the confirmation portal.
   const returnFocusTarget = React.useRef<HTMLElement | null>(null);
   const cancelButton = React.useRef<HTMLButtonElement>(null);
+  const leavingCopy = React.useRef<{ title: string; description: React.ReactNode; confirmText: string; danger: boolean }>();
+  // A caller may clear its pending action as soon as the dialog starts closing.
+  React.useLayoutEffect(() => {
+    if (open) leavingCopy.current = { title, description, confirmText, danger };
+  }, [open, title, description, confirmText, danger]);
+  const copy = (open ? undefined : leavingCopy.current) ?? { title, description, confirmText, danger };
+
   return (
     <Dialog.Root open={open} onOpenChange={next => {
       if (!busy) onOpenChange(next);
@@ -32,6 +39,7 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
         <Dialog.Content
           className="nfc-v2-dialog nfc-v2-confirm-dialog nfc-overlay-modal"
+          aria-busy={busy || undefined}
           onOpenAutoFocus={event => {
             const active = document.activeElement;
             returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
@@ -43,6 +51,7 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
             }
           }}
           onCloseAutoFocus={event => {
+            leavingCopy.current = undefined;
             const target = returnFocusTarget.current;
             returnFocusTarget.current = null;
             // A busy/removed launcher must never be focused after close.
@@ -53,15 +62,21 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
               target.focus({ preventScroll: true });
             }
           }}
+          onKeyDownCapture={event => {
+            if (!open) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }}
           onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}
         >
           <header className="nfc-v2-dialog-heading">
-            <span className={'nfc-v2-dialog-icon' + (danger ? ' is-danger' : '')}>
+            <span className={'nfc-v2-dialog-icon' + (copy.danger ? ' is-danger' : '')}>
               <ConsoleIcon name="shield-check" size={20} />
             </span>
             <div>
-              <Dialog.Title>{title}</Dialog.Title>
+              <Dialog.Title>{copy.title}</Dialog.Title>
             </div>
             <button type="button" className="nfc-v2-dialog-close"
               aria-label="关闭确认窗口" disabled={busy}
@@ -70,14 +85,14 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
             </button>
           </header>
           <Dialog.Description asChild>
-            <div className="nfc-v2-confirm-description">{description}</div>
+            <div className="nfc-v2-confirm-description">{copy.description}</div>
           </Dialog.Description>
           <div className="nfc-v2-confirm-actions">
             <ConsoleButton ref={cancelButton} disabled={busy} onClick={() => { if (!busy) onOpenChange(false); }}>取消</ConsoleButton>
-            <ConsoleButton variant={danger ? 'danger' : 'primary'}
+            <ConsoleButton variant={copy.danger ? 'danger' : 'primary'}
               disabled={busy || disabled} loading={busy}
               onClick={() => { if (!busy && !disabled) onConfirm(); }}>
-              {confirmText}
+              {copy.confirmText}
             </ConsoleButton>
           </div>
         </Dialog.Content>

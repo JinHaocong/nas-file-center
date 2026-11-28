@@ -5,12 +5,12 @@ import { Link } from 'react-router-dom';
 import { CodePath } from '../../components/ui/CodePath';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
-import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
-import { DataPanel } from '../../components/ui/DataPanel';
+import { ProgressMotionTrack } from '../../components/ui/ProgressMotionTrack';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 
-import { cloudFilesApi, type CloudFileProvider, type CloudFilesConfiguration, type CloudTransfer, type CloudTransfers } from '../../api/cloudFiles';
+import { cloudFilesApi, type CloudFileProvider, type CloudFilesConfiguration, type CloudTransfer,
+  type CloudTransferFile, type CloudTransfers } from '../../api/cloudFiles';
 import { getStructuredApiError } from '../../api/errors';
 
 import { formatDateTime } from '../../utils/format';
@@ -92,9 +92,33 @@ function TransferProgress({ value, label }: { value: number | null; label: strin
   return progress === null
     ? <span className="nfc-cloud-files-muted">进度待确认</span>
     : <div className="nfc-cloud-transfer-progress">
-      <progress className="nfc-v2-native-progress" max={100} value={progress} aria-label={label} />
+      <ProgressMotionTrack value={progress}>
+        <progress className="nfc-v2-native-progress" max={100} value={progress} aria-label={label} />
+      </ProgressMotionTrack>
       <span aria-hidden="true">{progress}%</span>
     </div>;
+}
+
+/** Keep the filename and its parent readable when a transfer spans several levels. */
+function TransferFileRow({ file }: { file: CloudTransferFile }) {
+  const slash = file.name.lastIndexOf('/');
+  return <li>
+    <div className="nfc-cloud-transfer-file-heading">
+      <div className="nfc-cloud-transfer-file-name">
+        <ConsoleIcon name="file-text" size={15} />
+        <div>
+          <strong>{file.name.slice(slash + 1)}</strong>
+          {slash > 0 && <small>{file.name.slice(0, slash)}</small>}
+        </div>
+      </div>
+      <StatusBadge status={file.status} label={statusLabel[file.status]} />
+    </div>
+    <TransferProgress value={file.progress} label={file.name + '复制进度'} />
+    <div className="nfc-cloud-transfer-file-metrics">
+      <span>{displayBytes(file.bytes)} / {displayBytes(file.total_bytes)}</span>
+      {file.speed !== null && <span>{displaySpeed(file.speed, file.speed_estimated)}</span>}
+    </div>
+  </li>;
 }
 
 /** Native task output remains available under its original service and task ids. */
@@ -110,7 +134,7 @@ function TransferDetails({ transfer, configuration }: { transfer: CloudTransfer;
     {(webUrl || (transfer.status === 'completed' && transfer.verification)) && (
       <div className="nfc-cloud-transfer-links">
         {webUrl && <a target="_blank" rel="noopener noreferrer" href={webUrl}>
-          打开 {providerLabel[transfer.provider]} 传输页 <ConsoleIcon name="arrow-right" size={14} />
+          打开 {providerLabel[transfer.provider]} 传输页 <ConsoleIcon name="arrow-right" size={13} />
         </a>}
         {transfer.status === 'completed' && transfer.verification &&
           <Link to={verificationPage(transfer.verification)}>下载完整性校验</Link>}
@@ -121,19 +145,8 @@ function TransferDetails({ transfer, configuration }: { transfer: CloudTransfer;
       : <>
         <h3 className="nfc-cloud-files-measure-title">逐文件进度</h3>
         <ul className="nfc-cloud-transfer-files" aria-label="逐文件进度">
-          {transfer.files.slice(0, page * filePageSize).map((file, index) => (
-            <li key={file.name + '/' + index}>
-              <div className="nfc-cloud-transfer-file-heading">
-                <strong>{file.name}</strong>
-                <StatusBadge status={file.status} label={statusLabel[file.status]} />
-              </div>
-              <TransferProgress value={file.progress} label={file.name + '复制进度'} />
-              <div className="nfc-cloud-transfer-file-metrics">
-                <span>{displayBytes(file.bytes)} / {displayBytes(file.total_bytes)}</span>
-                <span>速度 {displaySpeed(file.speed, file.speed_estimated)}</span>
-              </div>
-            </li>
-          ))}
+          {transfer.files.slice(0, page * filePageSize).map((file, index) =>
+            <TransferFileRow key={file.name + '/' + index} file={file} />)}
         </ul>
         {transfer.files.length > page * filePageSize &&
           <ConsoleButton variant="ghost" size="sm" onClick={() => setPage(count => count + 1)}>
@@ -150,6 +163,7 @@ export function TransferLedger({ configuration, openId, onOpen, recent, onDismis
   const [action, setAction] = useState<PendingAction | null>(null);
   const [error, setError] = useState('');
   const [visibleCount, setVisibleCount] = useState(filePageSize);
+  const [refreshing, setRefreshing] = useState(false);
   const inFlight = useRef(false);
 
   const list = useQuery({
@@ -213,68 +227,92 @@ export function TransferLedger({ configuration, openId, onOpen, recent, onDismis
     }
   }
 
+  /** Show a busy indicator for the refresh button's own request, independent of polling. */
+  async function refreshTransfers() {
+    setRefreshing(true);
+    try {
+      await client.invalidateQueries({ queryKey: cloudTransfersKey });
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   const liveCount = transfers.filter(transfer => isLiveTransfer(transfer.status)).length;
   const cancelling = action?.kind === 'cancel';
   const providerErrors = Object.entries(list.data?.errors || {}) as [CloudFileProvider, string][];
-  return <DataPanel title="传输任务" id="nfc-cloud-files-transfers" className="nfc-cloud-files-ledger"
-    description={transfers.length > 0 ? liveCount + ' 个进行中' : undefined}
-    action={<ConsoleButton size="sm" variant="ghost" disabled={list.isFetching}
-      leadingIcon={<ConsoleIcon name="refresh" size={15} />}
-      onClick={() => { void client.invalidateQueries({ queryKey: cloudTransfersKey }); }}>刷新</ConsoleButton>}>
-    {list.isPending && <p className="nfc-cloud-files-muted nfc-cloud-ledger-message" role="status">正在读取传输任务…</p>}
-    {list.isError && <p className="nfc-cloud-files-error nfc-cloud-ledger-message" role="alert">无法刷新传输任务，请重试。</p>}
-    {providerErrors.map(([provider, message]) => (
-      <p key={provider} className="nfc-cloud-files-muted nfc-cloud-ledger-message" role="status">{providerLabel[provider]} · {message}</p>
-    ))}
-    {list.isSuccess && transfers.length === 0 && <ConsoleEmpty title={providerErrors.length ? '暂无可读取的任务' : '暂无传输任务'} />}
-    <ul className="nfc-cloud-transfer-list" aria-label="传输任务记录">
-      {visible.map(transfer => {
-        const expanded = transfer.id === openId;
-        const updated = expanded && observed?.id === transfer.id ? observed : transfer;
-        const title = transferName(updated);
-        const detailId = idPrefix + '-' + transfer.id;
-        const source = updated.remote || providerLabel[updated.provider];
-        const native = updated.native_ids[0];
-        return (
-          <li className="nfc-cloud-transfer-row" key={transfer.id}>
-            <div className="nfc-cloud-transfer-heading">
-              <div><strong>{title}</strong>
-                <span className="nfc-cloud-files-muted">{source}{native ? ' · #' + native : ''}</span>
+  return <section id="nfc-cloud-files-transfers" className="nfc-cloud-files-ledger" aria-labelledby="nfc-cloud-transfer-title">
+    <header className="nfc-cloud-ledger-header">
+      <div className="nfc-cloud-ledger-title">
+        <ConsoleIcon name="activity" size={16} />
+        <h2 id="nfc-cloud-transfer-title">传输任务</h2>
+        {liveCount > 0 && <span className="nfc-cloud-ledger-count">{liveCount} 个进行中</span>}
+      </div>
+      <ConsoleButton size="sm" variant="ghost" disabled={list.isFetching} loading={refreshing} aria-label="刷新传输任务"
+        leadingIcon={<ConsoleIcon name="refresh" size={16} />}
+        onClick={() => { void refreshTransfers(); }} />
+    </header>
+    <div className="nfc-cloud-transfer-scroll" role="region" aria-label="传输任务列表" tabIndex={0}>
+      {list.isPending && <p className="nfc-cloud-files-muted nfc-cloud-ledger-message" role="status">正在读取传输任务…</p>}
+      {list.isError && <p className="nfc-cloud-files-error nfc-cloud-ledger-message" role="alert">无法刷新传输任务，请重试。</p>}
+      {providerErrors.map(([provider, message]) => (
+        <p key={provider} className="nfc-cloud-files-muted nfc-cloud-ledger-message" role="status">{providerLabel[provider]} · {message}</p>
+      ))}
+      {list.isSuccess && transfers.length === 0 && <p className="nfc-cloud-ledger-empty">
+        <ConsoleIcon name="activity" size={17} />
+        <span>{providerErrors.length ? '暂无可读取的任务' : '暂无传输任务'}</span>
+      </p>}
+      <ul className="nfc-cloud-transfer-list" aria-label="传输任务记录">
+        {visible.map(transfer => {
+          const expanded = transfer.id === openId;
+          const updated = expanded && observed?.id === transfer.id ? observed : transfer;
+          const title = transferName(updated);
+          const detailId = idPrefix + '-' + transfer.id;
+          const source = updated.remote || providerLabel[updated.provider];
+          const native = updated.native_ids[0];
+          return (
+            <li className="nfc-cloud-transfer-row" key={transfer.id}>
+              <div className="nfc-cloud-transfer-heading">
+                <div><strong>{title}</strong>
+                  <span className="nfc-cloud-files-muted">{source}{native ? ' · #' + native : ''}</span>
+                </div>
+                <StatusBadge status={updated.status} label={statusLabel[updated.status]} />
               </div>
-              <StatusBadge status={updated.status} label={statusLabel[updated.status]} />
-            </div>
-            <div className="nfc-cloud-transfer-summary">
-              <TransferProgress value={updated.progress} label={title + '整笔复制进度'} />
-              <span className="nfc-cloud-files-muted">{displaySpeed(updated.speed, updated.speed_estimated)}</span>
-            </div>
-            {updated.error && <p className="nfc-cloud-files-error">{updated.error}</p>}
-            <div className="nfc-cloud-transfer-actions">
-              <ConsoleButton size="sm" variant="ghost" aria-expanded={expanded} aria-controls={detailId}
-                onClick={() => onOpen(expanded ? null : transfer.id)}>{expanded ? '收起详情' : '查看详情'}</ConsoleButton>
-              {updated.can_cancel && <ConsoleButton size="sm" variant="ghost"
-                onClick={() => { setError(''); setAction({ kind: 'cancel', id: transfer.id }); }}>取消复制</ConsoleButton>}
-              {updated.can_delete && <ConsoleButton size="sm" variant="ghost"
-                leadingIcon={<ConsoleIcon name="trash" size={14} />}
-                onClick={() => { setError(''); setAction({ kind: 'delete', id: transfer.id }); }}>删除记录</ConsoleButton>}
-            </div>
-            <div id={detailId} hidden={!expanded}>
-              {expanded && <>
-                {detail.isPending && <p className="nfc-cloud-files-muted" role="status">正在取得单文件进度…</p>}
-                {awaitingNative && <p className="nfc-cloud-files-muted" role="status">已提交，正在等待原服务报告进度…</p>}
-                {detail.isError && !awaitingNative && <p className="nfc-cloud-files-error" role="alert">详情暂不可用。</p>}
-                {observed?.id === transfer.id && <TransferDetails key={transfer.id}
-                  transfer={observed} configuration={configuration} />}
-              </>}
-            </div>
-          </li>
-        );
-      })}
-    </ul>
-    {transfers.length > visibleCount && <div className="nfc-cloud-ledger-message">
-      <ConsoleButton variant="ghost" size="sm" onClick={() => setVisibleCount(count => count + filePageSize)}>
-        显示更多任务（{visibleCount} / {transfers.length}）
-      </ConsoleButton>
-    </div>}
+              <div className="nfc-cloud-transfer-summary" data-has-speed={updated.speed !== null}>
+                <TransferProgress value={updated.progress} label={title + '整笔复制进度'} />
+                {updated.speed !== null && <span className="nfc-cloud-transfer-speed">
+                  {displaySpeed(updated.speed, updated.speed_estimated)}
+                </span>}
+              </div>
+              {updated.error && <p className="nfc-cloud-files-error">{updated.error}</p>}
+              <div className="nfc-cloud-transfer-actions">
+                <ConsoleButton size="sm" variant="ghost" aria-expanded={expanded} aria-controls={detailId}
+                  leadingIcon={<ConsoleIcon className="nfc-cloud-transfer-chevron" name="chevron-right" size={14} />}
+                  onClick={() => onOpen(expanded ? null : transfer.id)}>{expanded ? '收起详情' : '查看详情'}</ConsoleButton>
+                {updated.can_cancel && <ConsoleButton size="sm" variant="ghost"
+                  onClick={() => { setError(''); setAction({ kind: 'cancel', id: transfer.id }); }}>取消复制</ConsoleButton>}
+                {updated.can_delete && <ConsoleButton size="sm" variant="ghost"
+                  leadingIcon={<ConsoleIcon name="trash" size={14} />}
+                  onClick={() => { setError(''); setAction({ kind: 'delete', id: transfer.id }); }}>删除记录</ConsoleButton>}
+              </div>
+              <div id={detailId} hidden={!expanded}>
+                {expanded && <>
+                  {detail.isPending && <p className="nfc-cloud-files-muted" role="status">正在取得单文件进度…</p>}
+                  {awaitingNative && <p className="nfc-cloud-files-muted" role="status">已提交，正在等待原服务报告进度…</p>}
+                  {detail.isError && !awaitingNative && <p className="nfc-cloud-files-error" role="alert">详情暂不可用。</p>}
+                  {observed?.id === transfer.id && <TransferDetails key={transfer.id}
+                    transfer={observed} configuration={configuration} />}
+                </>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {transfers.length > visibleCount && <div className="nfc-cloud-ledger-message">
+        <ConsoleButton variant="ghost" size="sm" onClick={() => setVisibleCount(count => count + filePageSize)}>
+          显示更多任务（{visibleCount} / {transfers.length}）
+        </ConsoleButton>
+      </div>}
+    </div>
     <ConsoleConfirmDialog open={action !== null}
       onOpenChange={visible => { if (!visible) setAction(null); }}
       title={cancelling ? '取消复制任务' : '删除传输记录'}
@@ -284,5 +322,5 @@ export function TransferLedger({ configuration, openId, onOpen, recent, onDismis
       </>}
       confirmText={cancelling ? '停止传输' : '删除记录'} busy={mutate.isPending} disabled={!canAct}
       onConfirm={() => { void confirmAction(); }} />
-  </DataPanel>;
+  </section>;
 }

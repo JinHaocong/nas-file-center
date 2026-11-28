@@ -67,6 +67,12 @@ export interface CloudTransfers {
   errors?: Partial<Record<CloudFileProvider, string>>;
 }
 
+export type CloudCopySubmission = (CloudTransfer & { skipped_names?: string[] }) | {
+  native_ids: [];
+  submitted_count: 0;
+  skipped_names: string[];
+};
+
 const endpoint = '/api/cloud-files';
 const transfers = endpoint + '/transfers';
 
@@ -79,7 +85,7 @@ export const cloudFilesApi = {
     if (remote !== undefined) query.set('remote', remote);
     return api.get<{ items: CloudEntry[] }>(endpoint + '/entries?' + query);
   },
-  start: (request: NewCloudTransfer) => api.post<CloudTransfer>(transfers, request),
+  start: (request: NewCloudTransfer) => api.post<CloudCopySubmission>(transfers, request),
   list: () => api.get<CloudTransfers>(transfers),
   detail: (id: string) => api.get<CloudTransfer>(transfers + '/' + encodeURIComponent(id)),
   cancel: (id: string) => api.post<CloudTransfer>(transfers + '/' + encodeURIComponent(id) + '/cancel'),

@@ -96,6 +96,16 @@
   overflow-wrap:anywhere; }
 .nfc-v2-quarantine-mobile-list .nfc-quarantine-mobile-card:focus-within {
   border-color:var(--nfc-q-ledger-accent); }
+.nfc-v2-quarantine-ledger .nfc-v2-quarantine-table tbody tr:has(.nfc-v2-quarantine-checkbox:checked),
+.nfc-v2-quarantine-mobile-list .nfc-quarantine-mobile-card:has(.nfc-v2-quarantine-checkbox:checked) {
+  background: color-mix(in srgb, var(--nfc-tint-soft) 64%, var(--studio-paper));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-quarantine-table tbody tr,
+  .nfc-v2-quarantine-mobile-list .nfc-quarantine-mobile-card {
+    transition: background-color 160ms ease, border-color 160ms ease;
+  }
+}
 .nfc-v2-quarantine-ledger :is(input,select,button):focus-visible { outline:2px solid var(--nfc-q-ledger-accent);outline-offset:2px; }
 [data-theme='dark'] .nfc-v2-quarantine-ledger {
   --nfc-q-ledger-paper:var(--nfc-surface-1,#242422);

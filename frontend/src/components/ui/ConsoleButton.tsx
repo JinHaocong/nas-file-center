@@ -7,6 +7,7 @@ export interface ConsoleButtonProps extends React.ButtonHTMLAttributes<HTMLButto
   leadingIcon?: React.ReactNode;
 }
 
+/** Keep compact icon-only actions centered and preserve button semantics during loading. */
 export const ConsoleButton = React.forwardRef<HTMLButtonElement, ConsoleButtonProps>(
   ({ variant = 'secondary', size = 'md', loading = false, leadingIcon, className = '',
     disabled, children, type = 'button', ...props }, ref) => (
@@ -17,7 +18,8 @@ export const ConsoleButton = React.forwardRef<HTMLButtonElement, ConsoleButtonPr
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={['nfc-console-button', 'nfc-console-button-' + variant,
-        'nfc-console-button-' + size, className].filter(Boolean).join(' ')}
+        'nfc-console-button-' + size, leadingIcon && children == null ? 'nfc-console-button-icon-only' : '',
+        className].filter(Boolean).join(' ')}
     >
       {leadingIcon && <span className="nfc-console-button-icon" aria-hidden="true">
         {loading ? <span className="nfc-console-spinner" /> : leadingIcon}
@@ -25,7 +27,7 @@ export const ConsoleButton = React.forwardRef<HTMLButtonElement, ConsoleButtonPr
       {loading && !leadingIcon && <span className="nfc-console-button-busy-overlay" aria-hidden="true">
         <span className="nfc-console-spinner" />
       </span>}
-      <span className="nfc-console-button-label">{children}</span>
+      {children != null && <span className="nfc-console-button-label">{children}</span>}
     </button>
   ),
 );

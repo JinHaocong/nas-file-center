@@ -120,6 +120,11 @@
 }
 .nfc-v2-task-table tbody tr:first-child td { border-top: 0; }
 .nfc-v2-task-table tbody tr:hover { background: color-mix(in srgb, var(--v2-indigo-soft) 43%, var(--v2-paper)); }
+.nfc-v2-task-table tbody tr:focus-within { background: color-mix(in srgb, var(--v2-indigo-soft) 43%, var(--v2-paper)); }
+.nfc-v2-task-table-scroll { overscroll-behavior-x: contain; }
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-task-table tbody tr { transition: background-color 160ms ease; }
+}
 .nfc-v2-task-table th:nth-child(4) { min-width: 225px; }
 .nfc-v2-task-table th:nth-child(7) { min-width: 170px; }
 .nfc-v2-task-table th:last-child { min-width: 140px; }

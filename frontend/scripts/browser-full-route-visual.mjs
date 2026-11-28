@@ -1481,6 +1481,14 @@ try {
             await tab.getByRole('heading', { name: '智能媒体整理', exact: true }).waitFor();
           }
         }
+        const headerCollision = await tab.evaluate(() => {
+          const header = document.querySelector('.nfc-v2-header:not(.has-file-toolbar)');
+          const shortcuts = header?.querySelector('.nfc-studio-shortcuts');
+          const commands = header?.querySelector('.nfc-header-command-cluster');
+          if (!shortcuts || !commands || !shortcuts.getClientRects().length) return false;
+          return shortcuts.getBoundingClientRect().right > commands.getBoundingClientRect().left + 1;
+        });
+        if (headerCollision) problems.push('Header shortcut bar overlaps system actions');
         report.push({ route: item.path, width, theme: themeLabel, ...audit, problems });
         if (problems.length) failures.push({ route: item.path, theme: themeLabel, problems });
       } catch (err) {

@@ -207,6 +207,13 @@
 .nfc-v2-plans-page .nfc-v2-plan-table td { padding: 15px 17px; border-top: 1px solid var(--v2-line); color: var(--v2-text); }
 .nfc-v2-plans-page .nfc-v2-plan-table tbody tr:first-child td { border-top: 0; }
 .nfc-v2-plans-page .nfc-v2-plan-table tbody tr:hover { background: color-mix(in srgb, var(--v2-indigo-soft) 50%, var(--v2-paper)); }
+.nfc-v2-plans-page .nfc-v2-plan-table tbody tr:focus-within {
+  background: color-mix(in srgb, var(--nfc-tint-soft) 55%, var(--studio-paper));
+}
+.nfc-v2-plans-page .nfc-v2-plan-table-scroll { overscroll-behavior-x: contain; }
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-plans-page .nfc-v2-plan-table tbody tr { transition: background-color 160ms ease; }
+}
 /* Plan LIST owns all structural table chrome and column sizing. The shared
    class also appears in PlanDetail: never let list padding, hover surfaces or
    horizontal scroll sizing leak into its separate PlanItem ledger. */

@@ -175,3 +175,26 @@
   outline-offset: 2px;
 }
 .nfc-zspace-authorization-form > p { margin: 0; }
+
+.nfc-v2-settings .nfc-settings-section-nav button[aria-selected='true'] {
+  position: relative;
+  font-weight: 690;
+}
+.nfc-v2-settings .nfc-settings-section-nav button[aria-selected='true']::before {
+  content: '';
+  position: absolute;
+  inset: 9px auto 9px 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--nfc-tint);
+}
+.nfc-v2-settings .nfc-settings-section-nav button[aria-selected='false']:hover {
+  background: color-mix(in srgb, var(--studio-paper) 62%, transparent);
+}
+@media (max-width: 1199px) {
+  .nfc-v2-settings .nfc-settings-section-nav button[aria-selected='true']::before {
+    inset: auto 10px 1px;
+    width: auto;
+    height: 2px;
+  }
+}

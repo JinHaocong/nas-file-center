@@ -1,10 +1,13 @@
 /* Let maintenance bodies scroll independently of their title and review actions. */
 .nfc-v2-dialog.nfc-maintenance-dialog {
   --maintenance-inset: clamp(16px, 3vw, 24px);
+  --maintenance-chrome: color-mix(in srgb, var(--studio-paper) 83%, var(--studio-soft));
   display: flex;
   flex-direction: column;
   max-block-size: min(860px, calc(100dvh - 32px));
   overflow: hidden;
+  border-color: var(--studio-line);
+  background: var(--studio-paper);
 }
 
 .nfc-maintenance-dialog > :is(.nfc-v2-dialog-heading, .nfc-v2-confirm-actions) {
@@ -40,8 +43,8 @@
   position: relative;
   z-index: 1;
   padding-block: 12px;
-  border-block-start: 1px solid var(--nfc-hairline);
-  background: inherit;
+  border-block-start: 1px solid var(--studio-line);
+  background: var(--maintenance-chrome);
 }
 
 .nfc-maintenance-selection {
@@ -54,17 +57,24 @@
 
 .nfc-maintenance-dialog :is(.nfc-v2-history-statuses, .nfc-v2-plan-history-options) label {
   min-block-size: 44px;
-  padding: 8px 10px;
-  border: 1px solid var(--nfc-hairline);
-  border-radius: 8px;
-  background: var(--nfc-surface-1);
-  color: var(--nfc-text);
+  padding: 9px 11px;
+  border: 1px solid var(--studio-line);
+  border-radius: 9px;
+  background: var(--studio-paper);
+  color: var(--studio-ink);
   font-size: 13px;
 }
 
 .nfc-maintenance-dialog :is(.nfc-v2-history-statuses, .nfc-v2-plan-history-options) label:has(input:checked) {
   border-color: var(--nfc-tint-line);
   background: var(--nfc-tint-soft);
+}
+
+@media (hover: hover) {
+  .nfc-maintenance-dialog :is(.nfc-v2-history-statuses, .nfc-v2-plan-history-options) label:has(input:not(:checked):not(:disabled)):hover {
+    border-color: var(--nfc-tint-line);
+    background: var(--maintenance-chrome);
+  }
 }
 
 .nfc-maintenance-dialog :is(.nfc-v2-history-statuses, .nfc-v2-plan-history-options) label:has(:focus-visible) {
@@ -102,10 +112,10 @@
 .nfc-maintenance-summary > div,
 .nfc-maintenance-impact-list > div {
   min-inline-size: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--nfc-hairline);
-  border-radius: 8px;
-  background: var(--nfc-surface-2);
+  padding: 9px 11px;
+  border: 1px solid var(--studio-line);
+  border-radius: 9px;
+  background: var(--maintenance-chrome);
 }
 .nfc-maintenance-summary dd { color: var(--nfc-text); font-size: 16px; font-weight: 720; font-variant-numeric: tabular-nums; }
 .nfc-maintenance-impact-list dt { margin-block-end: 3px; color: var(--nfc-text); font-weight: 690; }
@@ -130,8 +140,14 @@
 
 @media (max-width: 767px) {
   .nfc-v2-dialog.nfc-maintenance-dialog { max-block-size: calc(100dvh - 16px); }
-  .nfc-maintenance-dialog > .nfc-v2-confirm-actions { gap: 6px; padding-block: 9px; }
+  .nfc-maintenance-dialog > .nfc-v2-confirm-actions { gap: 6px; padding-block: 9px max(9px, env(safe-area-inset-bottom)); }
   .nfc-maintenance-dialog > .nfc-v2-confirm-actions > button { min-block-size: 44px; }
   .nfc-maintenance-selection { flex: 1 0 100%; }
   .nfc-maintenance-dialog :is(.nfc-v2-history-statuses, .nfc-v2-plan-history-options) label { min-block-size: 46px; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-maintenance-dialog :is(.nfc-v2-history-statuses, .nfc-v2-plan-history-options) label {
+    transition: background-color 145ms ease, border-color 145ms ease;
+  }
 }

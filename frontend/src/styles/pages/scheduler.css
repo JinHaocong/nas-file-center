@@ -41,7 +41,41 @@
 .nfc-v2-scheduler-actions { display:flex;flex-wrap:wrap;gap:6px;align-items:center; }
 .nfc-v2-scheduler-switch { display:inline-flex;align-items:center;gap:7px;
   color:var(--nfc-sched-text);font-size:12px;cursor:pointer; }
-.nfc-v2-scheduler-switch input { width:17px;height:17px;accent-color:var(--nfc-sched-accent); }
+.nfc-v2-scheduler-switch input {
+  appearance: none;
+  display: inline-grid;
+  align-items: center;
+  width: 31px;
+  height: 18px;
+  padding: 2px;
+  margin-inline-start: 0;
+  flex: none;
+  border: 1px solid var(--studio-line);
+  border-radius: 999px;
+  background: var(--studio-soft);
+  cursor: inherit;
+}
+.nfc-v2-scheduler-switch input::before {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--studio-muted);
+  content: '';
+}
+.nfc-v2-scheduler-switch input:checked { border-color: var(--nfc-tint); background: var(--nfc-tint); }
+.nfc-v2-scheduler-switch input:checked::before {
+  background: var(--studio-paper);
+  transform: translateX(13px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-scheduler-switch input { transition: border-color 160ms ease, background-color 160ms ease; }
+  .nfc-v2-scheduler-switch input::before { transition: transform 180ms var(--nfc-motion-ease); }
+  .nfc-v2-scheduler-table tbody tr { transition: background-color 160ms ease; }
+}
+@media (forced-colors: active) {
+  .nfc-v2-scheduler-switch input { appearance: auto; width: 18px; }
+  .nfc-v2-scheduler-switch input::before { content: none; }
+}
 .nfc-v2-scheduler-switch input:disabled { opacity:.55;cursor:not-allowed; }
 .nfc-v2-scheduler-state,.nfc-v2-scheduler-run-state {
   display:inline-flex;align-items:center;border:1px solid var(--nfc-sched-line);

@@ -212,6 +212,9 @@
 .nfc-file-workspace-search input::-webkit-search-cancel-button { display: none; }
 .nfc-file-workspace-search input:focus-visible { outline: 0; }
 .nfc-file-workspace-search:focus-within { border-color: var(--nfc-tint); }
+.nfc-file-workspace-search:focus-within {
+  box-shadow: 0 0 0 2px var(--nfc-tint-soft);
+}
 .nfc-file-workspace-search > button {
   display: grid;
   place-items: center;
@@ -268,7 +271,12 @@
   font-size: 13px;
   font-weight: 730;
 }
-.nfc-file-workspace-group-title span { font-size: 11px; font-weight: 500; color: var(--studio-muted); }
+.nfc-file-workspace-group-title span {
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--studio-muted);
+}
 .nfc-file-workspace-group-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -297,6 +305,10 @@
 }
 .nfc-file-workspace-entries button[aria-pressed="true"] { border-color: var(--nfc-tint-line); background: var(--nfc-tint-soft); }
 .nfc-file-workspace-entries button:hover:not([aria-pressed="true"], :disabled) { background: var(--studio-ground); }
+.nfc-file-workspace-entries button[data-kind='directory'] .nfc-media-thumbnail:not(:has(img)) {
+  background: var(--nfc-tint-soft);
+  color: var(--nfc-tint);
+}
 .nfc-file-workspace-entries button:disabled { cursor: wait; opacity: .65; }
 .nfc-file-workspace-entry-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .nfc-file-workspace-entry-name > span:last-child { display: grid; gap: 1px; min-width: 0; }
@@ -337,9 +349,17 @@
 .nfc-file-workspace-entries.is-list button[aria-pressed="true"]::before {
   content: "";
   position: absolute;
-  inset: 0 auto 0 0;
+  inset: 9px auto 9px 0;
   width: 2px;
+  border-radius: 2px;
   background: var(--nfc-tint);
+}
+@media (prefers-reduced-motion: no-preference) and (hover: hover) {
+  .nfc-file-workspace-entry-open { transition: transform 150ms var(--nfc-motion-ease), color 150ms ease; }
+  .nfc-file-workspace-entries button:hover:not(:disabled) .nfc-file-workspace-entry-open {
+    transform: translateX(2px);
+    color: var(--nfc-tint);
+  }
 }
 .nfc-file-workspace-entries.is-list .nfc-media-thumbnail {
   position: relative;

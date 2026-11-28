@@ -204,3 +204,48 @@ def test_bad_destinations_fail_before_any_native_submission(cloud_app):
     assert start_rclone(client, landing, names=["../original"]).status_code == 422
     settings.allow_mutation = False
     assert start_rclone(client, landing).status_code == 403
+
+
+def test_rclone_reuses_existing_folder_and_skips_existing_file(cloud_app, monkeypatch):
+    from app.cloud_files import router
+
+    client, _, landing = cloud_app
+    (landing / "封面.jpg").write_bytes(b"keep existing file")
+    (landing / "视频").mkdir()
+    (landing / "视频" / "已完成.mp4").write_bytes(b"keep existing clip")
+    submitted = []
+
+    class Provider:
+        def __init__(self, **kwargs):
+            pass
+
+        def remotes(self):
+            return ["PikPak WebDAV"]
+
+        def entries(self, remote, path):
+            return [{"name": "封面.jpg", "kind": "file", "size": 900},
+                    {"name": "视频", "kind": "directory", "size": None}]
+
+        def require_destination(self, destination):
+            assert destination == landing
+
+        def start(self, remote, path, name, is_directory, destination):
+            submitted.append((name, is_directory, destination))
+            return {"id": "11", "instance": "daemon"}
+
+    monkeypatch.setattr(router, "RcloneProvider", Provider)
+    mixed = start_rclone(client, landing)
+    assert mixed.status_code == 202, mixed.text
+    assert mixed.json()["skipped_names"] == ["封面.jpg"]
+    assert mixed.json()["names"] == ["视频"]
+    assert submitted == [("视频", True, landing / "视频")]
+    all_skipped = start_rclone(client, landing, names=["封面.jpg"])
+    assert all_skipped.status_code == 202
+    assert all_skipped.json() == {"native_ids": [], "submitted_count": 0, "skipped_names": ["封面.jpg"]}
+    assert len(submitted) == 1
+    assert (landing / "封面.jpg").read_bytes() == b"keep existing file"
+    assert (landing / "视频" / "已完成.mp4").read_bytes() == b"keep existing clip"
+
+    (landing / "视频" / "外部路径").symlink_to(landing.parent, target_is_directory=True)
+    assert start_rclone(client, landing).status_code == 409
+    assert len(submitted) == 1

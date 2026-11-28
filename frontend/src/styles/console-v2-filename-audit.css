@@ -85,11 +85,27 @@
   border-color: var(--studio-line);
 }
 .nfc-v2-filename-notice summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   cursor: pointer;
   color: var(--nfc-tint);
   font-weight: 650;
   min-height: 22px;
-  align-content: center;
+}
+.nfc-v2-filename-notice summary::-webkit-details-marker { display: none; }
+.nfc-v2-filename-notice summary::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin-inline-start: auto;
+  border-inline-end: 1.5px solid currentColor;
+  border-block-end: 1.5px solid currentColor;
+  transform: rotate(45deg);
+}
+.nfc-v2-filename-notice[open] summary::after { transform: rotate(225deg); }
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-filename-notice summary::after { transition: transform 160ms var(--nfc-motion-ease); }
 }
 .nfc-v2-filename-notice summary:focus-visible { outline: 2px solid var(--nfc-tint); outline-offset: 3px; }
 @media (min-width: 768px) {

@@ -4,6 +4,7 @@ import test from 'node:test';
 import TestRenderer, { act } from 'react-test-renderer';
 
 import { ConsoleButton } from '../src/components/ui/ConsoleButton';
+import { ProgressMotionTrack } from '../src/components/ui/ProgressMotionTrack';
 
 test('loading replaces the icon in the same slot and keeps the button label', () => {
   const render = (loading: boolean) => <ConsoleButton loading={loading} leadingIcon={<span>+</span>}>添加</ConsoleButton>;
@@ -23,5 +24,19 @@ test('text-only loading retains the label and uses an out-of-flow indicator', ()
   const indicator = view.root.findByProps({ className: 'nfc-console-button-busy-overlay' });
   assert.equal(indicator.props['aria-hidden'], 'true');
   assert.equal(view.root.findByProps({ className: 'nfc-console-button-label' }).children.join(''), '保存');
+  view.unmount();
+});
+
+test('animated progress reuses the visible fill and reports the updated native value immediately', () => {
+  const render = (value: number) => <ProgressMotionTrack value={value}>
+    <progress value={value} max={100} aria-label="任务进度" />
+  </ProgressMotionTrack>;
+  const view = TestRenderer.create(render(27));
+  const fill = view.root.findByProps({ className: 'nfc-progress-motion-fill' });
+  act(() => view.update(render(71)));
+  assert.equal(view.root.findByProps({ className: 'nfc-progress-motion-fill' }), fill);
+  assert.equal(fill.props['aria-hidden'], 'true');
+  assert.equal(view.root.findByType('progress').props.value, 71);
+  assert.equal(view.root.findByProps({ className: 'nfc-progress-motion' }).props.style['--nfc-progress-fraction'], .71);
   view.unmount();
 });

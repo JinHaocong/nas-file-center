@@ -4,6 +4,24 @@
   min-inline-size: 0;
   -webkit-tap-highlight-color: transparent;
 }
+.nfc-console-button:focus-visible {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: 3px;
+}
+.nfc-console-button-secondary:not(:disabled):hover {
+  border-color: var(--nfc-tint-line);
+}
+.nfc-console-button-ghost:not(:disabled):hover {
+  background: var(--nfc-tint-soft);
+}
+.nfc-console-button:active:not(:disabled) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 26%, transparent);
+}
+.nfc-console-button.nfc-console-button-icon-only {
+  min-inline-size: 34px;
+  justify-content: center;
+  padding-inline: 7px;
+}
 
 .nfc-console-button-icon {
   display: inline-grid;
@@ -26,13 +44,75 @@
 .nfc-console-button[aria-busy="true"] { cursor: progress; }
 .nfc-console-button :is(.nfc-console-button-icon, .nfc-console-button-busy-overlay) { color: inherit; }
 
+.nfc-console-checkbox-input:focus-visible {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: 2px;
+}
+
+.nfc-progress-motion {
+  position: relative;
+  display: block;
+  flex: 1 1 0;
+  min-inline-size: 0;
+  block-size: var(--nfc-meter-height, 8px);
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--nfc-meter-track, var(--nfc-hairline));
+}
+.nfc-progress-motion > .nfc-v2-native-progress {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  opacity: 0;
+}
+.nfc-progress-motion-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--nfc-meter-fill, var(--nfc-tint));
+  transform-origin: left center;
+  transform: scaleX(var(--nfc-progress-fraction));
+  pointer-events: none;
+}
+.nfc-progress-motion:dir(rtl) .nfc-progress-motion-fill { transform-origin: right center; }
+.nfc-v2-progress-success .nfc-progress-motion { --nfc-meter-fill: var(--studio-success-ink); }
+.nfc-v2-progress-danger .nfc-progress-motion { --nfc-meter-fill: var(--studio-danger-ink); }
+@media (forced-colors: active) {
+  .nfc-progress-motion > .nfc-v2-native-progress { opacity: 1; appearance: auto; }
+  .nfc-progress-motion-fill { display: none; }
+}
+
 .nfc-console-select-shell { min-inline-size: 0; }
 .nfc-console-select-shell:focus-within > .nfc-console-select-chevron { color: var(--nfc-tint); }
+.nfc-console-select:focus-visible {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: 2px;
+}
 .nfc-console-select:disabled + .nfc-console-select-chevron { opacity: .55; }
 .nfc-console-filter-label { overflow-wrap: anywhere; }
 .nfc-console-pagination { column-gap: 12px; row-gap: 8px; }
 .nfc-console-page-buttons { min-inline-size: 0; }
 .nfc-console-pagination :is(.nfc-console-page-buttons button, select) { min-block-size: 34px; }
+.nfc-console-pagination .nfc-console-page-buttons button[aria-current='page'] {
+  box-shadow: inset 0 0 0 1px var(--nfc-tint-line);
+}
+
+.nfc-studio .nfc-page-content .nfc-page-description { text-wrap: pretty; }
+.nfc-studio .nfc-page-actions { row-gap: 6px; }
+.nfc-studio .nfc-data-panel-description { text-wrap: pretty; }
+.nfc-studio .nfc-data-panel-header > * { min-inline-size: 0; }
+.nfc-studio .nfc-data-panel-header .nfc-data-panel-action { flex-shrink: 0; }
+.nfc-studio .nfc-console-empty {
+  gap: 8px;
+  padding-block: clamp(18px, 3vw, 32px);
+}
+.nfc-studio .nfc-console-empty-icon {
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: 11px;
+}
+.nfc-studio .nfc-console-empty-icon svg { inline-size: 20px; block-size: 20px; }
 
 .nfc-code-path .nfc-v2-code-path-copy {
   position: relative;
@@ -133,6 +213,7 @@
 .nfc-v2-organizer-import-dialog textarea:focus-visible { outline: 2px solid var(--nfc-tint); outline-offset: 2px; }
 
 @media (pointer: coarse) {
+  .nfc-console-button.nfc-console-button-icon-only { min-inline-size: 44px; }
   :is(.nfc-v2-dialog, .nfc-v2-sheet, .nfc-v2-mobile-nav-dialog) .nfc-v2-dialog-close { min-inline-size: 44px; min-block-size: 44px; }
   .nfc-code-path .nfc-v2-code-path-copy { inline-size: 44px; }
 }
@@ -153,12 +234,40 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .nfc-console-button {
-    transition: background-color 135ms ease, border-color 135ms ease, color 135ms ease, translate 110ms ease;
+    transition: background-color 150ms var(--nfc-motion-ease), border-color 150ms var(--nfc-motion-ease),
+      color 150ms var(--nfc-motion-ease), box-shadow 120ms var(--nfc-motion-ease), scale 165ms var(--nfc-motion-ease);
   }
-  .nfc-console-button:active:not(:disabled) { translate: 0 1px; }
+  .nfc-console-button:active:not(:disabled) {
+    scale: .975;
+    transition-duration: 120ms, 120ms, 120ms, 85ms, 85ms;
+  }
+  .nfc-console-button :is(.nfc-console-button-busy-overlay, .nfc-console-button-icon:has(> .nfc-console-spinner)) {
+    animation: nfc-action-busy-arrive 150ms var(--nfc-motion-ease) both;
+  }
+  .nfc-console-button-label { transition: opacity 110ms ease; }
+  .nfc-console-checkbox-input { transition: scale 155ms var(--nfc-motion-ease); }
+  .nfc-console-checkbox-input:active:not(:disabled) { scale: .88; transition-duration: 75ms; }
+  .nfc-progress-motion-fill { transition: transform 300ms var(--nfc-motion-ease); }
+  .nfc-studio :is(.nfc-tool-segment, .nfc-settings-section-nav, .nfc-v2-mobile-theme-options) > button {
+    transition: background-color 155ms var(--nfc-motion-ease), border-color 155ms var(--nfc-motion-ease),
+      color 155ms var(--nfc-motion-ease), scale 120ms var(--nfc-motion-ease);
+  }
+  .nfc-studio :is(.nfc-tool-segment, .nfc-settings-section-nav, .nfc-v2-mobile-theme-options) > button:active:not(:disabled) {
+    scale: .975;
+  }
+  .nfc-console-select-chevron { transition: color 150ms var(--nfc-motion-ease); }
+  .nfc-studio .nfc-console-pagination button:not(:disabled) {
+    transition: background-color 150ms var(--nfc-motion-ease), border-color 150ms var(--nfc-motion-ease);
+  }
   .nfc-v2-code-path-copy > small { animation: nfc-copy-feedback 130ms var(--nfc-motion-ease) both; }
   .nfc-v2-toast { animation: nfc-component-toast-appear 160ms var(--nfc-motion-ease) both; }
+  .nfc-v2-toast[data-closing='true'] {
+    pointer-events: none;
+    animation: nfc-component-toast-leave 125ms ease-in both;
+  }
 }
 
+@keyframes nfc-action-busy-arrive { from { opacity: .25; scale: .9; } to { opacity: 1; scale: 1; } }
 @keyframes nfc-copy-feedback { from { opacity: 0; translate: 0 3px; } }
 @keyframes nfc-component-toast-appear { from { opacity: 0; translate: 0 5px; } }
+@keyframes nfc-component-toast-leave { to { opacity: 0; translate: 0 5px; } }

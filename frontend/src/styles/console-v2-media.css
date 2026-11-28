@@ -13,6 +13,7 @@
 }
 .nfc-v2-media-filters {
   display:flex;align-items:flex-end;flex-wrap:wrap;gap:10px;padding:15px;
+  background:color-mix(in srgb,var(--nfc-media-soft) 64%,var(--nfc-media-bg));
   border-bottom:1px solid var(--nfc-media-line);
 }
 .nfc-v2-media-filters > label,.nfc-v2-media-search > label {
@@ -43,6 +44,12 @@
   border-bottom:1px solid var(--nfc-media-line);overflow-wrap:anywhere; }
 .nfc-v2-media-table tbody tr:last-child td { border-bottom:0; }
 .nfc-v2-media-table tbody tr:hover { background:color-mix(in srgb,var(--nfc-media-soft) 74%,transparent); }
+.nfc-v2-media-table tbody tr:focus-within { background:var(--nfc-media-soft); }
+.nfc-v2-media-table tbody tr:has(.nfc-v2-media-checkbox:checked),
+.nfc-v2-media-mobile .nfc-index-mobile-card:has(.nfc-v2-media-checkbox:checked) { background:var(--nfc-tint-soft); }
+.nfc-v2-media-table tbody tr:has(.nfc-v2-media-checkbox:checked) td:first-child {
+  box-shadow:inset 2px 0 var(--nfc-tint);
+}
 .nfc-v2-media-table th:nth-child(1) { width:42px; }
 .nfc-v2-media-table th:nth-child(2) { width:235px; }
 .nfc-v2-media-table th:nth-child(3) { width:119px; }
@@ -81,6 +88,14 @@
 .nfc-v2-media-mobile .nfc-mobile-record-heading { align-items:flex-start; }
 .nfc-v2-media-mobile .nfc-v2-media-badges { display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end; }
 .nfc-v2-media-mobile .nfc-mobile-record-actions { gap:12px; }
+.nfc-v2-media-mobile .nfc-index-mobile-card:has(.nfc-v2-media-checkbox:checked) { border-color:var(--nfc-tint-line); }
+.nfc-v2-media-table :is(td:nth-child(5),td:nth-child(6)),
+.nfc-v2-media-mobile .nfc-mobile-record-facts { font-variant-numeric:tabular-nums; }
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-media-table tbody tr, .nfc-v2-media-mobile .nfc-index-mobile-card {
+    transition:background-color 140ms ease,border-color 140ms ease;
+  }
+}
 .nfc-v2-media-loading { display:flex;justify-content:center;align-items:center;
   gap:10px;flex-wrap:wrap;min-height:110px;padding:20px;
   color:var(--nfc-media-muted);font-size:12px; }
@@ -99,6 +114,7 @@
   --nfc-media-accent:var(--v2-indigo,#e9e9e6);
 }
 /* Radix queue content must paint above the shared 1300 dim-only overlay. */
+.nfc-v2-media-queue-dialog[data-state='closed'],
 .nfc-v2-media-queue-dialog[data-state='open'] { z-index:1301; }
 .nfc-v2-media-queue-dialog {
   --nfc-media-queue-bg:var(--nfc-surface-1,#ffffff);

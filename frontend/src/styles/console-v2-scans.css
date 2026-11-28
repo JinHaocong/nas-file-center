@@ -130,6 +130,9 @@
   line-height: 1.5;
 }
 .nfc-v2-scan-table tbody tr:first-child td { border-top: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-scan-table tbody tr { transition: background-color 160ms ease; }
+}
 .nfc-v2-scan-table tbody tr:hover,
 .nfc-v2-scan-table tbody tr:focus-within {
   background: var(--v2-indigo-soft);

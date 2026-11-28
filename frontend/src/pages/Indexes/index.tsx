@@ -232,8 +232,8 @@ export const IndexesPage: React.FC = () => {
         {!isError && !isLoading && items.length > 0 && (
           <>
             <div className="nfc-record-controls nfc-index-record-summary" aria-label="本页索引状态">
-              <span><strong>{items.filter(record => record.path_state === 'available').length}</strong> 个目录可用</span>
-              <span><strong>{items.filter(record => record.has_active_job).length}</strong> 个目录有后台任务</span>
+              <span><ConsoleIcon name="folder-open" size={14} /><span><strong>{items.filter(record => record.path_state === 'available').length}</strong> 个目录可用</span></span>
+              <span><ConsoleIcon name="activity" size={14} /><span><strong>{items.filter(record => record.has_active_job).length}</strong> 个目录有后台任务</span></span>
             </div>
             <ResponsiveDataView
               desktop={<div className="nfc-v2-indexes-table-scroll">

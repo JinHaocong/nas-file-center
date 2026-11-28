@@ -216,6 +216,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
         <Dialog.Content
           className="nfc-directory-picker-modal nfc-overlay-modal nfc-v2-directory-dialog nfc-reading-picker"
           data-mobile={isMobile || undefined}
+          aria-busy={busy || undefined}
           onEscapeKeyDown={event => { if (busy || confirmFavoriteId !== null) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}
           onCloseAutoFocus={event => {
@@ -234,7 +235,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
               <div>
                 <Dialog.Title>选择目录 ({multiple ? '多选' : '单选'})</Dialog.Title>
                 <Dialog.Description id="nfc-v2-directory-description">
-                  仅能选择服务器 ALLOWED_ROOTS 允许的目录；最终由后端校验路径。
+                  从允许访问的根目录中选择文件夹。
                 </Dialog.Description>
               </div>
             </div>
@@ -334,7 +335,8 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                     <ConsoleEmpty title={searchQuery ? '没有匹配的子目录' : '当前目录下无子文件夹'} />
                   ) : (
                     <>
-                      <div className="nfc-directory-list-viewport" aria-busy={isDirFetching || undefined}>
+                      <div className="nfc-directory-list-viewport" role="region" aria-label="子目录列表"
+                        tabIndex={0} aria-busy={isDirFetching || undefined}>
                         <ul className="nfc-v2-directory-list">
                           {dirData.items.map(item => (
                             <li className={selectedPaths.includes(item.path) ? 'is-selected' : ''}

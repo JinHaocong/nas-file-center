@@ -1,5 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+
 import { ConsoleIcon } from './ConsoleIcon';
+
+import { useWorkspaceMotionEnabled } from '../../hooks/useWorkspaceMotion';
 
 interface Toast {
   id: number;
@@ -21,13 +24,30 @@ let sequence = 0;
 function ToastNotice({ toast, dismiss }: { toast: Toast; dismiss: (id: number) => void }) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const motionEnabled = useWorkspaceMotionEnabled();
+  const close = useCallback(() => {
+    if (motionEnabled) setClosing(true);
+    else dismiss(toast.id);
+  }, [dismiss, motionEnabled, toast.id]);
+
   useEffect(() => {
-    if (toast.tone === 'error' || hovered || focused) return;
-    const timer = window.setTimeout(() => dismiss(toast.id), 6000);
+    if (toast.tone === 'error' || hovered || focused || closing) return;
+    const timer = window.setTimeout(close, 6000);
     return () => window.clearTimeout(timer);
-  }, [toast, hovered, focused, dismiss]);
+  }, [toast, hovered, focused, closing, close]);
+  useEffect(() => {
+    if (!closing) return;
+    // A fallback keeps a cancelled or otherwise interrupted CSS animation from retaining the notice.
+    const timer = window.setTimeout(() => dismiss(toast.id), motionEnabled ? 200 : 0);
+    return () => window.clearTimeout(timer);
+  }, [closing, dismiss, motionEnabled, toast.id]);
 
   return <div className={'nfc-v2-toast nfc-v2-toast-' + toast.tone}
+    data-closing={closing || undefined}
+    onAnimationEnd={event => {
+      if (closing && event.target === event.currentTarget && event.animationName === 'nfc-component-toast-leave') dismiss(toast.id);
+    }}
     onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}
     onFocus={() => setFocused(true)} onBlur={event => {
       if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
@@ -36,7 +56,7 @@ function ToastNotice({ toast, dismiss }: { toast: Toast; dismiss: (id: number) =
     aria-live={toast.tone === 'error' ? 'assertive' : 'polite'}>
     <ConsoleIcon name={toast.tone === 'error' ? 'x' : toast.tone === 'info' ? 'info' : 'check-circle'} size={19} />
     <span>{toast.text}</span>
-    <button type="button" onClick={() => dismiss(toast.id)} aria-label="关闭通知"><ConsoleIcon name="x" size={17} /></button>
+    <button type="button" onClick={close} aria-label="关闭通知"><ConsoleIcon name="x" size={17} /></button>
   </div>;
 }
 

@@ -20,6 +20,25 @@ import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 
 const isSuccessResult = (value: string) => ['ok', 'success', 'verified'].includes(value);
 
+/** Render the same read-only event while its dialog completes the exit. */
+function AuditDetailFields({ selectedEvent }: { selectedEvent: AuditEvent }) {
+  return (
+    <div className="nfc-audit-detail">
+      <div><span>操作类型</span><strong className="nfc-operation-badge">{selectedEvent.operation}</strong></div>
+      <div><span>执行时间</span><strong>{formatDateTime(selectedEvent.timestamp)}</strong></div>
+      <div><span>执行结果</span><StatusBadge
+        status={isSuccessResult(selectedEvent.result) ? 'completed' : 'failed'}
+        label={selectedEvent.result} /></div>
+      <div className="nfc-reading-audit-path"><span>涉及路径</span><CodePath value={selectedEvent.path} /></div>
+      <details className="nfc-audit-json nfc-record-disclosure"><summary>详细元数据 JSON</summary>
+        <pre className="nfc-code-block" tabIndex={0} aria-label="审计事件原始元数据">
+          {JSON.stringify(selectedEvent.details, null, 2)}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
 export const AuditPage: React.FC = () => {
   useTitle('审计日志');
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
@@ -29,6 +48,8 @@ export const AuditPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const detailsOpener = useRef<HTMLButtonElement | null>(null);
+  const leavingEvent = useRef<AuditEvent | null>(null);
+  const displayedEvent = selectedEvent ?? leavingEvent.current;
 
   const { data: lifecyclePolicy } = useQuery({
     queryKey: ['dataLifecyclePolicy'],
@@ -50,7 +71,11 @@ export const AuditPage: React.FC = () => {
   };
   const renderDetailsButton = (event: AuditEvent) => (
     <ConsoleButton size="sm" variant="ghost"
-      onClick={click => { detailsOpener.current = click.currentTarget; setSelectedEvent(event); }}>查看事件</ConsoleButton>
+      onClick={click => {
+        detailsOpener.current = click.currentTarget;
+        leavingEvent.current = event;
+        setSelectedEvent(event);
+      }}>查看事件</ConsoleButton>
   );
 
   /** Close the open event and search matching operations across all pages. */
@@ -161,6 +186,7 @@ export const AuditPage: React.FC = () => {
           <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
           <Dialog.Content className="nfc-v2-dialog nfc-overlay-modal nfc-audit-detail-modal nfc-v2-audit-detail-modal nfc-record-dialog nfc-reading-dialog"
             onCloseAutoFocus={event => {
+              leavingEvent.current = null;
               const target = detailsOpener.current;
               detailsOpener.current = null;
               if (target?.isConnected && !target.disabled) {
@@ -172,7 +198,7 @@ export const AuditPage: React.FC = () => {
             <header className="nfc-v2-dialog-heading">
               <span className="nfc-v2-dialog-icon"><ConsoleIcon name="file-text" size={20} /></span>
               <div>
-                <Dialog.Title>审计事件详情 #{selectedEvent?.id}</Dialog.Title>
+                <Dialog.Title>审计事件详情 #{displayedEvent?.id}</Dialog.Title>
                 <Dialog.Description>原始操作与元数据记录（只读）。</Dialog.Description>
               </div>
               <Dialog.Close asChild>
@@ -181,23 +207,11 @@ export const AuditPage: React.FC = () => {
                 </button>
               </Dialog.Close>
             </header>
-            {selectedEvent && (
-              <div className="nfc-audit-detail">
-                <div><span>操作类型</span><strong className="nfc-operation-badge">{selectedEvent.operation}</strong></div>
-                <div><span>执行时间</span><strong>{formatDateTime(selectedEvent.timestamp)}</strong></div>
-                <div><span>执行结果</span><StatusBadge
-                  status={isSuccessResult(selectedEvent.result) ? 'completed' : 'failed'}
-                  label={selectedEvent.result} /></div>
-                <div className="nfc-reading-audit-path"><span>涉及路径</span><CodePath value={selectedEvent.path} /></div>
-                <details className="nfc-audit-json nfc-record-disclosure"><summary>详细元数据 JSON</summary>
-                  <pre className="nfc-code-block" tabIndex={0} aria-label="审计事件原始元数据">
-                    {JSON.stringify(selectedEvent.details, null, 2)}
-                  </pre>
-                </details>
-              </div>
-            )}
+            {displayedEvent && <AuditDetailFields selectedEvent={displayedEvent} />}
             <div className="nfc-v2-confirm-actions">
-              {selectedEvent?.operation && <ConsoleButton onClick={() => filterByOperation(selectedEvent.operation)}>
+              {displayedEvent?.operation && <ConsoleButton onClick={() => {
+                if (selectedEvent) filterByOperation(selectedEvent.operation);
+              }}>
                 筛选同类事件
               </ConsoleButton>}
               <ConsoleButton onClick={() => setSelectedEvent(null)}>关闭</ConsoleButton>

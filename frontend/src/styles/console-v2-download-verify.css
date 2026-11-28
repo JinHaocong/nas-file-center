@@ -90,8 +90,23 @@
 .nfc-download-verify-page .nfc-dv-pair-heading svg { color: var(--nfc-tint); }
 .nfc-dv-pair-connector { align-self: center; color: var(--nfc-tint); }
 .nfc-download-verify-page .nfc-dv-pair-card:last-child {
-  background: color-mix(in srgb, var(--nfc-tint-soft) 48%, var(--studio-paper));
+  background: color-mix(in srgb, var(--nfc-tint-soft) 32%, var(--studio-paper));
   border-color: var(--nfc-tint-line);
+}
+.nfc-download-verify-page .nfc-dv-pair-card:focus-within { border-color: var(--nfc-tint); }
+.nfc-download-verify-page .nfc-dv-modes > label:has(input:focus-visible) {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-download-verify-page .nfc-dv-pair-card { transition: border-color 160ms ease; }
+}
+.nfc-dv-source-page .nfc-dv-source-entry:focus-within {
+  border-color: var(--nfc-tint-line);
+  background: color-mix(in srgb, var(--nfc-tint-soft) 45%, var(--studio-paper));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-dv-source-page .nfc-dv-source-entry { transition: border-color 160ms ease, background-color 160ms ease; }
 }
 .nfc-download-verify-page .nfc-dv-pair-card .nfc-dv-field {width:100%;}
 .nfc-download-verify-page .nfc-dv-pair-card .nfc-v2-directory-picker {width:100%;min-width:0;}

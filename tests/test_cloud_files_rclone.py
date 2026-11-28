@@ -125,6 +125,7 @@ def test_submits_a_native_copy_job_in_the_default_web_visible_group(rc, director
     assert "_group" not in payload and payload["_async"] is True
     assert {key: payload[key] for key in parameters} == parameters
     assert payload["_config"]["Immutable"] is True
+    assert payload["_config"]["IgnoreExisting"] is True
     assert payload["_config"]["Links"] is False
 
 

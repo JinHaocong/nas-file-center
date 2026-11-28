@@ -1,22 +1,89 @@
-.nfc-cloud-files-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.19fr) minmax(0, .81fr);
-  align-items: start;
-  gap: var(--tool-space, 20px);
+/* Cloud workspace: one surface with separate browsing and transfer scroll regions. */
+.nfc-app-main .nfc-cloud-files-page > .nfc-cloud-files-header {
+  margin-block-end: 0;
+  min-height: 0;
+  padding-block-end: 0;
+  border: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
 }
-.nfc-cloud-files-layout > * { min-width: 0; }
-.nfc-cloud-files-sources { display: grid; gap: 12px; }
-.nfc-cloud-files-sources > .nfc-tool-segment { width: fit-content; }
+.nfc-app-main .nfc-cloud-files-header .nfc-page-header-copy {
+  flex: 1 1 auto;
+  width: auto;
+}
+.nfc-cloud-files-page .nfc-cloud-files-header .nfc-page-title {
+  font-size: clamp(25px, 2.5vw, 34px);
+  line-height: 1.14;
+}
 .nfc-cloud-files-page .nfc-page-actions > a {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   text-decoration: none;
 }
-.nfc-cloud-files-page :is(.nfc-cloud-files-browser, .nfc-cloud-files-ledger) > .nfc-data-panel-body { padding: 0; }
-.nfc-cloud-files-remote, .nfc-cloud-files-destination, .nfc-cloud-files-toolbar,
-.nfc-cloud-files-list-area, .nfc-cloud-ledger-message { padding-inline: 16px; }
-.nfc-cloud-files-toolbar, .nfc-cloud-files-destination { padding-block: 12px; }
+.nfc-cloud-files-layout {
+  --cloud-inset: 16px;
+  --cloud-row-gap: 9px;
+  --cloud-scroll-limit: clamp(220px, calc(100dvh - 275px), 690px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 34%);
+  align-items: stretch;
+  border: 1px solid var(--tool-border);
+  border-radius: var(--nfc-panel-radius);
+  background: var(--studio-paper);
+}
+.nfc-cloud-files-layout > * { min-width: 0; }
+.nfc-cloud-files-sources { display: flex; flex-direction: column; }
+.nfc-cloud-provider-switch, .nfc-cloud-ledger-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 53px;
+  padding: 7px var(--cloud-inset);
+  border-bottom: 1px solid var(--tool-border);
+}
+.nfc-cloud-provider-control {
+  --cloud-provider-index: 0;
+  position: relative;
+  isolation: isolate;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 3px;
+  border: 1px solid var(--tool-border);
+  border-radius: 9px;
+  background: var(--studio-soft);
+}
+.nfc-cloud-provider-control[data-provider='rclone'] { --cloud-provider-index: 1; }
+.nfc-cloud-provider-control[data-provider]::before {
+  position: absolute;
+  z-index: -1;
+  inset: 3px auto 3px 3px;
+  inline-size: calc((100% - 6px) / 2);
+  border-radius: 6px;
+  background: var(--studio-paper);
+  box-shadow: inset 0 0 0 1px var(--nfc-tint-line), 0 1px 2px rgb(0 0 0 / .045);
+  transform: translateX(calc(var(--cloud-provider-index) * 100%));
+  content: '';
+}
+.nfc-cloud-provider-control .nfc-console-button[aria-pressed='true']:not(:active) {
+  color: var(--nfc-tint);
+  background: transparent;
+  box-shadow: none;
+}
+.nfc-cloud-files-sources > .nfc-cloud-files-error { padding: 10px var(--cloud-inset); }
+.nfc-cloud-files-browser { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.nfc-cloud-files-browser-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 9px var(--cloud-inset);
+}
+.nfc-cloud-files-remote { min-width: 0; flex: 0 1 148px; }
+.nfc-cloud-files-remote .nfc-console-filter { margin: 0; }
+.nfc-cloud-files-remote .nfc-console-filter-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.nfc-cloud-files-remote .nfc-console-select { min-height: 34px; }
 .nfc-cloud-files-toolbar, .nfc-cloud-files-submit, .nfc-cloud-files-crumb,
 .nfc-cloud-files-failure, .nfc-cloud-transfer-heading, .nfc-cloud-transfer-actions,
 .nfc-cloud-transfer-links, .nfc-cloud-transfer-file-heading, .nfc-cloud-transfer-file-metrics {
@@ -26,21 +93,92 @@
   min-width: 0;
   gap: 8px;
 }
+.nfc-cloud-files-toolbar { flex: 1 1 290px; }
 .nfc-cloud-files-toolbar, .nfc-cloud-files-submit, .nfc-cloud-files-failure,
 .nfc-cloud-transfer-heading, .nfc-cloud-transfer-file-heading, .nfc-cloud-transfer-file-metrics {
   justify-content: space-between;
 }
-.nfc-cloud-files-remote { padding-block: 12px 0; }
-.nfc-cloud-files-toolbar > nav { flex: 1 1 160px; min-width: 0; }
-.nfc-cloud-files-crumb :is(button, strong) { overflow-wrap: anywhere; max-width: 100%; }
-.nfc-cloud-files-crumb button[aria-current='location']:disabled { opacity: 1; }
-.nfc-cloud-files-crumb > svg { color: var(--tool-muted); }
-.nfc-cloud-files-page .nfc-cloud-files-search { margin: 0 16px 8px; }
-.nfc-cloud-files-search input { min-width: 0; }
+.nfc-cloud-files-crumb { flex: 1 1 100px; gap: 3px; padding-block: 3px; }
+.nfc-cloud-files-crumb :is(button, strong) {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  padding: 3px;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  font-size: 13px;
+}
+.nfc-cloud-files-crumb button {
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--tool-muted);
+  cursor: pointer;
+}
+.nfc-cloud-files-crumb button:hover:not(:disabled) { color: var(--nfc-tint); background: var(--nfc-tint-soft); }
+.nfc-cloud-files-crumb svg { flex: none; color: var(--tool-muted); }
+.nfc-cloud-files-tools-actions { display: flex; flex: 0 1 194px; min-width: 0; align-items: center; gap: 5px; }
+.nfc-cloud-files-search {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  align-items: center;
+  gap: 7px;
+  padding-inline: 9px;
+  border: 1px solid var(--tool-border);
+  border-radius: 8px;
+  background: var(--studio-soft);
+  color: var(--tool-muted);
+}
+.nfc-cloud-files-search:focus-within {
+  border-color: var(--nfc-tint);
+  box-shadow: 0 0 0 2px var(--nfc-tint-soft);
+}
+.nfc-cloud-files-search svg { flex: none; }
+.nfc-cloud-files-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--nfc-text);
+  font: inherit;
+  font-size: 13px;
+}
+.nfc-cloud-files-search input::placeholder { color: var(--tool-muted); }
+.nfc-cloud-files-columns {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px var(--cloud-inset) 6px calc(var(--cloud-inset) + 36px);
+  background: color-mix(in srgb, var(--studio-soft) 62%, var(--studio-paper));
+  border-block: 1px solid var(--tool-border);
+  color: var(--tool-muted);
+  font-size: 12px;
+}
 .nfc-cloud-files-muted { color: var(--tool-muted, var(--nfc-text-muted)); }
 .nfc-cloud-files-error { color: var(--studio-danger-ink, var(--nfc-danger)); overflow-wrap: anywhere; margin: 0; }
-.nfc-cloud-ledger-message { padding-block: 12px; }
-.nfc-cloud-files-list-area { padding-block-end: 8px; }
+.nfc-cloud-ledger-message { padding: 9px var(--cloud-inset); margin: 0; }
+.nfc-cloud-files-list-area {
+  flex: 1;
+  min-height: 110px;
+  max-height: var(--cloud-scroll-limit);
+  padding: 3px max(7px, calc(var(--cloud-inset) - 9px));
+}
+.nfc-cloud-files-list-area, .nfc-cloud-transfer-scroll {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--nfc-tint-line) transparent;
+}
+.nfc-cloud-files-list-area:focus-visible, .nfc-cloud-transfer-scroll:focus-visible {
+  outline: 2px solid var(--nfc-tint);
+  outline-offset: -2px;
+}
+.nfc-cloud-files-list-area > :is(p, .nfc-cloud-files-failure) { margin: 12px 9px; }
+.nfc-cloud-files-list-area > .nfc-console-empty { min-height: 130px; }
 .nfc-cloud-files-entries, .nfc-cloud-transfer-list, .nfc-cloud-transfer-files {
   display: grid;
   list-style: none;
@@ -48,31 +186,58 @@
   padding: 0;
 }
 .nfc-cloud-files-entries > li {
+  position: relative;
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  grid-template-columns: 27px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  padding: 6px 9px;
+  gap: var(--cloud-row-gap);
+  padding-inline: 9px;
   min-height: 42px;
-  border-bottom: 1px solid var(--tool-border);
-}
-.nfc-cloud-files-entries > li:last-child { border-bottom-color: transparent; }
-.nfc-cloud-files-entries > li:is(.is-selected, :focus-within) {
-  background: var(--nfc-tint-soft);
   border-radius: 8px;
 }
-.nfc-cloud-files-entries > li > input { margin: 0; }
+.nfc-cloud-files-entries > li:hover { background: var(--studio-soft); }
+.nfc-cloud-files-entries > li.is-selected { background: var(--nfc-tint-soft); }
+.nfc-cloud-files-entries > li::before {
+  position: absolute;
+  inset: 9px auto 9px 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--nfc-tint);
+  transform: scaleY(.6);
+  opacity: 0;
+  pointer-events: none;
+  content: '';
+}
+.nfc-cloud-files-entries > li.is-selected::before { transform: scaleY(1); opacity: 1; }
+.nfc-cloud-selection-hit { display: grid; place-items: center; align-self: stretch; }
+.nfc-cloud-selection-hit input { width: 15px; height: 15px; margin: 0; accent-color: var(--nfc-tint); }
+.nfc-cloud-entry-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--nfc-text-muted);
+  background: var(--studio-soft);
+}
+.nfc-cloud-entry-icon[data-kind='directory'] {
+  color: var(--nfc-tint);
+  background: var(--nfc-tint-soft);
+}
 .nfc-cloud-file-name {
   display: inline-flex;
   align-items: center;
   min-width: 0;
-  gap: 7px;
+  gap: 8px;
   padding-block: 4px;
   color: inherit;
   text-align: start;
   overflow-wrap: anywhere;
 }
 button.nfc-cloud-file-name {
+  width: fit-content;
+  max-width: 100%;
   border: 0;
   background: none;
   padding-inline: 0;
@@ -81,10 +246,32 @@ button.nfc-cloud-file-name {
   cursor: pointer;
 }
 button.nfc-cloud-file-name:hover:not(:disabled) { color: var(--nfc-tint); }
-.nfc-cloud-file-name > svg { flex: none; color: var(--tool-muted); }
-.nfc-cloud-files-destination { display: grid; min-width: 0; gap: 10px; border-top: 1px solid var(--tool-border); }
+.nfc-cloud-file-name > .nfc-cloud-file-chevron { color: var(--tool-muted); }
+.nfc-cloud-file-size { color: var(--nfc-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nfc-cloud-files-destination {
+  padding: 9px var(--cloud-inset);
+  border-top: 1px solid var(--tool-border);
+  background: color-mix(in srgb, var(--studio-soft) 46%, var(--studio-paper));
+  border-end-start-radius: var(--nfc-panel-radius);
+}
+.nfc-cloud-selection-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
 .nfc-cloud-files-more { margin-top: 6px; }
-.nfc-cloud-transfer-row { display: grid; gap: 9px; padding: 13px 16px; min-width: 0; }
+.nfc-cloud-files-ledger {
+  min-width: 0;
+  border-inline-start: 1px solid var(--tool-border);
+  background: color-mix(in srgb, var(--studio-soft) 80%, var(--studio-paper));
+  border-start-end-radius: inherit;
+  border-end-end-radius: inherit;
+}
+.nfc-cloud-ledger-header { justify-content: space-between; }
+.nfc-cloud-ledger-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.nfc-cloud-ledger-title > svg { color: var(--nfc-tint); }
+.nfc-cloud-ledger-title h2 { margin: 0; font-size: 14px; }
+.nfc-cloud-ledger-count { color: var(--tool-muted); font-size: 12px; }
+.nfc-cloud-transfer-scroll { max-height: var(--cloud-scroll-limit); }
+.nfc-cloud-ledger-empty { display: flex; align-items: center; gap: 8px; color: var(--tool-muted); margin: 0; padding: 16px var(--cloud-inset); font-size: 13px; }
+.nfc-cloud-ledger-empty svg { flex: none; }
+.nfc-cloud-transfer-row { display: grid; gap: 9px; padding: 12px var(--cloud-inset); min-width: 0; }
 .nfc-cloud-transfer-row + .nfc-cloud-transfer-row { border-top: 1px solid var(--tool-border); }
 .nfc-cloud-transfer-heading > div { display: grid; gap: 2px; min-width: 0; }
 .nfc-cloud-transfer-heading strong, .nfc-cloud-transfer-heading .nfc-cloud-files-muted,
@@ -98,20 +285,47 @@ button.nfc-cloud-file-name:hover:not(:disabled) { color: var(--nfc-tint); }
   gap: 8px;
   font-variant-numeric: tabular-nums;
 }
-.nfc-cloud-transfer-progress > span { font-size: 12px; color: var(--tool-muted); }
-.nfc-cloud-transfer-progress progress { width: 100%; }
+.nfc-cloud-transfer-summary[data-has-speed='false'] { grid-template-columns: minmax(0, 1fr); }
+.nfc-cloud-transfer-speed { color: var(--nfc-tint); font-weight: 650; white-space: nowrap; }
+.nfc-cloud-transfer-actions button[aria-expanded='true'] .nfc-cloud-transfer-chevron { transform: rotate(90deg); }
+.nfc-cloud-transfer-progress > span[aria-hidden] {
+  inline-size: 4ch;
+  text-align: end;
+  font-size: 12px;
+  color: var(--tool-muted);
+}
+.nfc-cloud-transfer-progress .nfc-progress-motion {
+  --nfc-meter-height: 5px;
+  --nfc-meter-track: var(--tool-border);
+}
 .nfc-cloud-transfer-details {
   display: grid;
   gap: 10px;
   margin-top: 3px;
-  padding-top: 10px;
+  padding-top: 12px;
   border-top: 1px solid var(--tool-border);
 }
-.nfc-cloud-transfer-fields { display: grid; gap: 7px; margin: 0; }
-.nfc-cloud-transfer-fields > div { display: grid; grid-template-columns: minmax(76px, auto) minmax(0, 1fr); gap: 8px; }
+.nfc-cloud-transfer-fields {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--tool-border);
+  border-radius: 9px;
+  background: var(--studio-paper);
+}
+.nfc-cloud-transfer-fields > div { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 8px; align-items: baseline; }
 .nfc-cloud-transfer-fields dt, .nfc-cloud-transfer-file-metrics { color: var(--tool-muted); }
-.nfc-cloud-transfer-fields dd { min-width: 0; margin: 0; }
-.nfc-cloud-transfer-links > a { display: inline-flex; gap: 4px; align-items: center; color: var(--nfc-tint); }
+.nfc-cloud-transfer-fields dd { min-width: 0; margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.nfc-cloud-transfer-links > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--nfc-tint);
+  font-size: 12px;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
 .nfc-cloud-files-measure-title { margin: 0; font-size: 13px; }
 .nfc-cloud-transfer-files { gap: 8px; }
 .nfc-cloud-transfer-files > li {
@@ -121,16 +335,120 @@ button.nfc-cloud-file-name:hover:not(:disabled) { color: var(--nfc-tint); }
   padding: 8px 0;
   border-bottom: 1px solid var(--tool-border);
 }
-.nfc-cloud-transfer-file-heading > strong { min-width: 0; font-size: 13px; font-weight: 650; }
-@media (max-width: 920px) {
+.nfc-cloud-transfer-file-heading { flex-wrap: nowrap; align-items: flex-start; }
+.nfc-cloud-transfer-file-heading > :last-child { flex: none; }
+.nfc-cloud-transfer-file-name { min-width: 0; display: flex; align-items: flex-start; gap: 7px; }
+.nfc-cloud-transfer-file-name svg { flex: none; margin-top: 2px; color: var(--nfc-tint); }
+.nfc-cloud-transfer-file-name div { min-width: 0; overflow-wrap: anywhere; }
+.nfc-cloud-transfer-file-name :is(strong, small) { display: block; }
+.nfc-cloud-transfer-file-name strong { font-size: 13px; font-weight: 650; }
+.nfc-cloud-transfer-file-name small { color: var(--tool-muted); font-size: 11px; }
+.nfc-cloud-transfer-file-metrics { font-variant-numeric: tabular-nums; }
+
+.nfc-cloud-copy-overlay { z-index: 1150; }
+.nfc-cloud-copy-dialog.nfc-v2-dialog.nfc-overlay-modal {
+  position: fixed;
+  z-index: 1151;
+  inset: 50% auto auto 50%;
+  translate: -50% -50%;
+  transform: none;
+  width: min(500px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--studio-paper);
+  border: 1px solid var(--studio-line);
+}
+.nfc-cloud-copy-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--studio-line);
+}
+.nfc-cloud-copy-header h2 { margin: 0; font-size: 19px; }
+.nfc-cloud-copy-title { display: flex; align-items: center; gap: 10px; }
+.nfc-cloud-copy-title > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: var(--nfc-tint);
+  background: var(--nfc-tint-soft);
+}
+.nfc-cloud-copy-content {
+  display: grid;
+  min-width: 0;
+  gap: 17px;
+  padding: 16px 18px;
+  overflow-y: auto;
+}
+.nfc-cloud-copy-content h3 { margin: 0 0 8px; font-size: 14px; }
+.nfc-cloud-copy-selection {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(214px, 30dvh);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  border: 1px solid var(--studio-line);
+  border-radius: 9px;
+  overflow-wrap: anywhere;
+}
+.nfc-cloud-copy-selection li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 9px;
+}
+.nfc-cloud-copy-selection li + li { border-top: 1px solid var(--studio-line); }
+.nfc-cloud-copy-content section > .nfc-cloud-files-error { margin-top: 8px; }
+.nfc-cloud-copy-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--studio-line);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-cloud-copy-dialog.nfc-v2-dialog[data-state='open'] { animation: nfc-cloud-copy-enter 160ms var(--nfc-motion-ease) both; }
+  .nfc-cloud-copy-dialog.nfc-v2-dialog[data-state='closed'] { animation: nfc-cloud-copy-dismiss 128ms ease-in both; }
+  .nfc-cloud-provider-control::before { transition: transform 200ms var(--nfc-motion-ease); }
+  .nfc-cloud-files-entries > li { transition: background-color 150ms var(--nfc-motion-ease); }
+  .nfc-cloud-files-entries > li::before {
+    transition: opacity 150ms var(--nfc-motion-ease), transform 160ms var(--nfc-motion-ease);
+  }
+  .nfc-cloud-transfer-details { animation: nfc-cloud-details-reveal 185ms var(--nfc-motion-ease) both; }
+  .nfc-cloud-transfer-chevron { transition: transform 150ms var(--nfc-motion-ease); }
+  @keyframes nfc-cloud-details-reveal { from { opacity: .45; translate: 0 4px; } }
+  @keyframes nfc-cloud-copy-enter {
+    from { opacity: 0; transform: translateY(6px) scale(.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes nfc-cloud-copy-dismiss {
+    to { opacity: 0; transform: translateY(5px) scale(.995); }
+  }
+}
+@media (max-width: 860px) {
   .nfc-cloud-files-layout { grid-template-columns: minmax(0, 1fr); }
+  .nfc-cloud-files-ledger { border-inline-start: 0; border-top: 1px solid var(--tool-border); border-start-end-radius: 0; border-end-start-radius: inherit; }
+  .nfc-cloud-files-list-area { max-height: min(50dvh, 475px); }
+  .nfc-cloud-transfer-scroll { max-height: clamp(220px, 58dvh, 540px); }
+  .nfc-cloud-files-destination { border-end-start-radius: 0; }
 }
 @media (max-width: 520px) {
-  .nfc-cloud-files-remote, .nfc-cloud-files-destination, .nfc-cloud-files-toolbar,
-  .nfc-cloud-files-list-area, .nfc-cloud-transfer-row, .nfc-cloud-ledger-message { padding-inline: 12px; }
-  .nfc-cloud-files-page .nfc-cloud-files-search { margin-inline: 12px; }
+  .nfc-cloud-files-layout { --cloud-inset: 12px; }
+  .nfc-cloud-files-tools-actions { flex: 0 1 145px; }
+  .nfc-cloud-files-crumb { flex-basis: 110px; }
 }
 @media (pointer: coarse) {
-  .nfc-cloud-files-entries > li { min-height: 44px; }
+  .nfc-cloud-files-entries > li, .nfc-cloud-files-search { min-height: 44px; }
+  .nfc-cloud-files-entries > li { grid-template-columns: 40px minmax(0, 1fr) auto; }
+  .nfc-cloud-files-columns { padding-inline-start: calc(var(--cloud-inset) + 49px); }
   button.nfc-cloud-file-name { min-height: 42px; }
+  .nfc-cloud-files-search input { font-size: 16px; }
 }

@@ -100,6 +100,14 @@
 }
 @media (max-width: 767px) {
   .nfc-v2-directory-diff-pair { grid-template-columns: minmax(0, 1fr); gap: 9px; }
-  .nfc-v2-directory-diff-connector { display: none; }
+  .nfc-v2-directory-diff-pair .nfc-v2-directory-diff-connector { justify-self: center; }
   .nfc-v2-directory-diff-pair .nfc-v2-directory-diff-field { padding: 12px; }
+}
+.nfc-v2-directory-diff-pair .nfc-v2-directory-diff-field:focus-within { border-color: var(--nfc-tint-line); }
+.nfc-v2-directory-diff-table tbody tr:focus-within { background: var(--nfc-dd-soft); }
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-directory-diff-pair .nfc-v2-directory-diff-field,
+  .nfc-v2-directory-diff-table tbody tr { transition: border-color 160ms ease, background-color 160ms ease; }
+  .nfc-v2-directory-diff-connector > svg { transition: transform 180ms var(--nfc-motion-ease); }
+  .nfc-v2-directory-diff-connector:active:not(:disabled) > svg { transform: rotate(180deg); }
 }

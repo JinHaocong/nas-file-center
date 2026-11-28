@@ -84,7 +84,26 @@
   gap: 9px;
   min-width: 0;
 }
-.nfc-v2-shell .nfc-archive-recovery-filter-row input { flex: 1 1 220px; }
+.nfc-v2-shell .nfc-archive-search {
+  display: flex;
+  align-items: center;
+  flex: 1 1 180px;
+  gap: 8px;
+  min-width: 0;
+  padding-inline: 10px;
+  border: 1px solid var(--v2-line);
+  border-radius: var(--nfc-radius-control);
+  background: var(--studio-ground);
+  color: var(--v2-muted);
+}
+.nfc-v2-shell .nfc-archive-search:focus-within { border-color: var(--nfc-tint); }
+.nfc-v2-shell .nfc-archive-search svg { flex: none; }
+.nfc-v2-shell .nfc-archive-recovery-page .nfc-archive-search input[type='search'] {
+  padding-inline: 0;
+  border: 0;
+  outline-offset: 2px;
+  background: transparent;
+}
 .nfc-v2-shell .nfc-archive-recovery-page .nfc-console-button-primary {
   color: #fff;
   background: #262625;
@@ -131,10 +150,25 @@
 .nfc-v2-shell .nfc-archive-recovery-file.is-selected strong {
   margin-left: auto;
   flex: 0 0 auto;
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
   font-weight: 660;
-  color: var(--v2-text);
+  color: var(--nfc-tint);
 }
+.nfc-archive-file-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--studio-soft);
+  color: var(--nfc-tint);
+}
+.nfc-archive-file-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.nfc-archive-recovery-file.is-selected .nfc-archive-file-icon { background: var(--nfc-tint-soft); }
 .nfc-v2-shell .nfc-archive-recovery-empty {
   margin: 0;
   padding: 20px 12px;
@@ -255,10 +289,14 @@
   align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
-  margin-bottom: 16px;
   border: 1px solid var(--studio-line);
   border-radius: var(--nfc-radius-control);
   background: var(--studio-ground);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-v2-shell .nfc-archive-recovery-file {
+    transition: border-color 140ms ease, background-color 140ms ease;
+  }
 }
 .nfc-archive-source-summary > svg { flex: none; color: var(--nfc-tint); }
 .nfc-archive-source-summary > div { display: grid; gap: 5px; min-width: 0; }

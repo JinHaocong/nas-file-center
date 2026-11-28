@@ -2,7 +2,7 @@
 
 面向自托管 NAS 的中文 Web 文件工具。可以从一个目录开始整理照片和视频，跨目录查找重复文件，或把反复执行的归档流程保存成工作流。扫描和媒体整理在后台运行，关闭页面后可以回到任务中心查看结果。
 
-**已发布镜像 `kerwinjhc/nas-file-center:2.0.6`** · `linux/amd64`
+**已发布镜像 `kerwinjhc/nas-file-center:2.0.7`** · `linux/amd64`
 
 [Docker Hub](https://hub.docker.com/r/kerwinjhc/nas-file-center/tags) · [镜像构建](https://github.com/JinHaocong/nas-file-center/actions/workflows/dockerhub-publish.yml) · [发布验证](https://github.com/JinHaocong/nas-file-center/actions/workflows/release-validation.yml)
 
@@ -152,10 +152,10 @@ docker compose ps
 ```yaml
 services:
   api:
-    image: kerwinjhc/nas-file-center:2.0.6
+    image: kerwinjhc/nas-file-center:2.0.7
     platform: linux/amd64
   worker:
-    image: kerwinjhc/nas-file-center:2.0.6
+    image: kerwinjhc/nas-file-center:2.0.7
     platform: linux/amd64
 ```
 

@@ -42,6 +42,7 @@
     background: var(--nfc-tint-soft);
     color: var(--nfc-tint);
     font-weight: 750;
+    box-shadow: inset 0 0 0 1px var(--nfc-tint-line);
   }
   .nfc-workspace-navigation > a:hover { background: var(--nfc-tint-soft); color: var(--nfc-tint); }
   .nfc-workspace-navigation-title {
@@ -50,6 +51,7 @@
     font-size: 11px;
     font-weight: 730;
   }
+  .nfc-workspace-navigation > a > svg { flex: 0 0 auto; }
   .nfc-studio .nfc-workspace-navigation + .nfc-v2-page-content.nfc-page-content {
     padding-inline: clamp(23px, 3vw, 48px) !important;
   }
@@ -105,6 +107,12 @@
 .nfc-login-shell .nfc-login-password-visibility:focus-visible { outline: 2px solid var(--nfc-tint); outline-offset: -2px; }
 .nfc-login-shell .nfc-login-password-visibility:disabled { opacity: .58; cursor: not-allowed; }
 .nfc-v2-login-shell .nfc-v2-login-input-wrap:has(.nfc-login-password-visibility) { padding-inline-end: 4px; }
+.nfc-v2-login-shell .nfc-v2-login-input-wrap:focus-within {
+  border-color: var(--nfc-tint);
+  box-shadow: 0 0 0 3px var(--nfc-tint-soft);
+}
+.nfc-v2-login-shell .nfc-v2-login-field label { font-weight: 680; }
+.nfc-v2-login-shell .nfc-login-submit { min-block-size: 44px; }
 
 .nfc-login-storage-art { display: none; }
 @media (min-width: 902px) {
@@ -126,12 +134,38 @@
 
 .nfc-v2-confirm-dialog.nfc-overlay-modal {
   border-color: var(--studio-line);
-  border-radius: 15px;
+  border-radius: var(--nfc-overlay-radius);
   background: var(--studio-paper);
+  box-shadow: var(--nfc-shadow-overlay);
+}
+.nfc-v2-confirm-dialog > .nfc-v2-dialog-heading {
+  gap: 11px;
+  align-items: center;
+  padding: 14px 22px;
+  background: var(--nfc-overlay-chrome);
+  border-bottom-color: var(--studio-line);
+}
+.nfc-v2-confirm-dialog > .nfc-v2-dialog-heading h2 {
+  margin: 0;
+  color: var(--studio-ink);
+  line-height: 1.35;
+}
+.nfc-v2-confirm-dialog .nfc-v2-dialog-icon {
+  width: 35px;
+  height: 35px;
+  flex-basis: 35px;
+  border-radius: 9px;
+  background: var(--nfc-tint-soft);
+  color: var(--nfc-tint);
+}
+.nfc-v2-confirm-dialog .nfc-v2-dialog-icon.is-danger {
+  color: var(--studio-danger-ink);
+  background: var(--studio-danger-soft);
 }
 .nfc-v2-confirm-dialog .nfc-v2-confirm-actions {
-  padding-top: 14px;
+  padding: 11px 22px;
   border-top: 1px solid var(--studio-line);
+  background: var(--nfc-overlay-chrome);
 }
 .nfc-v2-confirm-dialog .nfc-console-button { min-height: 39px; }
 .nfc-v2-sheet.nfc-overlay-drawer { border-color: var(--studio-line); background: var(--studio-paper); }
@@ -142,20 +176,26 @@
 
 @media (max-width: 767px) {
   .nfc-v2-confirm-dialog .nfc-console-button { min-height: 44px; }
+  .nfc-v2-confirm-dialog > .nfc-v2-dialog-heading { padding-inline: 16px; }
+  .nfc-v2-confirm-dialog > .nfc-v2-confirm-description { padding-inline: 16px; }
+  .nfc-v2-confirm-dialog .nfc-v2-confirm-actions { padding: 10px 16px max(10px, env(safe-area-inset-bottom)); }
   /* Let the workspace surface reach the mobile dock on short pages. */
   .nfc-workspace-frame { flex-direction: column; }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .nfc-workspace-navigation > a { transition: background-color 145ms ease, color 145ms ease; }
+  .nfc-workspace-navigation > a {
+    transition: background-color 150ms var(--nfc-motion-ease), color 150ms var(--nfc-motion-ease);
+  }
+  .nfc-v2-login-shell .nfc-v2-login-input-wrap {
+    transition: border-color 150ms var(--nfc-motion-ease), box-shadow 150ms var(--nfc-motion-ease);
+  }
+  .nfc-v2-login-shell .nfc-v2-login-layout {
+    animation: nfc-login-arrive 200ms var(--nfc-motion-ease) both;
+  }
   .nfc-storage-preview :is(canvas, .nfc-storage-preview-fallback) { transition: opacity 150ms ease; }
-  .nfc-v2-confirm-dialog.nfc-overlay-modal[data-state="open"] { animation: nfc-dialog-arrive 165ms var(--nfc-motion-ease) both; }
-  .nfc-v2-confirm-dialog.nfc-overlay-modal[data-state="closed"] { animation: nfc-dialog-dismiss 115ms ease-in both; }
-  .nfc-v2-dialog-overlay.nfc-v2-confirm-overlay[data-state="closed"] { animation: nfc-dialog-dismiss-scrim 115ms ease-in both; }
   .nfc-studio .nfc-v2-dropdown[open] > .nfc-v2-menu { animation: nfc-menu-arrive 140ms var(--nfc-motion-ease) both; }
 }
 
-@keyframes nfc-dialog-arrive { from { opacity: 0; translate: 0 7px; scale: .985; } }
-@keyframes nfc-dialog-dismiss { to { opacity: 0; translate: 0 4px; scale: .995; } }
-@keyframes nfc-dialog-dismiss-scrim { to { opacity: 0; } }
 @keyframes nfc-menu-arrive { from { opacity: 0; translate: 0 -4px; } }
+@keyframes nfc-login-arrive { from { opacity: .92; translate: 0 5px; } }

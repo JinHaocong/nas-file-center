@@ -24,7 +24,8 @@ export function useWorkspaceMotion(main: RefObject<HTMLElement>, pathname: strin
     const surface = main.current?.firstElementChild;
     if (!active || !enabled || !(surface instanceof HTMLElement) || !surface.animate) return;
 
-    const transition = animate(surface, { opacity: [0.84, 1] }, { duration: 0.17, ease: 'easeOut' });
+    const transition = animate(surface, { opacity: [0.9, 1], translate: ['0px 4px', '0px 0px'] },
+      { duration: 0.19, ease: [0.22, 0.7, 0.28, 1] });
     return () => transition.cancel();
   }, [active, enabled, main, pathname]);
 }

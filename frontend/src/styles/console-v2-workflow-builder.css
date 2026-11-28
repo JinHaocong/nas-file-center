@@ -185,7 +185,23 @@
 }
 .nfc-workflow-builder-page .nfc-workflow-step-list {
   display: grid;
-  gap: 3px;
+  gap: 5px;
+}
+.nfc-workflow-builder-page .nfc-workflow-definition-rail .nfc-data-panel-header,
+.nfc-workflow-builder-page .nfc-workflow-pipeline-canvas .nfc-data-panel-header {
+  align-items: center;
+}
+.nfc-workflow-builder-page .nfc-workflow-pipeline-canvas .nfc-v2-step-menu {
+  border-color: var(--studio-line);
+  background: var(--studio-paper);
+  transform-origin: top left;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-workflow-builder-page .nfc-v2-step-menu { animation: nfc-workflow-menu-arrive 170ms var(--nfc-motion-ease) both; }
+  @keyframes nfc-workflow-menu-arrive {
+    from { opacity: .25; transform: translateY(-3px) scale(.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
 }
 .nfc-workflow-builder-page .nfc-step-add-surface,
 .nfc-workflow-builder-page .nfc-step-end-note {
