@@ -29,7 +29,7 @@ const task = {
   finished_at: '2026-10-12T09:03:00+08:00',
   heartbeat_at: '2026-10-12T09:02:00+08:00',
   error: null, error_code: null, retry_of: null,
-  checkpoint: {}, payload: {},
+  checkpoint: {}, payload: { scan_job_id: '42' },
 };
 const watchedTask = {
   ...task, id: '9007199254740999', job_type: 'cloud-copy', status: 'running',
@@ -84,10 +84,15 @@ async function auditTaskMonitor(page, width) {
   assert.match(await row.getAttribute('class') ?? '', /nfc-record-selected/);
   assert.match(await row.innerText(), /18\.4 MiB\/s/);
   assert.doesNotMatch(await row.innerText(), /example\/destination/);
+  const logsButton = sheet.locator('.nfc-v2-sheet-footer').getByRole('button', { name: '查看任务日志' });
+  await logsButton.waitFor();
+  await sheet.evaluate(node => Promise.all(node.getAnimations().map(animation => animation.finished.catch(() => {}))));
+  const footerBounds = await logsButton.boundingBox();
   const pageScroll = await page.evaluate(() => window.scrollY);
-  await sheet.getByRole('button', { name: '查看任务日志' }).click();
+  await logsButton.click();
   await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '任务日志');
   assert.equal(await page.evaluate(() => window.scrollY), pageScroll, 'Jump to logs only scrolls inside the sheet');
+  assert.deepEqual(await logsButton.boundingBox(), footerBounds, 'The action stays fixed while the body scrolls');
   await page.keyboard.press('Escape');
   await sheet.waitFor({ state: 'hidden' });
   await page.waitForFunction(() => document.activeElement?.id === 'nfc-task-queue');
@@ -196,7 +201,7 @@ async function auditMountedOverlaySectionOwnership(page, theme, width, phase) {
       };
       const rect = section.getBoundingClientRect();
       if (!background || background === 'transparent' ||
-          background === 'rgba(0, 0, 0, 0)' || radius !== '13px' ||
+          background === 'rgba(0, 0, 0, 0)' || radius !== '12px' ||
           actual.background !== background || actual.radius !== radius ||
           actual.image !== 'none' || actual.borderStyle !== 'solid' ||
           rect.width <= 0 || rect.height <= 0 || rect.left < -2 ||
@@ -250,6 +255,17 @@ try {
         await detailLauncher.click({ timeout: 15000 });
         const sheet = page.locator('.nfc-v2-sheet.nfc-overlay-drawer');
         await sheet.waitFor({ state: 'visible' });
+        if (width === 390 && theme.mode === 'light') {
+          const more = sheet.getByRole('button', { name: '更多操作', exact: true });
+          await more.click();
+          const source = sheet.getByRole('link', { name: '查看来源扫描 #42' });
+          await source.focus();
+          await page.screenshot({ path: resolve(OUT, 'detail-actions-' + label + '.png'), animations: 'disabled' });
+          await page.keyboard.press('Escape');
+          await source.waitFor({ state: 'hidden' });
+          assert.equal(await more.evaluate(button => button === document.activeElement), true);
+          assert.equal(await sheet.isVisible(), true);
+        }
         await auditMountedOverlaySectionOwnership(page, theme.effective, width, 'sheet');
         const deleteLauncher = sheet.getByRole('button', { name: '删除任务 #42' });
         const deleteOpener = await deleteLauncher.elementHandle();

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { plansApi } from '../../api/domain';
@@ -51,12 +51,15 @@ export const BatchPage: React.FC = () => {
   const [mappingsText, setMappingsText] = useState('');
   const [planLoading, setPlanLoading] = useState(false);
   const [validationError, setValidationError] = useState('');
-  const toolPicker = useRef<HTMLDetailsElement>(null);
+  const [toolPickerOpen, setToolPickerOpen] = useState(false);
+  const toolPicker = useRef<HTMLDivElement>(null);
+  const toolPickerTrigger = useRef<HTMLButtonElement>(null);
+  const toolPickerMenuId = useId();
   const mountedRef = useRef(true);
   const planGuard = useRef(false);
   const planMutation = useMutation({ mutationFn: plansApi.createPlan });
 
-  useEffect(() => { setValidationError(''); }, [operation]);
+  useEffect(() => { setValidationError(''); setToolPickerOpen(false); }, [operation]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -64,14 +67,15 @@ export const BatchPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (!toolPickerOpen) return;
     const closeOutside = (event: PointerEvent) => {
-      if (toolPicker.current?.open && event.target instanceof Node && !toolPicker.current.contains(event.target)) {
-        toolPicker.current.open = false;
+      if (event.target instanceof Node && !toolPicker.current?.contains(event.target)) {
+        setToolPickerOpen(false);
       }
     };
     document.addEventListener('pointerdown', closeOutside);
     return () => document.removeEventListener('pointerdown', closeOutside);
-  }, []);
+  }, [toolPickerOpen]);
 
   const handleGeneratePlan = async () => {
     if (planGuard.current) return;
@@ -103,10 +107,7 @@ export const BatchPage: React.FC = () => {
   /** Change tools and clear an organizer link when leaving the organizer. */
   const onOperationChange = (next: BatchMode) => {
     if (planGuard.current) return;
-    if (toolPicker.current?.open) {
-      toolPicker.current.open = false;
-      toolPicker.current.querySelector('summary')?.focus();
-    }
+    closeToolPicker();
     setSearchParams(current => {
       const params = new URLSearchParams(current);
       for (const key of ['directory', 'execution', 'preview', 'batch']) params.delete(key);
@@ -128,41 +129,51 @@ export const BatchPage: React.FC = () => {
     (organizerJobId(searchParams, 'batch') ?? organizerJobId(searchParams, 'preview'));
   const tool = operations.find(item => item.op === operation);
   const scopeCount = operation === 'move' || operation === 'rename' ? splitLines(mappingsText).length : paths.length;
+  /** Return to the stable trigger when a tool opens or the chooser is dismissed by keyboard. */
+  function closeToolPicker() {
+    setToolPickerOpen(false);
+    toolPickerTrigger.current?.focus({ preventScroll: true });
+  }
   const toolChooser = (
-    <details className="nfc-studio-tool-picker" ref={toolPicker}
+    <div className="nfc-studio-tool-picker" ref={toolPicker}
       onBlur={event => {
-        if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) event.currentTarget.open = false;
+        if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setToolPickerOpen(false);
       }}
       onKeyDown={event => {
-        if (event.key === 'Escape') {
-          event.currentTarget.open = false;
-          event.currentTarget.querySelector('summary')?.focus();
+        if (event.key === 'Escape' && toolPickerOpen) {
+          event.preventDefault();
+          closeToolPicker();
         }
       }}>
-      <summary><ConsoleIcon name="sliders" size={15} />切换文件工具<ConsoleIcon name="chevron-down" size={14} /></summary>
-        <fieldset className="nfc-v2-batch-operations">
-          <legend>操作类型</legend>
+      <button type="button" className="nfc-studio-tool-picker-trigger" ref={toolPickerTrigger}
+        aria-expanded={toolPickerOpen} aria-controls={toolPickerOpen ? toolPickerMenuId : undefined}
+        onClick={() => setToolPickerOpen(open => !open)}>
+        <ConsoleIcon name="sliders" size={15} />切换文件工具<ConsoleIcon name="chevron-down" size={14} />
+      </button>
+      {toolPickerOpen && (
+        <div id={toolPickerMenuId} className="nfc-v2-batch-operations nfc-studio-tool-picker-panel" role="group" aria-label="操作类型">
+          <p className="nfc-v2-batch-operation-label">操作类型</p>
           <div className="nfc-batch-operation-grid">
             {operations.map(item => (
-              <label key={item.op} className={'nfc-v2-batch-radio' +
-                (operation === item.op ? ' is-selected' : '')}>
-                <input type="radio" name="batch-operation" value={item.op}
-                  checked={operation === item.op} disabled={planLoading}
-                  onChange={() => onOperationChange(item.op)} />
+              <button type="button" key={item.op} className={'nfc-v2-batch-radio' +
+                (operation === item.op ? ' is-selected' : '')} aria-pressed={operation === item.op}
+                disabled={planLoading} onClick={() => onOperationChange(item.op)}>
+                <i className="nfc-v2-batch-operation-indicator" aria-hidden="true" />
                 <span>{item.title}</span>
-              </label>
+              </button>
             ))}
-            <label className="nfc-v2-batch-radio is-disabled">
-              <input type="radio" value="hardlink" disabled />
+            <button type="button" className="nfc-v2-batch-radio is-disabled" disabled>
+              <i className="nfc-v2-batch-operation-indicator" aria-hidden="true" />
               <span>硬链接去重<small>未实现</small></span>
-            </label>
-            <label className="nfc-v2-batch-radio is-disabled">
-              <input type="radio" value="reflink" disabled />
+            </button>
+            <button type="button" className="nfc-v2-batch-radio is-disabled" disabled>
+              <i className="nfc-v2-batch-operation-indicator" aria-hidden="true" />
               <span>Reflink 浅克隆<small>未实现</small></span>
-            </label>
+            </button>
           </div>
-        </fieldset>
-    </details>
+        </div>
+      )}
+    </div>
   );
   return (
     <div className="nfc-operations-page nfc-batch-page nfc-page-layout-workbench nfc-v2-batch"

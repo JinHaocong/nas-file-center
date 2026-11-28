@@ -136,6 +136,12 @@ function fixture(path) {
   if (path === '/api/quarantine/retention-policy') return {
     quarantine_retention_days: 30,
   };
+  if (path === '/api/database-maintenance') return {
+    database: { database_bytes: 32_000_000, wal_bytes: 1_000_000, reusable_bytes: 800_000,
+      estimated_reclaimable_bytes: 800_000, wal_retained_limit_bytes: 8_000_000, active_jobs: 0 },
+    task_events: { jobs: 2, rows: 24 }, operation_journal: { rows: 16 },
+    policy: { automatic: false, task_event_retention_days: 30, operation_journal_retention_days: 90 },
+  };
   if (path === '/api/settings/resource-policy') return {
     revision: 1, scan_threads: 2, hash_threads: 2,
     io_limit: 'normal', job_priority: 'normal',
@@ -396,6 +402,17 @@ try {
           const commandCluster = header?.querySelector('.nfc-header-command-cluster');
           const left = header?.querySelector('.nfc-v2-header-left');
           const identityStyle = identity ? getComputedStyle(identity) : null;
+          const dock = shell?.querySelector('.nfc-v2-mobile-dock');
+          const activeDock = dock?.querySelector('.nfc-mobile-dock-item.is-active');
+          const indicator = dock?.querySelector('.nfc-mobile-dock-marker');
+          function center(element) {
+            const rect = element?.getBoundingClientRect();
+            return rect ? [rect.x + rect.width / 2, rect.y + rect.height / 2] : null;
+          }
+          const control = center(activeDock);
+          const highlight = center(indicator);
+          const activeIcon = center(activeDock?.querySelector('svg'));
+          const activeLabel = center(activeDock?.querySelector('span'));
           return {
             pathname: location.pathname,
             effectiveTheme: document.documentElement.dataset.theme,
@@ -408,6 +425,9 @@ try {
             viewportHeight: window.innerHeight,
             hasShell: Boolean(shell),
             busy: Boolean(main?.querySelector('.nfc-session-loading')),
+            dockAligned: control !== null && highlight !== null && activeIcon !== null && activeLabel !== null &&
+              control.every((value, index) => Math.abs(value - highlight[index]) <= .75) &&
+              Math.abs(activeIcon[0] - highlight[0]) <= .75 && Math.abs(activeLabel[0] - highlight[0]) <= .75,
             mobileHeader: header && identity && commandCluster && left ? {
               identityText: identity.textContent?.trim() || '',
               identityHeight: identity.getBoundingClientRect().height,
@@ -429,6 +449,8 @@ try {
           'Document horizontal overflow: ' + audit.horizontalOverflow + 'px');
         if (width <= 767 && !item.public && (audit.mainDocumentBottom ?? 0) < audit.viewportHeight - 2)
           problems.push('Mobile workspace exposes the legacy canvas below short content');
+        if (width <= 767 && !item.public && !audit.dockAligned)
+          problems.push('Mobile dock indicator is not centered on its current tab');
         if (width <= 768 && !item.public) {
           const h = audit.mobileHeader;
           if (!h) problems.push('Mobile page header controls are missing');
@@ -1458,6 +1480,65 @@ try {
           }
           await tab.getByRole('button', { name: '取消' }).click();
         }
+        if (item.id === 'cloud-files' && (width === 390 || width === 1440) && themeLabel === 'light-dark') {
+          const cloudReadRoutes = [BASE + '/api/cloud-files/configuration', BASE + '/api/cloud-files/entries?**'];
+          const entries = Array.from({ length: 20 }, (_, i) => ({
+            name: '海岸公路 · 外景素材备份及机位补充说明 ' + String(i + 1).padStart(2, '0') + '.mp4',
+            kind: 'file', size: 24000000,
+          }));
+          await tab.route(cloudReadRoutes[0], route => route.request().method() === 'GET'
+            ? route.fulfill({ json: { ...fixture('/api/cloud-files/configuration'), writable: true } }) : route.fallback());
+          await tab.route(cloudReadRoutes[1], route => route.request().method() === 'GET'
+            ? route.fulfill({ json: { items: entries } }) : route.fallback());
+          try {
+            await tab.reload({ waitUntil: 'domcontentloaded' });
+            for (const entry of entries) await tab.getByRole('checkbox', { name: '选择 ' + entry.name, exact: true }).check();
+            const opener = tab.getByRole('button', { name: '复制到 NAS', exact: true });
+            await opener.focus();
+            await tab.keyboard.press('Enter');
+            const dialog = tab.getByRole('dialog', { name: '复制到 NAS', exact: true });
+            await dialog.waitFor();
+            const geometry = await dialog.evaluate(node => {
+              const rect = node.getBoundingClientRect();
+              const body = node.querySelector('.nfc-cloud-copy-content');
+              const header = node.querySelector('header');
+              const footer = node.querySelector('footer');
+              const before = [header.getBoundingClientRect().top, footer.getBoundingClientRect().bottom];
+              body.scrollTop = body.scrollHeight;
+              const after = [header.getBoundingClientRect().top, footer.getBoundingClientRect().bottom];
+              const result = { x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+                scrolled: body.scrollTop, before, after,
+                hasHorizontalOverflow: body.scrollWidth > body.clientWidth,
+                listOverflow: getComputedStyle(node.querySelector('.nfc-cloud-copy-selection')).overflowY };
+              body.scrollTop = 0;
+              return result;
+            });
+            assert.equal(geometry.hasHorizontalOverflow, false, JSON.stringify(geometry));
+            if (width === 390) {
+              assert.ok(geometry.x === 0 && geometry.width === width && Math.abs(geometry.y + geometry.height - 900) < 1,
+                'Copy review anchors to the full mobile bottom edge: ' + JSON.stringify(geometry));
+              assert.ok(geometry.scrolled > 100 && geometry.listOverflow === 'visible',
+                'One scroll body contains the target and the entire file list: ' + JSON.stringify(geometry));
+              assert.deepEqual(geometry.before, geometry.after, 'Title and actions stay fixed while reviewing mobile files');
+            } else {
+              assert.ok(Math.abs(geometry.x + geometry.width / 2 - width / 2) < 1 &&
+                Math.abs(geometry.y + geometry.height / 2 - 450) < 1, 'Keep the desktop copy dialog centered');
+            }
+            await tab.keyboard.press('Escape');
+            await dialog.waitFor({ state: 'hidden' });
+            await tab.waitForFunction(() => document.activeElement?.textContent?.trim() === '复制到 NAS');
+            const transfer = tab.locator('.nfc-cloud-files-ledger');
+            await transfer.locator('.nfc-cloud-transfer-row').first().waitFor();
+            const inset = await transfer.evaluate(node =>
+              ['.nfc-cloud-ledger-header', '.nfc-cloud-transfer-row'].map(selector =>
+                getComputedStyle(node.querySelector(selector)).paddingInlineStart));
+            assert.deepEqual(inset, Array(2).fill(width === 390 ? '16px' : '20px'));
+          } finally {
+            for (const pattern of cloudReadRoutes) await tab.unroute(pattern);
+          }
+          await tab.reload({ waitUntil: 'domcontentloaded' });
+          await tab.locator('.nfc-cloud-files-browser').waitFor();
+        }
         if (item.id === 'cloud-files' && width === 1440 && themeLabel === 'light-dark') {
           const rail = tab.getByRole('navigation', { name: '主导航', exact: true });
           const collapse = rail.getByRole('button', { name: '收起主导航', exact: true });
@@ -1467,6 +1548,20 @@ try {
           const expand = rail.getByRole('button', { name: '展开主导航', exact: true });
           assert.equal(await expand.getAttribute('aria-expanded'), 'false');
           assert.equal(await expand.evaluate(node => document.activeElement === node), true);
+          const index = rail.getByRole('link', { name: '文件索引', exact: true });
+          await index.hover();
+          const hint = tab.locator('.nfc-workspace-navigation-tooltip');
+          await hint.getByText('文件索引', { exact: true }).waitFor();
+          const [label, icon] = await Promise.all([hint.boundingBox(), index.boundingBox()]);
+          assert.ok(label && icon && label.x > icon.x + icon.width, 'The label must appear outside the scrollable rail');
+          await tab.screenshot({ path: resolve(OUT, name + '-compact-navigation-tooltip.png'), animations: 'disabled' });
+          await tab.mouse.move(280, 30);
+          await hint.waitFor({ state: 'hidden' });
+          await index.focus();
+          await hint.getByText('文件索引', { exact: true }).waitFor();
+          await tab.keyboard.press('Escape');
+          await hint.waitFor({ state: 'hidden' });
+          assert.equal(await index.evaluate(node => document.activeElement === node), true);
           await rail.getByRole('link', { name: '任务中心', exact: true }).click();
           await tab.getByRole('heading', { name: '任务中心', exact: true }).waitFor();
           assert.equal(await rail.getByRole('link', { name: '任务中心', exact: true }).getAttribute('aria-current'), 'page');
@@ -1505,6 +1600,18 @@ try {
             await tab.goBack();
             await tab.getByRole('heading', { name: '智能媒体整理', exact: true }).waitFor();
           }
+        }
+        if (item.id === 'batch' && (width === 390 || width === 1440) && themeLabel === 'light-dark') {
+          const tools = tab.getByRole('button', { name: '切换文件工具' });
+          const chooser = tab.getByRole('group', { name: '操作类型' });
+          for (const label of ['智能媒体整理', '批量移动', '批量改名', '批量隔离']) {
+            await tools.click();
+            await chooser.getByRole('button', { name: label, exact: true }).click();
+            await tab.getByRole('heading', { name: label, exact: true }).waitFor();
+            await chooser.waitFor({ state: 'hidden' });
+            assert.equal(await tools.evaluate(button => button === document.activeElement), true);
+          }
+          if (pageErrors.length > beforeErrors) problems.push(...pageErrors.slice(beforeErrors));
         }
         const headerCollision = await tab.evaluate(() => {
           const bounds = Array.from(document.querySelectorAll(

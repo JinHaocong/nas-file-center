@@ -303,6 +303,25 @@ class RuntimeInputs(BaseModel):
         return v
 
 
+class WorkflowRunInputs(RuntimeInputs):
+    directory: str | None = Field(default=None, min_length=1, max_length=4096, strict=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_scheduled_inputs(cls, value: Any) -> Any:
+        """Preserve existing scheduled workflow requests that use RuntimeInputs."""
+        return value.model_dump() if isinstance(value, RuntimeInputs) and not isinstance(value, cls) else value
+
+    @model_validator(mode="after")
+    def validate_directory_contract(self) -> WorkflowRunInputs:
+        from app.workflows.errors import WorkflowValidationError
+        if self.directory is not None and (self.root_ids is not None or self.scan_job_id is not None):
+            raise WorkflowValidationError(
+                "本次执行目录不能和其他范围参数同时提交", code="AMBIGUOUS_RUNTIME_INPUTS",
+            )
+        return self
+
+
 class WorkflowCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=128)
@@ -379,7 +398,7 @@ class WorkflowRevisionResponse(BaseModel):
 class WorkflowPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: int | None = Field(default=None, ge=1)
-    runtime_inputs: RuntimeInputs | None = None
+    runtime_inputs: WorkflowRunInputs | None = None
     root_ids: list[int] | None = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=50, ge=1, le=500)
@@ -431,6 +450,7 @@ class WorkflowPreviewResponse(BaseModel):
     dedupe_summary: dict[str, Any] | None = None
     utility_summary: dict[str, Any] | None = None
     organizer_summary: dict[str, Any] | None = None
+    file_summary: dict[str, Any] | None = None
 
 
 class WorkflowGeneratePlanRequest(BaseModel):
@@ -443,7 +463,7 @@ class WorkflowGeneratePlanRequest(BaseModel):
         pattern=r"^[0-9a-fA-F]{64}$",
     )
     revision: int | None = Field(default=None, ge=1)
-    runtime_inputs: RuntimeInputs | None = None
+    runtime_inputs: WorkflowRunInputs | None = None
     root_ids: list[int] | None = None
     selected_candidate_ids: list[str] | None = None
     plan_name: str | None = None

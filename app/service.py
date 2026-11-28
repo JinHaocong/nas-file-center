@@ -19,6 +19,8 @@ from app.utils.sorting import _MaxHeapCandidate, natural_sort_key
 
 from sqlalchemy import Integer, and_, delete, func, or_, select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.batch.plans import OperationItem
 from app.batch.rename import RenameCollisionError, RenameRule, _matches_source_extension, _new_name, build_rename_plan
@@ -442,23 +444,28 @@ def _freeze_capture_stable_quarantine_hash(
 
 
 class FileCenterService:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, worker_database: tuple[Engine, sessionmaker] | None = None):
         self.settings = settings
         self._quarantine_service_started_at = utcnow()
-        for directory in (settings.config_dir, settings.reports_dir, settings.backups_dir, settings.logs_dir, settings.fclones_home):
-            directory.mkdir(parents=True, exist_ok=True)
-        self.engine, self.SessionLocal = create_engine_and_session(settings.database_path)
-        init_db(
-            self.engine,
-            db_path=settings.database_path,
-            backups_dir=settings.backups_dir,
-            initial_admin_username=settings.initial_admin_username,
-            initial_admin_password=settings.initial_admin_password,
-        )
+        if worker_database is None:
+            for directory in (settings.config_dir, settings.reports_dir, settings.backups_dir, settings.logs_dir, settings.fclones_home):
+                directory.mkdir(parents=True, exist_ok=True)
+            self.engine, self.SessionLocal = create_engine_and_session(settings.database_path)
+            init_db(
+                self.engine,
+                db_path=settings.database_path,
+                backups_dir=settings.backups_dir,
+                initial_admin_username=settings.initial_admin_username,
+                initial_admin_password=settings.initial_admin_password,
+            )
+        else:
+            # The worker already owns its database and has run startup recovery.
+            self.engine, self.SessionLocal = worker_database
         self.task_service = TaskService(self.SessionLocal, report_settings=settings)
         self.workflow_service = WorkflowService(self.SessionLocal, self.settings)
         self._preview_snapshots: dict[str, dict[str, Any]] = {}
-        self.reconcile_startup_entries()
+        if worker_database is None:
+            self.reconcile_startup_entries()
 
     def _check_scan_has_dependent_plan(self, session: Session, scan_job_id: int) -> bool:
         legacy_count = session.scalar(
@@ -1624,7 +1631,13 @@ class FileCenterService:
             session.commit()
         return {"id": plan.id, "status": plan.status, "items": len(generated.items), "delete_counts": generated.delete_counts}
 
-    def validate_plan(self, plan_id: int, *, progress_callback: Callable[[int, int], None] | None = None) -> dict:
+    def validate_plan(
+        self,
+        plan_id: int,
+        *,
+        progress_callback: Callable[[int, int], None] | None = None,
+        verify_writer: Callable[[Session, BatchPlan], None] | None = None,
+    ) -> dict:
         with self.SessionLocal() as session:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
@@ -2235,6 +2248,10 @@ class FileCenterService:
         with self.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             plan = session.get(BatchPlan, plan_id)
+            if verify_writer is not None:
+                if plan is None:
+                    raise KeyError(plan_id)
+                verify_writer(session, plan)
             rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
             for row in rows:
                 if row.id in item_validations:
@@ -2487,7 +2504,13 @@ class FileCenterService:
             session.refresh(plan)
             return plan
 
-    def freeze_plan(self, plan_id: int, *, progress_callback: Callable[[int, int], None] | None = None) -> BatchPlan:
+    def freeze_plan(
+        self,
+        plan_id: int,
+        *,
+        progress_callback: Callable[[int, int], None] | None = None,
+        verify_writer: Callable[[Session, BatchPlan], None] | None = None,
+    ) -> BatchPlan:
         with self.SessionLocal() as session:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
@@ -3010,6 +3033,8 @@ class FileCenterService:
                 raise KeyError(plan_id)
             if plan.status != "draft":
                 raise ValueError(f"Only draft plans can be frozen, current status={plan.status}")
+            if verify_writer is not None:
+                verify_writer(session, plan)
             rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id)))
             for row in rows:
                 if row.id in item_updates:
@@ -3021,7 +3046,14 @@ class FileCenterService:
             session.refresh(plan)
             return plan
 
-    def enqueue_plan_execution(self, plan_id: int, user_id: int | None = None) -> dict:
+    def enqueue_plan_execution(
+        self,
+        plan_id: int,
+        user_id: int | None = None,
+        *,
+        verify_writer: Callable[[Session, BatchPlan], None] | None = None,
+        before_commit: Callable[[Session, BatchPlan, WorkJob], None] | None = None,
+    ) -> dict:
         with self.SessionLocal() as session:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
@@ -3110,6 +3142,10 @@ class FileCenterService:
             with self.SessionLocal() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 plan = session.get(BatchPlan, plan_id)
+                if verify_writer is not None:
+                    if plan is None:
+                        raise KeyError(plan_id)
+                    verify_writer(session, plan)
                 if plan:
                     plan.status = "stale"
                 for s in stale_items:
@@ -3133,6 +3169,8 @@ class FileCenterService:
                 raise StateConflictError(
                     f"Plan must be validated before execution (status must be 'ready' or 'partial'), current status={plan.status}"
                 )
+            if verify_writer is not None:
+                verify_writer(session, plan)
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:
                 raise StateConflictError(
@@ -3162,6 +3200,8 @@ class FileCenterService:
                     "user_id": user_id,
                 }, ensure_ascii=False),
             ))
+            if before_commit is not None:
+                before_commit(session, plan, job)
             session.commit()
             return {
                 "plan_id": plan_id,
@@ -6592,6 +6632,10 @@ class FileCenterService:
             or not isinstance(runtime_inputs.get("root_ids"), list)
             or len(runtime_inputs.get("root_ids")) == 0
             or not all(isinstance(r, int) and not isinstance(r, bool) and r > 0 for r in runtime_inputs["root_ids"])
+            or ("directory" in runtime_inputs and (
+                not isinstance(runtime_inputs["directory"], str) or not runtime_inputs["directory"]
+                or len(runtime_inputs["root_ids"]) != 1
+            ))
             or not isinstance(compile_digest, str)
             or not re.fullmatch(r"[0-9a-fA-F]{64}", compile_digest)
         ):
@@ -6648,6 +6692,7 @@ class FileCenterService:
                 workflow_revision=rev.revision,
                 definition_sha256=rev.definition_sha256,
                 override_root_ids=effective_root_ids,
+                runtime_directory=runtime_inputs.get("directory"),
             )
 
             all_items = res.planned_operations
@@ -6709,6 +6754,7 @@ class FileCenterService:
                 workflow_revision=rev.revision,
                 definition_sha256=rev.definition_sha256,
                 override_root_ids=effective_root_ids,
+                runtime_directory=runtime_inputs.get("directory"),
             )
 
             # Capture immutable snapshots for write phase
@@ -6724,6 +6770,7 @@ class FileCenterService:
             captured_matched_count = res.matched_count
             captured_matched_bytes = res.matched_bytes
             captured_planned_operations = list(res.planned_operations)
+            captured_directory_sources = dict(res.directory_sources)
 
         # read_session is completely closed and identity map destroyed
 
@@ -6781,6 +6828,8 @@ class FileCenterService:
                 "rebuild_source_status": "stale",
                 "created_by_user_id": user_id,
             }
+            if captured_runtime_inputs.get("directory") is not None:
+                new_metadata["workflow_mode"] = "file"
             new_plan = BatchPlan(
                 name=new_name,
                 kind=f"workflow-{captured_wf_id}",
@@ -6795,16 +6844,17 @@ class FileCenterService:
 
             for op in captured_planned_operations:
                 item_metadata = {k: v for k, v in op.items() if k not in {"source", "target", "operation", "sequence"}}
+                source = captured_directory_sources.get(op.get("candidate_id"), {})
                 item = BatchPlanItem(
                     plan_id=new_plan.id,
                     sequence=op.get("sequence", 0),
                     operation=op["operation"],
                     source_path=op["source"],
                     target_path=op.get("target"),
-                    expected_inode=0,
-                    expected_device=0,
-                    expected_mtime_ns=0,
-                    expected_size=op.get("size", 0),
+                    expected_inode=source.get("expected_inode", 0),
+                    expected_device=source.get("expected_device", 0),
+                    expected_mtime_ns=source.get("expected_mtime_ns", 0),
+                    expected_size=source.get("expected_size", op.get("size", 0)),
                     expected_hash=op.get("hash", ""),
                     state="pending",
                     reason="",

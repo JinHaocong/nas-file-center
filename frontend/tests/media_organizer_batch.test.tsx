@@ -45,7 +45,7 @@ const report = {
   summary: { success_count: 1, skipped_count: 0, conflict_count: 1, failed_count: 0 },
   items: [
     { unit: selection + '/ready', status: 'success' },
-    { unit: selection + '/blocked', status: 'conflict', reason: '目标路径已存在' },
+    { unit: selection + '/blocked', status: 'conflict', reason: '目标路径已存在', target_path: selection + '/blocked/001.jpg' },
   ],
 };
 
@@ -132,6 +132,32 @@ test('an archive promotion identifies whole child directories in its preview', t
   const rendered = JSON.stringify(view.toJSON());
   assert.match(rendered, /整体上提 2 个子目录/);
   assert.doesNotMatch(rendered, /0 个文件/);
+});
+
+test('an already organized unit shows the live tree and opens a bucket only on demand', async t => {
+  const unit = { ...readyUnit, status: 'already_organized' as const, contents_cursor: '9007199254740993',
+    mapping_id: null, needed_moves: 0, renamed_count: 0 };
+  const bucket = unit.unit + '/P [36 186MiB]';
+  const requests: URL[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    if (!url.includes('/entries?')) return Response.json({ ...preview, units: [unit] });
+    const request = new URL(url, 'https://synthetic.test');
+    requests.push(request);
+    const directory = request.searchParams.get('directory');
+    return Response.json({ unit: unit.unit, directory, page: 1, page_size: 25, total: 1, read_only: true,
+      items: directory === bucket ? [{ type: 'file', path: bucket + '/001.jpg', name: '001.jpg', kind: 'image' }]
+        : [{ type: 'directory', path: bucket, name: bucket.split('/').at(-1) }] });
+  });
+  const { view, dispose } = await openBatch(`/batch?operation=media-organize&preview=${previewId}`);
+  t.after(dispose);
+  await waitForRenderedText(view, 'P [36 186MiB]/');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].searchParams.get('cursor'), '9007199254740993');
+  assert.doesNotMatch(JSON.stringify(view.toJSON()), /整理前|路径变化示例/);
+  const trigger = view.root.findByProps({ 'aria-label': '展开 P [36 186MiB]' });
+  await act(async () => { trigger.props.onClick(); await settle(); });
+  await waitForRenderedText(view, '001.jpg');
+  assert.equal(requests[1].searchParams.get('directory'), bucket);
 });
 
 test('the selected directory shows reported path changes and full bucket destinations', t => {
@@ -290,7 +316,25 @@ test('opening the batch result URL preserves the exact string job ID and loads t
   assert.match(JSON.stringify(view.toJSON()), /目标路径已存在/);
 });
 
-test('locating conflicts requests the first filtered result page and can restore all results', async t => {
+test('locating a visible conflict selects its row and displays the full recorded target', async t => {
+  const requests: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    if (!url.includes('/batches/')) return Response.json(preview);
+    requests.push(url);
+    return Response.json(report);
+  });
+  const { view, dispose } = await openBatch(`/batch?operation=media-organize&batch=${batchId}`);
+  t.after(dispose);
+  const button = view.root.findAllByType('button').find(node =>
+    node.findAllByType('span').some(span => span.children.join('') === '定位冲突'))!;
+  await act(async () => { button.props.onClick({ currentTarget: { focus() {} } }); await settle(); });
+  assert.equal(requests.length, 1);
+  const detail = view.root.findByProps({ 'aria-label': '冲突详情' });
+  assert.ok(detail.findAllByType('code').some(code => code.props.title === blockedUnit.unit + '/001.jpg'));
+  assert.equal(view.root.findByProps({ 'data-result-unit': blockedUnit.unit }).props['aria-expanded'], true);
+});
+
+test('locating an off-page conflict requests its first filtered page and can restore all results', async t => {
   const requests: string[] = [];
   t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
     assert.equal(options.method, 'GET');
@@ -298,18 +342,19 @@ test('locating conflicts requests the first filtered result page and can restore
     requests.push(url);
     const query = new URL(url, 'http://synthetic.local').searchParams;
     return Response.json(query.get('status_filter') === 'conflict'
-      ? { ...report, filtered_total: 1, items: [report.items[1]] } : report);
+      ? { ...report, filtered_total: 1, items: [report.items[1]] }
+      : { ...report, items: [report.items[0], { unit: selection + '/another', status: 'success' }] });
   });
   const { view, dispose } = await openBatch(`/batch?operation=media-organize&batch=${batchId}`);
   t.after(dispose);
   const button = () => view.root.findAllByType('button').find(node => node.props['aria-pressed'] !== undefined &&
     node.findAllByType('span').some(span => ['定位冲突', '查看全部结果'].includes(span.children.join(''))))!;
-  await act(async () => { button().props.onClick(); await settle(); });
+  await act(async () => { button().props.onClick({ currentTarget: { focus() {} } }); await settle(); });
   assert.ok(requests.some(url => url === `/api/media-organizer/batches/${batchId}?page=1&page_size=25&status_filter=conflict`));
   const results = view.root.findByType('table').findAllByType('tbody')[0];
   assert.equal(results.findAllByType('tr').length, 1);
-  assert.ok(results.findAllByType('code').some(code => code.props.title === blockedUnit.unit));
-  await act(async () => { button().props.onClick(); await settle(); });
+  assert.ok(results.findAllByType('button').some(button => button.props.title === blockedUnit.unit));
+  await act(async () => { button().props.onClick({ currentTarget: { focus() {} } }); await settle(); });
   assert.equal(view.root.findByType('table').findByType('tbody').findAllByType('tr').length, 2);
 });
 

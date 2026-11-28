@@ -1,22 +1,32 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 
 import { DirectionalLight, HemisphereLight, MathUtils, OrthographicCamera, Scene, WebGLRenderer } from 'three';
 
 import { createZ4ProModel } from './createZ4ProModel';
 
-export interface StorageSceneProps { onReady: (ready: boolean) => void }
+export interface StorageSceneProps {
+  onReady: (ready: boolean) => void;
+  pointerArea?: RefObject<HTMLElement>;
+}
 
 const yawLimit = MathUtils.degToRad(28);
 const pitchLimit = MathUtils.degToRad(12);
 
-/** Render the Z4 Pro while the card is moving, then leave the GPU idle at rest. */
-export function StorageScene({ onReady }: StorageSceneProps) {
+/** Map each side of the preview's center independently to the tracking area's edge. */
+function pointerOffset(position: number, center: number, start: number, end: number) {
+  const extent = position < center ? center - start : end - center;
+  return MathUtils.clamp((position - center) / Math.max(extent, 1), -1, 1);
+}
+
+/** Render the Z4 Pro during motion and leave the GPU idle at rest. */
+export function StorageScene({ onReady, pointerArea }: StorageSceneProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const canvas = ref.current;
     const host = canvas?.parentElement;
     if (!canvas || !host) return;
+    const area = pointerArea?.current ?? host;
 
     let renderer: WebGLRenderer;
     try {
@@ -86,15 +96,14 @@ export function StorageScene({ onReady }: StorageSceneProps) {
       scheduleRender();
     }
 
-    /** Use the entire card, including the space around the rendered device. */
+    /** Follow the surrounding workspace while staying neutral at the card center. */
     function tilt(event: PointerEvent) {
       if (event.pointerType === 'touch') return;
-      const bounds = host!.getBoundingClientRect();
-      if (!bounds.width || !bounds.height) return;
-      const x = MathUtils.clamp(2 * (event.clientX - bounds.left) / bounds.width - 1, -1, 1);
-      const y = MathUtils.clamp(2 * (event.clientY - bounds.top) / bounds.height - 1, -1, 1);
-      targetX = y * pitchLimit;
-      targetY = x * yawLimit;
+      const card = host!.getBoundingClientRect();
+      const bounds = area.getBoundingClientRect();
+      if (!card.width || !card.height || !bounds.width || !bounds.height) return;
+      targetX = pointerOffset(event.clientY, card.top + card.height / 2, bounds.top, bounds.bottom) * pitchLimit;
+      targetY = pointerOffset(event.clientX, card.left + card.width / 2, bounds.left, bounds.right) * yawLimit;
       scheduleRender();
     }
 
@@ -120,9 +129,10 @@ export function StorageScene({ onReady }: StorageSceneProps) {
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(resize);
     if (observer) observer.observe(host);
     else window.addEventListener('resize', resize);
-    host.addEventListener('pointermove', tilt, { passive: true });
-    host.addEventListener('pointerleave', reset);
-    host.addEventListener('pointercancel', reset);
+    area.addEventListener('pointermove', tilt, { passive: true });
+    area.addEventListener('pointerleave', reset);
+    area.addEventListener('pointercancel', reset);
+    window.addEventListener('blur', reset);
     canvas.addEventListener('webglcontextlost', showFallback);
     canvas.addEventListener('webglcontextrestored', restore);
     resize();
@@ -131,9 +141,10 @@ export function StorageScene({ onReady }: StorageSceneProps) {
       observer?.disconnect();
       window.removeEventListener('resize', resize);
       if (pending) cancelAnimationFrame(pending);
-      host.removeEventListener('pointermove', tilt);
-      host.removeEventListener('pointerleave', reset);
-      host.removeEventListener('pointercancel', reset);
+      area.removeEventListener('pointermove', tilt);
+      area.removeEventListener('pointerleave', reset);
+      area.removeEventListener('pointercancel', reset);
+      window.removeEventListener('blur', reset);
       canvas.removeEventListener('webglcontextlost', showFallback);
       canvas.removeEventListener('webglcontextrestored', restore);
       dispose();
@@ -141,7 +152,7 @@ export function StorageScene({ onReady }: StorageSceneProps) {
       if (!canvas.isConnected) renderer.forceContextLoss();
       onReady(false);
     };
-  }, [onReady]);
+  }, [onReady, pointerArea]);
 
   return <canvas ref={ref} aria-hidden="true" />;
 }

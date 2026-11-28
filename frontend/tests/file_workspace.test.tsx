@@ -8,6 +8,7 @@ import TestRenderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { filesystemApi } from '../src/api/filesystem';
 import { MediaThumbnail } from '../src/components/ui/MediaThumbnail';
 import { DashboardPage } from '../src/pages/Dashboard';
+import { WorkspaceEntries } from '../src/pages/Dashboard/WorkspaceEntries';
 
 const root = '/development/library';
 const album = root + '/照片 & 旅行 ';
@@ -16,6 +17,33 @@ const album = root + '/照片 & 旅行 ';
 async function settle() {
   await new Promise(resolve => setTimeout(resolve, 15));
 }
+
+test('keyboard browsing follows the rendered rows and only opens quick look for eligible files', () => {
+  const folder = { path: album, name: '照片', type: 'directory' as const };
+  const photo = { path: root + '/DSC_0431.JPG', name: 'DSC_0431.JPG', type: 'file' as const };
+  const document = { path: root + '/说明.txt', name: '说明.txt', type: 'file' as const };
+  const focused: string[] = [];
+  const selected: string[] = [];
+  const opened: string[] = [];
+  const nodes = [folder, photo, document].map(entry => ({ dataset: { workspaceEntry: entry.path }, disabled: false,
+    focus: () => focused.push(entry.path), scrollIntoView() {}, closest: () => ({ querySelectorAll: () => nodes }) }));
+  const view = TestRenderer.create(<WorkspaceEntries entries={[photo, folder, document]} list pending={false}
+    selectedPath={photo.path} selectedRef={React.createRef()} openOnClick={false} quickLookEnabled
+    onOpen={() => {}} onInspect={() => {}} onSelect={entry => selected.push(entry.path)}
+    onQuickLook={entry => opened.push(entry.path)} />);
+  const key = (row: typeof photo | typeof folder, value: string, index: number) =>
+    view.root.findByProps({ title: row.path, type: 'button' }).props.onKeyDown({
+      key: value, preventDefault() {}, currentTarget: nodes[index],
+    });
+  key(photo, 'ArrowUp', 1);
+  key(folder, 'ArrowDown', 0);
+  key(photo, ' ', 1);
+  key(document, ' ', 2);
+  assert.deepEqual(selected, [folder.path, photo.path]);
+  assert.deepEqual(focused, selected);
+  assert.deepEqual(opened, [photo.path]);
+  view.unmount();
+});
 
 test('file workspace opens directories deliberately and Back restores the parent selection', async t => {
   t.mock.method(filesystemApi, 'listDirectory', async (path?: string) => ({

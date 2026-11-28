@@ -10,6 +10,7 @@ import { TaskDeleteButton } from './TaskDeleteButton';
 import { MediaPackageRecoveryPanel } from './MediaPackageRecoveryPanel';
 import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
+import { ConsoleOverflowActions } from '../ui/ConsoleOverflowActions';
 import { CodePath } from '../ui/CodePath';
 import { ConsoleSheet } from '../ui/ConsoleSheet';
 import { StatusBadge } from '../ui/StatusBadge';
@@ -125,6 +126,8 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
   const organizerDirectory = task?.job_type === 'media-organizer-preview' || task?.job_type === 'media-organizer-batch'
     ? task.payload?.selection : undefined;
   const taskPath = importedDirectory ?? organizerDirectory;
+  const canOrganizeCopy = cloudCopy?.status === 'completed' && typeof importedDirectory === 'string';
+  const hasRelatedActions = sourceLink || canOrganizeCopy || (originalTaskId && onViewTask);
 
   return (
     <ConsoleSheet open={open} onClose={onClose}
@@ -132,10 +135,26 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
       returnFocusFallback={returnFocusFallback}
       description={task ? taskTypeLabel(task.job_type) : undefined}
       className={'nfc-task-detail-drawer nfc-reading-sheet' + (returnToFiles ? ' nfc-task-workspace-return' : '')}
-      footer={returnToFiles && <Link className="nfc-console-button nfc-console-button-primary"
-        to={returnToFiles} state={{ restoreFileWorkspace: true }}>
-        <ConsoleIcon name="arrow-left" size={16} />返回文件空间
-      </Link>}
+      footer={<>
+        {returnToFiles ? <Link className="nfc-console-button nfc-console-button-secondary"
+          to={returnToFiles} state={{ restoreFileWorkspace: true }}>
+          <ConsoleIcon name="arrow-left" size={16} />返回文件空间
+        </Link> : <ConsoleButton onClick={onClose}>关闭</ConsoleButton>}
+        {task && !isError && <ConsoleButton variant="primary" leadingIcon={<ConsoleIcon name="file-text" size={16} />}
+          onClick={() => revealTaskLogs(logs.current)}>查看任务日志</ConsoleButton>}
+        {hasRelatedActions && <ConsoleOverflowActions key={task?.id}>{close => <>
+          {sourceLink && <Link className="nfc-console-button nfc-console-button-ghost" to={sourceLink.href}
+            state={returnToFiles ? { fileWorkspaceReturn: returnToFiles } : undefined}
+            onClick={() => close()}>{sourceLink.label}</Link>}
+          {canOrganizeCopy && <Link className="nfc-console-button nfc-console-button-ghost"
+            to={'/batch?' + new URLSearchParams({ operation: 'media-organize', directory: importedDirectory })}
+            onClick={() => close()}>预览整理</Link>}
+          {originalTaskId && onViewTask && <ConsoleButton variant="ghost" onClick={() => {
+            close(true);
+            onViewTask(originalTaskId);
+          }}>原任务 #{originalTaskId}</ConsoleButton>}
+        </>}</ConsoleOverflowActions>}
+      </>}
       titleAside={task ? (
         <><span className="nfc-v2-task-id">#{task.id}</span><StatusBadge status={task.status} /></>
       ) : visibleTaskId ? <span className="nfc-v2-task-id">#{visibleTaskId}</span> : null}
@@ -178,20 +197,7 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
             </header>
             <TaskActionBar key={task.id} task={task} onViewTask={onViewTask} />
             <div className="nfc-task-evidence-links">
-              {sourceLink && <Link className="nfc-task-origin-link" to={sourceLink.href}>{sourceLink.label}</Link>}
-              {cloudCopy?.status === 'completed' && typeof importedDirectory === 'string' && (
-                <Link className="nfc-task-origin-link"
-                  to={'/batch?' + new URLSearchParams({ operation: 'media-organize', directory: importedDirectory })}>
-                  预览整理
-                </Link>
-              )}
-              {originalTaskId && (onViewTask ? (
-                <button type="button" className="nfc-task-origin-link"
-                  onClick={() => onViewTask(originalTaskId)}>原任务 #{originalTaskId}</button>
-              ) : <span>原任务 #{originalTaskId}</span>)}
-              <button type="button" className="nfc-task-origin-link" onClick={() => revealTaskLogs(logs.current)}>
-                查看任务日志
-              </button>
+              {originalTaskId && !onViewTask && <span>原任务 #{originalTaskId}</span>}
               {getTaskDeleteAvailability(task).enabled &&
                 !(task.job_type === 'media_package-package-execute' && task.status === 'failed') && (
                   <TaskDeleteButton key={task.id} task={task} size="small" type="default"

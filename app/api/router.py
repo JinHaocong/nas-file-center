@@ -70,6 +70,7 @@ from app.workflows.schema import (
     WorkflowRollbackRequest,
     WorkflowUpdateRequest,
 )
+from app.workflows.quick_run import QuickWorkflowRunRequest, enqueue_workflow_quick_run
 
 
 router = APIRouter(prefix="/api", tags=["file-center"], dependencies=[Depends(get_current_user)])
@@ -2375,6 +2376,19 @@ def generate_workflow_plan(
     current_user: User = Depends(get_current_user),
 ):
     return request.app.state.service.workflow_service.generate_plan(current_user.id, workflow_id, payload)
+
+
+@router.post("/workflows/{workflow_id}/quick-run", status_code=202)
+def confirm_workflow_quick_run(
+    request: Request,
+    workflow_id: int,
+    payload: QuickWorkflowRunRequest,
+    current_user: User = Depends(get_current_user),
+):
+    service = request.app.state.service
+    return enqueue_workflow_quick_run(
+        service.SessionLocal, service.settings, actor_id=current_user.id, workflow_id=workflow_id, payload=payload,
+    )
 
 
 @router.post("/batch-utilities/preview")

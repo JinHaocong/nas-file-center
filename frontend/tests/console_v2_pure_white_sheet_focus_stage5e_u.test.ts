@@ -15,7 +15,8 @@ describe('Pure White Stage 5E-U controlled Sheet focus recovery', () => {
       'active instanceof HTMLElement && active !== document.body',
       'returnFocusTarget.current = active',
       '<Dialog.Root open={open} onOpenChange={next => { if (!next && !dismissDisabled) onClose(); }}>',
-      'onEscapeKeyDown={event => { if (dismissDisabled) event.preventDefault(); }}',
+      'onEscapeKeyDown={event => {',
+      "if (dismissDisabled || document.activeElement?.closest('.nfc-overflow-actions[data-open]')) event.preventDefault();",
       '<Dialog.Close asChild>', 'aria-label="关闭详情抽屉"',
     ]) assert.ok(sheet.includes(token), token);
     assert.doesNotMatch(sheet, /<Dialog\.Trigger/);

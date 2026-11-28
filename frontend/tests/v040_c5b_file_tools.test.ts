@@ -14,8 +14,9 @@ describe('v0.4.0 C5B file tools surfaces contract', () => {
     assert.match(source, /nfc-batch-operation-grid/);
     assert.match(source, /kind:\s*['"]batch-['"]\s*\+\s*op/);
     assert.match(source, /operation:\s*op/);
-    assert.match(source, /value=["']hardlink["'][^\n]*disabled/);
-    assert.match(source, /value=["']reflink["'][^\n]*disabled/);
+    for (const label of ['硬链接去重', 'Reflink 浅克隆']) {
+      assert.match(source, new RegExp('<button[^>]*is-disabled" disabled>[^]*?<span>' + label + '<small>未实现'));
+    }
     assert.match(source, /Quarantine|隔离/);
     assert.doesNotMatch(source, /<Card\b/);
   });

@@ -107,6 +107,7 @@ export function CloudBrowser({ provider, name, localRoot, writable, sourceTabs, 
   const reviewEntries = copyOpen ? selectedEntries : lastReview.current;
   const parts = path === '' ? [] : path.split('/');
   const label = provider === 'rclone' ? '根目录' : name;
+  const reviewSource = [provider === 'rclone' ? 'rclone' : name, path || remote].filter(Boolean).join(' / ');
 
   useLayoutEffect(() => {
     if (copyOpen) lastReview.current = selectedEntries;
@@ -346,8 +347,8 @@ export function CloudBrowser({ provider, name, localRoot, writable, sourceTabs, 
         </>}
         <Dialog.Portal>
           <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-cloud-copy-overlay" />
-          <Dialog.Content className="nfc-v2-dialog nfc-overlay-modal nfc-cloud-copy-dialog" data-copy-step={copyStep}
-            aria-describedby={undefined} aria-busy={dialogBusy || undefined}
+          <Dialog.Content className="nfc-v2-dialog nfc-cloud-copy-dialog" data-copy-step={copyStep}
+            aria-busy={dialogBusy || undefined}
             onEscapeKeyDown={event => {
               if (dialogBusy || copyStep === 'target') event.preventDefault();
               if (!dialogBusy && copyStep === 'target') showCopyStep('review');
@@ -365,8 +366,11 @@ export function CloudBrowser({ provider, name, localRoot, writable, sourceTabs, 
             onPointerDownOutside={event => event.preventDefault()}>
             <header className="nfc-cloud-copy-header">
               <div className="nfc-cloud-copy-title">
-                <span><ConsoleIcon name="arrow-down" size={19} /></span>
-                <Dialog.Title>复制到 NAS</Dialog.Title>
+                <span aria-hidden="true"><ConsoleIcon name="arrow-down" size={19} /></span>
+                <div>
+                  <Dialog.Title>复制到 NAS</Dialog.Title>
+                  <Dialog.Description>{reviewSource}</Dialog.Description>
+                </div>
               </div>
               <Dialog.Close asChild>
                 <button type="button" className="nfc-v2-dialog-close" aria-label="关闭复制窗口" disabled={dialogBusy}>
@@ -385,9 +389,23 @@ export function CloudBrowser({ provider, name, localRoot, writable, sourceTabs, 
                 }}
                 onCancel={() => showCopyStep('review')} />
             </> : <>
-              <div className="nfc-cloud-copy-content">
+              <div className="nfc-cloud-copy-content" role="region" aria-label="复制确认内容" tabIndex={0}>
+                <section role="group" aria-label="NAS 存放位置">
+                  <button ref={targetButton} type="button" className="nfc-cloud-copy-target" disabled={start.isPending}
+                    aria-label="选择目录" aria-describedby="nfc-cloud-copy-destination"
+                    onClick={() => showCopyStep('target')}>
+                    <span>NAS 目标</span>
+                    <code id="nfc-cloud-copy-destination">{destination}</code>
+                    <ConsoleIcon name="chevron-right" size={15} />
+                  </button>
+                  {destination && !insideRoot &&
+                    <p role="alert" className="nfc-cloud-files-error">请选择 {localRoot} 内的目录。</p>}
+                </section>
                 <section aria-labelledby="nfc-cloud-copy-selected" className="nfc-cloud-copy-items">
-                  <h3 id="nfc-cloud-copy-selected">已选 {reviewEntries.length} 项</h3>
+                  <div className="nfc-cloud-copy-list-heading">
+                    <h3 id="nfc-cloud-copy-selected">待复制文件</h3>
+                    <span>共 {reviewEntries.length} 项</span>
+                  </div>
                   <ul className="nfc-cloud-copy-selection">
                     {reviewEntries.map(entry => <li key={entry.name}>
                       <CloudEntryIcon icon={describeCloudFile(entry.name, entry.kind === 'directory').icon} />
@@ -395,16 +413,6 @@ export function CloudBrowser({ provider, name, localRoot, writable, sourceTabs, 
                       <small className="nfc-cloud-file-size">{entry.kind === 'directory' ? '文件夹' : displayBytes(entry.size)}</small>
                     </li>)}
                   </ul>
-                </section>
-                <section role="group" aria-label="NAS 存放位置">
-                  <h3>NAS 存放位置</h3>
-                  <div className="nfc-cloud-copy-target">
-                    <span><ConsoleIcon name="folder" size={16} />{destination}</span>
-                    <ConsoleButton ref={targetButton} size="sm" disabled={start.isPending}
-                      onClick={() => showCopyStep('target')}>选择目录</ConsoleButton>
-                  </div>
-                  {destination && !insideRoot &&
-                    <p role="alert" className="nfc-cloud-files-error">请选择 {localRoot} 内的目录。</p>}
                 </section>
               </div>
               <footer className="nfc-cloud-copy-actions">

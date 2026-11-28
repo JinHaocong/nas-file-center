@@ -153,15 +153,23 @@ body { font-family: var(--studio-font); }
   margin-top: 5px;
   line-height: 1.56;
 }
+.nfc-studio .nfc-app-main {
+  --nfc-shell-card-radius: var(--nfc-panel-radius);
+  --nfc-shell-card-shadow: var(--nfc-shadow-workspace);
+}
 .nfc-studio .nfc-page-content .nfc-data-panel {
   --nfc-shell-card-bg: var(--studio-paper);
   --nfc-shell-card-border: var(--studio-line);
   --nfc-shell-card-radius: var(--nfc-panel-radius);
-  --nfc-shell-card-shadow: 0 2px 7px rgb(40 47 34 / .035);
+  --nfc-shell-card-shadow: var(--nfc-shadow-workspace);
 }
 .nfc-studio .nfc-page-content .nfc-data-panel > .nfc-data-panel-header {
   min-width: 0;
   border-bottom-color: var(--studio-line) !important;
+}
+.nfc-studio .nfc-page-content :is(.nfc-dashboard-rail, .nfc-dedupe-context-rail, .nfc-workflow-definition-rail)
+  .nfc-data-panel > :is(.nfc-data-panel-header, .nfc-data-panel-body) {
+  padding-inline: var(--nfc-detail-inset) !important;
 }
 .nfc-studio .nfc-data-panel-title { color: var(--studio-ink); letter-spacing: -.02em; }
 .nfc-studio .nfc-page-content .nfc-code-path { font-variant-numeric: tabular-nums; }
@@ -275,7 +283,7 @@ body { font-family: var(--studio-font); }
   .nfc-studio .nfc-header-command-cluster { gap: 3px; }
   .nfc-studio .nfc-v2-header .nfc-header-status { max-width: none; gap: 3px; }
   .nfc-studio .nfc-v2-header .nfc-header-status-badge { padding-inline: 5px; font-size: 11px; }
-  .nfc-studio .nfc-v2-page-content.nfc-page-content { padding: 21px 14px calc(90px + env(safe-area-inset-bottom)) !important; }
+  .nfc-studio .nfc-v2-page-content.nfc-page-content { padding: 20px var(--nfc-detail-inset) calc(90px + env(safe-area-inset-bottom)) !important; }
   .nfc-studio .nfc-page-content .nfc-page-title { font-size: 25px !important; }
   .nfc-studio .nfc-v2-dashboard .nfc-metric-grid { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
   .nfc-studio .nfc-v2-dashboard .nfc-metric-card { padding: 12px !important; }
@@ -323,32 +331,34 @@ body { font-family: var(--studio-font); }
 .nfc-studio .nfc-page-layout-ledger .nfc-data-panel-title { font-size: 16px; line-height: 1.4; }
 .nfc-studio .nfc-page-content .nfc-status-badge { font-variant-numeric: tabular-nums; }
 .nfc-studio-tool-picker { position: relative; }
-.nfc-studio-tool-picker summary {
+.nfc-studio-tool-picker-trigger {
   display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 6px 12px;
   border: 1px solid var(--studio-line); border-radius: var(--nfc-radius-control);
   font-size: 13px; font-weight: 650; color: var(--nfc-tint); background: var(--studio-paper); cursor: pointer;
 }
-.nfc-studio-tool-picker summary::-webkit-details-marker { display: none; }
 .nfc-studio .nfc-batch-page > .nfc-page-header { overflow: visible; position: relative; z-index: 3; }
-.nfc-studio-tool-picker[open] fieldset {
+.nfc-studio-tool-picker-panel {
   position: absolute;
   z-index: 4;
   top: calc(100% + 8px);
   inset-inline-end: 0;
   width: min(480px, calc(100vw - 38px));
+  padding: 14px;
+  border-radius: var(--nfc-panel-radius);
+  border: 1px solid var(--studio-line);
+  background: var(--studio-paper);
   box-shadow: var(--nfc-shadow-overlay);
 }
 @media (max-width: 767px) {
   .nfc-studio .nfc-batch-page .nfc-page-actions { align-self: stretch !important; width: 100%; }
   .nfc-studio .nfc-batch-page .nfc-studio-tool-picker { width: 100%; }
-  .nfc-studio-tool-picker[open] fieldset { position: relative; inset: auto; width: 100%; margin-top: 8px; box-shadow: none; }
+  .nfc-studio-tool-picker-panel { position: relative; inset: auto; width: 100%; margin-top: 8px; box-shadow: none; }
 }
-.nfc-studio-tool-picker fieldset { padding: 14px; border-radius: var(--nfc-panel-radius); border: 1px solid var(--studio-line); background: var(--studio-paper); }
 .nfc-studio .nfc-v2-rename-mode { display: inline-flex; flex-wrap: wrap; gap: 3px; margin: 0 0 16px; padding: 4px; background: var(--studio-soft); border: 1px solid var(--studio-line); border-radius: 10px; }
 .nfc-studio .nfc-v2-rename-mode label { border-radius: 7px; color: var(--studio-muted); }
 .nfc-studio .nfc-v2-rename-mode label.is-selected { background: var(--studio-paper); color: var(--nfc-tint); box-shadow: 0 1px 3px rgb(34 49 36 / .1); }
 @media(max-width:767px) {
-  .nfc-studio-tool-picker summary, .nfc-studio-segment button { min-height: 44px; }
+  .nfc-studio-tool-picker-trigger, .nfc-studio-segment button { min-height: 44px; }
   .nfc-studio .nfc-operations-page > .nfc-metric-grid > .nfc-metric-card { border-bottom: 1px solid var(--studio-line) !important; }
 }
 

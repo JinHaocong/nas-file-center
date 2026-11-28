@@ -1,7 +1,7 @@
 /* Scan results, plans, activity and integrity records share copyable evidence and quiet controls. */
 .nfc-record-workspace {
   --record-control-gap: 10px;
-  --record-control-inset: clamp(12px, 1.5vw, 20px);
+  --record-control-inset: var(--nfc-detail-inset);
   min-width: 0;
 }
 

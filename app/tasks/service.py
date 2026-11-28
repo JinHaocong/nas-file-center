@@ -22,6 +22,7 @@ from app.tasks.state_machine import (
     validate_transition,
 )
 from app.tasks.sync import sync_batch_plan_status, sync_scan_job_status
+from app.workflows.quick_run import QUICK_RUN_KIND
 
 RETRY_WHITELISTS: dict[str, set[str]] = {
     "index-root": {"root"},
@@ -54,7 +55,10 @@ def _task_capabilities(kind: str) -> dict[str, bool]:
 
 
 def _public_id(job: WorkJob) -> int | str:
-    return str(job.id) if job.kind in _NEW_ORGANIZER_TASKS else job.id
+    exact_id = job.kind in (*_NEW_ORGANIZER_TASKS, QUICK_RUN_KIND) or (
+        job.kind == "batch-plan-execute" and "workflow_quick_run_job_id" in _task_json(job.state_json)
+    )
+    return str(job.id) if exact_id else job.id
 
 
 def _task_json(raw: str | None) -> dict:
@@ -243,13 +247,20 @@ class TaskService:
             return data
 
     def latest_workflow_run(self, workflow_id: int) -> dict | None:
-        """Read the latest scheduled task for this workflow without exposing its inputs."""
+        """Read the latest workflow task or its execution child without exposing inputs."""
         with self.SessionLocal() as session:
             state = case((func.json_valid(WorkJob.state_json) == 1, WorkJob.state_json), else_="{}")
             job = session.scalar(select(WorkJob).where(
-                WorkJob.kind == "workflow-scheduled",
-                func.json_extract(state, "$.workflow_id") == workflow_id,
+                WorkJob.kind.in_(("workflow-scheduled", QUICK_RUN_KIND)),
+                func.json_extract(state, "$.workflow_id").in_((workflow_id, str(workflow_id))),
             ).order_by(WorkJob.id.desc()).limit(1))
+            if job is not None and job.kind == QUICK_RUN_KIND:
+                child_id = _task_json(job.checkpoint_json).get("execution_job_id")
+                if isinstance(child_id, str) and child_id.isdecimal():
+                    child = session.get(WorkJob, int(child_id))
+                    if (child is not None and child.kind == "batch-plan-execute" and
+                            _task_json(child.state_json).get("workflow_quick_run_job_id") == str(job.id)):
+                        job = child
             return {**format_task(job), "id": str(job.id)} if job else None
 
     def pause_task(self, task_id: int) -> dict:

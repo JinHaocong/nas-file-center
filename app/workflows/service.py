@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections import Counter
 import json
 from math import ceil
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -98,6 +99,7 @@ class WorkflowService:
         scan_job_id: int | None = None,
         selected_candidate_ids: list[str] | None = None,
         safety_snapshot: DedupeWorkflowSafetySnapshot | None = None,
+        runtime_directory: str | None = None,
     ):
         if safety_snapshot is not None:
             allowed_roots = safety_snapshot.allowed_roots
@@ -114,6 +116,7 @@ class WorkflowService:
             quarantine_root=quarantine_root,
             protect_last_file=protect_last_file,
             safety_snapshot=safety_snapshot,
+            protected_roots=(self.settings.config_dir,),
         )
         return compiler.compile(
             definition,
@@ -123,6 +126,7 @@ class WorkflowService:
             override_root_ids=override_root_ids,
             scan_job_id=scan_job_id,
             selected_candidate_ids=selected_candidate_ids,
+            runtime_directory=runtime_directory,
             max_candidates=MAX_WORKFLOW_CANDIDATES,
             max_plan_items=MAX_WORKFLOW_PLAN_ITEMS,
         )
@@ -606,6 +610,7 @@ class WorkflowService:
                 override_root_ids=effective_root_ids,
                 scan_job_id=scan_job_id,
                 safety_snapshot=safety_snapshot,
+                runtime_directory=payload.runtime_inputs.directory if payload.runtime_inputs else None,
             )
 
             if definition.mode == "dedupe":
@@ -681,6 +686,14 @@ class WorkflowService:
             else:
                 all_items = res.planned_operations
                 changed_operations = {"rename", "move", "quarantine", "rmdir_empty"}
+                directory = res.runtime_inputs.get("directory")
+                file_summary = None
+                if directory is not None:
+                    changed_operations.add("touch")
+                    file_summary = {
+                        "directory": directory,
+                        "operation_counts": dict(Counter(item["operation"] for item in all_items)),
+                    }
                 if payload.only_changed:
                     all_items = [item for item in all_items if item.get("operation") in changed_operations]
 
@@ -750,6 +763,7 @@ class WorkflowService:
                     "dedupe_summary": None,
                     "utility_summary": utility_summary,
                     "organizer_summary": organizer_summary,
+                    "file_summary": file_summary,
                 }
 
     def generate_plan(
@@ -757,6 +771,8 @@ class WorkflowService:
         user_id: int | None,
         workflow_id: int,
         payload: WorkflowGeneratePlanRequest,
+        *,
+        before_commit: Callable[[Session, BatchPlan], None] | None = None,
     ) -> dict[str, Any]:
         with self.SessionLocal() as session:
             wf = session.get(Workflow, workflow_id)
@@ -779,6 +795,8 @@ class WorkflowService:
             mode = def_dict.get("mode")
             validate_raw_steps_types(def_dict.get("steps", []), mode=mode)
             definition = WorkflowDefinition.model_validate(def_dict)
+            if before_commit is not None and definition.mode != "file":
+                raise WorkflowValidationError("此工作流不支持快速运行", code="WORKFLOW_DIRECTORY_MODE_FORBIDDEN")
 
             if definition.mode == "utility":
                 if payload.root_ids is not None or payload.runtime_inputs is not None:
@@ -821,6 +839,7 @@ class WorkflowService:
                     payload.selected_candidate_ids if definition.mode == "utility" else None
                 ),
                 safety_snapshot=safety_snapshot,
+                runtime_directory=payload.runtime_inputs.directory if payload.runtime_inputs else None,
             )
 
             if not payload.expected_compile_digest or payload.expected_compile_digest != res.compile_digest:
@@ -1025,6 +1044,8 @@ class WorkflowService:
                 }
                 if definition.mode == "utility":
                     plan_metadata["workflow_mode"] = "utility"
+                elif res.runtime_inputs.get("directory") is not None:
+                    plan_metadata["workflow_mode"] = "file"
                 elif organizer_advanced:
                     organizer_stage = "structural" if organizer_structural is not None else "rename"
                     plan_metadata.update({
@@ -1065,20 +1086,25 @@ class WorkflowService:
                         generated_snapshot = organizer_generated_snapshots.get(op["source"])
                         if generated_snapshot is not None:
                             item_metadata["organizer_generated_snapshot"] = generated_snapshot
+                    source = res.directory_sources.get(op.get("candidate_id"), {})
                     item = BatchPlanItem(
                         plan_id=plan.id,
                         sequence=op.get("sequence", 0),
                         operation=op["operation"],
                         source_path=op["source"],
                         target_path=op.get("target"),
-                        expected_inode=0,
-                        expected_device=0,
-                        expected_mtime_ns=0,
+                        expected_inode=source.get("expected_inode", 0),
+                        expected_device=source.get("expected_device", 0),
+                        expected_mtime_ns=source.get("expected_mtime_ns", 0),
+                        expected_size=source.get("expected_size", 0),
                         state="pending",
                         metadata_json=json.dumps(item_metadata, ensure_ascii=False) if item_metadata else "{}",
                     )
                     write_session.add(item)
 
+                if before_commit is not None:
+                    write_session.flush()
+                    before_commit(write_session, plan)
                 write_session.commit()
                 write_session.refresh(plan)
 

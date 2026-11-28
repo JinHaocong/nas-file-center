@@ -791,7 +791,7 @@
 
 :root {
   --nfc-ui-panel-radius: 18px;
-  --nfc-ui-inner-radius: 13px;
+  --nfc-ui-inner-radius: var(--nfc-panel-radius);
   --nfc-ui-control-radius: 10px;
   --nfc-ui-panel-bg: color-mix(in srgb, var(--nfc-nav-surface) 58%, var(--nfc-surface-1));
   --nfc-ui-panel-bg-strong: color-mix(in srgb, var(--nfc-nav-surface) 28%, var(--nfc-surface-1));

@@ -12,7 +12,14 @@ interface ThumbnailProps {
   representativeFile?: string;
 }
 
-const previewableFile = /\.(?:jpe?g|jfif|png|webp|gif|bmp|tiff?|mp4|m4v|mov|3gp|mkv|webm|avi|m2?ts|ts)$/i;
+const imageFile = /\.(?:jpe?g|jfif|png|webp|gif|bmp|tiff?)$/i;
+const videoFile = /\.(?:mp4|m4v|mov|3gp|mkv|webm|avi|mts|m2ts|ts)$/i;
+
+/** Match the supported server thumbnail formats and keep videos labeled as cover images. */
+export function mediaThumbnailKind(path: string): 'image' | 'video' | undefined {
+  if (imageFile.test(path)) return 'image';
+  if (videoFile.test(path)) return 'video';
+}
 const waiting = new Set<() => Promise<void>>();
 let activeRequests = 0;
 
@@ -88,7 +95,7 @@ function VisibleThumbnail({ url, kind, size }: { url: string; kind: ThumbnailKin
 
   return (
     <span ref={ref} className={`nfc-media-thumbnail is-${size}${failed ? ' is-unavailable' : ''}`} aria-hidden="true">
-      {image ? <img src={image} alt="" decoding="async" onError={() => setFailed(true)} /> : <ThumbnailIcon kind={kind} />}
+      {image ? <img src={image} alt="" decoding="async" draggable={false} onError={() => setFailed(true)} /> : <ThumbnailIcon kind={kind} />}
     </span>
   );
 }
@@ -96,10 +103,10 @@ function VisibleThumbnail({ url, kind, size }: { url: string; kind: ThumbnailKin
 /** Display a server-generated thumbnail or a compact file-type icon according to global preferences. */
 export function MediaThumbnail({ path, kind, size = 'small', representativeFile }: ThumbnailProps) {
   const { showThumbnails } = useDisplayPreferences();
-  if (!showThumbnails || !path.startsWith('/') || (kind !== 'directory' && !previewableFile.test(path))) {
+  if (!showThumbnails || !path.startsWith('/') || (kind !== 'directory' && !mediaThumbnailKind(path))) {
     return <span className="nfc-media-thumbnail is-icon" aria-hidden="true"><ThumbnailIcon kind={kind} /></span>;
   }
-  const cover = kind === 'directory' && representativeFile?.startsWith('/') && previewableFile.test(representativeFile)
+  const cover = kind === 'directory' && representativeFile?.startsWith('/') && mediaThumbnailKind(representativeFile)
     ? representativeFile : undefined;
   const params = new URLSearchParams({ path: cover ?? path, kind: kind === 'directory' && !cover ? 'directory' : 'file' });
   const url = '/api/media/thumbnail?' + params.toString();

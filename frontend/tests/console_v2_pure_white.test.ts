@@ -80,7 +80,8 @@ describe('Console surfaces, navigation materials and controls', () => {
     assert.match(shell, /\.nfc-v2-mobile-nav-dialog\s*\{[^}]*background:\s*var\(--v2-paper\);/);
     assert.match(shell, /\.nfc-v2-mobile-nav-close\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px;/);
     assert.match(shell, /\.nfc-v2-mobile-dock \.nfc-mobile-dock-surface\s*\{[^}]*background:\s*var\(--nfc-material-bg\) !important;/);
-    assert.match(shell, /\.nfc-mobile-dock-surface::before\s*\{[^}]*pointer-events:\s*none;/);
+    assert.match(shell, /\.nfc-mobile-dock-track\s*\{[^}]*pointer-events:\s*none;/);
+    assert.match(shell, /\.nfc-mobile-dock-marker\s*\{[^}]*width:\s*20%;[^}]*translateX/);
     assert.doesNotMatch(shell, /#121f31|#293e59/);
   });
 

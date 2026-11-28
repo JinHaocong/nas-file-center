@@ -68,6 +68,24 @@ def read_mapping(request: Request, job_id: int, mapping_id: str,
         raise HTTPException(409, str(exc)) from exc
 
 
+@router.get("/previews/{job_id}/entries")
+def read_current_entries(request: Request, job_id: int,
+                         unit: str = Query(min_length=1, max_length=4096),
+                         directory: str = Query(min_length=1, max_length=4096),
+                         cursor: int = Query(ge=0, le=2**63 - 1),
+                         page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100)):
+    try:
+        service = request.app.state.service
+        return jobs.get_current_entries(service.SessionLocal, service.settings, job_id, unit=unit,
+                                        cursor=cursor, directory=directory, page=page, page_size=page_size)
+    except (KeyError, FileNotFoundError) as exc:
+        raise HTTPException(404, "当前整理单元或目录已不存在") from exc
+    except OSError as exc:
+        raise HTTPException(409, "无法读取该目录，请在文件空间核对") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.get("/previews/{job_id}/loose-files/{loose_id}")
 def read_loose_files(request: Request, job_id: int, loose_id: str,
                      page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=100)):

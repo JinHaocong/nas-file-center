@@ -358,6 +358,10 @@ def resolve_mode_runtime_inputs(
     Returns:
         tuple of (scan_job_id, effective_root_ids)
     """
+    if getattr(runtime_inputs, "directory", None) is not None and mode != "file":
+        raise WorkflowValidationError(
+            "仅文件工作流支持本次执行目录", code="WORKFLOW_DIRECTORY_MODE_FORBIDDEN",
+        )
     if mode == "dedupe":
         if root_ids is not None or (runtime_inputs is not None and runtime_inputs.root_ids is not None):
             raise WorkflowValidationError(

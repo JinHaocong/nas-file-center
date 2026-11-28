@@ -370,6 +370,7 @@ export function MediaOrganizerBatchEditor() {
       {currentResult ? (
         <MediaOrganizerResultReport report={currentResult} conflictsOnly={resultPage.filter === 'conflict'}
           pending={resultQuery.isPlaceholderData}
+          onRescan={selection && !busy ? () => chooseDirectory(selection) : undefined}
           onToggleConflicts={() => {
             if (batchId) setResultView({
               id: batchId, page: 1, size: resultPage.size, filter: resultPage.filter === 'conflict' ? 'all' : 'conflict',
@@ -398,7 +399,8 @@ export function MediaOrganizerBatchEditor() {
       {currentPreview?.status === 'completed' && currentPreview.summary && (
         <MediaOrganizerPreviewReport preview={currentPreview} selected={currentUnit} onSelect={inspectUnit} onDetails={openDetails}
           detail={detailReport} onDismissDetails={() => setDetails(null)} pending={previewQuery.isPlaceholderData}
-          detailBusy={assignmentBusy}
+          detailBusy={assignmentBusy} confirmationOpen={confirmationOpen}
+          onRescan={selection && !busy ? () => chooseDirectory(selection) : undefined}
           action={canConfirm && (
             <ConsoleButton size="sm" variant="primary" disabled={busy} loading={action === 'confirm'}
               aria-label={recycleCount ? '确认整理与回收' : '确认整理全部'}
@@ -406,7 +408,7 @@ export function MediaOrganizerBatchEditor() {
               onClick={event => {
                 event?.currentTarget.focus({ preventScroll: true });
                 reviewBatch(true);
-              }}>{recycleCount ? '确认整理与回收' : '确认整理'}</ConsoleButton>
+              }}>{recycleCount ? '确认整理与回收' : '确认整理全部'}</ConsoleButton>
           )}
           footer={currentPreview.filtered_total > pageSizes[0] && <ConsolePagination page={previewPage.page} pageSize={previewPage.size}
             total={currentPreview.filtered_total} pageSizes={pageSizes}

@@ -10,6 +10,8 @@ import {
   WorkflowRollbackRequest,
   WorkflowPreviewRequest,
   WorkflowPreviewResponse,
+  WorkflowQuickRunRequest,
+  WorkflowQuickRunResponse,
   WorkflowGeneratePlanRequest,
   WorkflowGeneratePlanResponse,
   PlanRebuildPreviewRequest,
@@ -76,11 +78,15 @@ export const workflowApi = {
   },
 
   previewWorkflow: async (
-    id: number,
+    id: number | string,
     data: WorkflowPreviewRequest
   ): Promise<WorkflowPreviewResponse> => {
-    return api.post<WorkflowPreviewResponse>(`/api/workflows/${id}/preview`, data);
+    return api.post<WorkflowPreviewResponse>(`/api/workflows/${encodeURIComponent(id)}/preview`, data);
   },
+
+  /** Queue an explicitly reviewed file workflow with a stable request token. */
+  quickRun: (id: string, data: WorkflowQuickRunRequest): Promise<WorkflowQuickRunResponse> =>
+    api.post<WorkflowQuickRunResponse>(`/api/workflows/${encodeURIComponent(id)}/quick-run`, data),
 
   generatePlan: async (
     id: number,

@@ -9,6 +9,33 @@
 
 .nfc-workspace-frame > .nfc-v2-page-content { flex: 1 1 auto; min-width: 0; }
 .nfc-workspace-navigation { display: none; }
+.nfc-workspace-navigation-tooltip {
+  position: fixed;
+  z-index: 160;
+  translate: 0 -50%;
+  max-inline-size: calc(100vw - 90px);
+  padding: 5px 10px;
+  color: var(--studio-ink);
+  background: var(--studio-paper);
+  border: 1px solid var(--nfc-tint-line);
+  border-radius: var(--nfc-radius-control);
+  box-shadow: var(--nfc-shadow-overlay);
+  font: 650 12px/20px var(--studio-font);
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.nfc-workspace-navigation-tooltip::before {
+  position: absolute;
+  inset-inline-start: -4px;
+  inset-block-start: calc(50% - 3px);
+  width: 6px;
+  height: 6px;
+  rotate: 45deg;
+  background: inherit;
+  border: solid var(--nfc-tint-line);
+  border-width: 0 0 1px 1px;
+  content: '';
+}
 
 @media (min-width: 1200px) {
   .nfc-workspace-frame { overflow: hidden; }
@@ -239,6 +266,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  .nfc-workspace-navigation-tooltip { animation: nfc-navigation-hint-in 145ms var(--nfc-motion-ease) both; }
   .nfc-workspace-navigation { transition: flex-basis 180ms var(--nfc-motion-ease); }
   .nfc-workspace-navigation-group > a {
     transition: background-color 150ms var(--nfc-motion-ease), color 150ms var(--nfc-motion-ease);
@@ -252,6 +280,7 @@
   .nfc-storage-preview :is(canvas, .nfc-storage-preview-fallback) { transition: opacity 150ms ease; }
   .nfc-studio .nfc-v2-dropdown[open] > .nfc-v2-menu { animation: nfc-menu-arrive 140ms var(--nfc-motion-ease) both; }
 }
+@keyframes nfc-navigation-hint-in { from { opacity: 0; translate: -4px -50%; } }
 
 @keyframes nfc-menu-arrive { from { opacity: 0; translate: 0 -4px; } }
 @keyframes nfc-login-arrive { from { opacity: .92; translate: 0 5px; } }

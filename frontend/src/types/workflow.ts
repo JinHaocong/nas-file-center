@@ -105,16 +105,22 @@ export interface WorkflowOrganizerSummary {
   structural_required: boolean;
 }
 export interface WorkflowPreviewRequest {
-  revision?: number; runtime_inputs?: { root_ids?: number[]; scan_job_id?: number; [key: string]: any; };
+  revision?: number; runtime_inputs?: { root_ids?: number[]; scan_job_id?: number; directory?: string; [key: string]: any; };
   root_ids?: number[]; page?: number; page_size?: number; only_changed?: boolean;
 }
+export interface WorkflowFileSummary { directory: string; operation_counts: Record<string, number>; }
 export interface WorkflowPreviewResponse {
   workflow_id: number; revision: number; workflow_revision: number; definition_sha256: string; workflow_mode?: WorkflowMode;
   preview_source: 'index' | 'organizer-live-readonly' | 'completed-scan-readonly-safety' | 'utility-live-readonly';
   live_filesystem_verified: boolean; compile_digest: string; matched_count: number; matched_bytes: number; planned_operations_count: number;
   page: number; page_size: number; total_pages: number; items: WorkflowPreviewItem[];
+  file_summary?: WorkflowFileSummary | null;
   dedupe_summary?: DedupeSummary | null; utility_summary?: WorkflowUtilitySummary | null; organizer_summary?: WorkflowOrganizerSummary | null;
 }
+export interface WorkflowQuickRunRequest {
+  revision: number; directory: string; expected_compile_digest: string; request_id: string;
+}
+export interface WorkflowQuickRunResponse { job_id: string; }
 export interface WorkflowGeneratePlanRequest {
   expected_compile_digest: string; expected_preview_digest?: string; revision?: number;
   runtime_inputs?: { root_ids?: number[]; scan_job_id?: number; [key: string]: any; };

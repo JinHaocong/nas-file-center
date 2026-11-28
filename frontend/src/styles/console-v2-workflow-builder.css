@@ -289,3 +289,123 @@
   .nfc-workflow-builder-page .nfc-workflow-pipeline-canvas .nfc-data-panel-body { padding-inline: 8px; }
   .nfc-workflow-builder-page :is(.nfc-step-add-surface, .nfc-step-end-note) { padding-inline: 9px; }
 }
+
+/* Workflow quick run uses the same inset, footer and border rhythm as other sheets. */
+.nfc-workflow-quick-run-stack {
+  display: grid;
+  gap: var(--nfc-detail-gap);
+  min-width: 0;
+}
+.nfc-workflow-quick-run :is(h3, p) { margin: 0; }
+.nfc-workflow-quick-run :is(.nfc-workflow-quick-run-field, .nfc-workflow-quick-run-preview) {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+.nfc-workflow-quick-run-field h3,
+.nfc-workflow-quick-run .nfc-console-filter-label { font-size: 12px; font-weight: 720; }
+.nfc-workflow-quick-run .nfc-console-filter { display: grid; gap: 7px; width: 100%; min-width: 0; }
+.nfc-workflow-quick-run .nfc-console-select-shell { position: relative; display: flex; align-items: center; width: 100%; }
+.nfc-workflow-quick-run .nfc-console-select {
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  min-height: 39px;
+  padding: 7px 30px 7px 11px;
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-radius-control);
+  color: var(--studio-ink);
+  background: var(--studio-paper);
+  font: inherit;
+  font-size: 13px;
+}
+.nfc-workflow-quick-run .nfc-console-select:focus-visible { outline: 2px solid var(--nfc-tint); outline-offset: 2px; }
+.nfc-workflow-quick-run .nfc-console-select-chevron {
+  position: absolute;
+  inset-inline-end: 10px;
+  color: var(--studio-muted);
+  pointer-events: none;
+}
+.nfc-workflow-quick-run-selection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  min-height: 39px;
+  gap: 6px 9px;
+  padding: 7px 10px;
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-radius-control);
+  background: var(--studio-ground);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.nfc-workflow-quick-run-selection > svg { flex-shrink: 0; color: var(--nfc-tint); }
+.nfc-workflow-quick-run-selection small { margin-inline-start: auto; color: var(--studio-muted); }
+.nfc-workflow-quick-run-preview {
+  padding: 14px;
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-panel-radius);
+  background: var(--studio-paper);
+}
+.nfc-workflow-quick-run-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+.nfc-workflow-quick-run-heading h3 { font-size: 15px; }
+.nfc-workflow-quick-run-heading > span,
+.nfc-workflow-quick-run-caption { color: var(--studio-muted); font-size: 12px; }
+.nfc-workflow-quick-run-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 90px), 1fr));
+  gap: 6px;
+  margin: 0;
+}
+.nfc-workflow-quick-run-counts > div {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-radius-control);
+  background: var(--studio-ground);
+}
+.nfc-workflow-quick-run-counts dt { color: var(--studio-muted); font-size: 11px; overflow-wrap: anywhere; }
+.nfc-workflow-quick-run-counts dd { margin: 2px 0 0; font-size: 16px; font-weight: 720; font-variant-numeric: tabular-nums; }
+.nfc-workflow-quick-run-samples { display: grid; margin: 0; padding: 0; list-style: none; }
+.nfc-workflow-quick-run-samples li {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  padding: 8px 0;
+  border-top: 1px solid var(--studio-line);
+}
+.nfc-workflow-quick-run-samples strong { font-size: 12px; }
+.nfc-workflow-quick-run-target { display: grid; min-width: 0; grid-template-columns: 14px minmax(0, 1fr); align-items: center; gap: 5px; }
+.nfc-workflow-quick-run-target > svg { color: var(--nfc-tint); }
+.nfc-workflow-quick-run-feedback, .nfc-workflow-quick-run-hint {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: 9px 11px;
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-radius-control);
+  background: var(--studio-ground);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.nfc-workflow-quick-run-feedback[data-tone='error'] {
+  color: var(--studio-danger-ink);
+  border-color: color-mix(in srgb, var(--studio-danger-ink) 35%, var(--studio-line));
+  background: var(--studio-danger-soft);
+}
+.nfc-workflow-quick-run-feedback h3 { font-size: 13px; }
+.nfc-workflow-quick-run-preview a { width: fit-content; color: var(--nfc-tint); }
+@media (min-width: 768px) {
+  .nfc-v2-sheet.nfc-workflow-quick-run { width: min(570px, calc(100vw - 24px)); }
+}
+@media (max-width: 767px) {
+  .nfc-workflow-quick-run-preview { padding: 10px; }
+  .nfc-workflow-quick-run .nfc-console-select { min-height: var(--nfc-control-height-touch); }
+}

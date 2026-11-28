@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentType } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ComponentType, type RefObject } from 'react';
 
 import { useWorkspaceMotionEnabled } from '../../hooks/useWorkspaceMotion';
 import type { StorageSceneProps } from './StorageScene';
@@ -18,7 +18,7 @@ function hasHoverPointer() {
 }
 
 /** Show the static drive until a visible, motion-enabled location can render WebGL. */
-export function StoragePreview({ label }: { label: string }) {
+export function StoragePreview({ label, pointerArea }: { label: string; pointerArea?: RefObject<HTMLElement> }) {
   const host = useRef<HTMLDivElement>(null);
   const motion = useWorkspaceMotionEnabled();
   const pointer = useSyncExternalStore(subscribePointer, hasHoverPointer, () => false);
@@ -48,7 +48,7 @@ export function StoragePreview({ label }: { label: string }) {
     <div ref={host} className="nfc-storage-preview" role="img" aria-label={`${label} · 极空间 Z4 Pro 珍珠白`}
       data-webgl={enabled && ready}>
       <span className="nfc-storage-preview-fallback" aria-hidden="true" />
-      {enabled && Scene && <Scene onReady={onReady} />}
+      {enabled && Scene && <Scene onReady={onReady} pointerArea={pointerArea} />}
     </div>
   );
 }

@@ -17,6 +17,7 @@ export const MobileDock: React.FC<Props> = ({ moreOpen, onMore }) => {
   const indicatorStyle = { '--nfc-dock-index': moreActive ? primaryDestinations.length : activeTab } as React.CSSProperties;
   return <nav className="nfc-mobile-dock nfc-v2-mobile-dock" aria-label="移动端快捷导航">
     <div className="nfc-mobile-dock-surface" style={indicatorStyle}>
+      <span className="nfc-mobile-dock-track" aria-hidden="true"><span className="nfc-mobile-dock-marker" /></span>
       {primaryDestinations.map((item, index) => <Link key={item.path} to={item.path}
         aria-current={activeTab === index ? 'page' : undefined}
         className={'nfc-mobile-dock-item' + (!moreOpen && activeTab === index ? ' is-active' : '')}>

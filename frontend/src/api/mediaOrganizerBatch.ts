@@ -56,6 +56,7 @@ export interface MediaBatchPreviewUnit {
   total_proposals: number;
   mapping_id: string | null;
   loose_id?: string;
+  contents_cursor?: string;
   conflicts: MediaPreviewConflict[];
 }
 
@@ -85,6 +86,21 @@ interface MediaMappingPage extends Page {
   moves: Array<{ source: string; target: string; kind: OrganizerMappingKind; bytes: number }>;
 }
 
+export interface MediaCurrentEntry {
+  name: string;
+  path: string;
+  type: 'directory' | 'file';
+  kind?: string;
+}
+
+interface MediaCurrentEntriesPage extends Page {
+  unit: string;
+  directory: string;
+  items: MediaCurrentEntry[];
+  total: number;
+  read_only: true;
+}
+
 interface MediaLooseFilesPage extends Page {
   job_id: OrganizerJobId;
   loose_id: string;
@@ -112,7 +128,15 @@ export interface MediaBatchResult extends OrganizerJob, OrganizerReportPage {
   preview_job_id: OrganizerJobId;
   report_cleanup_status?: 'pending' | 'released' | 'missing';
   summary: Record<`${MediaBatchOutcome}_count`, number>;
-  items: Array<{ unit: string; status: MediaBatchOutcome; reason?: string | null; operation?: string }>;
+  items: MediaBatchResultItem[];
+}
+
+export interface MediaBatchResultItem {
+  unit: string;
+  status: MediaBatchOutcome;
+  reason?: string | null;
+  operation?: string;
+  target_path?: string;
 }
 
 const base = '/api/media-organizer';
@@ -139,6 +163,14 @@ export const mediaOrganizerBatchApi = {
     const query = pagination(page, pageSize);
     query.set('status_filter', status);
     return api.get<MediaBatchPreview>(`${base}/previews/${id}?${query}`);
+  },
+  /** Read a single live directory, bound to the already-organized row that opened it. */
+  getCurrentEntries: (id: OrganizerJobId, unit: string, cursor: string, directory: string, page: number, pageSize: number) => {
+    const query = pagination(page, pageSize);
+    query.set('unit', unit);
+    query.set('cursor', cursor);
+    query.set('directory', directory);
+    return api.get<MediaCurrentEntriesPage>(`${base}/previews/${id}/entries?${query}`);
   },
   /** Read a complete per-unit mapping, one page at a time. */
   getMapping: (id: OrganizerJobId, mappingId: string, page: number, pageSize: number) =>

@@ -42,6 +42,34 @@ def _preview(client, settings, selection):
     return response.json()
 
 
+def test_already_organized_contents_are_bound_to_the_selected_unit_and_read_current_entries(tmp_path):
+    client, settings, _ = _fixture(tmp_path)
+    root = settings.data_mount / "作品集"
+    unit = root / "已整理作品"
+    unit.mkdir(parents=True)
+    (unit / "001.jpg").write_bytes(b"one")
+    (unit / "002.jpg").write_bytes(b"two")
+    sibling = root / "另一份作品"
+    sibling.mkdir()
+    (sibling / "原图.jpg").write_bytes(b"private to the sibling")
+    preview = _preview(client, settings, root)
+    row, = [row for row in preview["units"] if row["unit"] == str(unit)]
+    assert row["status"] == "already_organized"
+
+    (unit / "003.jpg").write_bytes(b"added after scanning")
+    (unit / "越界链接").symlink_to(sibling, target_is_directory=True)
+    endpoint = f"/api/media-organizer/previews/{preview['job_id']}/entries"
+    binding = {"unit": str(unit), "cursor": row["contents_cursor"]}
+    page = client.get(endpoint, params={**binding, "directory": str(unit), "page": 2, "page_size": 2})
+    assert page.status_code == 200, page.text
+    assert page.json()["total"] == 3
+    assert page.json()["items"] == [{"name": "003.jpg", "path": str(unit / "003.jpg"), "type": "file", "kind": "image"}]
+    for directory in (sibling, unit / "越界链接"):
+        denied = client.get(endpoint, params={**binding, "directory": str(directory)})
+        assert denied.status_code == 409
+    assert client.get(endpoint, params={**binding, "unit": str(sibling), "directory": str(sibling)}).status_code == 404
+
+
 def test_author_single_video_child_flattens_with_unnumbered_root_in_one_pass(tmp_path):
     client, settings, _ = _fixture(tmp_path)
     month = settings.data_mount / "Else/2604"

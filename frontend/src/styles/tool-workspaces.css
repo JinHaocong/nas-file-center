@@ -1,6 +1,6 @@
 /* Tool workspaces share the application palette but keep their own reading order. */
 .nfc-studio .nfc-app-main .nfc-tool-workspace {
-  --tool-space: clamp(16px, 1.6vw, 24px);
+  --tool-space: var(--nfc-detail-gap);
   --tool-border: var(--studio-line, var(--nfc-hairline));
   --tool-paper: var(--studio-paper, var(--nfc-surface-1));
   --tool-soft: var(--studio-soft, var(--nfc-surface-2));

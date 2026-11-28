@@ -87,13 +87,15 @@ describe('Console v2 native shared CodePath', () => {
     for (const token of [
       "if (!value)", 'nfc-code-path-empty', '>—</span>', 'title={value}',
       'copyExactText(value', 'navigator.clipboard', 'fallback: copyUsingSelection',
-      "document.execCommand('copy')", 'field.select()', 'field.remove()',
-      'activeElement.focus()', 'className="nfc-v2-code-path-value"',
+      'className="nfc-v2-code-path-value"', '{copy && <button',
       'nfc-code-path-muted', '<button type="button"',
       'aria-label="复制完整路径"', 'aria-live="polite"', 'role="status"',
       "result?.value === value", '请手动选择路径',
       'void copyPath()', '<ConsoleIcon name="copy"',
     ]) assert.ok(source.includes(token), token);
+    const fallback = read('src/utils/clipboard.ts');
+    for (const token of ["document.execCommand('copy')", 'field.value = value', 'field.select()', 'field.remove()',
+      'activeElement.focus({ preventScroll: true })']) assert.ok(fallback.includes(token), token);
     assert.doesNotMatch(source, /from ['"]antd['"]|@ant-design\/icons|<Text\b|Typography/);
   });
 

@@ -5,6 +5,7 @@ import { workflowApi } from '../../api/workflows';
 import { getStructuredApiError } from '../../api/errors';
 import type { WorkflowListItem } from '../../types/workflow';
 import { RevisionDrawer } from '../../components/workflows/RevisionDrawer';
+import { WorkflowQuickRunSheet } from '../../components/workflows/WorkflowQuickRunSheet';
 import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime } from '../../utils/format';
 import { useAuth } from '../../contexts/AuthContext';
@@ -46,6 +47,7 @@ export const WorkflowListPage: React.FC = () => {
   const [includeArchived, setIncludeArchived] = useState(false);
   const [modeFilter, setModeFilter] = useState<WorkflowListItem['mode'] | 'all'>('all');
   const [selectedWorkflowForRevision, setSelectedWorkflowForRevision] = useState<WorkflowListItem | null>(null);
+  const [workflowToRun, setWorkflowToRun] = useState<WorkflowListItem>();
   const [confirmation, setConfirmation] = useState<WorkflowListIntent | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
@@ -123,6 +125,11 @@ export const WorkflowListPage: React.FC = () => {
 
   const renderActions = (workflow: WorkflowListItem, mobile = false) => (
     <div className={mobile ? 'nfc-mobile-record-actions nfc-v2-workflow-actions' : 'nfc-row-actions nfc-v2-workflow-actions'}>
+      {workflow.mode === 'file' && !workflow.archived_at && <ConsoleButton size="sm" variant="secondary"
+        leadingIcon={<ConsoleIcon name="play" size={15} />} onClick={event => {
+          event.currentTarget.focus({ preventScroll: true });
+          setWorkflowToRun(workflow);
+        }}>运行</ConsoleButton>}
       <ConsoleButton variant="ghost" size="sm"
         leadingIcon={<ConsoleIcon name="pencil" size={15} />}
         onClick={() => navigate(`/workflows/${workflow.id}`)}>
@@ -314,6 +321,8 @@ export const WorkflowListPage: React.FC = () => {
         danger busy={busy || mutationInFlight.current}
         disabled={!confirmTarget} onConfirm={handleConfirmAction}
       />
+      <WorkflowQuickRunSheet open={workflowToRun !== undefined} workflow={workflowToRun}
+        onClose={() => setWorkflowToRun(undefined)} />
     </div>
   );
 };

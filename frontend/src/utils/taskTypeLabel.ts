@@ -8,6 +8,7 @@ const jobTypes: Record<string, string> = {
   'download-verify-webdav': '核对下载文件',
   'cloud-copy': '云端复制到 NAS',
   'workflow-scheduled': '定时工作流',
+  'workflow-quick-run': '工作流快捷运行',
   'plan-execute': '执行计划',
 };
 

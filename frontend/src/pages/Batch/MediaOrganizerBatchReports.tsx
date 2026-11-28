@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 
 import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { CodePath } from '../../components/ui/CodePath';
@@ -13,12 +14,13 @@ import { MediaThumbnail, ThumbnailSwitch } from '../../components/ui/MediaThumbn
 import { commonDirectoryPrefix, PathPrefixDisclosure, usePathPrefix } from '../../components/ui/PathPrefixDisclosure';
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { StatusBadge } from '../../components/ui/StatusBadge';
+import { OrganizerCurrentStructure } from './OrganizerCurrentStructure';
 import { OrganizerStructure } from './OrganizerStructure';
 
 import { getStructuredApiError } from '../../api/errors';
 import {
   mediaOrganizerBatchApi, type MediaBatchOutcome, type MediaBatchPreview,
-  type MediaBatchPreviewUnit, type MediaBatchResult, type OrganizerJobId,
+  type MediaBatchPreviewUnit, type MediaBatchResult, type MediaBatchResultItem, type OrganizerJobId,
 } from '../../api/mediaOrganizerBatch';
 
 import { useDisplayPreferences } from '../../contexts/DisplayPreferencesContext';
@@ -119,8 +121,9 @@ function unitName(path: string) {
 }
 
 /** Render the selected unit using only paths reported by its verified preview. */
-function UnitInspection({ row, onDetails, onClose, closeDisabled }: {
+function UnitInspection({ row, previewId, onDetails, onClose, closeDisabled }: {
   row: MediaBatchPreviewUnit;
+  previewId: OrganizerJobId;
   onDetails: OpenUnitDetails;
   onClose?: () => void;
   closeDisabled: boolean;
@@ -134,6 +137,7 @@ function UnitInspection({ row, onDetails, onClose, closeDisabled }: {
       查看完整映射（{row.total_proposals.toLocaleString()}）
     </ConsoleButton>
   );
+  const organized = row.status === 'already_organized';
   return (
     <section className="nfc-unit-inspection" aria-label="所选目录整理详情" id="organizer-unit-inspection">
       <header className="nfc-organizer-inspection-header">
@@ -154,6 +158,7 @@ function UnitInspection({ row, onDetails, onClose, closeDisabled }: {
           </button>}
         </div>
       </header>
+      {organized ? <OrganizerCurrentStructure previewId={previewId} unit={row.unit} cursor={row.contents_cursor} /> : <>
       <OrganizerStructure unit={row} />
       {samples.length > 0 && <section className="nfc-organizer-path-samples">
         <div className="nfc-organizer-path-samples-heading">
@@ -191,13 +196,14 @@ function UnitInspection({ row, onDetails, onClose, closeDisabled }: {
         </details>
       ) : <div className="nfc-organizer-unit-path"><CodePath value={row.unit} /></div>}
       <PreviewUnitDetails row={row} onDetails={onDetails} groupsShown={hasFacts} />
+      </>}
     </section>
   );
 }
 
 /** Display a preview's aggregated totals and the current page of independent units. */
 export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDetails, action, children, footer,
-  detail, onDismissDetails, pending = false, detailBusy = false }: {
+  detail, onDismissDetails, onRescan, confirmationOpen = false, pending = false, detailBusy = false }: {
   preview: MediaBatchPreview;
   selected?: MediaBatchPreviewUnit;
   onSelect: (row: MediaBatchPreviewUnit) => void;
@@ -207,6 +213,8 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
   footer: React.ReactNode;
   detail?: React.ReactNode;
   onDismissDetails?: () => void;
+  onRescan?: () => void;
+  confirmationOpen?: boolean;
   pending?: boolean;
   detailBusy?: boolean;
 }) {
@@ -218,8 +226,19 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
   const selectedCard = useRef<HTMLButtonElement>(null);
   const selectedKey = selected ? preview.job_id + '/' + selected.unit : null;
   const listView = !showThumbnails || view === 'list';
-  const sheetOpen = isMobile && selectedKey !== null && selectedKey === selectionKey && !collapsed;
+  const sheetOpen = isMobile && selectedKey !== null && selectedKey === selectionKey && !collapsed && !confirmationOpen;
   const desktopOpen = !isMobile && selected !== undefined && !collapsed;
+  const [reviewFromSheet, setReviewFromSheet] = useState(false);
+
+  // Do not nest two open Radix focus scopes. Restore this sheet only when
+  // cancelling the review and the same unit is still selected.
+  useEffect(() => {
+    if (!reviewFromSheet || confirmationOpen) return;
+    setReviewFromSheet(false);
+    if (!selectedKey || selectedKey !== selectionKey || !action) return;
+    selectedCard.current?.focus({ preventScroll: true });
+    setCollapsed(false);
+  }, [action, confirmationOpen, reviewFromSheet, selectedKey, selectionKey]);
 
   /** Close only the current inspector and clear details tied to its row. */
   function closeInspection() {
@@ -244,10 +263,22 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
   const summary = preview.summary;
   if (!summary) return null;
   const inspector = selected && <>
-    <UnitInspection key={selected.unit} row={selected} onDetails={onDetails}
+    <UnitInspection key={selectedKey} row={selected} previewId={preview.job_id} onDetails={onDetails}
       onClose={isMobile ? undefined : closeInspection} closeDisabled={detailBusy} />
     {detail}
   </>;
+  const organized = selected?.status === 'already_organized';
+  const sheetAction = organized ? <Link className="nfc-console-button nfc-console-button-primary nfc-console-button-md"
+    to={'/dashboard?' + new URLSearchParams({ directory: selected.unit })}>
+    <ConsoleIcon name="folder-open" size={16} /> 打开目录
+  </Link> : selected?.status === 'blocked' && onRescan ? <ConsoleButton variant="primary" onClick={onRescan}
+    leadingIcon={<ConsoleIcon name="refresh" size={16} />}>重新扫描</ConsoleButton>
+    : selected?.status === 'ready' && React.isValidElement<React.ComponentProps<typeof ConsoleButton>>(action)
+      ? React.cloneElement(action, { onClick: event => {
+        setReviewFromSheet(true);
+        setCollapsed(true);
+        action.props.onClick?.(event);
+      } }) : null;
 
   return (
     <section className="nfc-organizer-workspace-report nfc-v2-batch-organizer-report" aria-label="整理预览工作台">
@@ -322,7 +353,11 @@ export function MediaOrganizerPreviewReport({ preview, selected, onSelect, onDet
         {desktopOpen && <aside key={selectedKey} className="nfc-organizer-workspace-inspector" aria-label="整理详情">{inspector}</aside>}
       </div>
       {isMobile && selectionKey !== null && <ConsoleSheet open={sheetOpen} onClose={closeInspection} title="整理详情"
-        className="nfc-organizer-workspace-sheet" dismissDisabled={detailBusy}>
+        className="nfc-organizer-workspace-sheet" dismissDisabled={detailBusy} returnFocusFallback={() => confirmationOpen ? null : selectedCard.current}
+        footer={<div className="nfc-organizer-sheet-actions">
+          <ConsoleButton onClick={closeInspection} disabled={detailBusy}>{organized ? '关闭' : '返回列表'}</ConsoleButton>
+          {sheetAction}
+        </div>}>
         {inspector}
       </ConsoleSheet>}
       {action && <footer className="nfc-unit-confirmation">
@@ -413,27 +448,144 @@ export function MediaOrganizerMappingReport({ previewId, mappingId, unit, onClos
   );
 }
 
-/** Display durable progress and the success, skip, conflict and failure counts. */
-export function MediaOrganizerResultReport({ report, children, conflictsOnly, onToggleConflicts, pending }: {
+/** Display the recorded reason and exact path without deriving a target from an error string. */
+function ResultConflictDetails({ row }: { row: MediaBatchResultItem }) {
+  const displayPath = row.target_path && row.target_path.startsWith(row.unit + '/')
+    ? '…/' + row.target_path.slice(row.unit.length + 1) : undefined;
+  return <div className="nfc-organizer-result-detail-content">
+    <div className="nfc-organizer-result-detail-heading">
+      <h3 title={row.unit}>{unitName(row.unit)}</h3>
+      <StatusBadge status="partial" label="冲突" />
+    </div>
+    <div className="nfc-organizer-result-conflict-note"><ConsoleIcon name="info" size={17} />
+      <div><strong>{row.reason || '此整理单元发生冲突'}</strong><p>核对目录后，可重新扫描。</p></div>
+    </div>
+    <div className="nfc-organizer-result-detail-path">
+      <h4>{row.target_path ? '目标路径' : '整理单元路径'}</h4>
+      <CodePath key={row.target_path ?? row.unit} value={row.target_path ?? row.unit} displayValue={displayPath} />
+    </div>
+  </div>;
+}
+
+/** Display the current result page without moving the entire screen when a conflict is found. */
+export function MediaOrganizerResultReport({ report, children, conflictsOnly, onToggleConflicts, onRescan, pending }: {
   report: MediaBatchResult;
   children: React.ReactNode;
   conflictsOnly: boolean;
   onToggleConflicts: () => void;
+  onRescan?: () => void;
   pending: boolean;
 }) {
+  const { isMobile } = useResponsive();
+  const [selection, setSelection] = useState<{ job: string; unit: string } | null>(null);
+  const [pulse, setPulse] = useState(false);
+  const [jump, setJump] = useState<{ job: string; unit?: string } | null>(null);
+  const scrollArea = useRef<HTMLDivElement>(null);
+  const locator = useRef<HTMLButtonElement>(null);
+  const closeAnchor = useRef<HTMLButtonElement | null>(null);
+  const pulseTimer = useRef<number | null>(null);
+  const visibleConflict = report.items.find(row => row.status === 'conflict');
+  const selected = !pending && selection?.job === report.job_id
+    ? report.items.find(row => row.unit === selection.unit && row.status === 'conflict') : undefined;
   const cleanupMessage = {
     pending: '报告明细已排队回收，整理结果会保留。',
     released: '报告文件已回收，整理结果已保留。',
     missing: '报告文件已不存在，整理结果已保留。',
   };
+  const canLocate = report.summary.conflict_count > 0 && !['released', 'missing'].includes(report.report_cleanup_status ?? '');
+  const completedWithConflicts = report.status === 'completed' && canLocate;
+
+  useEffect(() => () => {
+    if (pulseTimer.current !== null) window.clearTimeout(pulseTimer.current);
+  }, []);
+
+  /** Once the requested page arrives, select the conflict, focus it and scroll its own list. */
+  useEffect(() => {
+    if (pending || !jump) return;
+    setJump(null);
+    if (jump.job !== report.job_id) return;
+    const unit = jump.unit ?? (conflictsOnly ? visibleConflict?.unit : undefined);
+    if (!unit) return;
+    setSelection({ job: report.job_id, unit });
+    const area = scrollArea.current;
+    if (area) {
+      const trigger = [...area.querySelectorAll<HTMLButtonElement>('button[data-result-unit]')]
+        .find(button => button.dataset.resultUnit === unit);
+      if (trigger) {
+        closeAnchor.current = trigger;
+        trigger.focus({ preventScroll: true });
+        const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+        const row = trigger.closest('tr, li')?.getBoundingClientRect() ?? trigger.getBoundingClientRect();
+        const box = area.getBoundingClientRect();
+        if (row.top < box.top || row.bottom > box.bottom) {
+          area.scrollTo({ top: Math.max(0, area.scrollTop + row.top - box.top - (area.clientHeight - row.height) / 2), behavior });
+        }
+        if (box.top < 0 || box.bottom > window.innerHeight) area.scrollIntoView({ block: 'nearest', behavior });
+      }
+    }
+    if (pulseTimer.current !== null) window.clearTimeout(pulseTimer.current);
+    setPulse(true);
+    pulseTimer.current = window.setTimeout(() => setPulse(false), 780);
+  }, [conflictsOnly, jump, pending, report.job_id, visibleConflict]);
+
+  /** Do not change filters when the current page already includes a conflict. */
+  function locateConflict() {
+    if (pending) return;
+    if (conflictsOnly) {
+      setJump(null);
+      setSelection(null);
+      setPulse(false);
+      onToggleConflicts();
+      return;
+    }
+    setJump({ job: report.job_id, unit: visibleConflict?.unit });
+    if (!visibleConflict) onToggleConflicts();
+  }
+
+  /** Remember the row as the return target for the mobile disclosure. */
+  function reveal(row: MediaBatchResultItem, opener: HTMLButtonElement) {
+    opener.focus({ preventScroll: true });
+    closeAnchor.current = opener;
+    setPulse(false);
+    setSelection({ job: report.job_id, unit: row.unit });
+  }
+
+  /** Close the details without altering the current result page or filters. */
+  function closeDetail() {
+    setSelection(null);
+    setPulse(false);
+    if (!isMobile) (closeAnchor.current?.isConnected ? closeAnchor.current : locator.current)?.focus({ preventScroll: true });
+  }
+
+  /** Use the same recognizable directory title and status on the table and mobile list. */
+  function resultName(row: MediaBatchResultItem) {
+    return row.status === 'conflict' ? <button type="button" className="nfc-organizer-result-trigger" title={row.unit}
+      aria-expanded={selected?.unit === row.unit} aria-haspopup={isMobile ? 'dialog' : undefined}
+      data-result-unit={row.unit} onClick={event => reveal(row, event.currentTarget)}>
+      <ConsoleIcon name="folder" size={15} /> <span>{unitName(row.unit)}</span>
+    </button> : <div className="nfc-organizer-result-name"><ConsoleIcon name="folder" size={15} />
+      <strong title={row.unit}>{unitName(row.unit)}</strong>
+    </div>;
+  }
+
+  const locateAction = canLocate && <ConsoleButton ref={locator} size="sm" variant={completedWithConflicts ? 'primary' : 'secondary'}
+    aria-pressed={conflictsOnly} leadingIcon={<ConsoleIcon name={conflictsOnly ? 'list-checks' : 'arrow-right'} size={15} />}
+    loading={pending} onClick={locateConflict}>{conflictsOnly ? '查看全部结果' : '定位冲突'}</ConsoleButton>;
+  const detailActions = selected && <div className="nfc-organizer-sheet-actions">
+    <ConsoleButton onClick={closeDetail}>{isMobile ? '关闭' : '返回列表'}</ConsoleButton>
+    {onRescan && <ConsoleButton variant="primary" onClick={() => { closeDetail(); onRescan(); }}
+      leadingIcon={<ConsoleIcon name="refresh" size={16} />}>重新扫描</ConsoleButton>}
+  </div>;
+
   return (
-    <DataPanel title="整理结果" variant="dense" className={panelClass}
-      action={(report.summary.conflict_count > 0 && !['released', 'missing'].includes(report.report_cleanup_status ?? '')) &&
-        <ConsoleButton size="sm" variant="secondary" aria-pressed={conflictsOnly}
-          leadingIcon={<ConsoleIcon name={conflictsOnly ? 'list-checks' : 'search'} size={15} />}
-          loading={pending}
-          onClick={onToggleConflicts}>{conflictsOnly ? '查看全部结果' : '定位冲突'}</ConsoleButton>}>
-      <TaskProgress status={report.status} progress={{ ...report.progress, percent: null }} />
+    <DataPanel title="整理结果" variant="dense" className={`${panelClass} nfc-organizer-result-report`}
+      action={!completedWithConflicts && locateAction}>
+      {completedWithConflicts ? <div className="nfc-organizer-result-summary" role="status">
+        <ConsoleIcon name="check-circle" size={22} />
+        <div><strong>成功 {report.summary.success_count.toLocaleString()} · {report.summary.conflict_count.toLocaleString()} 处冲突</strong>
+          <p>可定位到有冲突的目录，核对目标路径。</p></div>
+        {locateAction}
+      </div> : <TaskProgress status={report.status} progress={{ ...report.progress, percent: null }} />}
       {report.error && <p className="nfc-v2-batch-error" role="alert">{report.error}</p>}
       {report.report_cleanup_status && <p className="nfc-form-note" role="status">
         {cleanupMessage[report.report_cleanup_status]}
@@ -445,14 +597,19 @@ export function MediaOrganizerResultReport({ report, children, conflictsOnly, on
         ))}
       </div>
       {pending ? <p className="nfc-file-workspace-loading" role="status">正在读取结果…</p> : report.items.length > 0 ? (
-        <ResponsiveDataView
-          desktop={<div className="nfc-v2-batch-media-scroll">
+        <div className={`nfc-organizer-result-workbench${selected && !isMobile ? ' has-conflict-detail' : ''}`}
+          data-pulse={pulse || undefined}>
+          <div className="nfc-organizer-result-list">
+            <header><h3>执行结果</h3><span>{report.filtered_total.toLocaleString()} 个整理单元</span></header>
+            <div ref={scrollArea} className="nfc-organizer-result-scroll">
+              <ResponsiveDataView
+          desktop={<div className="nfc-v2-batch-media-scroll nfc-organizer-result-table-wrap">
             <table className="nfc-v2-batch-media-table">
               <caption className="nfc-v2-batch-media-sr-only">各整理单元结果</caption>
               <thead><tr><th scope="col">整理单元</th><th scope="col">状态</th><th scope="col">说明</th></tr></thead>
               <tbody>{report.items.map(row => (
-                <tr key={row.unit}>
-                  <td><CodePath value={row.unit} /></td>
+                <tr key={row.unit} data-selected={selected?.unit === row.unit || undefined}>
+                  <td>{resultName(row)}</td>
                   <td><StatusBadge status={outcomes[row.status].tone} label={outcomes[row.status].label} /></td>
                   <td>{row.reason || '—'}</td>
                 </tr>
@@ -461,16 +618,32 @@ export function MediaOrganizerResultReport({ report, children, conflictsOnly, on
           </div>}
           mobile={<ul className="nfc-v2-batch-organizer-records" role="list" aria-label="各整理单元结果">
             {report.items.map(row => (
-              <li key={row.unit}>
+              <li key={row.unit} data-selected={selected?.unit === row.unit || undefined}>
                 <div><StatusBadge status={outcomes[row.status].tone} label={outcomes[row.status].label} /></div>
-                <CodePath value={row.unit} />
+                {resultName(row)}
                 {row.reason && <p>{row.reason}</p>}
               </li>
             ))}
           </ul>}
-        />
+              />
+            </div>
+            {children}
+          </div>
+          {!isMobile && selected && <aside className="nfc-organizer-result-detail" aria-label="冲突详情">
+            <header><strong>冲突详情</strong>
+              <ConsoleButton size="sm" variant="ghost" aria-label="关闭冲突详情" onClick={closeDetail}
+                leadingIcon={<ConsoleIcon name="x" size={16} />} />
+            </header>
+            <ResultConflictDetails row={selected} />
+            {detailActions}
+          </aside>}
+        </div>
       ) : conflictsOnly && !report.report_cleanup_status && <ConsoleEmpty title="没有可查看的冲突结果" />}
-      {children}
+      {isMobile && <ConsoleSheet open={Boolean(selected)} onClose={closeDetail} title="冲突详情"
+        className="nfc-organizer-result-sheet" footer={detailActions}
+        returnFocusFallback={() => closeAnchor.current?.isConnected ? closeAnchor.current : locator.current}>
+        {selected && <ResultConflictDetails row={selected} />}
+      </ConsoleSheet>}
     </DataPanel>
   );
 }

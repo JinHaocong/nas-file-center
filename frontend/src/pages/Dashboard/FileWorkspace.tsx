@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 
@@ -8,11 +8,14 @@ import { CodePath } from '../../components/ui/CodePath';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
+import { ConsoleOverflowActions } from '../../components/ui/ConsoleOverflowActions';
 import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { ConsoleSheet } from '../../components/ui/ConsoleSheet';
 import { MediaThumbnail, ThumbnailSwitch } from '../../components/ui/MediaThumbnail';
 import { StoragePreview } from '../../components/ui/StoragePreview';
-import { WorkspaceEntries, workspaceEntryModified, workspaceEntryTypes } from './WorkspaceEntries';
+import { WorkflowQuickRunSheet } from '../../components/workflows/WorkflowQuickRunSheet';
+import { canQuickLook, WorkspaceEntries, workspaceEntryModified, workspaceEntryTypes } from './WorkspaceEntries';
+import { WorkspaceQuickLook } from './WorkspaceQuickLook';
 
 import { getStructuredApiError } from '../../api/errors';
 import { directoryHistoryKey, filesystemApi, type DirectoryOverview } from '../../api/filesystem';
@@ -21,6 +24,7 @@ import { useDisplayPreferences } from '../../contexts/DisplayPreferencesContext'
 
 import { useResponsive } from '../../hooks/useResponsive';
 import { useTitle } from '../../hooks/useTitle';
+import { copyExactText, copyUsingSelection, readClipboardWriter } from '../../utils/clipboard';
 import { formatBytes } from '../../utils/format';
 import { useFileWorkspacePosition } from './useFileWorkspacePosition';
 
@@ -68,13 +72,11 @@ function WorkspaceSearch({ initialValue, onSearch }: { initialValue: string; onS
 interface WorkspaceInspectionProps {
   current: string;
   entry?: DirectoryItem;
-  onOpen: (path: string) => void;
-  returnState: { fileWorkspaceReturn: string };
-  onLeave: () => void;
   onClose?: () => void;
-  favoriteAction?: React.ReactNode;
+  actions?: React.ReactNode;
   storageRoot?: boolean;
   overview?: DirectoryOverview | null;
+  pointerArea?: RefObject<HTMLElement>;
 }
 
 /** Make the media mix readable even when the selection contains no photos or videos. */
@@ -85,12 +87,13 @@ function overviewContents(overview: DirectoryOverview) {
 }
 
 /** Keep the cover, identity, verified facts and primary action in the same order for each selection. */
-function WorkspaceInspection({ current, entry, onOpen, returnState, onLeave, onClose, favoriteAction,
-  storageRoot, overview }: WorkspaceInspectionProps) {
+function WorkspaceInspection({ current, entry, onClose, actions,
+  storageRoot, overview, pointerArea }: WorkspaceInspectionProps) {
+  const detailArea = useRef<HTMLDivElement>(null);
   const path = entry?.path ?? current;
   const directory = !entry || entry.type === 'directory';
   const modified = workspaceEntryModified(entry?.mtime_ns);
-  return <div className="nfc-file-workspace-detail">
+  return <div ref={detailArea} className="nfc-file-workspace-detail">
     {onClose && <header className="nfc-file-workspace-inspector-bar">
       <span>{directory ? '目录详情' : '文件详情'}</span>
       <button type="button" className="nfc-file-workspace-icon" aria-label="关闭目录详情" title="收起详情" onClick={onClose}>
@@ -105,7 +108,7 @@ function WorkspaceInspection({ current, entry, onOpen, returnState, onLeave, onC
         <span className="nfc-file-workspace-detail-icon"><ConsoleIcon name={directory ? 'folder' : 'file-text'} size={20} /></span>
         <div><h2>{entry?.name ?? pathName(current)}</h2><span>{workspaceEntryTypes[entry?.type ?? 'directory']}</span></div>
       </div>
-      {storageRoot && <StoragePreview label={pathName(current)} />}
+      {storageRoot && <StoragePreview label={pathName(current)} pointerArea={pointerArea ?? detailArea} />}
       <dl>
         {overview && <>
           <div className="nfc-file-workspace-detail-fact" title="统计此目录及其子目录，排除符号链接、系统目录和其他挂载点">
@@ -117,20 +120,36 @@ function WorkspaceInspection({ current, entry, onOpen, returnState, onLeave, onC
         </>}
         {!directory && entry?.size != null && <div className="nfc-file-workspace-detail-fact"><dt>大小</dt><dd>{formatBytes(entry.size)}</dd></div>}
         {modified && <div className="nfc-file-workspace-detail-fact"><dt>修改时间</dt><dd><time dateTime={modified.iso}>{modified.label}</time></dd></div>}
-        <div><dt>所在路径</dt><dd><CodePath value={path} /></dd></div>
+        <div><dt>所在路径</dt><dd><CodePath value={path} copy={!directory} /></dd></div>
       </dl>
     </div>
-    {directory && <footer className="nfc-file-workspace-detail-actions">
-      <Link className="nfc-file-workspace-action" to={organizerLink(path)} state={returnState} onClick={onLeave}>
-        <ConsoleIcon name="layers" size={16} /> 预览整理
-      </Link>
-      {(entry || favoriteAction) && <div className="nfc-file-workspace-detail-secondary">
-        {entry && <ConsoleButton size="sm" variant="ghost" onClick={() => onOpen(path)}
-          leadingIcon={<ConsoleIcon name="folder-open" size={16} />}>打开目录</ConsoleButton>}
-        {favoriteAction}
-      </div>}
-    </footer>}
+    {actions && <footer className="nfc-file-workspace-detail-actions">{actions}</footer>}
   </div>;
+}
+
+/** Keep clipboard feedback on the action that copied this exact filesystem path. */
+function CopyWorkspacePath({ path }: { path: string }) {
+  const [result, setResult] = useState<'copied' | 'failed' | 'unsupported'>();
+  const control = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (result !== 'copied') return;
+    const timer = setTimeout(() => setResult(undefined), 2200);
+    return () => clearTimeout(timer);
+  }, [result]);
+  async function copy() {
+    setResult(await copyExactText(path, {
+      writer: readClipboardWriter(() => navigator.clipboard),
+      fallback: value => copyUsingSelection(value, control.current?.closest<HTMLElement>('.nfc-overflow-panel') ?? undefined),
+    }));
+  }
+  return <>
+    <ConsoleButton ref={control} size="sm" variant="ghost" className="nfc-file-workspace-copy-action" title={result === 'copied' ? '已复制完整路径' : undefined}
+      onClick={() => { void copy(); }} leadingIcon={<ConsoleIcon name={result === 'copied' ? 'check' : 'copy'} size={16} />}>
+      复制完整路径
+    </ConsoleButton>
+    <span className="nfc-file-workspace-path-status" role="status">{result === 'copied' ? '已复制完整路径' : ''}</span>
+    {result && result !== 'copied' && <span className="nfc-file-workspace-copy-error" role="alert">复制失败，请手动选择路径</span>}
+  </>;
 }
 
 /** Browse directories and retain selection, search, and pagination in browser history. */
@@ -153,6 +172,10 @@ export function FileWorkspace() {
   const [history, setHistory] = useState<'favorites' | 'recent'>('favorites');
   const [inspectSheet, setInspectSheet] = useState<string | null>(null);
   const [inspectorClosed, setInspectorClosed] = useState(false);
+  const [quickLook, setQuickLook] = useState<{ path: string; scope: string } | null>(null);
+  const [workflowDirectory, setWorkflowDirectory] = useState<string>();
+  const quickLookReturn = useRef<string | null>(null);
+  const workspaceArea = useRef<HTMLElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const selectedEntry = useRef<HTMLButtonElement>(null);
   const scrollList = useRef<HTMLDivElement>(null);
@@ -191,6 +214,11 @@ export function FileWorkspace() {
   const parent = reportedParent && buildDirectoryBreadcrumb(reportedParent, roots) ? reportedParent : undefined;
   const entries = currentQuery.data?.items ?? [];
   const selection = entries.find(item => item.path === selectedPath);
+  const quickLookEntries = showThumbnails && currentQuery.isSuccess && !currentQuery.isPlaceholderData
+    ? entries.filter(canQuickLook) : [];
+  const quickLookScope = JSON.stringify([ownerId, current, page, pageSize, filter]);
+  const quickLookPath = quickLook?.scope === quickLookScope && quickLookEntries.some(entry => entry.path === quickLook.path)
+    ? quickLook.path : null;
   const inspectedPath = selection?.path ?? current;
   const showInspectionSheet = !isDesktop && inspectSheet !== null && inspectSheet === inspectedPath;
   const overviewRequested = Boolean(inspectedPath && !roots.includes(inspectedPath) && (!selection || selection.type === 'directory') &&
@@ -207,6 +235,10 @@ export function FileWorkspace() {
   const returnState = { fileWorkspaceReturn };
 
   useEffect(() => {
+    if (quickLook && !quickLookPath) setQuickLook(null);
+  }, [quickLook, quickLookPath]);
+
+  useEffect(() => {
     if (!current || !focusNewLocation.current) return;
     focusNewLocation.current = false;
     headingRef.current?.focus({ preventScroll: true });
@@ -221,6 +253,7 @@ export function FileWorkspace() {
   /** Navigate only with paths provided by the backend or its directory breadcrumb. */
   function openDirectory(path: string) {
     setInspectSheet(null);
+    setQuickLook(null);
     setLocationsOpen(false);
     if (path === current && !filter && page === 1 && !selectedPath) return;
     savePosition();
@@ -237,13 +270,10 @@ export function FileWorkspace() {
   }
 
   /** Selection replaces only the current history entry; opening a directory pushes a new entry. */
-  function inspect(entry: DirectoryItem, trigger?: HTMLButtonElement) {
-    // Some touch browsers do not focus a button on activation. The sheet
-    // remembers this exact element and returns focus to it on close.
-    if (!isDesktop) trigger?.focus({ preventScroll: true });
-    savePosition();
+  function selectEntry(entry: DirectoryItem) {
     setInspectorClosed(false);
-    setInspectSheet(entry.path);
+    if (selectedPath === entry.path) return;
+    savePosition();
     setParams(previous => {
       const next = new URLSearchParams(previous);
       next.set('selected', entry.path);
@@ -251,10 +281,36 @@ export function FileWorkspace() {
     }, { replace: true });
   }
 
+  /** Remember the exact opener for touch browsers that don't focus a tapped button. */
+  function inspect(entry: DirectoryItem, trigger?: HTMLButtonElement) {
+    if (!isDesktop) trigger?.focus({ preventScroll: true });
+    setInspectSheet(entry.path);
+    selectEntry(entry);
+  }
+
+  /** Keep the row selection in sync for mouse, keyboard and touch navigation. */
+  function openQuickLook(entry: DirectoryItem) {
+    if (!quickLookEntries.some(candidate => candidate.path === entry.path)) return;
+    quickLookReturn.current = entry.path;
+    setInspectSheet(null);
+    selectEntry(entry);
+    setQuickLook({ path: entry.path, scope: quickLookScope });
+  }
+
+  /** Return to the last previewed file even when the overlay was opened from another row. */
+  function restoreQuickLookFocus() {
+    const row = Array.from(scrollList.current?.querySelectorAll<HTMLButtonElement>('button[data-workspace-entry]') ?? [])
+      .find(candidate => candidate.dataset.workspaceEntry === quickLookReturn.current && !candidate.disabled);
+    quickLookReturn.current = null;
+    (row ?? headingRef.current)?.focus({ preventScroll: true });
+    row?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+  }
+
   /** Keep stale selections out of a different filtered page. */
   function changeList(search: string, nextPage: number, size: number) {
     savePosition();
     setInspectSheet(null);
+    setQuickLook(null);
     setParams(previous => {
       const next = new URLSearchParams(previous);
       next.delete('selected');
@@ -328,24 +384,44 @@ export function FileWorkspace() {
       <Link className="nfc-file-workspace-overview" to={'/dashboard?' + overview}><ConsoleIcon name="activity" size={16} /> 运行概览</Link>
     </section>
   </div>;
-  const inspection = current && <WorkspaceInspection current={current} entry={selection} onOpen={openDirectory}
-    returnState={returnState} onLeave={savePosition}
-    overview={overviewRequested ? directoryOverview.data?.overview : undefined}
-    storageRoot={!selection && roots.includes(current)}
-    onClose={isDesktop ? () => {
-      setInspectorClosed(true);
-      (selectedEntry.current ?? headingRef.current)?.focus({ preventScroll: true });
-    } : undefined}
-    favoriteAction={inspectedPath && favorites.isSuccess && <>
-      <ConsoleButton size="sm" variant="ghost" aria-pressed={Boolean(favoriteItem)} disabled={favorite.isPending}
+  const directoryInspection = Boolean(inspectedPath && (!selection || selection.type === 'directory'));
+  const runWorkflow = directoryInspection && inspectedPath && currentQuery.isSuccess && !currentQuery.isPlaceholderData &&
+    <ConsoleButton size="sm" variant="primary" leadingIcon={<ConsoleIcon name="play" size={15} />}
+      onClick={event => {
+        event.currentTarget.focus({ preventScroll: true });
+        savePosition();
+        setWorkflowDirectory(inspectedPath);
+      }}>运行工作流</ConsoleButton>;
+  const extraActions = directoryInspection && inspectedPath &&
+    <ConsoleOverflowActions key={inspectedPath} placement={isDesktop ? 'top' : 'bottom'}>{() => <>
+      {favorites.isSuccess && <ConsoleButton size="sm" variant="ghost" aria-pressed={Boolean(favoriteItem)} disabled={favorite.isPending}
         leadingIcon={<ConsoleIcon name="star" size={16} />}
         onClick={() => favorite.mutate({ path: inspectedPath, existing: favoriteItem })}>
         {favoriteItem ? '取消收藏' : '收藏目录'}
-      </ConsoleButton>
-      {favorite.isError && favorite.variables?.path === inspectedPath && <p role="alert">
+      </ConsoleButton>}
+      {favorite.isError && favorite.variables?.path === inspectedPath && <p className="nfc-file-workspace-copy-error" role="alert">
         {getStructuredApiError(favorite.error).message}
       </p>}
-    </>} />;
+      <CopyWorkspacePath path={inspectedPath} />
+    </>}</ConsoleOverflowActions>;
+  const inspectionActions = directoryInspection && inspectedPath ? <>
+    {selection && <ConsoleButton size="sm" onClick={() => openDirectory(inspectedPath)}
+      leadingIcon={<ConsoleIcon name="folder-open" size={16} />}>打开目录</ConsoleButton>}
+    <Link className="nfc-file-workspace-action" to={organizerLink(inspectedPath)} state={returnState} onClick={savePosition}>
+      <ConsoleIcon name="layers" size={16} /> 预览整理
+    </Link>
+    {isDesktop && extraActions}
+  </> : selection && quickLookEntries.includes(selection) ? <ConsoleButton variant="primary" size="sm"
+    leadingIcon={<ConsoleIcon name="image" size={16} />} onClick={() => openQuickLook(selection)}>快速查看</ConsoleButton> : null;
+
+  const inspection = current && <WorkspaceInspection current={current} entry={selection}
+    overview={overviewRequested ? directoryOverview.data?.overview : undefined}
+    storageRoot={!selection && roots.includes(current)} actions={isDesktop ? inspectionActions : undefined}
+    pointerArea={isDesktop ? workspaceArea : undefined}
+    onClose={isDesktop ? () => {
+      setInspectorClosed(true);
+      (selectedEntry.current ?? headingRef.current)?.focus({ preventScroll: true });
+    } : undefined} />;
 
   const locationBar = <div className="nfc-file-workspace-location-bar">
     {isMobile && <ConsoleButton size="sm" variant="ghost" onClick={() => setLocationsOpen(true)}
@@ -409,11 +485,14 @@ export function FileWorkspace() {
     page={page} pageSize={pageSize} pageSizes={pageSizes} total={currentQuery.data.total}
     onChange={(next, size) => changeList(filter, next, size)} />;
 
-  return <section className="nfc-operations-page nfc-file-workspace" aria-label="文件空间">
+  return <section ref={workspaceArea} className="nfc-operations-page nfc-file-workspace" aria-label="文件空间">
     {isDesktop && <header className="nfc-file-workspace-page-heading">
       <h1 ref={headingRef} tabIndex={-1}>文件空间</h1>
-      {parent && <ConsoleButton size="sm" variant="ghost" onClick={() => openDirectory(parent)}
-        leadingIcon={<ConsoleIcon name="arrow-up" size={15} />}>返回上一级</ConsoleButton>}
+      <div className="nfc-file-workspace-heading-actions">
+        {parent && <ConsoleButton size="sm" variant="ghost" onClick={() => openDirectory(parent)}
+          leadingIcon={<ConsoleIcon name="arrow-up" size={15} />}>返回上一级</ConsoleButton>}
+        {runWorkflow}
+      </div>
     </header>}
     <div className="nfc-file-workspace-window">
       {toolbar}
@@ -425,9 +504,12 @@ export function FileWorkspace() {
               <h1 ref={headingRef} tabIndex={-1}>{current ? pathName(current) : '文件空间'}</h1>
               {count}
             </div>
-            {isMobile && <Link className="nfc-file-workspace-quiet-link" to={'/dashboard?' + overview}>
-              <ConsoleIcon name="activity" size={16} /> 运行概览
-            </Link>}
+            <div className="nfc-file-workspace-heading-actions">
+              {runWorkflow}
+              {isMobile && <Link className="nfc-file-workspace-quiet-link" to={'/dashboard?' + overview}>
+                <ConsoleIcon name="activity" size={16} /> 运行概览
+              </Link>}
+            </div>
           </div>}
           <div className="nfc-file-workspace-list-scroll" ref={scrollList} onScroll={savePosition}
             tabIndex={isDesktop ? 0 : undefined} role="region" aria-label="文件列表">
@@ -439,12 +521,16 @@ export function FileWorkspace() {
                 {params.size > 0 && <ConsoleButton size="sm" variant="ghost" onClick={() => setParams({})}>返回文件空间</ConsoleButton>}
               </div> : entries.length ? <WorkspaceEntries entries={entries} list={currentListView}
                 selectedPath={selectedPath} selectedRef={selectedEntry} pending={currentQuery.isPlaceholderData}
-                openOnClick={isMobile} onOpen={openDirectory} onInspect={inspect} /> :
+                openOnClick={isMobile} quickLookEnabled={showThumbnails} onOpen={openDirectory}
+                onInspect={inspect} onSelect={selectEntry} onQuickLook={openQuickLook} /> :
               <ConsoleEmpty title={currentQuery.data.total ? '此页已没有项目'
               : filter ? '没有找到符合条件的项目' : '这个目录里还没有项目'}
               action={filter ? <ConsoleButton onClick={() => changeList('', 1, pageSize)}>清除搜索</ConsoleButton> : undefined} />}
           </div>
-          {isDesktop ? (count || pagination) && <footer className="nfc-file-workspace-list-footer">{count}{pagination}</footer> : pagination}
+          {isDesktop ? (count || pagination) && <footer className="nfc-file-workspace-list-footer">{count}
+            {selection && quickLookEntries.includes(selection) && <span className="nfc-file-workspace-preview-hint">
+              <kbd>↑</kbd> <kbd>↓</kbd> 切换选择 · 空格预览
+            </span>}{pagination}</footer> : pagination}
         </section>
         {isDesktop && inspection && !inspectorClosed && <aside className="nfc-file-workspace-inspector" aria-label="目录详情">
           {inspection}
@@ -454,9 +540,15 @@ export function FileWorkspace() {
     {isMobile && locationsOpen && <ConsoleSheet open onClose={() => setLocationsOpen(false)} title="位置"
       className="nfc-file-workspace-sheet">{locations}</ConsoleSheet>}
     {inspection && !isDesktop &&
-      <ConsoleSheet open={showInspectionSheet} onClose={() => setInspectSheet(null)} title="详情" className="nfc-file-workspace-sheet"
+      <ConsoleSheet open={showInspectionSheet} onClose={() => setInspectSheet(null)} title={directoryInspection ? '目录详情' : '文件详情'}
+        className="nfc-file-workspace-sheet" titleAside={extraActions}
+        footer={inspectionActions && <div className="nfc-file-workspace-detail-actions">{inspectionActions}</div>}
         returnFocusFallback={() => selectedEntry.current ?? headingRef.current}>
         {inspection}
       </ConsoleSheet>}
+    <WorkspaceQuickLook entries={quickLookEntries} path={quickLookPath} onSelect={openQuickLook}
+      onClose={() => setQuickLook(null)} restoreFocus={restoreQuickLookFocus} />
+    <WorkflowQuickRunSheet open={workflowDirectory !== undefined} directory={workflowDirectory}
+      onClose={() => setWorkflowDirectory(undefined)} />
   </section>;
 }

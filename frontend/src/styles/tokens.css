@@ -46,8 +46,11 @@
   --nfc-material-filter: none;
   --nfc-material-shadow: 0 12px 32px rgb(43 53 37 / .08), inset 0 1px var(--nfc-material-highlight);
   --nfc-motion-ease: cubic-bezier(.22, .7, .28, 1);
-  --nfc-panel-radius: 13px;
+  --nfc-panel-radius: 12px;
   --nfc-overlay-radius: 18px;
+  --nfc-detail-inset: 20px;
+  --nfc-detail-gap: 16px;
+  --nfc-mobile-sheet-height: min(88dvh, calc(100dvh - max(16px, env(safe-area-inset-top))));
 
   --nfc-canvas-tint-a: rgba(32, 32, 31, 0.015);
   --nfc-canvas-tint-b: rgba(32, 32, 31, 0.008);
@@ -65,7 +68,7 @@
   --nfc-border-accent: color-mix(in srgb, var(--nfc-accent) 28%, var(--nfc-border-soft));
 
   --nfc-shadow-shell: none;
-  --nfc-shadow-workspace: 0 1px 2px rgba(24, 24, 20, 0.018);
+  --nfc-shadow-workspace: none;
   --nfc-shadow-overlay: 0 22px 70px rgba(20, 20, 18, 0.17), 0 6px 20px rgba(20, 20, 18, 0.055);
 
   --nfc-blur-shell: 0px;
@@ -73,7 +76,7 @@
   --nfc-blur-overlay: 24px;
 
   --nfc-radius-shell: 12px;
-  --nfc-radius-workspace: 10px;
+  --nfc-radius-workspace: var(--nfc-panel-radius);
   --nfc-radius-inner: 8px;
   --nfc-radius-control: 9px;
   --nfc-radius-pill: 999px;
@@ -167,7 +170,6 @@
   --nfc-border-soft: #383834;
   --nfc-border-strong: #55554f;
   --nfc-shadow-shell: none;
-  --nfc-shadow-workspace: 0 1px 2px rgba(0, 0, 0, 0.12);
   --nfc-shadow-overlay: 0 24px 80px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.2);
 }
 
@@ -190,4 +192,8 @@
     --nfc-material-bg: var(--nfc-material-solid);
     --nfc-material-filter: none;
   }
+}
+
+@media (max-width: 767px) {
+  :root { --nfc-detail-inset: 16px; }
 }

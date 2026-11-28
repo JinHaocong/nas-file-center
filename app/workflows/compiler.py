@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
@@ -39,6 +39,7 @@ from app.workflows.errors import (
 )
 from app.workflows.graph import VirtualCandidate, VirtualPathGraph
 from app.workflows.revisions import compute_definition_sha256
+from app.workflows.runtime_scope import descendants, require_current_source_parents, resolve_file_run_scope
 from app.workflows.schema import (
     DedupeStep,
     FilterStep,
@@ -72,6 +73,7 @@ class CompilationResult:
     compile_digest: str
     runtime_inputs: dict[str, Any]
     compile_context: dict[str, Any]
+    directory_sources: dict[int, dict[str, int]] = field(default_factory=dict)
 
 
 class WorkflowCompiler:
@@ -82,12 +84,14 @@ class WorkflowCompiler:
         quarantine_root: Path | str | None = None,
         protect_last_file: bool = True,
         safety_snapshot: DedupeWorkflowSafetySnapshot | None = None,
+        protected_roots: Iterable[Path | str] = (),
     ):
         self.session = session
         self.allowed_roots = [str(r) for r in allowed_roots]
         self.quarantine_root = str(quarantine_root) if quarantine_root else None
         self.protect_last_file = protect_last_file
         self.safety_snapshot = safety_snapshot
+        self.protected_roots = tuple(str(path) for path in protected_roots)
 
     def compile(
         self,
@@ -99,10 +103,15 @@ class WorkflowCompiler:
         override_root_ids: list[int] | None = None,
         scan_job_id: int | None = None,
         selected_candidate_ids: list[str] | None = None,
+        runtime_directory: str | None = None,
         max_candidates: int = MAX_WORKFLOW_CANDIDATES,
         max_plan_items: int = MAX_WORKFLOW_PLAN_ITEMS,
     ) -> CompilationResult:
         """Compile a validated workflow definition into planned operations with compile_digest."""
+        if runtime_directory is not None and definition.mode != "file":
+            raise WorkflowValidationError(
+                "仅文件工作流支持本次执行目录", code="WORKFLOW_DIRECTORY_MODE_FORBIDDEN",
+            )
         if definition.mode == "organizer":
             return self._compile_organizer_workflow(
                 definition,
@@ -120,6 +129,7 @@ class WorkflowCompiler:
                 workflow_revision=workflow_revision,
                 definition_sha256=definition_sha256,
                 override_root_ids=override_root_ids,
+                runtime_directory=runtime_directory,
                 max_candidates=max_candidates,
                 max_plan_items=max_plan_items,
             )
@@ -755,6 +765,7 @@ class WorkflowCompiler:
         workflow_revision: int | None = None,
         definition_sha256: str | None = None,
         override_root_ids: list[int] | None = None,
+        runtime_directory: str | None = None,
         max_candidates: int = MAX_WORKFLOW_CANDIDATES,
         max_plan_items: int = MAX_WORKFLOW_PLAN_ITEMS,
     ) -> CompilationResult:
@@ -765,6 +776,29 @@ class WorkflowCompiler:
         all_roots = self.session.scalars(select(IndexRoot)).all()
         root_map = {r.id: r.root for r in all_roots}
         root_key_to_id = {r.root: r.id for r in all_roots}
+
+        # The same exclusion policy governs both choosing a scope and finding its files.
+        policy = self.session.get(FilterPolicy, 1)
+        excludes = list(DEFAULT_EXCLUDE_DIR_NAMES)
+        if policy and policy.exclude_dir_names_json:
+            try:
+                excludes = json.loads(policy.exclude_dir_names_json)
+            except (TypeError, ValueError):
+                pass
+
+        scope = None
+        if runtime_directory is not None:
+            protected = self.protected_roots + ((self.quarantine_root,) if self.quarantine_root else ())
+            scope = resolve_file_run_scope(
+                self.session,
+                runtime_directory,
+                roots=all_roots,
+                allowed_roots=self.allowed_roots,
+                protected_roots=protected,
+                excluded_names=(*DEFAULT_EXCLUDE_DIR_NAMES, *excludes),
+                pinned_root_ids=override_root_ids,
+            )
+            effective_root_ids = [scope.index_root.id]
 
         if not effective_root_ids:
             raise WorkflowValidationError("At least one root is required", code="ROOT_REQUIRED")
@@ -791,7 +825,17 @@ class WorkflowCompiler:
             IndexedPath.root_key.in_(target_roots),
         ]
 
-        if scan_step.subpath:
+        if scope is not None:
+            if scope.relative_path:
+                where_clauses.append(descendants(IndexedPath.relative_path, scope.relative_path))
+            where_clauses.append(descendants(IndexedPath.absolute_path, runtime_directory))
+            for path in self.protected_roots:
+                canonical = str(Path(path).resolve())
+                where_clauses.append(~((IndexedPath.absolute_path == canonical) |
+                                       descendants(IndexedPath.absolute_path, canonical)))
+            folded_relative = func.lower(IndexedPath.relative_path)
+            where_clauses.extend((~folded_relative.like(".nfc-%"), ~folded_relative.like("%/.nfc-%")))
+        elif scan_step.subpath:
             sub = scan_step.subpath.strip().lstrip("/\\")
             if sub:
                 esc_sub = sub.replace("!", "!!").replace("%", "!%").replace("_", "!_")
@@ -800,20 +844,9 @@ class WorkflowCompiler:
                     | (IndexedPath.relative_path == sub)
                 )
 
-        # Global exclude policy
-        policy = self.session.get(FilterPolicy, 1)
-        excludes = []
-        if policy and policy.exclude_dir_names_json:
-            try:
-                excludes = json.loads(policy.exclude_dir_names_json)
-            except Exception:
-                excludes = list(DEFAULT_EXCLUDE_DIR_NAMES)
-        else:
-            excludes = list(DEFAULT_EXCLUDE_DIR_NAMES)
-
         where_clauses.append(
             build_exclude_predicates(
-                excludes,
+                tuple(dict.fromkeys((*DEFAULT_EXCLUDE_DIR_NAMES, *excludes))) if scope is not None else excludes,
                 quarantine_root=self.quarantine_root,
             )
         )
@@ -846,6 +879,8 @@ class WorkflowCompiler:
             .order_by(IndexedPath.relative_path.asc(), IndexedPath.id.asc())
         )
         candidates = self.session.scalars(candidate_stmt).all()
+        if scope is not None:
+            require_current_source_parents((candidate.absolute_path for candidate in candidates), scope)
 
         # Step 2: Virtual Simulation
         graph = VirtualPathGraph(
@@ -900,6 +935,20 @@ class WorkflowCompiler:
             "effective_exclude_dir_names": sorted(excludes),
             "filter_policy_updated_at": policy.updated_at.isoformat() if policy and policy.updated_at else None,
         }
+        directory_sources = {}
+        if scope is not None:
+            runtime_inputs["directory"] = str(scope.directory)
+            compile_context["directory_identity"] = [scope.device, scope.inode]
+            compile_context["directory_index_time"] = scope.index_root.last_indexed_at.isoformat()
+            compile_context["directory_source_digest"] = compute_definition_sha256([
+                [item.absolute_path, item.device, item.inode, item.size, item.mtime_ns]
+                for item in candidates
+            ])
+            directory_sources = {
+                item.id: {"expected_device": item.device, "expected_inode": item.inode,
+                          "expected_size": item.size, "expected_mtime_ns": item.mtime_ns}
+                for item in candidates
+            }
 
         digest_payload = {
             "workflow_id": workflow_id,
@@ -918,4 +967,5 @@ class WorkflowCompiler:
             compile_digest=digest,
             runtime_inputs=runtime_inputs,
             compile_context=compile_context,
+            directory_sources=directory_sources,
         )

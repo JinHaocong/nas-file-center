@@ -118,6 +118,7 @@ BatchPlanExecuteHandler = _impl.BatchPlanExecuteHandler
 from app.media.handler import MediaAnalysisHandler as MediaAnalysisHandler
 from app.media.integrity_handler import MediaIntegrityVerifyHandler as MediaIntegrityVerifyHandler
 from app.workflows.scheduled_handler import ScheduledWorkflowHandler as ScheduledWorkflowHandler
+from app.workflows.quick_run import WorkflowQuickRunHandler as WorkflowQuickRunHandler
 
 
 class _HandlerCompatibilityModule(types.ModuleType):

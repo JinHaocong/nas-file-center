@@ -1,35 +1,17 @@
 import React from 'react';
 import { ConsoleIcon } from './ConsoleIcon';
-import { copyExactText, readClipboardWriter } from '../../utils/clipboard';
+import { copyExactText, copyUsingSelection, readClipboardWriter } from '../../utils/clipboard';
 
 interface CodePathProps {
   value?: string | null;
   /** An optional reading label. The title and clipboard always use the full value. */
   displayValue?: string;
   muted?: boolean;
-}
-
-/** Legacy fallback keeps path copying usable on NAS hosts without secure Clipboard API access. */
-function copyUsingSelection(value: string): boolean {
-  const field = document.createElement('textarea');
-  const activeElement = document.activeElement;
-  field.value = value;
-  field.readOnly = true;
-  field.setAttribute('aria-hidden', 'true');
-  field.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
-  document.body.appendChild(field);
-  try {
-    field.focus();
-    field.select();
-    return document.execCommand('copy');
-  } finally {
-    field.remove();
-    if (activeElement instanceof HTMLElement) activeElement.focus();
-  }
+  copy?: boolean;
 }
 
 /** Read-only filesystem path display: show and copy the exact server-provided string. */
-export const CodePath: React.FC<CodePathProps> = ({ value, displayValue, muted = false }) => {
+export const CodePath: React.FC<CodePathProps> = ({ value, displayValue, muted = false, copy = true }) => {
   const textRef = React.useRef<HTMLElement>(null);
   const disclosureRef = React.useRef<HTMLButtonElement>(null);
   const copyButtonRef = React.useRef<HTMLButtonElement>(null);
@@ -110,12 +92,12 @@ export const CodePath: React.FC<CodePathProps> = ({ value, displayValue, muted =
           onClick={() => setExpandedValue(expanded ? null : value)}>
           {expanded ? '收起' : '展开'}
         </button>}
-        <button type="button" className="nfc-v2-code-path-copy" ref={copyButtonRef}
+        {copy && <button type="button" className="nfc-v2-code-path-copy" ref={copyButtonRef}
           data-copied={status === '已复制' || undefined} title={status || '复制完整路径'} aria-label="复制完整路径"
           onClick={() => { void copyPath(); }}>
           {status === '已复制' ? <ConsoleIcon name="check" size={15} /> : <ConsoleIcon name="copy" size={15} />}
           {status === '已复制' && <small aria-hidden="true">已复制</small>}
-        </button>
+        </button>}
       </span>
       <span className="nfc-v2-code-path-feedback" data-error={Boolean(status && status !== '已复制') || undefined}
         aria-live="polite" role="status">

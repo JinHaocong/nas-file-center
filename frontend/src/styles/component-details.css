@@ -271,3 +271,38 @@
 @keyframes nfc-copy-feedback { from { opacity: 0; translate: 0 3px; } }
 @keyframes nfc-component-toast-appear { from { opacity: 0; translate: 0 5px; } }
 @keyframes nfc-component-toast-leave { to { opacity: 0; translate: 0 5px; } }
+.nfc-overflow-actions { position: relative; flex: none; }
+.nfc-overflow-actions .nfc-overflow-trigger { min-width: 36px; padding-inline: 6px; }
+.nfc-overflow-panel {
+  position: absolute;
+  z-index: 4;
+  inset-inline-end: 0;
+  inset-block-end: calc(100% + 6px);
+  display: grid;
+  gap: 2px;
+  min-width: min(170px, calc(100vw - 40px));
+  max-width: min(240px, calc(100vw - 40px));
+  padding: 4px;
+  border: 1px solid var(--studio-line);
+  border-radius: var(--nfc-radius-control);
+  background: var(--studio-paper);
+  box-shadow: var(--nfc-shadow-overlay);
+}
+.nfc-overflow-actions[data-placement='bottom'] .nfc-overflow-panel {
+  inset-block: calc(100% + 6px) auto;
+}
+.nfc-overflow-actions .nfc-overflow-panel > :is(button, a) {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+@media (max-width: 767px) {
+  .nfc-overflow-actions .nfc-overflow-trigger, .nfc-overflow-panel > :is(button, a) { min-height: var(--nfc-control-height-touch); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nfc-overflow-panel { animation: nfc-action-overflow-in 145ms var(--nfc-motion-ease) both; }
+}
+@keyframes nfc-action-overflow-in { from { opacity: 0; translate: 0 4px; } }

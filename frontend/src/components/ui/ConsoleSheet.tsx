@@ -31,7 +31,10 @@ export const ConsoleSheet: React.FC<Props> = ({
           className={'nfc-v2-sheet nfc-overlay-drawer ' + className}
           {...(description ? {} : { 'aria-describedby': undefined })}
           aria-busy={dismissDisabled || undefined}
-          onEscapeKeyDown={event => { if (dismissDisabled) event.preventDefault(); }}
+          onEscapeKeyDown={event => {
+            // Let an open secondary-actions panel consume Escape before its sheet.
+            if (dismissDisabled || document.activeElement?.closest('.nfc-overflow-actions[data-open]')) event.preventDefault();
+          }}
           onPointerDownOutside={event => { if (dismissDisabled) event.preventDefault(); }}
           onOpenAutoFocus={() => {
             const active = document.activeElement;
@@ -56,6 +59,7 @@ export const ConsoleSheet: React.FC<Props> = ({
           }}
         >
           <header className="nfc-v2-sheet-header">
+            <span className="nfc-v2-sheet-handle" aria-hidden="true" />
             <div className="nfc-v2-sheet-heading">
               <div className="nfc-v2-sheet-title-row">
                 <Dialog.Title>{title}</Dialog.Title>

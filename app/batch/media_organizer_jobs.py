@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import os
 import stat
@@ -14,7 +15,7 @@ from uuid import uuid4
 
 from sqlalchemy import func, select, text
 
-from app.batch.file_rename import _open_directory_nofollow
+from app.batch.file_rename import _DIRECTORY_FLAGS, _open_directory_nofollow
 from app.batch.media_organizer_archive import PROMOTE_ARCHIVE_CHILDREN
 from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_organizer_planner import is_reserved_workspace
@@ -23,17 +24,20 @@ from app.batch.media_organizer_recycle import (
     iter_recycle_candidates, omit_recycle_files, zspace_client,
 )
 from app.batch.media_organizer_recycle_rules import matches_reviewed_candidate
-from app.batch.media_package_organizer import APPEND_MEDIA_OPERATIONS, MAX_FILES_PER_GROUP, _validate_scope
+from app.batch.media_package_organizer import APPEND_MEDIA_OPERATIONS, MAX_FILES_PER_GROUP, MAX_SCOPE_ENTRIES_PER_DIRECTORY, _validate_scope
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
 from app.batch.organizer_report_cleanup import archived_result, preview_unavailable, report_missing, report_reclaimed, report_state
 from app.config import Settings
 from app.execution.luolcy_assignment import LUOLCY_ASSIGNMENT_KIND
+from app.filters.excludes import DEFAULT_EXCLUDE_DIR_NAMES
+from app.filters.media_types import get_media_type
 from app.maintenance.organizer import archived_page
 from app.models import TaskEvent, WorkJob, utcnow
 from app.path_safety import validate_mutation_destination
 from app.tasks.context import JobContext
 from app.tasks.handlers_base import TaskHandler, register_handler
 from app.tasks.logging import log_task_event, sanitize_text
+from app.utils.sorting import _MaxHeapCandidate, natural_sort_key
 
 PREVIEW_KIND = "media-organizer-preview"
 BATCH_KIND = "media-organizer-batch"
@@ -44,6 +48,7 @@ PREVIEW_STATUSES = ("ready", "blocked", "already_organized", "skipped", "needs_a
 RESULT_STATUSES = ("success", "skipped", "conflict", "failed")
 RESULT_COMMIT_SIZE = 100
 RESULT_COMMIT_INTERVAL = 0.8
+_CONTENTS_EXCLUDES = frozenset(name.casefold() for name in DEFAULT_EXCLUDE_DIR_NAMES)
 
 
 def _selection(value: str, settings: Settings) -> Path:
@@ -114,6 +119,33 @@ def _rows(path: Path):
             yield json.loads(line)
 
 
+def _indexed_rows(path: Path):
+    """Derive stable byte cursors from existing reports without another index on disk."""
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as source:
+        offset = 0
+        for line in source:
+            yield offset, json.loads(line)
+            offset += len(line)
+
+
+def _read_indexed_unit(path: Path, cursor: int, unit: str) -> dict:
+    """Only accept the requested report record, at its original line boundary."""
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), "rb") as source:
+        if cursor >= os.fstat(source.fileno()).st_size:
+            raise KeyError(unit)
+        if cursor:
+            source.seek(cursor - 1)
+            if source.read(1) != b"\n":
+                raise KeyError(unit)
+        line = source.readline(32 * 1024 * 1024 + 1)
+        if len(line) > 32 * 1024 * 1024:
+            raise ValueError("目录预览记录过大，请重新扫描")
+        entry = json.loads(line)
+    if entry.get("unit") != unit:
+        raise KeyError(unit)
+    return entry
+
+
 def _report_file(path: Path):
     # API and Worker may use different UIDs with the same primary group.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
@@ -166,14 +198,88 @@ def get_preview(session_factory, settings: Settings, job_id: int, *,
         result["summary"] = {key: value for key, value in _plan_summary(report).items()
                              if key not in ("recycle_binding", "recycle_projection")}
         offset = (page - 1) * page_size
-        for unit in _rows(report / "units.jsonl"):
+        for cursor, unit in _indexed_rows(report / "units.jsonl"):
             if status_filter != "all" and unit["status"] != status_filter:
                 continue
             if offset <= result["filtered_total"] < offset + page_size:
                 unit.pop("recycle_identity", None)
+                if unit["status"] == "already_organized":
+                    unit["contents_cursor"] = str(cursor)
                 result["units"].append(unit)
             result["filtered_total"] += 1
     return result
+
+
+def _contents_protected(path: Path, reserved: tuple[Path, ...]) -> bool:
+    return (is_reserved_workspace(path) or any(part.casefold() in _CONTENTS_EXCLUDES for part in path.parts)
+            or any(path.is_relative_to(root) for root in reserved))
+
+
+def _list_current_entries(root: Path, directory: Path, *, page: int, page_size: int,
+                          reserved: tuple[Path, ...]) -> tuple[list[dict], int]:
+    """Open descendants relative to the observed root and enumerate one directory only."""
+    fd = _open_directory_nofollow(root)
+    try:
+        device = os.fstat(fd).st_dev
+        for segment in directory.relative_to(root).parts:
+            child_fd = os.open(segment, _DIRECTORY_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = child_fd
+            if os.fstat(fd).st_dev != device:
+                raise ValueError("此目录位于其他挂载点")
+        first, end = (page - 1) * page_size, page * page_size
+        candidates = []
+        total = 0
+        with os.scandir(fd) as entries:
+            for index, entry in enumerate(entries):
+                if index == MAX_SCOPE_ENTRIES_PER_DIRECTORY:
+                    raise ValueError("目录条目过多，请在文件空间查看")
+                path = directory / entry.name
+                if _contents_protected(path, reserved):
+                    continue
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                folder = stat.S_ISDIR(info.st_mode)
+                if info.st_dev != device or not (folder or stat.S_ISREG(info.st_mode)):
+                    continue
+                total += 1
+                row = _MaxHeapCandidate((not folder, natural_sort_key(entry.name), entry.name), (path, folder))
+                if len(candidates) < end:
+                    heapq.heappush(candidates, row)
+                elif row.sort_key < candidates[0].sort_key:
+                    heapq.heapreplace(candidates, row)
+        items = []
+        for candidate in sorted(candidates, key=lambda row: row.sort_key)[first:end]:
+            path, folder = candidate.val
+            items.append({"name": path.name, "path": str(path), "type": "directory" if folder else "file",
+                          **({"kind": get_media_type(path.suffix)} if not folder else {})})
+        return items, total
+    finally:
+        os.close(fd)
+
+
+def get_current_entries(session_factory, settings: Settings, job_id: int, *, unit: str, cursor: int,
+                        directory: str, page: int, page_size: int) -> dict:
+    """Show the live layout of an already-organized unit from a completed preview."""
+    with session_factory() as session:
+        job, state = _job(session, PREVIEW_KIND, job_id)
+        if job.status != "completed":
+            raise ValueError("预览尚未完成")
+    row = _read_indexed_unit(_report_dir(settings, job_id) / "units.jsonl", cursor, unit)
+    if row.get("status") != "already_organized":
+        raise KeyError(unit)
+    root = _selection(unit, settings)
+    selection = _selection(state["selection"], settings)
+    chosen = _selection(directory, settings)
+    reserved = (settings.config_dir.resolve(), settings.quarantine_root.resolve())
+    if (not root.is_relative_to(selection) or not chosen.is_relative_to(root)
+            or _contents_protected(chosen, reserved)):
+        raise ValueError("请选择该整理单元内的目录")
+    entries, total = _list_current_entries(selection, chosen, page=page, page_size=page_size, reserved=reserved)
+    return {"unit": unit, "directory": directory, "items": entries,
+            "page": page, "page_size": page_size, "total": total, "read_only": True}
 
 
 def get_mapping(session_factory, settings: Settings, job_id: int, mapping_id: str, *,
@@ -662,6 +768,16 @@ def _finish_recycle(unit: dict, settings: Settings, client, fence, remember) -> 
         return "failed", str(exc)
 
 
+def _result_conflict_path(unit: dict) -> str | None:
+    """Keep the first reported conflict path in the durable result when safe to copy."""
+    for conflict in unit.get("conflicts", ()):
+        path = conflict.get("target") or conflict.get("directory")
+        if (isinstance(path, str) and Path(path).is_absolute() and "\0" not in path
+                and sanitize_text(path) == path and len(path.encode()) <= 2048):
+            return path
+    return None
+
+
 @register_handler
 class MediaOrganizerBatchHandler(TaskHandler):
     job_type = BATCH_KIND
@@ -750,10 +866,12 @@ class MediaOrganizerBatchHandler(TaskHandler):
                         status, reason = _finish_unit(
                             unit, settings, folder / f"{ordinal}.json", job.id, fence, selection=selection,
                         )
-                pending.append({
-                    "unit": unit["unit"], "status": status, "reason": reason,
-                    **({"operation": RECYCLE_DOWNLOAD_EXTRAS} if recycling else {}),
-                })
+                result = {"unit": unit["unit"], "status": status, "reason": reason}
+                if recycling:
+                    result["operation"] = RECYCLE_DOWNLOAD_EXTRAS
+                if status == "conflict" and (target := _result_conflict_path(unit)):
+                    result["target_path"] = target
+                pending.append(result)
                 if (ready or len(pending) >= RESULT_COMMIT_SIZE
                         or time.monotonic() - last_commit >= RESULT_COMMIT_INTERVAL):
                     commit_pending()

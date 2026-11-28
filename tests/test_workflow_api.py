@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.auth.password import hash_password
 from app.config import Settings
 from app.main import create_app
-from app.models import BatchPlan, BatchPlanItem, IndexRoot, IndexedPath, User, Workflow, WorkJob
+from app.models import BatchPlan, BatchPlanItem, IndexRoot, IndexedPath, User, Workflow, WorkJob, utcnow
 from app.service import FileCenterService
 
 
@@ -146,6 +146,126 @@ def test_latest_scheduled_workflow_run_is_scoped_to_workflow_and_keeps_exact_tas
     assert response.status_code == 200
     assert response.json()["id"] == "9007199254740994"
     assert response.json()["progress"]["percent"] == 46
+
+
+def _directory_workflow(env):
+    root = env["media"].resolve()
+    chosen = root / "本次_%归档"
+    sibling = root / "本次_%归档-副本"
+    with env["service"].SessionLocal() as session:
+        index_root = session.get(IndexRoot, env["root_id"])
+        index_root.last_indexed_at = utcnow()
+        for folder in (chosen, sibling):
+            folder.mkdir()
+            file = folder / "movie.mkv"
+            file.write_text("demo")
+            session.add(IndexedPath(
+                root_key=str(root), absolute_path=str(file), relative_path=file.relative_to(root).as_posix(),
+                basename=file.name, stem=file.stem, suffix=file.suffix, size=4, mtime_ns=1000,
+                is_dir=False, scan_generation="gen1",
+            ))
+        session.commit()
+    response = env["admin_client"].post("/api/workflows", json={
+        "name": "媒体归档",
+        "definition": {"schema_version": 1, "mode": "file", "steps": [
+            {"id": "scan", "type": "scan", "root_ids": [env["root_id"]], "subpath": sibling.name},
+            {"id": "rename", "type": "rename", "pattern": ".mkv", "replacement": ".mp4"},
+            {"id": "touch", "type": "touch", "touch_now": False, "mtime_ns": 42},
+        ]},
+    })
+    assert response.status_code == 201, response.json()
+    return response.json()["id"], chosen, sibling
+
+
+def test_workflow_runtime_directory_keeps_exact_scope_in_preview_plan_and_rebuild(workflow_test_env):
+    env = workflow_test_env
+    admin = env["admin_client"]
+    workflow, chosen, sibling = _directory_workflow(env)
+    endpoint = f"/api/workflows/{workflow}"
+    inputs = {"directory": str(chosen)}
+    preview = admin.post(endpoint + "/preview", json={
+        "revision": 1, "runtime_inputs": inputs, "only_changed": True, "page_size": 1,
+    })
+    assert preview.status_code == 200, preview.json()
+    body = preview.json()
+    assert body["matched_count"] == 1
+    assert body["total_pages"] == 2
+    assert body["file_summary"] == {"directory": str(chosen), "operation_counts": {"rename": 1, "touch": 1}}
+    assert body["items"][0]["source_path"] == str(chosen / "movie.mkv")
+    second_page = admin.post(endpoint + "/preview", json={
+        "revision": 1, "runtime_inputs": inputs, "only_changed": True, "page": 2, "page_size": 1,
+    }).json()
+    assert second_page["compile_digest"] == body["compile_digest"]
+    assert second_page["items"][0]["operation"] == "touch"
+
+    # Even with the same operation counts, switching directories invalidates the reviewed digest.
+    draft = {"revision": 1, "expected_compile_digest": body["compile_digest"], "runtime_inputs": inputs}
+    stale = admin.post(endpoint + "/generate-plan", json={**draft, "runtime_inputs": {"directory": str(sibling)}})
+    assert stale.status_code == 409, stale.json()
+    generated = admin.post(endpoint + "/generate-plan", json=draft)
+    assert generated.status_code == 201, generated.json()
+    plan_id = generated.json()["plan_id"]
+    with env["service"].SessionLocal() as session:
+        plan = session.get(BatchPlan, plan_id)
+        assert json.loads(plan.metadata_json)["runtime_inputs"] == {"root_ids": [env["root_id"]], **inputs}
+        plan.status = "stale"
+        session.commit()
+    rebuild = admin.post(f"/api/plans/{plan_id}/rebuild-preview", json={})
+    assert rebuild.status_code == 200, rebuild.json()
+    assert rebuild.json()["runtime_inputs"]["directory"] == str(chosen)
+    assert all(Path(item["source_path"]).is_relative_to(chosen) for item in rebuild.json()["items"])
+    state = admin.get(endpoint).json()
+    assert state["current_revision"] == 1
+    assert state["definition"]["steps"][0]["subpath"] == sibling.name
+
+
+def test_workflow_runtime_directory_rejects_link_alias_unindexed_directory_and_mixed_inputs(workflow_test_env):
+    env = workflow_test_env
+    workflow, chosen, _ = _directory_workflow(env)
+    admin = env["admin_client"]
+    endpoint = f"/api/workflows/{workflow}/preview"
+    alias = chosen.parent / "目录软链接"
+    alias.symlink_to(chosen, target_is_directory=True)
+    unindexed = chosen.parent / "尚未索引"
+    unindexed.mkdir()
+    protected = chosen.parent / ".git"
+    protected.mkdir()
+    for inputs, code in (
+        ({"directory": str(alias)}, "WORKFLOW_DIRECTORY_UNAVAILABLE"),
+        ({"directory": str(unindexed)}, "WORKFLOW_DIRECTORY_NOT_INDEXED"),
+        ({"directory": str(protected)}, "WORKFLOW_DIRECTORY_FORBIDDEN"),
+        ({"directory": str(chosen), "root_ids": [env["root_id"]]}, "AMBIGUOUS_RUNTIME_INPUTS"),
+        ({"directory": str(chosen), "scan_job_id": 1}, "AMBIGUOUS_RUNTIME_INPUTS"),
+    ):
+        response = admin.post(endpoint, json={"runtime_inputs": inputs})
+        assert response.status_code == 422, response.json()
+        assert response.json()["error"]["code"] == code
+
+    (chosen / "movie.mp4").write_text("occupied")
+    collision = admin.post(endpoint, json={"runtime_inputs": {"directory": str(chosen)}})
+    assert collision.status_code == 409
+    assert collision.json()["error"]["details"]["target"] == str(chosen / "movie.mp4")
+
+
+def test_workflow_runtime_directory_detects_replacement_after_preview(workflow_test_env):
+    env = workflow_test_env
+    workflow, chosen, _ = _directory_workflow(env)
+    admin = env["admin_client"]
+    endpoint = f"/api/workflows/{workflow}"
+    inputs = {"directory": str(chosen)}
+    root_scope = admin.post(endpoint + "/preview", json={"runtime_inputs": {"directory": str(chosen.parent)}})
+    assert root_scope.status_code == 200, root_scope.json()
+    assert root_scope.json()["file_summary"]["directory"] == str(chosen.parent)
+    preview = admin.post(endpoint + "/preview", json={"runtime_inputs": inputs})
+    assert preview.status_code == 200, preview.json()
+
+    chosen.rename(chosen.with_name("原目录"))
+    chosen.mkdir()
+    (chosen / "movie.mkv").write_text("new file at the same path")
+    generated = admin.post(endpoint + "/generate-plan", json={
+        "revision": 1, "expected_compile_digest": preview.json()["compile_digest"], "runtime_inputs": inputs,
+    })
+    assert generated.status_code == 409, generated.json()
 
 
 def test_workflow_rbac(workflow_test_env):

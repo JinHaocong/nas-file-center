@@ -100,13 +100,14 @@ describe('Console v2 Batch native Draft-only UI', () => {
       'buildBatchDraft(name, operation, paths, mappingsText)',
       'await planMutation.mutateAsync(draft)', 'useConsoleToast',
       "navigate('/plans/' + created.id)", '<DirectoryPicker multiple value={paths}',
-      'value={mappingsText}', 'type="radio"', 'name="batch-operation"',
-      '<fieldset', '<legend', 'nfc-batch-operation-grid',
-      'kind: ', 'batch-', 'value="hardlink" disabled', 'value="reflink" disabled',
+      'value={mappingsText}', 'aria-pressed={operation === item.op}', 'aria-expanded={toolPickerOpen}',
+      'role="group" aria-label="操作类型"', 'nfc-batch-operation-grid',
+      'kind: ', 'batch-', '硬链接去重', 'Reflink 浅克隆', 'nfc-v2-batch-radio is-disabled" disabled',
       '<ConsoleButton', '<ConsoleIcon',
     ]) assert.ok((page + helper).includes(token), token);
     assert.doesNotMatch(page, /from ['"]antd['"]|@ant-design\/icons|<Form\b|<Radio\.|<Alert\b/);
     assert.doesNotMatch(page, /executePlan|freezePlan|validatePlan|deletePlan|\/execute/);
+    assert.doesNotMatch(page, /<details className="nfc-studio-tool-picker"|<input type="radio"/);
   });
 
   test('scoped CSS retains accessible dark/mobile/focus/reduced-motion surfaces', () => {

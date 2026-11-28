@@ -43,6 +43,7 @@ const JOB_TYPE_OPTIONS = [
   { label: taskTypeLabel('fclones-scan'), value: 'fclones-scan' },
   { label: taskTypeLabel('index-root'), value: 'index-root' },
   { label: taskTypeLabel('workflow-scheduled'), value: 'workflow-scheduled' },
+  { label: taskTypeLabel('workflow-quick-run'), value: 'workflow-quick-run' },
   { label: taskTypeLabel('media-analysis'), value: 'media-analysis' },
   { label: taskTypeLabel('media-integrity-verify'), value: 'media-integrity-verify' },
   { label: taskTypeLabel('download-verify-webdav'), value: 'download-verify-webdav' },
