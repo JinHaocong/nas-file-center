@@ -9,6 +9,7 @@ export interface TaskActionAvailability {
 
 export interface TaskLike {
   status: TaskStatus;
+  pause_requested?: boolean;
   capabilities?: TaskCapabilities | null;
 }
 
@@ -38,6 +39,9 @@ export function getTaskActionAvailability(
       }
       if (status === 'paused') {
         return { enabled: false, reason: '任务已经暂停' };
+      }
+      if (task.pause_requested) {
+        return { enabled: false, reason: '等待 Worker 暂停' };
       }
       if (status === 'cancel_requested') {
         return { enabled: false, reason: '当前任务正在取消' };

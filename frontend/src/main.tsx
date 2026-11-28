@@ -69,12 +69,15 @@ import './styles/console-v2-keyboard-navigation.css';
 import './styles/console-v2-studio.css';
 import './styles/workspace.css';
 import './styles/file-workspace.css';
+import './styles/workspace-quicklook.css';
 import './styles/records-workspaces.css';
 import './styles/tool-workspaces.css';
 import './styles/component-details.css';
 import './styles/overlay-forms.css';
 import './styles/overlay-maintenance.css';
 import './styles/overlay-reading.css';
+import './styles/console-v2-workflow-activity.css';
+import './styles/console-v2-workspace-layout.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

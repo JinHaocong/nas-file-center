@@ -21,7 +21,7 @@ from app.batch.media_organizer_link_intent import LinkIntent
 from app.batch.media_organizer_planner import is_reserved_workspace
 from app.batch.media_organizer_recycle import (
     LEGACY_RECYCLE_PROBE_NAME, RECYCLE_DOWNLOAD_EXTRAS, identity as recycle_identity,
-    iter_recycle_candidates, omit_recycle_files, zspace_client,
+    cleanup_empty_recycle_buckets, iter_recycle_candidates, omit_recycle_files, zspace_client,
 )
 from app.batch.media_organizer_recycle_rules import matches_reviewed_candidate
 from app.batch.media_package_organizer import APPEND_MEDIA_OPERATIONS, MAX_FILES_PER_GROUP, MAX_SCOPE_ENTRIES_PER_DIRECTORY, _validate_scope
@@ -203,6 +203,7 @@ def get_preview(session_factory, settings: Settings, job_id: int, *,
                 continue
             if offset <= result["filtered_total"] < offset + page_size:
                 unit.pop("recycle_identity", None)
+                unit.pop("_recycle_bucket_identity", None)
                 if unit["status"] == "already_organized":
                     unit["contents_cursor"] = str(cursor)
                 result["units"].append(unit)
@@ -551,6 +552,8 @@ def _preview_row(record: dict, report: Path) -> dict:
         "totals": totals, "total_files": 1 if recycling else sum(totals.values()),
         **({"recycle_reason": record["recycle_reason"], "recycle_identity": record["recycle_identity"]}
            if recycling else {}),
+        **({"_recycle_bucket_identity": record["_recycle_bucket_identity"]}
+           if recycling and "_recycle_bucket_identity" in record else {}),
         "total_bytes": record.get("total_bytes", 0), "groups": record.get("groups", []),
         "needed_moves": record.get("actual_moves", 0),
         "renamed_count": record.get("renamed_count", 0),
@@ -768,6 +771,45 @@ def _finish_recycle(unit: dict, settings: Settings, client, fence, remember) -> 
         return "failed", str(exc)
 
 
+def _recycled_buckets_for_cleanup(context: JobContext, report: Path, recycle_count: int) -> dict[Path, list[int]]:
+    """Match frozen buckets to durable, confirmed recycle receipts, including on resume."""
+    buckets: dict[Path, list[int] | None] = {}
+    where = (TaskEvent.job_id == context.job_id, TaskEvent.event_type == RESULT_EVENT)
+    with context.SessionLocal() as session, closing(_rows(report / "units.jsonl")) as rows:
+        receipts = session.scalars(select(TaskEvent.context_json).where(*where).order_by(TaskEvent.id)
+                                   .limit(recycle_count)).yield_per(100)
+        with closing(receipts):
+            count = 0
+            for unit, raw in zip(islice(rows, recycle_count), receipts):
+                count += 1
+                result = json.loads(raw)
+                if (unit.get("operation") != RECYCLE_DOWNLOAD_EXTRAS
+                        or result.get("operation") != RECYCLE_DOWNLOAD_EXTRAS
+                        or result.get("unit") != sanitize_text(unit["unit"])):
+                    return {}
+                bucket = Path(unit["unit"]).parent
+                identity = unit.get("_recycle_bucket_identity")
+                confirmed = (result.get("status") == "success" and isinstance(identity, list)
+                             and len(identity) == 2 and all(type(value) is int and value > 0 for value in identity))
+                buckets[bucket] = identity if confirmed and buckets.get(bucket, identity) == identity else None
+        if count != recycle_count or not any(buckets.values()):
+            return {}
+
+        # A failed media operation can still need its frozen original folders.
+        status = func.json_extract(TaskEvent.context_json, "$.status")
+        operation = func.json_extract(TaskEvent.context_json, "$.operation")
+        path = func.json_extract(TaskEvent.context_json, "$.unit")
+        failed = session.scalars(select(path).where(
+            *where, operation.is_distinct_from(RECYCLE_DOWNLOAD_EXTRAS), status.in_(("failed", "conflict")),
+        ))
+        failed_paths = {Path(value) for value in failed if isinstance(value, str) and Path(value).is_absolute()}
+    ancestors = {parent for folder in failed_paths for parent in folder.parents}
+    return {bucket: identity for bucket, identity in buckets.items()
+            if identity is not None and sanitize_text(str(bucket)) == str(bucket)
+            and bucket not in ancestors and bucket not in failed_paths
+            and not any(parent in failed_paths for parent in bucket.parents)}
+
+
 def _result_conflict_path(unit: dict) -> str | None:
     """Keep the first reported conflict path in the durable result when safe to copy."""
     for conflict in unit.get("conflicts", ()):
@@ -881,3 +923,8 @@ class MediaOrganizerBatchHandler(TaskHandler):
             saved = session.get(WorkJob, job.id)
             if count != total or saved is None or saved.progress_current != total or saved.progress_total != total:
                 raise ValueError("目录预览报告不完整")
+        if client is not None:
+            # Freeze, apply and verify all media steps before removing source directories.
+            buckets = _recycled_buckets_for_cleanup(context, report, summary["recycle_count"])
+            if buckets:
+                cleanup_empty_recycle_buckets(selection, settings, buckets, fence)

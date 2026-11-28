@@ -23,10 +23,20 @@ export interface TaskProgress {
 
 export type TaskId = number | string;
 
+export interface TaskOrganizerResult {
+  success_count: number;
+  conflict_count: number;
+  skipped_count: number;
+  failed_count: number;
+  conflicts_available: boolean;
+}
+
 export interface TaskItem {
   id: TaskId;
   job_type: string;
   status: TaskStatus;
+  pause_requested?: boolean;
+  organizer_result?: TaskOrganizerResult;
   capabilities: TaskCapabilities;
   progress: TaskProgress;
   created_at: string | null;

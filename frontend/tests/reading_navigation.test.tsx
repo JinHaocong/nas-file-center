@@ -6,10 +6,12 @@ import { MemoryRouter } from 'react-router-dom';
 import TestRenderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import { tasksApi } from '../src/api/tasks';
+import { authApi } from '../src/api/auth';
 import { TaskLogTable } from '../src/components/tasks/TaskLogTable';
 import { CodePath } from '../src/components/ui/CodePath';
 import { ConsolePagination } from '../src/components/ui/ConsolePagination';
 import { ConsoleToastProvider } from '../src/components/ui/ConsoleToast';
+import { AuthProvider } from '../src/contexts/AuthContext';
 import { TasksPage } from '../src/pages/Tasks';
 import type { TaskEvent, TaskItem } from '../src/types/task';
 
@@ -104,7 +106,7 @@ test('pagination validates jumps on Enter within forms and synchronizes size and
 async function mountTaskReader(t: TestContext, content: React.ReactNode) {
   const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
-  Object.defineProperty(globalThis, 'document', { configurable: true, value: { title: '' } });
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: Object.assign(new EventTarget(), { title: '' }) });
   Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), { innerWidth: 1440 }) });
   const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = (children: React.ReactNode) => <MemoryRouter initialEntries={['/tasks']}>
@@ -180,6 +182,80 @@ test('task paging preserves the paginator without leaving the preceding page act
   await settleTaskPage();
   assert.equal(view.root.findAllByProps({ 'aria-label': '列表分页' }).length, 0);
   assert.equal(deleteButtons(nextId).length, 0);
+});
+
+test('the task toolbar searches visible names and exact IDs on the current page', async t => {
+  const indexed = { ...taskItem, id: '90071992547409932', job_type: 'index-root' };
+  t.mock.method(tasksApi, 'getWorkerStatus', async () => ({ status: 'online' }));
+  t.mock.method(tasksApi, 'listTasks', async () => ({ items: [taskItem, indexed], total: 120, page: 1, page_size: 50 }));
+  const { view } = await mountTaskReader(t, <TasksPage />);
+  const search = view.root.findByProps({ 'aria-label': '搜索当前页任务' });
+  assert.equal(search.props.placeholder, '搜索任务');
+  assert.equal(view.root.findByProps({ className: 'nfc-page-header' }).findAllByType('button').length, 1,
+    'only Refresh is in the title bar');
+  act(() => search.props.onChange({ currentTarget: { value: '文件索引' } }));
+  assert.equal(view.root.findAllByProps({ 'data-task-row': String(taskItem.id) }).length, 0);
+  assert.equal(view.root.findAllByProps({ 'data-task-row': indexed.id }).length, 1);
+  act(() => search.props.onChange({ currentTarget: { value: '#' + taskItem.id } }));
+  assert.equal(view.root.findAllByProps({ 'data-task-row': String(taskItem.id) }).length, 1);
+  assert.equal(view.root.findAllByProps({ 'data-task-row': indexed.id }).length, 0);
+  assert.ok(view.root.findByProps({ 'aria-label': '列表分页' }));
+});
+
+test('task-row pause keeps feedback local, retries a failed request and waits for the Worker', async t => {
+  const failed = pauseTaskResponse(t);
+  const accepted = pauseTaskResponse(t);
+  const actionId = '90071992547409933';
+  const other = { ...taskItem, id: '90071992547409934' };
+  let current: TaskItem = { ...taskItem, id: actionId, status: 'running',
+    capabilities: { ...taskItem.capabilities, supports_pause: true, supports_resume: true } };
+  const calls: Array<string | number> = [];
+  t.mock.method(tasksApi, 'getWorkerStatus', async () => ({ status: 'online' }));
+  t.mock.method(tasksApi, 'listTasks', async () => ({ items: [current, other], total: 2, page: 1, page_size: 50 }));
+  t.mock.method(tasksApi, 'pauseTask', async (id: string | number) => {
+    calls.push(id);
+    if (calls.length === 1) {
+      await failed.wait;
+      throw { status: 0, message: '暂停请求超时' };
+    }
+    await accepted.wait;
+    current = Object.assign({ ...current }, { pause_requested: true });
+    return current;
+  });
+  const { view } = await mountTaskReader(t, <TasksPage />);
+  const firstRow = () => view.root.findByProps({ 'data-task-row': actionId });
+  const command = () => firstRow().findAllByType('button').find(node => node.props['data-task-inline-action'] === 'pause')!;
+  const trigger = command();
+  await act(async () => { trigger.props.onClick(); trigger.props.onClick(); });
+  assert.deepEqual(calls, [actionId]);
+  assert.match(JSON.stringify(view.toJSON()), /正在请求暂停/);
+  assert.equal(command().props['aria-busy'], true);
+
+  failed.release();
+  await settleTaskPage();
+  assert.equal(view.root.findByProps({ 'data-task-feedback': actionId }).findByProps({ role: 'alert' }).children.join(''),
+    '暂停请求超时');
+  assert.equal(view.root.findAllByProps({ 'data-task-feedback': other.id }).length, 0);
+  act(() => view.root.findAllByType('button').find(node => node.props['data-task-inline-retry'] === actionId)!.props.onClick());
+  accepted.release();
+  await settleTaskPage();
+  assert.deepEqual(calls, [actionId, actionId]);
+  assert.match(JSON.stringify(view.toJSON()), /等待 Worker 暂停/);
+  assert.doesNotMatch(JSON.stringify(view.toJSON()), /暂停请求超时/);
+});
+
+test('completed organizer rows link to the exact conflicts report from its counts', async t => {
+  const task = { ...taskItem, job_type: 'media-organizer-batch', organizer_result: {
+    success_count: 38, conflict_count: 2, skipped_count: 0, failed_count: 0, conflicts_available: true,
+  } };
+  t.mock.method(tasksApi, 'getWorkerStatus', async () => ({ status: 'online' }));
+  t.mock.method(tasksApi, 'listTasks', async () => ({ items: [task], total: 1, page: 1, page_size: 50 }));
+  t.mock.method(authApi, 'getMe', async () => ({ id: 1, username: 'demo-admin', role: 'admin' }));
+  const { view } = await mountTaskReader(t, <AuthProvider><TasksPage /></AuthProvider>);
+  const receipt = view.root.findByProps({ 'data-task-feedback': String(task.id) });
+  assert.ok(receipt.findByProps({ role: 'status' }));
+  assert.match(JSON.stringify(view.toJSON()), /38/);
+  assert.equal(receipt.findByType('a').props.href, '/batch?operation=media-organize&batch=' + task.id + '&result=conflict');
 });
 
 test('event log paging keeps navigation and drops placeholder data across filters or tasks', async t => {

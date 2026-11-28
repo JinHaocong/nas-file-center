@@ -403,7 +403,7 @@
 .nfc-workflow-quick-run-feedback h3 { font-size: 13px; }
 .nfc-workflow-quick-run-preview a { width: fit-content; color: var(--nfc-tint); }
 @media (min-width: 768px) {
-  .nfc-v2-sheet.nfc-workflow-quick-run { width: min(570px, calc(100vw - 24px)); }
+  .nfc-v2-sheet.nfc-workflow-quick-run { width: min(502px, calc(100vw - 24px)); }
 }
 @media (max-width: 767px) {
   .nfc-workflow-quick-run-preview { padding: 10px; }

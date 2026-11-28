@@ -329,6 +329,7 @@ try {
 
         // Stage 5E-AA: history cleanup is a controlled Dialog with no Trigger.
         // Keep the exact launcher so three safe dismissal paths restore keyboard focus.
+        await page.getByRole('button', { name: '任务筛选与更多操作', exact: true }).click();
         const historyLauncher = page.getByRole('button', { name: '清理历史' });
         const historyOpener = await historyLauncher.elementHandle();
         assert.ok(historyOpener, 'Task History launcher must remain mounted');

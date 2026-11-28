@@ -77,8 +77,8 @@ describe('v0.4.7 control plane foundation', () => {
     assert.match(settings, /\.nfc-settings-panel-lifecycle[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
     assert.match(settings, /\.nfc-settings-resource-controls[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
     assert.match(settings, /\.nfc-settings-window-card > \.nfc-settings-control-grid/);
-    assert.match(page, /nfc-settings-policy-card/);
-    assert.match(page, /nfc-settings-status-card/);
+    assert.match(page, /<SettingsGroup title="保留时间">/);
+    assert.match(page, /<SettingsGroup title="当前生效">/);
     assert.doesNotMatch(settings, /repeat\(12, minmax\(0, 1fr\)\)/);
   });
 

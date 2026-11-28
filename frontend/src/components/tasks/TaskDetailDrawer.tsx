@@ -31,6 +31,7 @@ const ERROR_PREVIEW_CHARS = 160;
 interface Props {
   taskId: TaskId | null;
   open: boolean;
+  listActionPending?: boolean;
   onClose: () => void;
   onViewTask?: (taskId: TaskId) => void;
   returnToFiles?: string;
@@ -93,7 +94,7 @@ function revealTaskLogs(target: HTMLElement | null) {
   sheetBody.scrollTo({ top, behavior: reducedMotion ? 'instant' : 'smooth' });
 }
 
-export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onViewTask, returnFocusFallback, returnToFiles }) => {
+export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, listActionPending, onClose, onViewTask, returnFocusFallback, returnToFiles }) => {
   const logs = useRef<HTMLElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const lastTaskId = useRef<TaskId | null>(null);
@@ -195,7 +196,7 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
             <header className="nfc-overlay-section-header">
               <div><h3>任务操作</h3></div>
             </header>
-            <TaskActionBar key={task.id} task={task} onViewTask={onViewTask} />
+            <TaskActionBar key={task.id} task={task} onViewTask={onViewTask} listActionPending={listActionPending} />
             <div className="nfc-task-evidence-links">
               {originalTaskId && !onViewTask && <span>原任务 #{originalTaskId}</span>}
               {getTaskDeleteAvailability(task).enabled &&

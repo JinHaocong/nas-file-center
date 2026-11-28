@@ -118,7 +118,10 @@ export function MediaOrganizerBatchEditor() {
   const [resultView, setResultView] = useState<{
     id: OrganizerJobId; page: number; size: number; filter: MediaBatchResultFilter;
   }>();
-  const resultPage = resultView?.id === batchId ? resultView : { page: 1, size: 25, filter: 'all' as const };
+  const linkedResultFilter = batchId && params.get('result') === 'conflict' ? 'conflict' : 'all';
+  const resultPage: { page: number; size: number; filter: MediaBatchResultFilter } =
+    resultView?.id === batchId && resultView.filter === linkedResultFilter
+    ? resultView : { page: 1, size: 25, filter: linkedResultFilter };
   const [assignmentBusy, setAssignmentBusy] = useState(false);
   const [assignmentDraft, setAssignmentDraft] = useState<{
     previewId: OrganizerJobId; detailId: string; planId: string;
@@ -203,8 +206,21 @@ export function MediaOrganizerBatchEditor() {
       next.delete('directory');
       next.delete('preview');
       next.delete('batch');
+      next.delete('result');
       if (previewJobId) next.set('preview', previewJobId);
       if (batchJobId) next.set('batch', batchJobId);
+      return next;
+    }, { replace: true, state: routeState });
+  }
+
+  /** Keep the visible result filter shareable and reopen it on browser Back. */
+  function changeResultFilter(filter: 'all' | 'conflict') {
+    if (!batchId) return;
+    setResultView({ id: batchId, page: 1, size: resultPage.size, filter });
+    setParams(current => {
+      const next = new URLSearchParams(current);
+      if (filter === 'conflict') next.set('result', 'conflict');
+      else next.delete('result');
       return next;
     }, { replace: true, state: routeState });
   }
@@ -371,11 +387,7 @@ export function MediaOrganizerBatchEditor() {
         <MediaOrganizerResultReport report={currentResult} conflictsOnly={resultPage.filter === 'conflict'}
           pending={resultQuery.isPlaceholderData}
           onRescan={selection && !busy ? () => chooseDirectory(selection) : undefined}
-          onToggleConflicts={() => {
-            if (batchId) setResultView({
-              id: batchId, page: 1, size: resultPage.size, filter: resultPage.filter === 'conflict' ? 'all' : 'conflict',
-            });
-          }}>
+          onToggleConflicts={() => changeResultFilter(resultPage.filter === 'conflict' ? 'all' : 'conflict')}>
           {!resultQuery.isPlaceholderData && currentResult.filtered_total > 0 && <ConsolePagination
             page={resultPage.page} pageSize={resultPage.size}
             total={currentResult.filtered_total} pageSizes={pageSizes}
@@ -388,7 +400,7 @@ export function MediaOrganizerBatchEditor() {
           {resultQuery.isError ? (
             <>
               <p role="alert">{getStructuredApiError(resultQuery.error).message || '无法读取整理结果'}</p>
-              {resultPage.filter !== 'all' && <ConsoleButton size="sm" onClick={() => setResultView(undefined)}>
+              {resultPage.filter !== 'all' && <ConsoleButton size="sm" onClick={() => changeResultFilter('all')}>
                 查看全部结果
               </ConsoleButton>}
             </>

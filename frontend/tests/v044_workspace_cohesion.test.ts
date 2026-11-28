@@ -75,18 +75,18 @@ describe('v0.4.4 cohesion invariants carried into the v0.4.7 control plane', () 
     assert.doesNotMatch(read('src/styles/overlays.css'), /\.(?:ant-[a-z][\w-]*|anticon\b)/);
   });
 
-  test('settings keeps one stable page column with task-specific internal grids', () => {
+  test('settings keeps one stable page column with aligned section rows', () => {
     const page = read('src/pages/Settings/index.tsx');
     const css = read('src/styles/pages/settings.css');
     assert.match(page, /nfc-settings-panel-runtime/);
     assert.match(page, /nfc-settings-panel-lifecycle/);
     assert.match(page, /nfc-settings-panel-resource/);
     assert.match(page, /nfc-settings-panel-sessions/);
-    assert.match(page, /nfc-settings-policy-card/);
-    assert.match(page, /nfc-settings-resource-controls/);
+    assert.match(page, /className="nfc-settings-groups"/);
+    assert.match(page, /<SettingsRow label="扫描线程上限">/);
     assert.match(css, /\.nfc-settings-grid[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/);
-    assert.match(css, /\.nfc-settings-panel-lifecycle[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
-    assert.match(css, /\.nfc-settings-resource-controls[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
-    assert.match(css, /@media \(max-width: 1199px\)[\s\S]*\.nfc-settings-panel-lifecycle[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+    const sections = read('src/styles/console-v2-settings.css');
+    assert.match(sections, /\.nfc-settings-row\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, max-content\)/);
+    assert.match(sections, /@media \(max-width: 767px\)[\s\S]*\.nfc-settings-row\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
   });
 });

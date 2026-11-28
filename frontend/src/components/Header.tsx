@@ -6,6 +6,7 @@ import { SafeModeBadge } from './SafeModeBadge';
 import { WorkerStatusBadge } from './WorkerStatusBadge';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { ConsoleIcon } from './ui/ConsoleIcon';
+import { WorkflowRunActivityButton } from './workflows/WorkflowRunActivityButton';
 import { navLabel } from './layout/navItems';
 
 interface Props {
@@ -71,6 +72,7 @@ export const Header: React.FC<Props> = ({ isMobile, navigationOpen, onOpenNaviga
         </div>
       </div>
       <div className="nfc-header-command-cluster">
+        {!isMobile && <WorkflowRunActivityButton />}
         <div className="nfc-header-status" aria-label="系统安全与任务状态">
           <SafeModeBadge /><WorkerStatusBadge />
         </div>

@@ -14,10 +14,11 @@ interface Props {
   size?: 'small' | 'middle';
   type?: 'link' | 'text' | 'default' | 'primary';
   danger?: boolean;
+  iconOnly?: boolean;
 }
 
 export const TaskDeleteButton: React.FC<Props> = ({
-  task, onSuccess, size = 'middle', type = 'default', danger = true,
+  task, onSuccess, size = 'middle', type = 'default', danger = true, iconOnly = false,
 }) => {
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
@@ -65,7 +66,7 @@ export const TaskDeleteButton: React.FC<Props> = ({
 
   return (
     <>
-      <span title={!availability.enabled ? availability.reason || undefined : undefined}>
+      <span title={!availability.enabled ? availability.reason || undefined : iconOnly ? '删除任务' : undefined}>
         <ConsoleButton
           size={size === 'small' ? 'sm' : 'md'}
           variant={type === 'link' || type === 'text' ? 'ghost' : danger ? 'danger' : 'secondary'}
@@ -74,7 +75,7 @@ export const TaskDeleteButton: React.FC<Props> = ({
           loading={deleteMutation.isPending}
           aria-label={'删除任务 #' + task.id}
           onClick={() => { if (availability.enabled && !deleteMutation.isPending && !deleteInFlight.current) setOpen(true); }}
-        >删除</ConsoleButton>
+        >{iconOnly ? null : '删除'}</ConsoleButton>
       </span>
       <ConsoleConfirmDialog
         open={open}

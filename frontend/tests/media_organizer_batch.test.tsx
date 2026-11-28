@@ -358,6 +358,21 @@ test('locating an off-page conflict requests its first filtered page and can res
   assert.equal(view.root.findByType('table').findByType('tbody').findAllByType('tr').length, 2);
 });
 
+test('the task row conflicts deep link reads the first filtered page before showing results', async t => {
+  const requests: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string, options: RequestInit) => {
+    assert.equal(options.method, 'GET');
+    if (!url.includes('/batches/')) return Response.json(preview);
+    requests.push(url);
+    return Response.json({ ...report, filtered_total: 1, items: [report.items[1]] });
+  });
+  const { view, dispose } = await openBatch(`/batch?operation=media-organize&batch=${batchId}&result=conflict`);
+  t.after(dispose);
+  await waitForRenderedText(view, '查看全部结果');
+  assert.deepEqual(requests, [`/api/media-organizer/batches/${batchId}?page=1&page_size=25&status_filter=conflict`]);
+  assert.ok(view.root.findAllByType('button').some(button => button.props.title === blockedUnit.unit));
+});
+
 for (const [cleanup, message] of [
   ['pending', '报告明细已排队回收'],
   ['released', '报告文件已回收'],

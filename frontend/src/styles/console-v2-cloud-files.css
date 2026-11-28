@@ -656,10 +656,6 @@ button.nfc-cloud-file-name:hover:not(:disabled) { color: var(--nfc-tint); }
 }
 @media (min-width: 861px) {
   .nfc-studio .nfc-app-main .nfc-tool-workspace.nfc-cloud-files-page { --tool-space: 12px; }
-  .nfc-studio .nfc-app-main .nfc-v2-page-content.nfc-page-content:has(> .nfc-cloud-files-page) {
-    padding-block-end: 20px !important;
-    scroll-padding-block-end: 20px;
-  }
 }
 @media (max-width: 860px) {
   .nfc-cloud-files-layout[data-transfers-open='true'] { grid-template-columns: minmax(0, 1fr); }

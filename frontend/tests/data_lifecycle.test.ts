@@ -161,12 +161,12 @@ describe('Data Lifecycle & Audit Retention: Frontend Unit Tests', () => {
   });
 
   describe('UI Truthfulness & Security Invariants', () => {
-    test('Settings/index.tsx includes Data Lifecycle Card and three safety principles', () => {
+    test('retention settings show distinct save and review actions and allow permanent retention', () => {
       const content = readFileSync(resolve(__dirname, '../../src/pages/Settings/index.tsx'), 'utf-8');
-      assert.ok(content.includes('数据生命周期与审计保留策略'));
-      assert.ok(content.includes('保存策略 ≠ 执行删除'));
-      assert.ok(content.includes('0 天 = 永久保留'));
-      assert.ok(content.includes('预览 ≠ 执行'));
+      assert.ok(content.includes('title="保留与清理"'));
+      assert.ok(content.includes('onClick={handleSavePolicy}>保存'));
+      assert.ok(content.includes('0 天表示永久保留'));
+      assert.ok(content.includes('void handlePrepareApply(); }}>查看清理预览'));
       assert.ok(content.includes('确认执行审计日志保留清理？'));
     });
 

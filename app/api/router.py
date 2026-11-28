@@ -1047,9 +1047,11 @@ def list_tasks(
     page_size: int = Query(default=50, ge=1, le=500),
     status: str | None = None,
     job_type: str | None = None,
+    current_user: User = Depends(get_current_user),
 ):
     return request.app.state.service.list_tasks(
-        page=page, page_size=page_size, status=status, job_type=job_type
+        page=page, page_size=page_size, status=status, job_type=job_type,
+        include_organizer_results=current_user.role == "admin",
     )
 
 

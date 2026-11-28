@@ -161,11 +161,11 @@ describe('Console v2 Settings native RBAC and destructive action security', () =
     const s = page();
     for (const token of [
       '<table', '<caption', '<th scope="col">', '<tbody>',
-      'nfc-settings-control-grid', 'type="number"', '<select',
+      'nfc-settings-window-fields', 'type="number"', '<select',
       'type="checkbox"', 'role="switch"', 'aria-checked=',
       'nfc-settings-panel-runtime', 'nfc-settings-panel-lifecycle',
       'nfc-settings-panel-resource', 'nfc-settings-panel-sessions',
-      'ResponsiveDescriptions', 'CodePath', 'ConsoleButton', 'ConsoleEmpty',
+      'SettingsGroup', 'SettingsRow', 'CodePath', 'ConsoleButton', 'ConsoleEmpty',
     ]) assert.ok(s.includes(token), token);
   });
 

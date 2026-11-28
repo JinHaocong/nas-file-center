@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
 import { ConsoleSheet } from '../ui/ConsoleSheet';
+import { SettingsGroup, SettingsRow, SettingsStatus } from './SettingsRows';
 import { getStructuredApiError } from '../../api/errors';
 import { zspaceAuthorizationApi, type ZSpaceAuthorizationAttempt } from '../../api/zspaceAuthorization';
 
@@ -133,26 +134,21 @@ export function ZSpaceAuthorization() {
   const status = statusQuery.data?.status;
   const available = status === 'authorized' || status === 'needs_login';
   return (
-    <section className="nfc-settings-subpanel" aria-labelledby="nfc-zspace-authorization">
-      <div className="nfc-settings-subpanel-header">
-        <div>
-          <strong id="nfc-zspace-authorization">极空间授权</strong>
-          <span>供 Worker 把整理时确认的附带文件送入极空间系统回收站。</span>
-        </div>
-        <span className="nfc-kind-badge" role="status">
+    <SettingsGroup title="极空间授权">
+      <SettingsRow label="当前连接" description="供 Worker 将已确认的附带文件送入极空间系统回收站。">
+        <span role="status"><SettingsStatus tone={status === 'authorized' ? 'success' : 'neutral'}>
           {statusQuery.isPending ? '正在读取' : status ? statusLabels[status] : '状态读取失败'}
-        </span>
-      </div>
-      <div className="nfc-action-bar">
-        {available && <ConsoleButton variant="primary" size="sm" loading={busy === 'start'}
-          disabled={busy === 'complete'} onClick={() => { void start(); }}>
+        </SettingsStatus></span>
+        <ConsoleButton size="sm" loading={statusQuery.isFetching} disabled={busy !== null}
+          leadingIcon={<ConsoleIcon name="refresh" size={15} />}
+          onClick={() => { void statusQuery.refetch(); }}>刷新状态</ConsoleButton>
+        {available && <ConsoleButton size="sm" loading={busy === 'start'} disabled={busy === 'complete'}
+          leadingIcon={<ConsoleIcon name="lock" size={15} />} onClick={() => { void start(); }}>
           {status === 'authorized' ? '重新授权' : '连接极空间'}
         </ConsoleButton>}
-        <ConsoleButton size="sm" loading={statusQuery.isFetching} disabled={busy !== null}
-          onClick={() => { void statusQuery.refetch(); }}>刷新授权状态</ConsoleButton>
-      </div>
-      {status === 'unconfigured' && <p className="nfc-settings-help">请在部署配置中为 API 和 Worker 配置极空间 CLI、共用授权卷和目录映射。</p>}
-      {notice && <p className="nfc-settings-help" role="status">{notice}</p>}
+      </SettingsRow>
+      {status === 'unconfigured' && <p className="nfc-settings-group-note">请在部署配置中为 API 和 Worker 配置极空间 CLI、共用授权卷和目录映射。</p>}
+      {notice && <p className="nfc-settings-group-note" role="status">{notice}</p>}
       {!attempt && error && <p className="nfc-v2-settings-error" role="alert">{error}</p>}
       {attempt && <ConsoleSheet open title="极空间账号授权"
         description="在极空间网页选中设备并确认授权，再把网页显示的一次性授权码填到这里。"
@@ -182,6 +178,6 @@ export function ZSpaceAuthorization() {
           </div>
         </form>
       </ConsoleSheet>}
-    </section>
+    </SettingsGroup>
   );
 }

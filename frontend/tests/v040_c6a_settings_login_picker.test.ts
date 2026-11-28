@@ -19,7 +19,7 @@ describe('v0.4.0 C6A settings login and directory picker contract', () => {
 
   test('Settings uses shared v0.4.0 surfaces and responsive session view', () => {
     const source = read('src/pages/Settings/index.tsx');
-    for (const symbol of ['PageHeader', 'DataPanel', 'ActionBar', 'ResponsiveDescriptions', 'ResponsiveDataView', 'CodePath']) {
+    for (const symbol of ['PageHeader', 'DataPanel', 'ActionBar', 'SettingsGroup', 'SettingsRow', 'ResponsiveDataView', 'CodePath']) {
       assert.match(source, new RegExp(symbol));
     }
     assert.match(source, /nfc-session-mobile-card/);

@@ -1,13 +1,15 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Laptop, Smartphone, Tablet } from 'lucide-react';
 import { settingsApi, dataLifecycleApi, auditApi, quarantineApi, resourcePolicyApi } from '../../api/domain';
 import { authApi } from '../../api/auth';
 import { getStructuredApiError } from '../../api/errors';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme, type ThemeMode } from '../../contexts/ThemeContext';
 import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime } from '../../utils/format';
-import type { SessionInfo, ResourcePolicyUpdate } from '../../types';
+import type { SessionInfo, ResourcePolicy, ResourcePolicyUpdate } from '../../types';
 import {
   formatAuditRetention, getAuditRetentionApplyAvailability,
   getAuditRetentionSaveAvailability, getQuarantineRetentionSaveAvailability,
@@ -19,10 +21,10 @@ import {
 import { PageHeader } from '../../components/ui/PageHeader';
 import { ZSpaceAuthorization } from '../../components/settings/ZSpaceAuthorization';
 import { DatabaseMaintenance } from '../../components/settings/DatabaseMaintenance';
+import { SettingsGroup, SettingsRow, SettingsStatus } from '../../components/settings/SettingsRows';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ThumbnailSwitch } from '../../components/ui/MediaThumbnail';
 import { ActionBar } from '../../components/ui/ActionBar';
-import { ResponsiveDescriptions } from '../../components/ui/ResponsiveDescriptions';
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { CodePath } from '../../components/ui/CodePath';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
@@ -35,28 +37,55 @@ import { useResponsive } from '../../hooks/useResponsive';
 type Confirmation =
   | { kind: 'clear' }
   | { kind: 'retention'; days: number; deleteCount: number }
-  | { kind: 'revoke'; sessionId: number; agent: string };
+  | { kind: 'revoke'; sessionId: SessionInfo['id']; agent: string };
 
 type StatusTone = 'success' | 'warning' | 'danger' | 'neutral';
-const status = (tone: StatusTone, label: string) => (
-  <span className={'nfc-v2-settings-status tone-' + tone}>{label}</span>
-);
+const status = (tone: StatusTone, label: string) => <SettingsStatus tone={tone}>{label}</SettingsStatus>;
 const failure = (error: unknown, fallback: string) =>
   getStructuredApiError(error).message || fallback;
 
 const settingsSections = [
   { id: 'appearance', label: '界面显示' },
-  { id: 'safety', label: '安全状态' },
-  { id: 'retention', label: '保留策略' },
-  { id: 'resources', label: '资源设置' },
-  { id: 'sessions', label: '活动会话' },
+  { id: 'safety', label: '安全与授权' },
+  { id: 'retention', label: '保留与清理' },
+  { id: 'database', label: '数据库维护', admin: true },
+  { id: 'resources', label: '资源控制', admin: true },
+  { id: 'sessions', label: '登录设备' },
 ] as const;
 
 type SettingsSectionId = typeof settingsSections[number]['id'];
 
-const settingsIcons: Record<SettingsSectionId, ConsoleIconName> = {
-  appearance: 'sun', safety: 'shield-check', retention: 'archive', resources: 'sliders', sessions: 'user',
+const settingsIcons: Record<Exclude<SettingsSectionId, 'sessions'>, ConsoleIconName> = {
+  appearance: 'sun', safety: 'shield-check', retention: 'archive', database: 'database', resources: 'sliders',
 };
+
+const themeChoices: { mode: ThemeMode; label: string }[] = [
+  { mode: 'light', label: '浅色' }, { mode: 'dark', label: '深色' }, { mode: 'system', label: '系统' },
+];
+
+/** 用易读的浏览器和平台名显示会话，原始标识仍保留在详情中。 */
+function sessionDeviceName(agent: string) {
+  const browser = /Edg\//i.test(agent) ? 'Edge' : /(?:Chrome|CriOS)\//i.test(agent) ? 'Chrome'
+    : /(?:Firefox|FxiOS)\//i.test(agent) ? 'Firefox' : /Safari\//i.test(agent) ? 'Safari' : '';
+  const platform = (agent.match(/iPhone|iPad|Android|Windows|Mac OS X|Linux/i)?.[0] ?? '').replace(/Mac OS X/i, 'macOS');
+  return [browser, platform].filter(Boolean).join(' · ') || agent || '未知设备';
+}
+
+/** 以本地时间绘制活跃区间，跨午夜的时段拆成前后两段。 */
+function ResourceWindowTrack({ start, end }: { start: string; end: string }) {
+  const hours = (time: string) => {
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) return NaN;
+    const [hour, minute] = time.split(':').map(Number);
+    return (hour * 60 + minute) * 100 / (24 * 60);
+  };
+  const [from, to] = [hours(start), hours(end)];
+  const ranges = !Number.isFinite(from + to) || from === to ? [] : from < to ? [[from, to]] : [[0, to], [from, 100]];
+  return <div className="nfc-settings-time-rule">
+    <div className="nfc-settings-time-track" aria-hidden="true">{ranges.map(([left, right]) =>
+      <i key={left} style={{ insetInlineStart: left + '%', width: (right - left) + '%' }} />)}</div>
+    <div className="nfc-settings-time-labels"><span>00:00</span><strong>{start} – {end}</strong><span>24:00</span></div>
+  </div>;
+}
 
 /** 方向键切换设置分区，Home 和 End 分别跳到首尾标签。 */
 function handleSettingsTabKey(
@@ -103,8 +132,10 @@ function SettingsSectionNav({ sections, active, onSelect }: {
           tabIndex={active === section.id ? 0 : -1}
           onClick={() => onSelect(section.id)}
           onKeyDown={event => handleSettingsTabKey(event, index, sections, onSelect, isDesktop)}>
-          <ConsoleIcon name={settingsIcons[section.id]} size={17} />
+          {section.id === 'sessions' ? <Laptop size={17} strokeWidth={1.85} aria-hidden="true" />
+            : <ConsoleIcon name={settingsIcons[section.id]} size={17} />}
           {section.label}
+          {isDesktop && active === section.id && <ConsoleIcon name="chevron-right" className="nfc-settings-tab-arrow" size={13} />}
         </button>
       ))}
     </div>
@@ -117,10 +148,11 @@ export const SettingsPage: React.FC = () => {
   const toast = useConsoleToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { mode: themeMode, setMode: setThemeMode } = useTheme();
   const isAdmin = user?.role === 'admin';
   const { pathname, search, hash } = useLocation();
   const navigate = useNavigate();
-  const visibleSections = settingsSections.filter(section => section.id !== 'resources' || isAdmin);
+  const visibleSections = settingsSections.filter(section => !('admin' in section) || isAdmin);
   const activeSection = visibleSections.find(section => hash === '#' + section.id)?.id ?? 'appearance';
 
   /** 使用同一页面的 URL 片段保存当前标签，支持直达和浏览器前进后退。 */
@@ -181,7 +213,7 @@ export const SettingsPage: React.FC = () => {
   const { data: quarantinePolicy, refetch: refetchQuarantinePolicy } = useQuery({
     queryKey: ['quarantineRetentionPolicy'], queryFn: quarantineApi.getRetentionPolicy,
   });
-  const { data: resourcePolicy, isLoading: policyLoading, refetch: refetchResourcePolicy } = useQuery({
+  const { data: resourcePolicy, isFetching: policyLoading, isError: resourcePolicyError, refetch: refetchResourcePolicy } = useQuery({
     queryKey: ['resourcePolicy'], queryFn: resourcePolicyApi.getPolicy, enabled: !!isAdmin,
   });
   const savedWindowTimezone = resourcePolicy?.active_window_timezone;
@@ -198,18 +230,20 @@ export const SettingsPage: React.FC = () => {
   useEffect(() => {
     if (quarantinePolicy) setQuarantineDaysInput(quarantinePolicy.quarantine_retention_days);
   }, [quarantinePolicy]);
-  useEffect(() => {
-    if (!resourcePolicy) return;
-    setScanThreadsInput(resourcePolicy.scan_threads);
-    setHashThreadsInput(resourcePolicy.hash_threads);
-    setIoLimitInput(resourcePolicy.io_limit);
-    setJobPriorityInput(resourcePolicy.job_priority);
-    setWindowEnabledInput(resourcePolicy.active_window_enabled);
-    setWindowStartInput(resourcePolicy.active_window_start || '01:00');
-    setWindowEndInput(resourcePolicy.active_window_end || '07:00');
-    setWindowTimezoneInput(resourcePolicy.active_window_timezone || 'UTC');
-    setOutsideModeInput(resourcePolicy.outside_window_mode);
-  }, [resourcePolicy]);
+  /** 以服务端已保存的值恢复资源表单。 */
+  function resetResourceDraft(policy: ResourcePolicy) {
+    setScanThreadsInput(policy.scan_threads);
+    setHashThreadsInput(policy.hash_threads);
+    setIoLimitInput(policy.io_limit);
+    setJobPriorityInput(policy.job_priority);
+    setWindowEnabledInput(policy.active_window_enabled);
+    setWindowStartInput(policy.active_window_start || '01:00');
+    setWindowEndInput(policy.active_window_end || '07:00');
+    setWindowTimezoneInput(policy.active_window_timezone || 'UTC');
+    setOutsideModeInput(policy.outside_window_mode);
+  }
+
+  useEffect(() => { if (resourcePolicy) resetResourceDraft(resourcePolicy); }, [resourcePolicy]);
 
   const saveResourcePolicyMutation = useMutation({
     mutationFn: (payload: ResourcePolicyUpdate) => resourcePolicyApi.updatePolicy(payload),
@@ -279,17 +313,21 @@ export const SettingsPage: React.FC = () => {
     return true;
   };
 
+  const resourceDraft: ResourcePolicyUpdate = {
+    scan_threads: scanThreadsInput, hash_threads: hashThreadsInput,
+    io_limit: ioLimitInput, job_priority: jobPriorityInput,
+    active_window_enabled: windowEnabledInput,
+    active_window_start: windowEnabledInput ? windowStartInput : null,
+    active_window_end: windowEnabledInput ? windowEndInput : null,
+    active_window_timezone: windowEnabledInput ? windowTimezoneInput : null,
+    outside_window_mode: outsideModeInput,
+  };
+  const resourceDirty = !!resourcePolicy && (Object.keys(resourceDraft) as (keyof ResourcePolicyUpdate)[])
+    .some(key => resourceDraft[key] !== resourcePolicy[key]);
+
   const handleSaveResourcePolicy = () => {
-    if (rejectNonAdmin('修改资源控制策略')) return;
-    const payload: ResourcePolicyUpdate = {
-      scan_threads: scanThreadsInput, hash_threads: hashThreadsInput,
-      io_limit: ioLimitInput, job_priority: jobPriorityInput,
-      active_window_enabled: windowEnabledInput,
-      active_window_start: windowEnabledInput ? windowStartInput : null,
-      active_window_end: windowEnabledInput ? windowEndInput : null,
-      active_window_timezone: windowEnabledInput ? windowTimezoneInput : null,
-      outside_window_mode: outsideModeInput,
-    };
+    if (rejectNonAdmin('修改资源控制策略') || !resourceDirty) return;
+    const payload = resourceDraft;
     const checked = validateResourcePolicyUpdate(payload);
     if (!checked.valid) { toast.error(checked.error || '资源策略校验失败'); return; }
     void runOnce('resource-save', () => saveResourcePolicyMutation.mutateAsync(payload)).catch(() => {});
@@ -416,347 +454,287 @@ export const SettingsPage: React.FC = () => {
     : confirmation?.kind === 'clear' ? '立即清空' : '强制下线';
 
   const sessionActions = (session: SessionInfo) =>
-    session.is_current ? <span className="nfc-v2-settings-muted">当前会话</span>
-      : isAdmin ? <ConsoleButton size="sm" variant="danger"
+    session.is_current ? status('success', '当前设备')
+      : isAdmin ? <ConsoleButton size="sm"
         disabled={revokeMutation.isPending || confirmBusy}
-        onClick={() => handleRevokeSession(session)}>强制下线</ConsoleButton>
+        leadingIcon={<ConsoleIcon name="log-out" size={15} />}
+        onClick={() => handleRevokeSession(session)}>注销设备</ConsoleButton>
         : <span className="nfc-v2-settings-muted">仅管理员可管理</span>;
-  const deviceLabel = (session: SessionInfo) => (
-    <div className="nfc-v2-settings-device">
-      <ConsoleIcon name={session.user_agent.toLowerCase().includes('mobile') ? 'user' : 'terminal'} size={17} />
-      <span className="nfc-session-user-agent">{session.user_agent}</span>
-      {session.is_current && status('success', '当前设备')}
-    </div>
-  );
+  const deviceLabel = (session: SessionInfo) => {
+    const DeviceIcon = /ipad|tablet/i.test(session.user_agent) ? Tablet
+      : /mobile|iphone|android/i.test(session.user_agent) ? Smartphone : Laptop;
+    return <div className="nfc-v2-settings-device">
+      <span className="nfc-settings-device-icon"><DeviceIcon size={17} strokeWidth={1.85} aria-hidden="true" /></span>
+      <span className="nfc-session-user-agent" title={session.user_agent}>{sessionDeviceName(session.user_agent)}</span>
+    </div>;
+  };
+  const deviceFacts = (session: SessionInfo) => <div className="nfc-settings-device-facts">
+    <span>{session.ip_address}</span>
+    <span>最近活动 {formatDateTime(session.last_seen_at)}</span>
+    <span>{formatDateTime(session.created_at)} 登录</span>
+  </div>;
   const sessions = sessionsData?.sessions || [];
+  const profile = resourcePolicy ? getProfileDisplay(resourcePolicy.effective_now.profile) : undefined;
 
   return (
-    <div className="nfc-operations-page nfc-settings-page nfc-system-controls-page nfc-page-layout-workbench nfc-v2-settings nfc-tool-workspace">
+    <div className="nfc-operations-page nfc-settings-page nfc-system-controls-page nfc-page-layout-workbench nfc-v2-settings nfc-tool-workspace nfc-settings-redesign">
       <PageHeader title="系统设置与安全中心"
-        description="集中查看文件安全开关、数据保留、资源控制与管理员会话。危险文件开关仍只能通过宿主机环境变量配置。"
-        actions={<ActionBar compact>
-          <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
-            onClick={() => {
-              void refetchSettings(); void refetchSessions(); void refetchPolicy();
-              void refetchPreview(); void refetchQuarantinePolicy();
-              if (isAdmin) void refetchResourcePolicy();
-            }}>刷新全部</ConsoleButton>
-        </ActionBar>}
+        actions={<ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
+          onClick={() => {
+            void refetchSettings(); void refetchSessions(); void refetchPolicy();
+            void refetchPreview(); void refetchQuarantinePolicy();
+            if (isAdmin) {
+              void refetchResourcePolicy();
+              void queryClient.invalidateQueries({ queryKey: ['settings', 'database-maintenance'] });
+              void queryClient.invalidateQueries({ queryKey: ['settings', 'zspace-authorization'] });
+            }
+          }}>刷新全部</ConsoleButton>}
       />
 
       <div className="nfc-tool-settings-layout">
-      <SettingsSectionNav sections={visibleSections} active={activeSection} onSelect={selectSection} />
-      <div className="nfc-settings-grid" id="nfc-settings-active-panel" key={activeSection}
-        role="tabpanel" aria-labelledby={'settings-tab-' + activeSection} tabIndex={0}>
-        {activeSection === 'appearance' && <DataPanel id="appearance" title="界面显示" className="nfc-settings-appearance">
-          <div className="nfc-thumbnail-settings-row">
-            <ThumbnailSwitch />
-            <p>在当前浏览器记住偏好，用于媒体、目录选择和整理预览。</p>
-          </div>
-        </DataPanel>}
-        {activeSection === 'safety' && <DataPanel title="全局文件安全运行参数" id="safety"
-          description="这些开关来自服务端运行环境，Web UI 只读展示，防止误触扩大文件修改权限。"
-          className="nfc-panel-flush nfc-settings-panel-runtime">
-          <div className="nfc-settings-panel-body">
-            <div className="nfc-v2-settings-notice" role="note">
-              <ConsoleIcon name="shield-check" size={19} />
-              <div><strong>安全机制提示</strong>
-                <p>为确保大容量核心数据安全，ALLOW_MUTATION、ALLOW_DELETE 等危险开关只能通过宿主机 Docker Compose 环境变量配置，禁止在 Web 界面一键开启。</p>
-              </div>
+        <SettingsSectionNav sections={visibleSections} active={activeSection} onSelect={selectSection} />
+        <div className="nfc-settings-grid" id="nfc-settings-active-panel" key={activeSection}
+          role="tabpanel" aria-labelledby={'settings-tab-' + activeSection} tabIndex={0}>
+          {activeSection === 'appearance' && <DataPanel id="appearance" title="界面显示"
+            className="nfc-settings-appearance" description="在当前浏览器保存外观和媒体显示偏好。">
+            <div className="nfc-settings-groups">
+              <SettingsGroup title="外观">
+                <SettingsRow label="主题模式" description="选择浅色、深色或跟随系统。">
+                  <div className="nfc-settings-theme-choices" role="group" aria-label="主题模式">
+                    {themeChoices.map(({ mode, label }) => <button key={mode} type="button" aria-pressed={mode === themeMode}
+                      onClick={() => setThemeMode(mode)}>
+                      <span className={'nfc-settings-theme-example theme-' + mode} aria-hidden="true" />{label}
+                    </button>)}
+                  </div>
+                </SettingsRow>
+              </SettingsGroup>
+              <SettingsGroup title="文件与预览">
+                <SettingsRow label="媒体缩略图" description="应用于文件空间、媒体、目录选择和整理预览。">
+                  <ThumbnailSwitch />
+                </SettingsRow>
+              </SettingsGroup>
             </div>
-            {settingsError && <p role="alert" className="nfc-v2-settings-error">安全运行参数读取失败，请刷新重试。</p>}
-          </div>
-          <ResponsiveDescriptions items={[
-            { label: '只读安全模式 (ALLOW_MUTATION)',
-              value: settings ? settings.allow_mutation ? status('warning', '开启写入 (true)') : status('success', '只读保护 (false)') : '—' },
-            { label: '永久删除开关 (ALLOW_DELETE)',
-              value: settings ? settings.allow_delete ? status('danger', '允许永久删除 (true)') : status('success', '禁用删除 (false - 仅隔离)') : '—' },
-            { label: '最后副本保护 (PROTECT_LAST_FILE)',
-              value: settings ? settings.protect_last_file ? status('success', '已启用') : status('danger', '未启用') : '—' },
-            { label: '去重校验哈希', value: <span className="nfc-kind-badge">{settings?.verification_hash?.toUpperCase() || 'SHA256'}</span> },
-            { label: '隔离区根目录 (QUARANTINE_ROOT)', value: <CodePath value={settings?.quarantine_root} /> },
-            { label: '允许访问路径白名单 (ALLOWED_ROOTS)',
-              value: <div className="nfc-settings-path-list">
-                {settings?.allowed_roots.map((root, idx) => <CodePath value={root} key={idx} />)}
-              </div> },
-          ]} />
-          {isAdmin && <div className="nfc-settings-panel-body"><ZSpaceAuthorization /></div>}
-        </DataPanel>}
-
-        {activeSection === 'retention' && <DataPanel title="数据生命周期与审计保留策略" id="retention"
-          description="保存策略不会自动删除数据；审计清理始终需要重新获取最新预览并显式确认。"
-          className="nfc-settings-panel-lifecycle"
-          action={<ActionBar compact>
-            {lifecyclePolicy && <span className="nfc-kind-badge">Audit · {formatAuditRetention(lifecyclePolicy.audit_retention_days)}</span>}
-            {quarantinePolicy && <span className="nfc-kind-badge">Quarantine · {quarantinePolicy.quarantine_retention_days === 0 ? '永久' : quarantinePolicy.quarantine_retention_days + ' 天'}</span>}
-          </ActionBar>}>
-          <div className="nfc-settings-stack">
-            <div className="nfc-v2-settings-notice" role="note">
-              <ConsoleIcon name="info" size={19} />
-              <div><strong>数据生命周期安全原则</strong>
-                <p>保存策略 ≠ 执行删除；0 天 = 永久保留；预览 ≠ 执行。只有点击执行审计清理并确认后才会真正清理符合条件的 Audit 历史。</p>
-              </div>
+            <div className="nfc-settings-panel-footer">
+              <span className="nfc-settings-footer-message"><ConsoleIcon name="check-circle" size={15} />偏好保存在当前浏览器</span>
             </div>
-            <section className="nfc-settings-subpanel nfc-settings-policy-card">
-              <div className="nfc-settings-subpanel-header">
-                <div><strong>审计日志保留策略</strong><span>仅保存参数，不触发清理。</span></div>
-              </div>
-              <ActionBar>
-                <label className="nfc-settings-inline-control">
-                  <span>保留天数</span>
-                  <input type="number" min={0} max={3650} step={1}
-                    value={retentionDaysInput ?? ''}
-                    disabled={savePolicyMutation.isPending}
-                    onChange={event => setRetentionDaysInput(event.target.value === '' ? null : Number(event.target.value))} />
-                </label>
-                {[0, 30, 90, 180, 365].map(days => (
-                  <ConsoleButton key={days} size="sm" disabled={savePolicyMutation.isPending}
-                    onClick={() => setRetentionDaysInput(days)}>{days === 0 ? '永久保留' : days + ' 天'}</ConsoleButton>
-                ))}
-                <ConsoleButton variant="primary" size="sm" loading={savePolicyMutation.isPending}
-                  disabled={!auditSaveAvail.canSave}
-                  title={!isAdmin ? '仅系统管理员允许修改审计保留策略' : auditSaveAvail.disabledReason}
-                  leadingIcon={<ConsoleIcon name="check" size={16} />}
-                  onClick={handleSavePolicy}>保存策略</ConsoleButton>
-              </ActionBar>
-              <p className="nfc-settings-help">
-                {retentionDaysInput === 0
-                  ? '0 天表示永久保留全部审计日志。'
-                  : '保存后按所选天数计算过期日志；保存动作本身不会删除历史记录。'}
-                {lifecyclePolicy?.updated_at ? ' 上次保存：' + formatDateTime(lifecyclePolicy.updated_at) : ''}
-              </p>
-            </section>
+          </DataPanel>}
 
-            <section className="nfc-settings-subpanel nfc-settings-policy-card">
-              <div className="nfc-settings-subpanel-header">
-                <div><strong>文件隔离区保留策略</strong><span>仅记录到期元数据，不启动后台静默删除线程。</span></div>
-              </div>
-              <ActionBar>
-                <label className="nfc-settings-inline-control">
-                  <span>保留周期</span>
-                  <select value={quarantineDaysInput} disabled={saveQuarantinePolicyMutation.isPending}
-                    onChange={event => setQuarantineDaysInput(Number(event.target.value))}>
-                    <option value={0}>永久保留 (0 天)</option>
-                    <option value={7}>保留 7 天</option>
-                    <option value={30}>保留 30 天</option>
-                    <option value={90}>保留 90 天</option>
+          {activeSection === 'safety' && <DataPanel id="safety" title="安全与授权"
+            className="nfc-settings-panel-runtime" description="查看文件操作权限、访问范围和极空间授权状态。">
+            <div className="nfc-settings-groups">
+              {settingsError && <p role="alert" className="nfc-v2-settings-error">安全运行参数读取失败，请刷新重试。</p>}
+              <SettingsGroup title="文件操作权限" action={<span title="通过宿主机 Docker Compose 环境变量配置"><SettingsStatus>宿主机配置</SettingsStatus></span>}>
+                <SettingsRow label="文件写入" description="来自服务器运行配置。">
+                  <span title="ALLOW_MUTATION">{settings ? settings.allow_mutation ? status('warning', '允许写入') : status('success', '只读保护') : '—'}</span>
+                </SettingsRow>
+                <SettingsRow label="永久删除" description="隔离区操作遵守当前安全策略。">
+                  <span title="ALLOW_DELETE">{settings ? settings.allow_delete ? status('danger', '允许永久删除') : status('success', '已禁用') : '—'}</span>
+                </SettingsRow>
+                <SettingsRow label="最后副本保护" description="保持每组文件至少有一个副本。">
+                  <span title="PROTECT_LAST_FILE">{settings ? settings.protect_last_file ? status('success', '已启用') : status('danger', '未启用') : '—'}</span>
+                </SettingsRow>
+              </SettingsGroup>
+              <SettingsGroup title="目录与校验">
+                <SettingsRow label="允许访问目录">
+                  <div className="nfc-settings-path-list" title="ALLOWED_ROOTS">{settings?.allowed_roots.map(root => <CodePath key={root} value={root} />)}</div>
+                </SettingsRow>
+                <SettingsRow label="隔离区位置"><span title="QUARANTINE_ROOT"><CodePath value={settings?.quarantine_root} /></span></SettingsRow>
+                <SettingsRow label="去重校验"><SettingsStatus>{settings?.verification_hash?.toUpperCase() || '—'}</SettingsStatus></SettingsRow>
+              </SettingsGroup>
+              {isAdmin && <ZSpaceAuthorization />}
+            </div>
+          </DataPanel>}
+
+          {activeSection === 'retention' && <DataPanel id="retention" title="保留与清理" className="nfc-settings-panel-lifecycle"
+            description="管理审计日志和文件隔离区的保留时间。清理时先核对预览。">
+            <div className="nfc-settings-groups">
+              <SettingsGroup title="保留时间">
+                <SettingsRow label="审计日志" description={retentionDaysInput === 0
+                  ? '0 天表示永久保留。' : '保存后按新的保留期计算清理预览。'}>
+                  <label className="nfc-settings-number-field">
+                    <input aria-label="审计日志保留天数" type="number" min={0} max={3650} step={1}
+                      value={retentionDaysInput ?? ''} list="nfc-settings-audit-presets" disabled={savePolicyMutation.isPending}
+                      onChange={event => setRetentionDaysInput(event.target.value === '' ? null : Number(event.target.value))} />
+                    <span aria-hidden="true">天</span>
+                  </label>
+                  <datalist id="nfc-settings-audit-presets">
+                    {[0, 30, 90, 180, 365].map(days => <option key={days} value={days}>{days === 0 ? '永久保留' : days + ' 天'}</option>)}
+                  </datalist>
+                  <ConsoleButton size="sm" loading={savePolicyMutation.isPending} disabled={!auditSaveAvail.canSave}
+                    title={!isAdmin ? '仅系统管理员允许修改审计保留策略' : auditSaveAvail.disabledReason}
+                    leadingIcon={<ConsoleIcon name="check" size={15} />} onClick={handleSavePolicy}>保存</ConsoleButton>
+                </SettingsRow>
+                <SettingsRow label="文件隔离区" description={quarantineDaysInput === 0
+                  ? '保留期用于决定记录何时到期。' : '到期后仍需管理员审阅并确认清除。'}>
+                  <select className="nfc-settings-select" aria-label="文件隔离区保留周期" value={quarantineDaysInput}
+                    disabled={saveQuarantinePolicyMutation.isPending} onChange={event => setQuarantineDaysInput(Number(event.target.value))}>
+                    <option value={0}>永久保留</option>
+                    <option value={7}>7 天</option>
+                    <option value={30}>30 天</option>
+                    <option value={90}>90 天</option>
                   </select>
-                </label>
-                <ConsoleButton variant="primary" size="sm" loading={saveQuarantinePolicyMutation.isPending}
-                  disabled={!quarantineSaveAvail.canSave}
-                  title={!isAdmin ? '仅系统管理员允许修改隔离区保留策略' : quarantineSaveAvail.disabledReason}
-                  leadingIcon={<ConsoleIcon name="check" size={16} />}
-                  onClick={handleSaveQuarantinePolicy}>保存隔离区策略</ConsoleButton>
-              </ActionBar>
-              <p className="nfc-settings-help">
-                {quarantineDaysInput === 0
-                  ? '永久保留全部隔离文件；系统不会标记过期时间。'
-                  : '新进入隔离区的文件将记录对应到期时间；过期后仍需管理员人工审阅并确认清除。'}
-              </p>
-            </section>
+                  <ConsoleButton size="sm" loading={saveQuarantinePolicyMutation.isPending} disabled={!quarantineSaveAvail.canSave}
+                    title={!isAdmin ? '仅系统管理员允许修改隔离区保留策略' : quarantineSaveAvail.disabledReason}
+                    leadingIcon={<ConsoleIcon name="check" size={15} />} onClick={handleSaveQuarantinePolicy}>保存</ConsoleButton>
+                </SettingsRow>
+              </SettingsGroup>
 
-            <section className="nfc-settings-subpanel nfc-settings-subpanel-danger">
-              <div className="nfc-settings-subpanel-header nfc-settings-retention-header">
-                <div className="nfc-settings-retention-copy">
-                  <strong>审计日志保留清理预览</strong>
-                  <span>执行前会强制刷新策略与预览，最终删除数量以执行时数据为准。</span>
-                </div>
-                <ActionBar compact className="nfc-settings-retention-actions">
-                  <ConsoleButton size="sm" loading={previewLoading}
-                    leadingIcon={<ConsoleIcon name="refresh" size={16} />}
-                    onClick={() => { void refetchPreview(); }}>刷新预览</ConsoleButton>
-                  <ConsoleButton variant="danger" size="sm" loading={clearAuditMutation.isPending}
-                    disabled={!isAdmin || !!confirmation || prepareApplyPending || savePolicyMutation.isPending}
-                    title={!isAdmin ? '仅管理员可立即清空' : '忽略保留期，清空 Audit 历史，仅保留一条自审计'}
-                    leadingIcon={<ConsoleIcon name="trash" size={16} />}
-                    onClick={handleClearAuditHistory}>立即清空</ConsoleButton>
-                  <ConsoleButton variant="danger" size="sm"
+              <SettingsGroup title="审计清理">
+                <SettingsRow label="到期日志" description={retentionPreview?.cutoff
+                  ? '截止于 ' + formatDateTime(retentionPreview.cutoff) : formatAuditRetention(lifecyclePolicy?.audit_retention_days)}>
+                  {retentionPreview && status(retentionPreview.delete_count > 0 ? 'warning' : 'neutral', '可清理 ' +
+                    retentionPreview.delete_count.toLocaleString('zh-CN') + ' 条')}
+                  <ConsoleButton size="sm" variant="primary"
                     loading={applyRetentionMutation.isPending || prepareApplyPending}
                     disabled={!availability.canApply || !!confirmation}
                     title={!isAdmin ? '仅系统管理员允许执行审计日志清理' : availability.disabledReason}
-                    leadingIcon={<ConsoleIcon name="trash" size={16} />}
-                    onClick={() => { void handlePrepareApply(); }}>执行审计清理</ConsoleButton>
-                </ActionBar>
-              </div>
-              <ResponsiveDescriptions items={[
-                { label: '当前生效保留期', value: formatAuditRetention(retentionPreview?.retention_days ?? lifecyclePolicy?.audit_retention_days) },
-                { label: '审计日志总数', value: String(retentionPreview?.total_count ?? 0), emphasis: true },
-                { label: '清理截止时间点', value: retentionPreview?.cutoff ? formatDateTime(retentionPreview.cutoff) : '无（永久保留）' },
-                { label: '拟删除记录数', value: String(retentionPreview?.delete_count ?? 0), emphasis: true },
-                { label: '拟保留记录数', value: String(retentionPreview?.keep_count ?? retentionPreview?.total_count ?? 0), emphasis: true },
-                { label: '最早记录时间', value: retentionPreview?.oldest_timestamp ? formatDateTime(retentionPreview.oldest_timestamp) : '—' },
-                { label: '立即清空说明', value: '管理员可忽略保留期直接清空历史；系统固定保留 1 条 audit.clear 自审计记录' },
-              ]} />
-            </section>
-            {isAdmin && <DatabaseMaintenance />}
-          </div>
-        </DataPanel>}
+                    leadingIcon={<ConsoleIcon name="arrow-right" size={15} />}
+                    onClick={() => { void handlePrepareApply(); }}>查看清理预览</ConsoleButton>
+                </SettingsRow>
+                <SettingsRow label="当前日志总数" description={retentionPreview
+                  ? '预计清理后保留 ' + retentionPreview.keep_count.toLocaleString('zh-CN') + ' 条。' : undefined}>
+                  {retentionPreview && <strong className="nfc-settings-count">{retentionPreview.total_count.toLocaleString('zh-CN')} 条</strong>}
+                  {(previewQueryError || policyQueryError) && <ConsoleButton size="sm" loading={previewLoading}
+                    onClick={() => { void refetchPolicy(); void refetchPreview(); }}>重新读取</ConsoleButton>}
+                </SettingsRow>
+                {(previewQueryError || policyQueryError) &&
+                  <p className="nfc-v2-settings-error" role="alert">保留策略或清理预览读取失败。</p>}
+              </SettingsGroup>
 
-        {activeSection === 'resources' && isAdmin && (
-          <DataPanel title="资源控制" id="resources" className="nfc-settings-panel-resource"
-            description="控制扫描/哈希并发和时间窗口；不会改变文件安全与变动任务的优先安全语义。"
-            action={<ActionBar compact>
-              <ConsoleButton loading={policyLoading} size="sm"
-                leadingIcon={<ConsoleIcon name="refresh" size={16} />}
-                onClick={() => { void refetchResourcePolicy(); }}>刷新</ConsoleButton>
-              <ConsoleButton variant="primary" size="sm" disabled={!resourcePolicy}
-                loading={saveResourcePolicyMutation.isPending}
-                leadingIcon={<ConsoleIcon name="check" size={16} />}
-                onClick={handleSaveResourcePolicy}>保存资源策略</ConsoleButton>
-            </ActionBar>}>
-            <div className="nfc-settings-stack">
-              <div className="nfc-v2-settings-notice" role="note">
-                <ConsoleIcon name="info" size={19} />
-                <div><strong>资源控制说明</strong>
-                  <p>I/O 压力与线程限制属于应用层并发节流；窗口外 Pause 只阻止资源型任务被 Worker 认领，不创建后台自动调度。文件变动任务不受该资源策略降级。</p>
-                </div>
+              <div className="nfc-settings-danger-zone">
+                <SettingsRow label="立即清空审计历史" description="执行前需要确认，系统保留一条清空操作记录。">
+                  <ConsoleButton variant="danger" size="sm" loading={clearAuditMutation.isPending}
+                    disabled={!isAdmin || !!confirmation || prepareApplyPending || savePolicyMutation.isPending}
+                    title={!isAdmin ? '仅管理员可立即清空' : '忽略保留期，清空 Audit 历史，仅保留一条自审计'}
+                    leadingIcon={<ConsoleIcon name="trash" size={15} />} onClick={handleClearAuditHistory}>立即清空</ConsoleButton>
+                </SettingsRow>
               </div>
-              {resourcePolicy && (
-                <section className="nfc-settings-subpanel nfc-settings-status-card">
-                  <div className="nfc-settings-subpanel-header"><strong>当前生效状态</strong></div>
-                  <ResponsiveDescriptions items={[
-                    { label: '配置版本', value: 'rev.' + resourcePolicy.revision },
-                    { label: '生效模式', value: (() => {
-                      const display = getProfileDisplay(resourcePolicy.effective_now.profile);
-                      const tone: StatusTone = display.color === 'success' ? 'success'
-                        : display.color === 'warning' ? 'warning'
-                          : display.color === 'error' ? 'danger' : 'neutral';
-                      return status(tone, display.text);
-                    })() },
-                    { label: '有效并发线程上限', value: resourcePolicy.effective_now.effective_thread_cap + ' 线程', emphasis: true },
-                    { label: '资源任务认领许可',
-                      value: resourcePolicy.effective_now.resource_jobs_admitted
-                        ? status('success', '允许认领') : status('danger', '队列保持 (Held)') },
-                  ]} />
-                </section>
-              )}
-              <div className="nfc-settings-control-grid nfc-settings-resource-controls">
-                <label className="nfc-settings-control">
-                  <span>扫描线程上限 (1..32)</span>
-                  <input type="number" min={1} max={32} step={1}
-                    disabled={saveResourcePolicyMutation.isPending} value={scanThreadsInput}
-                    onChange={event => setScanThreadsInput(event.target.value === '' ? 0 : Number(event.target.value))} />
-                </label>
-                <label className="nfc-settings-control">
-                  <span>哈希线程上限 (1..32)</span>
-                  <input type="number" min={1} max={32} step={1}
-                    disabled={saveResourcePolicyMutation.isPending} value={hashThreadsInput}
-                    onChange={event => setHashThreadsInput(event.target.value === '' ? 0 : Number(event.target.value))} />
-                </label>
-                <label className="nfc-settings-control">
-                  <span>I/O 压力模式</span>
-                  <select disabled={saveResourcePolicyMutation.isPending} value={ioLimitInput}
+            </div>
+          </DataPanel>}
+
+          {activeSection === 'database' && isAdmin && <DatabaseMaintenance />}
+
+          {activeSection === 'resources' && isAdmin && <DataPanel id="resources" title="资源控制" className="nfc-settings-panel-resource"
+            description="设置扫描、哈希并发以及资源任务可运行的时间段。">
+            <div className="nfc-settings-groups">
+              {resourcePolicyError && <p className="nfc-v2-settings-error" role="alert">资源策略读取失败，请刷新重试。</p>}
+              {resourcePolicy && profile && <SettingsGroup title="当前生效">
+                <SettingsRow label={profile.text} description={'资源策略 rev.' + resourcePolicy.revision +
+                  ' · 有效线程上限 ' + resourcePolicy.effective_now.effective_thread_cap}>
+                  {resourcePolicy.effective_now.resource_jobs_admitted ? status('success', '允许认领') : status('warning', '暂停认领')}
+                </SettingsRow>
+              </SettingsGroup>}
+              <SettingsGroup title="并发与调度">
+                <SettingsRow label="扫描线程上限">
+                  <label className="nfc-settings-number-field">
+                    <input type="number" aria-label="扫描线程上限" min={1} max={32} step={1} value={scanThreadsInput || ''}
+                      disabled={!resourcePolicy || saveResourcePolicyMutation.isPending}
+                      onChange={event => setScanThreadsInput(event.target.value === '' ? 0 : Number(event.target.value))} />
+                    <span aria-hidden="true">线程</span>
+                  </label>
+                </SettingsRow>
+                <SettingsRow label="哈希线程上限">
+                  <label className="nfc-settings-number-field">
+                    <input type="number" aria-label="哈希线程上限" min={1} max={32} step={1} value={hashThreadsInput || ''}
+                      disabled={!resourcePolicy || saveResourcePolicyMutation.isPending}
+                      onChange={event => setHashThreadsInput(event.target.value === '' ? 0 : Number(event.target.value))} />
+                    <span aria-hidden="true">线程</span>
+                  </label>
+                </SettingsRow>
+                <SettingsRow label="I/O 压力">
+                  <select className="nfc-settings-select" aria-label="I/O 压力" value={ioLimitInput}
+                    disabled={!resourcePolicy || saveResourcePolicyMutation.isPending}
                     onChange={event => setIoLimitInput(event.target.value as typeof ioLimitInput)}>
-                    <option value="low">低压模式 (Low - 上限 1 线程)</option>
-                    <option value="normal">标准模式 (Normal - 上限 2 线程)</option>
-                    <option value="unlimited">无上限模式 (Unlimited - 上限 32 线程)</option>
+                    <option value="low">低压模式</option>
+                    <option value="normal">标准模式</option>
+                    <option value="unlimited">无上限模式</option>
                   </select>
-                </label>
-                <label className="nfc-settings-control">
-                  <span>任务调度优先级</span>
-                  <select disabled={saveResourcePolicyMutation.isPending} value={jobPriorityInput}
+                </SettingsRow>
+                <SettingsRow label="任务队列">
+                  <select className="nfc-settings-select" aria-label="任务队列" value={jobPriorityInput}
+                    disabled={!resourcePolicy || saveResourcePolicyMutation.isPending}
                     onChange={event => setJobPriorityInput(event.target.value as typeof jobPriorityInput)}>
-                    <option value="normal">标准先进先出 (Normal FIFO)</option>
-                    <option value="background">后台让步 (Background)</option>
+                    <option value="normal">先进先出</option>
+                    <option value="background">后台让步</option>
                   </select>
-                </label>
-              </div>
-              <section className="nfc-settings-subpanel nfc-settings-window-card">
-                <div className="nfc-settings-window-header">
-                  <div><strong>活跃时间窗口</strong><span>窗口外自动降速或暂停扫描/索引任务认领。</span></div>
-                  <label className="nfc-v2-settings-switch">
-                    <input type="checkbox" checked={windowEnabledInput}
-                      disabled={saveResourcePolicyMutation.isPending}
+                </SettingsRow>
+              </SettingsGroup>
+              <SettingsGroup title="活跃时间窗口">
+                <SettingsRow label="允许时段" description={windowEnabledInput
+                  ? windowTimezoneInput + ' · 窗口外' + (outsideModeInput === 'limited' ? '降速运行' : '暂停认领')
+                  : '开启后可限制扫描与索引任务的运行时间。'}>
+                  {windowEnabledInput && <ResourceWindowTrack start={windowStartInput} end={windowEndInput} />}
+                  <label className="nfc-settings-toggle">
+                    <input type="checkbox" checked={windowEnabledInput} disabled={!resourcePolicy || saveResourcePolicyMutation.isPending}
                       onChange={event => setWindowEnabledInput(event.target.checked)}
                       aria-label="启用活跃时间窗口" role="switch" aria-checked={windowEnabledInput} />
-                    <span>{windowEnabledInput ? '已启用' : '未启用'}</span>
+                    <span aria-hidden="true" />
                   </label>
-                </div>
-                {windowEnabledInput && (
-                  <div className="nfc-settings-control-grid">
-                    <label className="nfc-settings-control">
-                      <span>窗口起始时间</span>
-                      <input type="text" value={windowStartInput} placeholder="01:00"
-                        disabled={saveResourcePolicyMutation.isPending}
-                        onChange={event => setWindowStartInput(event.target.value)} />
-                    </label>
-                    <label className="nfc-settings-control">
-                      <span>窗口结束时间</span>
-                      <input type="text" value={windowEndInput} placeholder="07:00"
-                        disabled={saveResourcePolicyMutation.isPending}
-                        onChange={event => setWindowEndInput(event.target.value)} />
-                    </label>
-                    <label className="nfc-settings-control">
-                      <span>时区</span>
-                      <select value={windowTimezoneInput} disabled={saveResourcePolicyMutation.isPending}
-                        onChange={event => setWindowTimezoneInput(event.target.value)}>
-                        {windowTimezones.map(tz => <option key={tz} value={tz}>{tz}</option>)}
-                      </select>
-                    </label>
-                    <label className="nfc-settings-control">
-                      <span>窗口外行为模式</span>
-                      <select value={outsideModeInput} disabled={saveResourcePolicyMutation.isPending}
-                        onChange={event => setOutsideModeInput(event.target.value as typeof outsideModeInput)}>
-                        <option value="limited">降速运行 (Limited)</option>
-                        <option value="pause">暂停认领 (Pause)</option>
-                      </select>
-                    </label>
+                </SettingsRow>
+                {windowEnabledInput && <details className="nfc-settings-window-details">
+                  <summary>编辑时段 <ConsoleIcon name="chevron-down" size={14} /></summary>
+                  <div className="nfc-settings-window-fields">
+                    <label>开始 <input type="time" value={windowStartInput} disabled={saveResourcePolicyMutation.isPending}
+                      onChange={event => setWindowStartInput(event.target.value)} /></label>
+                    <label>结束 <input type="time" value={windowEndInput} disabled={saveResourcePolicyMutation.isPending}
+                      onChange={event => setWindowEndInput(event.target.value)} /></label>
+                    <label>时区 <select value={windowTimezoneInput} disabled={saveResourcePolicyMutation.isPending}
+                      onChange={event => setWindowTimezoneInput(event.target.value)}>
+                      {windowTimezones.map(tz => <option key={tz} value={tz}>{tz}</option>)}
+                    </select></label>
+                    <label>窗口外 <select value={outsideModeInput} disabled={saveResourcePolicyMutation.isPending}
+                      onChange={event => setOutsideModeInput(event.target.value as typeof outsideModeInput)}>
+                      <option value="limited">降速运行</option>
+                      <option value="pause">暂停认领</option>
+                    </select></label>
                   </div>
-                )}
-              </section>
+                </details>}
+              </SettingsGroup>
             </div>
-          </DataPanel>
-        )}
+            <div className="nfc-settings-panel-footer">
+              <span className="nfc-settings-footer-message" role="status">
+                {resourceDirty ? '有未保存的更改' : policyLoading ? '正在读取资源策略…' : resourcePolicy ? '资源策略已保存' : ''}
+              </span>
+              <ActionBar compact>
+                <ConsoleButton size="sm" disabled={!resourcePolicy || !resourceDirty || saveResourcePolicyMutation.isPending}
+                  onClick={() => { if (resourcePolicy) resetResourceDraft(resourcePolicy); }}>取消修改</ConsoleButton>
+                <ConsoleButton size="sm" variant="primary" disabled={!resourceDirty} loading={saveResourcePolicyMutation.isPending}
+                  leadingIcon={<ConsoleIcon name="check" size={15} />} onClick={handleSaveResourcePolicy}>保存资源策略</ConsoleButton>
+              </ActionBar>
+            </div>
+          </DataPanel>}
 
-        {activeSection === 'sessions' && <DataPanel title="管理员活动会话" id="sessions"
-          description="当前设备不可在此强制注销；其他会话可由管理员显式下线。"
-          action={<span className="nfc-panel-count">{sessions.length} sessions</span>}
-          className="nfc-panel-flush nfc-settings-panel-sessions" variant="dense">
-          {sessionsError ? <ConsoleEmpty title="活动会话获取失败"
-            description="请刷新后重试。当前会话尚未修改。"
-            action={<ConsoleButton onClick={() => { void refetchSessions(); }}>重新加载</ConsoleButton>} />
-            : sessionsLoading ? <div role="status" className="nfc-v2-settings-loading">正在加载设备会话…</div>
-              : sessions.length === 0 ? <ConsoleEmpty title="暂无活动会话" />
-                : <ResponsiveDataView
-                  desktop={<div className="nfc-v2-settings-table-scroll">
-                    <table className="nfc-v2-settings-table">
-                      <caption>活动设备会话与强制下线操作</caption>
-                      <thead><tr>
-                        <th scope="col">登录设备 / User Agent</th>
-                        <th scope="col">IP 地址</th>
-                        <th scope="col">首次登录时间</th>
-                        <th scope="col">最近活动时间</th>
-                        <th scope="col">操作</th>
-                      </tr></thead>
-                      <tbody>{sessions.map(session => (
-                        <tr key={session.id}>
-                          <td>{deviceLabel(session)}</td>
-                          <td><code>{session.ip_address}</code></td>
-                          <td>{formatDateTime(session.created_at)}</td>
-                          <td>{formatDateTime(session.last_seen_at)}</td>
-                          <td>{sessionActions(session)}</td>
-                        </tr>
-                      ))}</tbody>
-                    </table>
-                  </div>}
-                  mobile={<div className="nfc-mobile-record-list nfc-v2-settings-mobile">
-                    {sessions.map(session => (
-                      <article className="nfc-session-mobile-card" key={session.id}>
-                        <div className="nfc-mobile-record-heading">{deviceLabel(session)}</div>
-                        <div className="nfc-mobile-record-facts">
-                          <span>IP <b className="nfc-mono">{session.ip_address}</b></span>
-                          <span>首次登录 <b>{formatDateTime(session.created_at)}</b></span>
-                          <span>最近活动 <b>{formatDateTime(session.last_seen_at)}</b></span>
-                        </div>
-                        {!session.is_current && <div className="nfc-mobile-record-actions">
-                          {sessionActions(session)}
-                        </div>}
-                      </article>
-                    ))}
-                  </div>}
-                />}
-        </DataPanel>}
-      </div>
+          {activeSection === 'sessions' && <DataPanel id="sessions" title="登录设备" className="nfc-settings-panel-sessions"
+            description="查看登录会话和最近活动时间。"
+            action={<ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="refresh" size={15} />}
+              loading={sessionsLoading} onClick={() => { void refetchSessions(); }}>刷新会话</ConsoleButton>}>
+            <div className="nfc-settings-groups">
+              {sessionsError ? <ConsoleEmpty title="活动会话获取失败"
+                action={<ConsoleButton onClick={() => { void refetchSessions(); }}>重新加载</ConsoleButton>} />
+                : sessionsLoading ? <div role="status" className="nfc-v2-settings-loading">正在加载设备会话…</div>
+                : sessions.length === 0 ? <ConsoleEmpty title="暂无活动会话" />
+                  : <SettingsGroup title="活动会话">
+                    <ResponsiveDataView
+                      desktop={<table className="nfc-v2-settings-table nfc-settings-device-list">
+                        <caption>活动设备会话与注销操作</caption>
+                        <thead className="nfc-settings-sr-only"><tr><th scope="col">设备及最近活动</th><th scope="col">操作</th></tr></thead>
+                        <tbody>{sessions.map(session => <tr key={session.id}>
+                          <td>{deviceLabel(session)}{deviceFacts(session)}</td><td>{sessionActions(session)}</td>
+                        </tr>)}</tbody>
+                      </table>}
+                      mobile={<div className="nfc-settings-device-list">
+                        {sessions.map(session => <article className="nfc-session-mobile-card" key={session.id}>
+                          <SettingsRow label={deviceLabel(session)} description={deviceFacts(session)}>
+                            {sessionActions(session)}
+                          </SettingsRow>
+                        </article>)}
+                      </div>} />
+                  </SettingsGroup>}
+              {isAdmin && sessions.some(session => !session.is_current) &&
+                <div className="nfc-settings-inline-note"><ConsoleIcon name="shield-check" size={15} />注销其他设备前需要确认。</div>}
+            </div>
+          </DataPanel>}
+        </div>
       </div>
 
       <ConsoleConfirmDialog open={confirmation !== null}
@@ -769,6 +747,7 @@ export const SettingsPage: React.FC = () => {
             <p>当前已保存策略：<strong>{formatAuditRetention(confirmation.days)}</strong></p>
             <p>当前最新预览：预计清理 <strong className="nfc-danger-text">{confirmation.deleteCount}</strong> 条 Audit 历史记录。</p>
             <p>提示：当前预览仅为预计结果。实际执行时将根据数据库中最新保存的保留策略以及执行时最新的审计数据重新计算，最终删除数量可能与当前预览不同。</p>
+            {retentionPreview?.oldest_timestamp && <p>最早记录 {formatDateTime(retentionPreview.oldest_timestamp)}</p>}
             <p>安全边界：本操作仅清理符合保留期条件的 Audit 历史记录。不会删除 NAS 上的真实文件或目录，也不会删除 Task、Scan、Plan 或 Index 数据。</p>
             <p className="nfc-danger-copy">审计历史清理不可撤销。</p>
           </div>

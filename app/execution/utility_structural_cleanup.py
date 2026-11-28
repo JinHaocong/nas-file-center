@@ -5,7 +5,7 @@ import errno
 import os
 from pathlib import Path
 import stat
-from typing import Iterable
+from typing import Callable, Iterable
 
 from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 
@@ -25,14 +25,15 @@ def remove_authorized_empty_wrapper(
     allowed_roots: Iterable[Path | str],
     expected_device: int | None,
     expected_inode: int | None,
+    before_rmdir: Callable[[int, int], bool] | None = None,
 ) -> UtilityStructuralCleanupResult:
     """Remove exactly one already-authorized empty wrapper directory.
 
-    This primitive is intentionally quarantine-independent. Authorization is
-    resolved by the frozen Utility MOVE -> rmdir pair before this function is
-    reached. Here we only re-open the bound wrapper through no-follow directory
-    descriptors, re-check its frozen identity and physical emptiness, and issue
-    one non-recursive rmdir against the already-open parent directory.
+    The caller authorizes removal from its reviewed operation and completed
+    file steps. This primitive re-opens the bound wrapper through no-follow
+    directory descriptors, confirms its frozen identity and physical emptiness,
+    and issues one non-recursive rmdir against the already-open parent.
+    Callers may check a lease or mount boundary before the final identity check.
     """
     if not hasattr(os, "O_NOFOLLOW"):
         return UtilityStructuralCleanupResult(
@@ -82,6 +83,8 @@ def remove_authorized_empty_wrapper(
                     return UtilityStructuralCleanupResult("skipped", "source identity changed")
                 if os.listdir(wrapper_fd):
                     return UtilityStructuralCleanupResult("skipped", "source directory is not empty")
+                if before_rmdir is not None and not before_rmdir(parent_fd, wrapper_fd):
+                    return UtilityStructuralCleanupResult("skipped", "source directory is outside the current cleanup boundary")
 
                 # Re-check the pathname binding immediately before rmdir so an
                 # ABA replacement cannot substitute a different empty directory.

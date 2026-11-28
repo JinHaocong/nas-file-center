@@ -14,7 +14,7 @@ const owned = readdirSync(root)
   .filter(name => /^console-v2(?:-[a-z0-9-]+)?\.css$/.test(name))
   .map(name => 'console-v2:' + name);
 for (const name of [
-  'workspace.css', 'file-workspace.css', 'records-workspaces.css', 'tool-workspaces.css',
+  'workspace.css', 'file-workspace.css', 'workspace-quicklook.css', 'records-workspaces.css', 'tool-workspaces.css',
   'component-details.css', 'overlay-forms.css', 'overlay-maintenance.css', 'overlay-reading.css',
 ]) {
   owned.push('workspace:' + name);

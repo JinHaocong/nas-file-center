@@ -10,6 +10,7 @@ import { MobileDock } from '../components/layout/MobileDock';
 import { WorkspaceNavigation } from '../components/layout/WorkspaceNavigation';
 import { currentDestination } from '../components/layout/navItems';
 import { ConsoleIcon } from '../components/ui/ConsoleIcon';
+import { WorkflowRunActivityProvider } from '../components/workflows/WorkflowRunActivity';
 import { useResponsive } from '../hooks/useResponsive';
 
 const navigationCompactKey = 'nfc_navigation_compact';
@@ -27,7 +28,7 @@ function readNavigationCompact(): boolean | undefined {
 
 /** Mount the workspace and preserve the actual opener across menu navigation. */
 export const MainLayout: React.FC = () => {
-  const { isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
   const { isMobile, isDesktop } = useResponsive();
   const { pathname, search } = useLocation();
   const fileSpace = Boolean(matchPath('/dashboard', pathname)) && new URLSearchParams(search).get('view') !== 'overview';
@@ -87,18 +88,21 @@ export const MainLayout: React.FC = () => {
   }
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
-  return <div className={'nfc-app-shell nfc-v2-shell nfc-studio' + (fileSpace ? ' nfc-file-space-shell' : '')}>
-    <a className="nfc-v2-skip-link" href="#main-content">跳转到主要内容</a>
-    <div className="nfc-app-main nfc-v2-main">
-      <Header isMobile={isMobile} navigationOpen={navigationOpen} onOpenNavigation={openNavigation} />
-      <div className="nfc-workspace-frame">
-        {isDesktop && <WorkspaceNavigation compact={compactNavigation} onToggleCompact={toggleNavigationCompact} />}
-        <main ref={main} className="nfc-page-content nfc-v2-page-content" id="main-content" tabIndex={-1}>
-          <Outlet />
-        </main>
+  const account = String(user?.id ?? '');
+  return <WorkflowRunActivityProvider account={account} key={account}>
+    <div className={'nfc-app-shell nfc-v2-shell nfc-studio' + (fileSpace ? ' nfc-file-space-shell' : '')}>
+      <a className="nfc-v2-skip-link" href="#main-content">跳转到主要内容</a>
+      <div className="nfc-app-main nfc-v2-main">
+        <Header isMobile={isMobile} navigationOpen={navigationOpen} onOpenNavigation={openNavigation} />
+        <div className="nfc-workspace-frame">
+          {isDesktop && <WorkspaceNavigation compact={compactNavigation} onToggleCompact={toggleNavigationCompact} />}
+          <main ref={main} className="nfc-page-content nfc-v2-page-content" id="main-content" tabIndex={-1}>
+            <Outlet />
+          </main>
+        </div>
+        {isMobile && <MobileDock moreOpen={navigationOpen} onMore={openNavigation} />}
       </div>
-      {isMobile && <MobileDock moreOpen={navigationOpen} onMore={openNavigation} />}
+      <ResponsiveNav open={navigationOpen} onClose={() => setNavigationOpen(false)} opener={opener} />
     </div>
-    <ResponsiveNav open={navigationOpen} onClose={() => setNavigationOpen(false)} opener={opener} />
-  </div>;
+  </WorkflowRunActivityProvider>;
 };

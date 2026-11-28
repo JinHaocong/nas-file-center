@@ -8,6 +8,28 @@ import type { DirectoryItem } from '../../types';
 
 export const workspaceEntryTypes = { directory: '目录', file: '文件', symlink: '链接' } as const;
 
+/** Keep column labels and their geometry across the directory request. */
+export function WorkspaceColumnHeading() {
+  return <div className="nfc-file-workspace-column-head" aria-hidden="true">
+    <span>名称</span><span>类型</span><span>大小</span><span>修改时间</span>
+  </div>;
+}
+
+/** Present fixed-size placeholders while there is no matching listing to display. */
+export function WorkspaceEntriesLoading({ list }: { list: boolean }) {
+  return <div className={'nfc-file-workspace-entries nfc-file-workspace-skeleton' + (list ? ' is-list' : '')} aria-hidden="true">
+    {list && <WorkspaceColumnHeading />}
+    <div className="nfc-file-workspace-placeholder-rows">
+      {[48, 34, 58, 45, 37, 54, 42, 51].map((width, index) => (
+        <div key={index} className="nfc-file-workspace-placeholder-row">
+          <span><i /><b style={{ inlineSize: width + '%' }} /></span>
+          {list && <><i /><i /><i /><span /></>}
+        </div>
+      ))}
+    </div>
+  </div>;
+}
+
 /** Preview regular media files through the same endpoint as their existing thumbnails. */
 export function canQuickLook(entry: DirectoryItem) {
   return entry.type === 'file' && Boolean(mediaThumbnailKind(entry.path));
@@ -70,9 +92,7 @@ export function WorkspaceEntries({ entries, list, pending, selectedPath, selecte
   }
 
   return <div className={'nfc-file-workspace-entries' + (list ? ' is-list' : '')} aria-busy={pending || undefined}>
-    {list && <div className="nfc-file-workspace-column-head" aria-hidden="true">
-      <span>名称</span><span>类型</span><span>大小</span><span>修改时间</span>
-    </div>}
+    {list && <WorkspaceColumnHeading />}
     {groups.map(({ label, rows }) => <section key={label} aria-label={label}>
       <h2 className="nfc-file-workspace-group-title">{label}<span>{rows.length.toLocaleString()} 项</span></h2>
       <ul className="nfc-file-workspace-group-list" aria-label={label + '列表'}>

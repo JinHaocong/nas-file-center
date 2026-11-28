@@ -322,6 +322,40 @@ async function inspectSchedulerListErrorPaint(page, theme, width) {
     focusPairs });
 }
 
+/** Measure the authenticated page against the shell's shared gutters and page-header gap. */
+async function workspaceGeometry(tab) {
+  return tab.evaluate(() => {
+    const main = document.querySelector('#main-content');
+    const page = main?.firstElementChild;
+    if (!main || !page) return null;
+    const area = main.getBoundingClientRect();
+    const root = page.getBoundingClientRect();
+    const heading = page.querySelector('.nfc-page-header,.nfc-file-workspace-page-heading');
+    let panel = heading?.nextElementSibling;
+    while (panel && !panel.getBoundingClientRect().height) panel = panel.nextElementSibling;
+    const header = heading?.getBoundingClientRect();
+    const firstPanel = panel?.getBoundingClientRect();
+    return {
+      left: root.left - area.left,
+      right: area.left + main.clientWidth - root.right,
+      top: root.top - area.top,
+      headerLeft: header ? header.left - root.left : 0,
+      gap: header && firstPanel ? firstPanel.top - header.bottom : null,
+    };
+  });
+}
+
+function checkWorkspaceGeometry(path, geometry, problems) {
+  const gutter = width < 768 ? 16 : width < 1200 ? 20 : 28;
+  const top = width < 768 ? 16 : width < 1200 ? 20 : 26;
+  const gap = width < 1200 ? 16 : 19;
+  if (!geometry || Math.abs(geometry.left - gutter) > 2 || Math.abs(geometry.right - gutter) > 2 ||
+    Math.abs(geometry.top - top) > 2 || Math.abs(geometry.headerLeft) > 2 ||
+    (geometry.gap !== null && Math.abs(geometry.gap - gap) > 2)) {
+    problems.push('Workspace gutter or heading gap differs: ' + JSON.stringify({ path, geometry, gutter, top, gap }));
+  }
+}
+
 try {
   await ready();
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
@@ -369,7 +403,8 @@ try {
         loginFixture = Boolean(item.public);
         if (item.id === 'dashboard') {
           await tab.goto(BASE + item.path, { waitUntil: 'domcontentloaded' });
-          await tab.locator('.nfc-file-workspace-entries').waitFor();
+          await tab.locator('.nfc-file-workspace-list-footer, .nfc-file-workspace-column-head, .nfc-file-workspace-entries').first().waitFor();
+          checkWorkspaceGeometry(item.path, await workspaceGeometry(tab), problems);
           const fileWorkspaceOverflow = await tab.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (fileWorkspaceOverflow > 3) problems.push('File workspace horizontal overflow: ' + fileWorkspaceOverflow + 'px');
         }
@@ -440,6 +475,10 @@ try {
             } : null,
           };
         });
+        if (!item.public) {
+          audit.workspaceGeometry = await workspaceGeometry(tab);
+          checkWorkspaceGeometry(pagePath, audit.workspaceGeometry, problems);
+        }
         if (audit.pathname !== item.path) problems.push('Route redirected: ' + audit.pathname);
         if (audit.effectiveTheme !== theme.effective) problems.push('Theme mismatch');
         if (!item.public && !audit.hasShell) problems.push('Missing authenticated React shell');
@@ -472,8 +511,8 @@ try {
           // Keep read-only: never submit login or mutate Settings state.
           if (item.id === 'settings') {
             const tabs = [
-              ['界面显示', 'appearance'], ['安全状态', 'safety'], ['保留策略', 'retention'],
-              ['资源设置', 'resources'], ['活动会话', 'sessions'],
+              ['界面显示', 'appearance'], ['安全与授权', 'safety'], ['保留与清理', 'retention'],
+              ['数据库维护', 'database'], ['资源控制', 'resources'], ['登录设备', 'sessions'],
             ];
             for (const [name, id] of tabs) {
               const control = tab.getByRole('tab', { name, exact: true });
@@ -487,7 +526,7 @@ try {
                   JSON.stringify({ id, rendered }));
               }
             }
-            await tab.getByRole('tab', { name: '保留策略' }).click();
+            await tab.getByRole('tab', { name: '保留与清理' }).click();
             await tab.locator('#retention').waitFor();
           }
           const painted = await tab.evaluate(route => {
@@ -505,33 +544,15 @@ try {
                   subpanel: readPaint('.nfc-v2-settings .nfc-settings-subpanel') };
           }, item.id);
           const required = theme.effective === 'dark'
-            ? { canvas: 'rgb(23, 23, 22)', panel: 'rgb(36, 36, 34)',
-                soft: 'rgb(45, 45, 42)' }
-            : { canvas: 'rgb(255, 255, 255)', panel: 'rgb(255, 255, 255)',
-                soft: 'rgb(247, 247, 245)' };
-          // A Settings subpanel may use CSS color-mix(). Chromium returns
-          // color(srgb …), not necessarily integer rgb(); parse strictly and
-          // verify painted neutral channels instead of string-equating CSS.
-          const soft = painted.subpanel?.background
-            ? parseComputedPaintColor(painted.subpanel.background) : null;
-          const softChannels = soft?.channels ?? [];
-          const neutralSoft = soft?.alpha === 1 && softChannels.length === 3 &&
-            Math.max(...softChannels) - Math.min(...softChannels) <= 4 &&
-            (theme.effective === 'dark'
-              ? softChannels.every(v => v >= 24 && v <= 75)
-              : softChannels.every(v => v >= 235 && v <= 255));
-          audit.loginSettingsPaint = { ...painted, required,
-            softChannels: softChannels.map(v => Number(v.toFixed(2))),
-            neutralSoft };
-          const loginPaint = theme.effective === 'dark'
-            ? { canvas: 'rgb(25, 28, 25)', panel: 'rgb(35, 39, 34)' }
-            : { canvas: 'rgb(247, 246, 241)', panel: 'rgb(255, 254, 250)' };
+            ? { canvas: 'rgb(25, 28, 25)', paper: 'rgb(35, 39, 34)' }
+            : { canvas: 'rgb(247, 246, 241)', paper: 'rgb(255, 254, 250)' };
+          audit.loginSettingsPaint = { ...painted, required };
           const match = item.id === 'login'
-            ? painted.shell?.background === loginPaint.canvas &&
+            ? painted.shell?.background === required.canvas &&
               painted.shell?.image === 'none' &&
-              painted.panel?.background === loginPaint.panel
-            : painted.panel?.background === required.panel && neutralSoft;
-          if (!match) problems.push('Login/Settings actual neutral paint mismatch: ' +
+              painted.panel?.background === required.paper
+            : painted.panel?.background === required.paper && painted.subpanel?.background === required.paper;
+          if (!match) problems.push('Login/Settings workspace paint mismatch: ' +
             JSON.stringify({ route: item.id, effectiveTheme: theme.effective, painted }));
           if (item.id === 'settings') {
             await tab.getByRole('tab', { name: '界面显示' }).click();
@@ -1140,7 +1161,7 @@ try {
           // its offscreen contents. Keep the 800 baseline screenshots unchanged;
           // add a separately labeled bottom-of-workspace review PNG when needed.
           if (item.id === 'settings') {
-            await tab.getByRole('tab', { name: '保留策略' }).click();
+            await tab.getByRole('tab', { name: '保留与清理' }).click();
             await tab.locator('#retention').waitFor();
           }
           const scroll = await tab.evaluate(() => {
@@ -1157,9 +1178,7 @@ try {
               visibleHeight: pane.clientHeight,
             };
           });
-          if (!scroll || scroll.visibleHeight < 100 ||
-              (item.id === 'settings' && (!scroll.scrollable || scroll.maxScroll < 100)) ||
-              !scroll.bottomReached) {
+          if (!scroll || scroll.visibleHeight < 100 || !scroll.bottomReached) {
             problems.push('Desktop workspace nested scroll unavailable or bottom unreachable: ' +
               JSON.stringify({ route: item.path, scroll }));
           }
@@ -1263,6 +1282,10 @@ try {
           const targets = item.id === 'tasks'
             ? [['#nfc-task-status-filter', '状态'], ['#nfc-task-type-filter', '任务类型']]
             : [['#quarantine-state-filter', '隔离状态']];
+          const options = item.id === 'tasks'
+            ? tab.getByRole('button', { name: '任务筛选与更多操作', exact: true })
+            : null;
+          await options?.click();
           audit.nativeSelectFocus = [];
           for (const [selector, accessibleName] of targets) {
             const control = tab.locator(selector);
@@ -1311,6 +1334,12 @@ try {
                 focusContrast < 3 || textContrast < 4.5)
               problems.push('Native filter select computed keyboard contrast failed: ' +
                 JSON.stringify({ selector, ...data, focusContrast, textContrast }));
+          }
+          if (options) {
+            await tab.keyboard.press('Escape');
+            if (await options.getAttribute('aria-expanded') !== 'false' ||
+                !await options.evaluate(button => document.activeElement === button))
+              problems.push('Task options should close and restore the toolbar trigger on Escape');
           }
         }
         if (item.id === 'dashboard' && width === 768) {

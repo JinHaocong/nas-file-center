@@ -1,0 +1,61 @@
+/* The authenticated shell owns the exterior of every page. Nested card layouts own their own insets. */
+.nfc-studio {
+  --nfc-workspace-inline: 28px;
+  --nfc-workspace-top: 26px;
+  --nfc-workspace-bottom: 24px;
+  --nfc-workspace-gap: 19px;
+}
+.nfc-studio .nfc-app-main .nfc-workspace-frame > .nfc-v2-page-content.nfc-page-content {
+  padding: var(--nfc-workspace-top) var(--nfc-workspace-inline) var(--nfc-workspace-bottom) !important;
+  scroll-padding-block-end: var(--nfc-workspace-bottom);
+  background: var(--studio-ground);
+}
+.nfc-studio .nfc-app-main .nfc-workspace-frame > .nfc-v2-page-content > * {
+  width: 100% !important;
+  max-width: none !important;
+  margin-inline: 0;
+  row-gap: var(--nfc-workspace-gap) !important;
+  transition-property: color, background-color;
+}
+.nfc-studio .nfc-app-main .nfc-workspace-frame > .nfc-page-content >
+  :is(.nfc-scan-detail-page, .nfc-plan-detail-page, .nfc-advanced-dedupe-page, .nfc-workflow-builder-page) {
+  margin-block: 0 !important;
+  padding: 0 !important;
+  background: transparent;
+}
+.nfc-studio .nfc-app-main .nfc-workspace-frame .nfc-page-content
+  :is(.nfc-v2-immediate-rename, .nfc-v2-advanced-rename, .nfc-tool-profile-view, .nfc-organizer-preview-page) {
+  row-gap: var(--nfc-workspace-gap);
+}
+.nfc-studio .nfc-app-main .nfc-workspace-frame .nfc-page-content
+  :is(.nfc-operations-page, .nfc-v2-dashboard, .nfc-v2-immediate-rename, .nfc-v2-advanced-rename, .nfc-tool-profile-view) >
+  :is(.nfc-page-header, .nfc-file-workspace-page-heading) {
+  min-block-size: 40px;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+@media (min-width: 768px) {
+  .nfc-studio .nfc-app-main .nfc-workspace-frame .nfc-page-content > * > .nfc-page-header {
+    align-items: center;
+  }
+}
+@media (min-width: 1200px) {
+  .nfc-studio .nfc-app-main .nfc-workspace-frame .nfc-page-content
+    :is(.nfc-page-title, .nfc-file-workspace-page-heading h1) {
+    font-size: clamp(27px, 2.16vw, 31px) !important;
+  }
+}
+@media (max-width: 1199px) {
+  .nfc-studio {
+    --nfc-workspace-inline: 20px;
+    --nfc-workspace-top: 20px;
+    --nfc-workspace-gap: 16px;
+  }
+}
+@media (max-width: 767px) {
+  .nfc-studio {
+    --nfc-workspace-inline: 16px;
+    --nfc-workspace-top: 16px;
+    --nfc-workspace-bottom: calc(88px + env(safe-area-inset-bottom));
+  }
+}

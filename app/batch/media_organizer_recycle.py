@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
+import sys
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
@@ -11,6 +13,7 @@ from typing import TYPE_CHECKING, Callable, Iterator
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_recycle_rules import check, recycle_file_reason
 from app.batch.zspace_recycle import ZSpaceRecycleClient
+from app.execution.utility_structural_cleanup import remove_authorized_empty_wrapper
 
 if TYPE_CHECKING:
     from app.config import Settings
@@ -18,6 +21,7 @@ if TYPE_CHECKING:
 RECYCLE_DOWNLOAD_EXTRAS = "recycle_download_extras"
 LEGACY_RECYCLE_PROBE_NAME = ".nfc-zspace-recycle-probe"
 _RECYCLE_DIRS = frozenset({".recycle", "#recycle", "@recycle", "@eadir", "@recently-snapshot"})
+_BUCKET_SIZE = re.compile(r"[0-9]+(?:\.[0-9]+)?(?:[kmgt]i?b|b)", re.I)
 _omitted: ContextVar[frozenset[Path]] = ContextVar("organizer_omitted_recycle_paths", default=frozenset())
 
 
@@ -65,6 +69,66 @@ def identity(info: os.stat_result) -> list[int]:
     return [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
 
 
+def _is_other_bucket(folder: Path) -> bool:
+    from app.batch.media_organizer_planner import _is_wrapper, _labelled_bucket_kind
+
+    if folder.name.casefold() == "other":
+        return _is_wrapper(folder.parent, folder.name)
+    return (_labelled_bucket_kind(folder.name) == "Other"
+            and _BUCKET_SIZE.fullmatch(folder.name.rsplit(" ", 1)[-1][:-1]) is not None)
+
+
+def _mount_identity(fd: int) -> tuple[int, bytes | None]:
+    """Include the Linux mount ID so a same-device bind mount is also a boundary."""
+    device = os.fstat(fd).st_dev
+    if sys.platform != "linux":
+        return device, None
+    with open(f"/proc/self/fdinfo/{fd}", "rb") as info:
+        for line in info:
+            if line.startswith(b"mnt_id:"):
+                return device, line.partition(b":")[2].strip()
+    raise ValueError("无法确认整理目录的挂载边界")
+
+
+def cleanup_empty_recycle_buckets(selection: Path, settings: Settings, buckets: dict[Path, list[int]],
+                                  fence: Callable[[], None]) -> None:
+    """Retire verified buckets only within the original selection and mount."""
+    try:
+        root_fd = _open_directory_nofollow(selection)
+        try:
+            mount = _mount_identity(root_fd)
+        finally:
+            os.close(root_fd)
+    except (OSError, ValueError):
+        return
+
+    for bucket, expected in buckets.items():
+        if (bucket == selection or not bucket.is_relative_to(selection) or ".." in bucket.parts
+                or not _is_other_bucket(bucket)
+                or not bucket.is_relative_to(settings.data_mount) or _ignored(bucket, settings.quarantine_root)
+                or bucket in settings.allowed_roots or bucket.is_relative_to(settings.config_dir)):
+            continue
+
+        def before_rmdir(parent_fd: int, bucket_fd: int) -> bool:
+            if _mount_identity(parent_fd) != mount or _mount_identity(bucket_fd) != mount:
+                return False
+            fence()
+            # Re-open the selected name after the lease check. A moved parent
+            # must not cause rmdir to operate through its now-detached fd.
+            live_fd = _open_directory_nofollow(bucket.parent)
+            try:
+                live, parent = os.fstat(live_fd), os.fstat(parent_fd)
+                return ((live.st_dev, live.st_ino) == (parent.st_dev, parent.st_ino)
+                        and _mount_identity(live_fd) == mount)
+            finally:
+                os.close(live_fd)
+
+        remove_authorized_empty_wrapper(
+            bucket, allowed_roots=[selection], expected_device=expected[0], expected_inode=expected[1],
+            before_rmdir=before_rmdir,
+        )
+
+
 def iter_recycle_candidates(selection: Path, settings: Settings, checkpoint: Callable[[], None]) -> Iterator[dict]:
     """Visit literal ordinary files on this mount, skipping recycle and system trees."""
     from app.batch.media_package_organizer import MAX_DEPTH, MAX_PACKAGE_FILES, MAX_SCOPE_ENTRIES_PER_DIRECTORY
@@ -86,8 +150,11 @@ def iter_recycle_candidates(selection: Path, settings: Settings, checkpoint: Cal
         fd = _open_directory_nofollow(folder)
         children = []
         try:
-            if os.fstat(fd).st_dev != device:
+            folder_info = os.fstat(fd)
+            if folder_info.st_dev != device:
                 continue
+            bucket = ([folder_info.st_dev, folder_info.st_ino]
+                      if depth and _is_other_bucket(folder) else None)
             with os.scandir(fd) as entries:
                 for count, entry in enumerate(entries, 1):
                     if count > MAX_SCOPE_ENTRIES_PER_DIRECTORY:
@@ -113,6 +180,7 @@ def iter_recycle_candidates(selection: Path, settings: Settings, checkpoint: Cal
                         yield {
                             "unit": str(path), "status": "ready", "operation": RECYCLE_DOWNLOAD_EXTRAS,
                             "recycle_reason": reason, "recycle_identity": identity(info),
+                            **({"_recycle_bucket_identity": bucket} if bucket is not None else {}),
                             "total_bytes": info.st_size, "totals": {"P": 0, "V": 0, "Other": 0},
                         }
         finally:

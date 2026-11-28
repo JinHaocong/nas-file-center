@@ -685,8 +685,12 @@ class FileCenterService:
         page_size: int = 50,
         status: str | None = None,
         job_type: str | None = None,
+        include_organizer_results: bool = False,
     ) -> dict:
-        return self.task_service.list_tasks(page=page, page_size=page_size, status=status, job_type=job_type)
+        return self.task_service.list_tasks(
+            page=page, page_size=page_size, status=status, job_type=job_type,
+            include_organizer_results=include_organizer_results,
+        )
 
     def get_task_detail(self, task_id: int) -> dict:
         return self.task_service.get_task_detail(task_id)

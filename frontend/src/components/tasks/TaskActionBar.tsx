@@ -12,9 +12,10 @@ import { useConsoleToast } from '../ui/ConsoleToast';
 interface Props {
   task: TaskItem | TaskDetail;
   onViewTask?: (taskId: TaskId) => void;
+  listActionPending?: boolean;
 }
 
-export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
+export const TaskActionBar: React.FC<Props> = ({ task, onViewTask, listActionPending }) => {
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
   const [activeAction, setActiveAction] = useState<TaskAction | null>(null);
@@ -86,6 +87,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
   const dispatch = (action: TaskAction, mutation: () => Promise<unknown>) => {
     // activeAction protects a committed render, and the ref closes the gap
     // before React Query updates the UI. Both guard the shared action bar.
+    if (listActionPending) return;
     if (activeAction !== null || actionInFlight.current) return;
     void dispatchTaskActionOnce(
       actionInFlight, task, action, mutation,
@@ -113,14 +115,15 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
 
   return (
     <div className="nfc-task-action-bar nfc-v2-task-actions nfc-maintenance-task-actions">
+      {task.pause_requested && <span role="status" className="nfc-v2-task-muted">等待 Worker 暂停</span>}
       {(pauseAvail.enabled || activeAction === 'pause') && (
-        <ConsoleButton disabled={!pauseAvail.enabled || isAnyPending}
+        <ConsoleButton disabled={!pauseAvail.enabled || isAnyPending || listActionPending}
           loading={activeAction === 'pause'} onClick={() => dispatch('pause', () => pauseMutation.mutateAsync())}>
           暂停
         </ConsoleButton>
       )}
       {(resumeAvail.enabled || activeAction === 'resume') && (
-        <ConsoleButton disabled={!resumeAvail.enabled || isAnyPending}
+        <ConsoleButton disabled={!resumeAvail.enabled || isAnyPending || listActionPending}
           loading={activeAction === 'resume'} onClick={() => dispatch('resume', () => resumeMutation.mutateAsync())}>
           恢复
         </ConsoleButton>
@@ -128,7 +131,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
       {(cancelAvail.enabled || activeAction === 'cancel') && (
         <ConsoleButton variant="danger"
           leadingIcon={<ConsoleIcon name="x" size={15} />}
-          disabled={!cancelAvail.enabled || isAnyPending}
+          disabled={!cancelAvail.enabled || isAnyPending || listActionPending}
           loading={activeAction === 'cancel'}
           onClick={() => { if (cancelAvail.enabled && !isAnyPending && !actionInFlight.current) setConfirmAction('cancel'); }}>
           取消
@@ -137,7 +140,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
       {(retryAvail.enabled || activeAction === 'retry') && (
         <ConsoleButton variant="primary"
           leadingIcon={<ConsoleIcon name="refresh" size={15} />}
-          disabled={!retryAvail.enabled || isAnyPending}
+          disabled={!retryAvail.enabled || isAnyPending || listActionPending}
           loading={activeAction === 'retry'}
           onClick={() => { if (retryAvail.enabled && !isAnyPending && !actionInFlight.current) setConfirmAction('retry'); }}>
           重试

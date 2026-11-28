@@ -1,20 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { tasksApi } from '../../api/tasks';
-import { useTitle } from '../../hooks/useTitle';
-import { sqliteIdText } from '../../utils/sqliteId';
-import { taskTypeLabel } from '../../utils/taskTypeLabel';
-import type { TaskId, TaskItem } from '../../types/task';
+
 import { WorkerStatusCard } from '../../components/tasks/WorkerStatusCard';
 import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { TaskDetailDrawer } from '../../components/tasks/TaskDetailDrawer';
 import { TaskDeleteButton } from '../../components/tasks/TaskDeleteButton';
 import { TaskHistoryCleanupModal } from '../../components/tasks/TaskHistoryCleanupModal';
 import { OrganizerReportInventory } from '../../components/tasks/OrganizerReportInventory';
-import { getReportedTaskSpeed } from '../../components/tasks/task_utils';
-import { fileWorkspaceReturn } from '../../components/layout/navItems';
-import { useAuth } from '../../contexts/AuthContext';
+import { TaskRowCommand, TaskRowFeedback,
+  getTaskRowActionFailure, getTaskRowCommand } from '../../components/tasks/TaskRowFeedback';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
@@ -24,7 +19,20 @@ import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsoleSelect } from '../../components/ui/ConsoleSelect';
-import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
+import { ConsoleIcon, type ConsoleIconName } from '../../components/ui/ConsoleIcon';
+
+import { tasksApi } from '../../api/tasks';
+import { useAuth } from '../../contexts/AuthContext';
+import { fileWorkspaceReturn } from '../../components/layout/navItems';
+import { getReportedTaskSpeed } from '../../components/tasks/task_utils';
+import { getTaskDeleteAvailability } from '../../components/tasks/task_cleanup';
+import { useTaskRowActions } from '../../components/tasks/useTaskRowActions';
+import { useTitle } from '../../hooks/useTitle';
+import { formatDateTime } from '../../utils/format';
+import { sqliteIdText } from '../../utils/sqliteId';
+import { taskTypeLabel } from '../../utils/taskTypeLabel';
+
+import type { TaskId, TaskItem } from '../../types/task';
 
 const STATUS_OPTIONS = [
   { label: '全部状态', value: 'all' },
@@ -52,13 +60,56 @@ const JOB_TYPE_OPTIONS = [
 
 const QUICK_STATUS_OPTIONS = [
   { label: '全部', value: 'all' },
-  { label: '执行中', value: 'running' },
-  { label: '已失败', value: 'failed' },
+  { label: '进行中', value: 'running' },
+  { label: '已完成', value: 'completed' },
+  { label: '异常', value: 'failed' },
 ] as const;
+
+const TASK_ICONS: Record<string, ConsoleIconName> = {
+  'media-analysis': 'file-search', 'media-integrity-verify': 'file-check', 'media-organizer-batch': 'layers',
+  'media-organizer-preview': 'folder-open', 'fclones-scan': 'search', 'index-root': 'database',
+  'workflow-quick-run': 'workflow', 'workflow-scheduled': 'workflow', 'cloud-copy': 'cloud',
+};
 
 /** Return focus to the queue if the detail was opened by a link or its launcher is gone. */
 function taskQueueFocusTarget() {
   return document.getElementById('nfc-task-queue');
+}
+
+/** Keep filters and maintenance accessible without competing with refresh or task search. */
+function TaskToolbarMore({ children, filtered }: { children: React.ReactNode; filtered: boolean }) {
+  const [open, setOpen] = useState(false);
+  const options = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: Event) => {
+      if (!(event.target instanceof Node) || options.current?.contains(event.target) ||
+          document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      setOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('focusin', closeOutside);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('focusin', closeOutside);
+    };
+  }, [open]);
+
+  return <div ref={options} className="nfc-task-toolbar-more" onKeyDown={event => {
+    if (event.key !== 'Escape' || !open || !event.currentTarget.contains(event.target as Node)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setOpen(false);
+    trigger.current?.focus({ preventScroll: true });
+  }}>
+    <ConsoleButton ref={trigger} size="sm" className="nfc-task-toolbar-trigger" data-filtered={filtered || undefined}
+      aria-label="任务筛选与更多操作" title="任务筛选与更多操作" aria-expanded={open} aria-controls={panelId}
+      leadingIcon={<ConsoleIcon name="ellipsis" size={17} />} onClick={() => setOpen(current => !current)} />
+    <div id={panelId} className="nfc-task-toolbar-popover" role="group" aria-label="任务筛选与更多操作"
+      hidden={!open}>{children}</div>
+  </div>;
 }
 
 /** Render the same record identity and detail trigger in the table and on mobile. */
@@ -69,14 +120,17 @@ function TaskRecordIdentity({ task, selected, onOpen }: {
 }) {
   return (
     <div className="nfc-v2-task-identity">
-      <strong>{taskTypeLabel(task.job_type)}</strong>
-      <div className="nfc-v2-task-identity-meta">
-        <button type="button" className="nfc-table-link nfc-mono nfc-v2-task-id"
-          aria-haspopup="dialog" aria-expanded={selected}
-          onClick={event => onOpen(task.id, event.currentTarget)}>#{task.id}</button>
-        {(task.error || task.error_code) && (
-          <span className="nfc-table-error nfc-v2-task-error">{task.error_code || '有错误记录'}</span>
-        )}
+      <span className="nfc-task-row-icon"><ConsoleIcon name={TASK_ICONS[task.job_type] ?? 'list-checks'} size={17} /></span>
+      <div className="nfc-task-row-name">
+        <strong>{taskTypeLabel(task.job_type)}</strong>
+        <div className="nfc-v2-task-identity-meta">
+          <button type="button" className="nfc-table-link nfc-mono nfc-v2-task-id"
+            aria-haspopup="dialog" aria-expanded={selected}
+            onClick={event => onOpen(task.id, event.currentTarget)}>#{task.id}</button>
+          {(task.error || task.error_code) && (
+            <span className="nfc-table-error nfc-v2-task-error">{task.error_code || '有错误记录'}</span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -85,11 +139,14 @@ function TaskRecordIdentity({ task, selected, onOpen }: {
 export const TasksPage: React.FC = () => {
   useTitle('任务中心');
   const { user } = useAuth();
+  const showOrganizerResult = user?.role === 'admin';
+  const { feedbackById, dispatch } = useTaskRowActions();
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [statusFilter, setStatusFilter] = useState('all');
   const [jobTypeFilter, setJobTypeFilter] = useState('all');
+  const [search, setSearch] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -176,11 +233,12 @@ export const TasksPage: React.FC = () => {
 
   const isFiltered = statusFilter !== 'all' || jobTypeFilter !== 'all';
   const items: TaskItem[] = isError ? [] : data?.items || [];
-  const latestFailure = !isFiltered && items.find(task => task.status === 'failed');
-  const noItemsTitle = isFiltered ? '没有匹配的任务' : '暂无任务记录';
-  const noItemsDescription = isFiltered
-    ? '当前筛选条件没有找到记录，请尝试切换状态或类型。'
-    : '扫描、索引或执行计划生成的任务会显示在这里。';
+  const searchTerm = search.trim().toLocaleLowerCase();
+  const matching = searchTerm ? items.filter(task => [taskTypeLabel(task.job_type), task.job_type, `#${task.id}`]
+    .some(value => value.toLocaleLowerCase().includes(searchTerm))) : items;
+  const noItemsTitle = searchTerm ? '当前页没有匹配的任务' : isFiltered ? '没有匹配的任务' : '暂无任务记录';
+  const noItemsDescription = searchTerm ? '请调整关键词或切换页码。' : isFiltered
+    ? '请尝试切换状态或类型。' : '扫描、索引或执行计划生成的任务会显示在这里。';
 
   const pagination = !isError && !isLoading && (data?.total || 0) > 0 && (
     <ConsolePagination
@@ -192,41 +250,31 @@ export const TasksPage: React.FC = () => {
     />
   );
 
+  const rows = matching.map(task => {
+    const id = sqliteIdText(task.id);
+    const selected = selectedTaskId !== null && id === selectedTaskId;
+    const feedback = id ? feedbackById[id] : undefined;
+    const rowProps = { task, feedback, onAction: (item: TaskItem, action: 'pause' | 'resume') => { void dispatch(item, action); } };
+    const hasFeedback = Boolean(getTaskRowActionFailure(task, feedback) ||
+      (showOrganizerResult && task.job_type === 'media-organizer-batch' && task.status === 'completed' && task.organizer_result));
+    const timestamp = task.finished_at ?? task.heartbeat_at ?? task.started_at ?? task.created_at;
+    const updated = formatDateTime(timestamp);
+    return {
+      task, selected, className: selected ? ' nfc-record-selected' : '',
+      updated: timestamp ? <time dateTime={timestamp} title={updated}>{updated.slice(5, 16)}</time> : '—',
+      identity: <TaskRecordIdentity task={task} selected={selected} onOpen={openTaskDetail} />,
+      status: <StatusBadge status={task.status} label={task.status === 'running' ? '进行中' : undefined} />,
+      progress: <TaskProgress progress={task.progress} status={task.status} compact
+        reportedSpeed={getReportedTaskSpeed(task)} />,
+      command: getTaskRowCommand(task, feedback) ? <TaskRowCommand {...rowProps} /> : null,
+      feedback: hasFeedback ? <TaskRowFeedback {...rowProps} showOrganizerResult={showOrganizerResult} /> : null,
+    };
+  });
+
   return (
     <div className="nfc-operations-page nfc-tasks-page nfc-page-layout-ledger nfc-v2-tasks-page nfc-record-workspace">
-      <PageHeader
-        title="任务中心"
-        actions={
-          <ActionBar compact>
-            {returnToFiles && <Link className="nfc-console-button nfc-console-button-secondary nfc-console-button-sm"
-              to={returnToFiles} state={{ restoreFileWorkspace: true }}>
-              <ConsoleIcon name="arrow-left" size={16} />返回文件空间
-            </Link>}
-            {user?.role === 'admin' && <OrganizerReportInventory />}
-            <TaskHistoryCleanupModal
-              onCleaned={() => {
-                setPage(1);
-                closeTaskDetail();
-              }}
-            />
-            <ConsoleButton
-              loading={isFetching}
-              leadingIcon={<ConsoleIcon name="refresh" size={16} />}
-              onClick={() => refetch()}
-            >刷新</ConsoleButton>
-          </ActionBar>
-        }
-      />
-
-      <WorkerStatusCard />
-
-      {latestFailure && (
-        <section className="nfc-record-attention" aria-label="本页最近失败的任务">
-          <ConsoleIcon name="info" size={18} />
-          <div><strong>本页最近失败 · #{latestFailure.id} {taskTypeLabel(latestFailure.job_type)}</strong></div>
-          <ConsoleButton size="sm" onClick={event => openTaskDetail(latestFailure.id, event.currentTarget)}>查看失败详情</ConsoleButton>
-        </section>
-      )}
+      <PageHeader title="任务中心" actions={<ConsoleButton loading={isFetching}
+        leadingIcon={<ConsoleIcon name="refresh" size={16} />} onClick={() => refetch()}>刷新</ConsoleButton>} />
 
       {isError && (
         <div className="nfc-v2-task-alert nfc-page-alert" role="alert">
@@ -243,7 +291,7 @@ export const TasksPage: React.FC = () => {
         id="nfc-task-queue"
         title="任务队列"
         action={<span className="nfc-panel-count">{isError ? '—' : data?.total ?? 0} 项</span>}
-        className="nfc-panel-flush"
+        className="nfc-panel-flush nfc-task-queue-panel"
         variant="dense"
       >
         <ActionBar className="nfc-filter-bar nfc-v2-task-filter-bar">
@@ -253,27 +301,45 @@ export const TasksPage: React.FC = () => {
                 onClick={() => handleStatusFilterChange(value)}>{label}</button>
             ))}
           </div>
-          <ConsoleSelect id="nfc-task-status-filter" label="状态" value={statusFilter}
-            onChange={handleStatusFilterChange} options={STATUS_OPTIONS} />
-          <ConsoleSelect id="nfc-task-type-filter" label="任务类型" value={jobTypeFilter}
-            onChange={handleJobTypeFilterChange} options={JOB_TYPE_OPTIONS} />
-          {isFiltered && (
-            <ConsoleButton variant="ghost" size="sm" onClick={() => {
-              setStatusFilter('all');
-              setJobTypeFilter('all');
-              setPage(1);
-            }} leadingIcon={<ConsoleIcon name="x" size={15} />}>清除筛选</ConsoleButton>
-          )}
-          <span className="nfc-v2-task-filter-hint">
-            <ConsoleIcon name="activity" size={15} /> 活动任务自动更新
-          </span>
+          <div className="nfc-task-queue-tools">
+            <div className="nfc-task-search-box" title="按名称或编号搜索当前页任务">
+              <ConsoleIcon name="search" size={15} />
+              <input type="search" aria-label="搜索当前页任务" placeholder="搜索任务"
+                value={search} onChange={event => setSearch(event.currentTarget.value)} />
+            </div>
+            <TaskToolbarMore filtered={isFiltered}>
+              <div className="nfc-task-toolbar-filters">
+                <ConsoleSelect id="nfc-task-status-filter" label="状态" value={statusFilter}
+                  onChange={handleStatusFilterChange} options={STATUS_OPTIONS} />
+                <ConsoleSelect id="nfc-task-type-filter" label="任务类型" value={jobTypeFilter}
+                  onChange={handleJobTypeFilterChange} options={JOB_TYPE_OPTIONS} />
+                {isFiltered && <ConsoleButton variant="ghost" size="sm" onClick={() => {
+                  setStatusFilter('all');
+                  setJobTypeFilter('all');
+                  setPage(1);
+                }} leadingIcon={<ConsoleIcon name="x" size={15} />}>清除筛选</ConsoleButton>}
+              </div>
+              <div className="nfc-task-toolbar-actions">
+                {returnToFiles && <Link className="nfc-console-button nfc-console-button-secondary nfc-console-button-sm"
+                  to={returnToFiles} state={{ restoreFileWorkspace: true }}>
+                  <ConsoleIcon name="arrow-left" size={16} />返回文件空间
+                </Link>}
+                {showOrganizerResult && <OrganizerReportInventory />}
+                <TaskHistoryCleanupModal onCleaned={() => { setPage(1); closeTaskDetail(); }} />
+                <details className="nfc-task-worker-details">
+                  <summary><ConsoleIcon name="activity" size={15} />调度 Worker 状态</summary>
+                  <WorkerStatusCard />
+                </details>
+              </div>
+            </TaskToolbarMore>
+          </div>
         </ActionBar>
 
         {isError ? (
           <ConsoleEmpty title="暂时无法显示任务" description="请先恢复任务服务连接，已有任务不会受到影响。" />
         ) : isLoading || isPlaceholderData ? (
           <div className="nfc-v2-task-loading" role="status">正在加载任务列表…</div>
-        ) : items.length === 0 ? (
+        ) : matching.length === 0 ? (
           <ConsoleEmpty title={noItemsTitle} description={noItemsDescription} />
         ) : (
           <ResponsiveDataView
@@ -283,52 +349,55 @@ export const TasksPage: React.FC = () => {
                   <thead><tr>
                     <th scope="col">任务</th>
                     <th scope="col">状态</th>
-                    <th scope="col">执行进度</th>
+                    <th scope="col">进度</th>
+                    <th scope="col" className="nfc-task-updated">更新时间</th>
                     <th scope="col">操作</th>
                   </tr></thead>
-                  <tbody>{items.map(task => {
-                    const selected = selectedTaskId !== null && sqliteIdText(task.id) === selectedTaskId;
-                    return (
-                      <tr key={task.id} className={selected ? 'nfc-record-selected' : undefined}>
-                        <td><TaskRecordIdentity task={task} selected={selected} onOpen={openTaskDetail} /></td>
-                        <td><StatusBadge status={task.status} /></td>
+                  <tbody>{rows.map(row => {
+                    const { task, selected } = row;
+                    return (<React.Fragment key={task.id}>
+                      <tr data-task-row={String(task.id)} className={'nfc-task-list-row' + row.className}>
+                        <td>{row.identity}</td>
+                        <td>{row.status}</td>
                         <td className="nfc-v2-task-progress-cell">
-                          <TaskProgress progress={task.progress} status={task.status} compact
-                            reportedSpeed={getReportedTaskSpeed(task)} />
+                          {row.progress}
                         </td>
+                        <td className="nfc-task-updated">{row.updated}</td>
                         <td><div className="nfc-row-actions">
-                          <ConsoleButton size="sm" variant="ghost" aria-haspopup="dialog" aria-expanded={selected}
+                          {row.command ?? <ConsoleButton size="sm" variant="secondary" aria-haspopup="dialog" aria-expanded={selected}
                             leadingIcon={<ConsoleIcon name="search" size={15} />}
-                            onClick={event => openTaskDetail(task.id, event.currentTarget)}>详情</ConsoleButton>
-                          <TaskDeleteButton task={task} size="small" type="text"
-                            onSuccess={() => handleDeleted(task.id)} />
+                            onClick={event => openTaskDetail(task.id, event.currentTarget)}>任务详情</ConsoleButton>}
+                          {getTaskDeleteAvailability(task).enabled && <TaskDeleteButton task={task} size="small" type="text" iconOnly
+                            onSuccess={() => handleDeleted(task.id)} />}
                         </div></td>
                       </tr>
-                    );
+                      {row.feedback && <tr className="nfc-task-list-feedback-row"><td colSpan={5}>{row.feedback}</td></tr>}
+                    </React.Fragment>);
                   })}</tbody>
                 </table>
               </div>
             }
             mobile={
               <div className="nfc-mobile-record-list">
-                {items.map(task => {
-                  const selected = selectedTaskId !== null && sqliteIdText(task.id) === selectedTaskId;
+                {rows.map(row => {
+                  const { task, selected } = row;
                   return (
-                    <article className={'nfc-task-mobile-card' + (selected ? ' nfc-record-selected' : '')} key={task.id}>
+                    <article className={'nfc-task-mobile-card' + row.className} data-task-row={String(task.id)} key={task.id}>
                       <div className="nfc-mobile-record-heading">
-                        <TaskRecordIdentity task={task} selected={selected} onOpen={openTaskDetail} />
-                        <StatusBadge status={task.status} />
+                        {row.identity}
+                        {row.status}
                       </div>
                       <div className="nfc-mobile-record-progress">
-                        <TaskProgress progress={task.progress} status={task.status} compact
-                          reportedSpeed={getReportedTaskSpeed(task)} />
+                        {row.progress}
                       </div>
+                      {row.feedback}
                       <div className="nfc-mobile-record-actions">
+                        {row.command}
                         <ConsoleButton size="sm" variant="ghost" aria-haspopup="dialog" aria-expanded={selected}
                           leadingIcon={<ConsoleIcon name="search" size={15} />}
                           onClick={event => openTaskDetail(task.id, event.currentTarget)}>查看详情</ConsoleButton>
-                        <TaskDeleteButton task={task} type="text"
-                          onSuccess={() => handleDeleted(task.id)} />
+                        {getTaskDeleteAvailability(task).enabled && <TaskDeleteButton task={task} size="small" type="text" iconOnly
+                          onSuccess={() => handleDeleted(task.id)} />}
                       </div>
                     </article>
                   );
@@ -337,12 +406,16 @@ export const TasksPage: React.FC = () => {
             }
           />
         )}
+        {searchTerm && !isPlaceholderData && !isLoading && !isError && (
+          <div className="nfc-task-search-count" role="status">本页匹配 {matching.length} 项</div>
+        )}
         {pagination}
       </DataPanel>
 
       <TaskDetailDrawer
         taskId={selectedTaskId}
         open={selectedTaskId !== null}
+        listActionPending={Boolean(selectedTaskId && feedbackById[selectedTaskId]?.phase === 'pending')}
         onClose={closeTaskDetail}
         onViewTask={openTaskDetail}
         returnToFiles={returnToFiles}

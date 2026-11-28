@@ -116,7 +116,7 @@ test('leaving retention via browser Back discards the outstanding cleanup confir
   let complete!: (preview: AuditRetentionPreview) => void;
   t.mock.method(auditApi, 'getRetentionPreview', () => new Promise<AuditRetentionPreview>(resolve => { complete = resolve; }));
   const { view, goBack } = await openSettings(t, '/settings#retention');
-  const apply = () => view.root.findAllByType(ConsoleButton).find(button => button.props.children === '执行审计清理')!;
+  const apply = () => view.root.findAllByType(ConsoleButton).find(button => button.props.children === '查看清理预览')!;
   let pending!: Promise<void>;
   act(() => { pending = apply().props.onClick(); });
   assert.equal(apply().props.loading, true);
@@ -142,7 +142,7 @@ test('a discarded cleanup preview cannot clear the pending state of a later requ
   const queries: Array<(preview: AuditRetentionPreview) => void> = [];
   t.mock.method(auditApi, 'getRetentionPreview', () => new Promise<AuditRetentionPreview>(resolve => { queries.push(resolve); }));
   const { view } = await openSettings(t, '/settings#retention');
-  const apply = () => view.root.findAllByType(ConsoleButton).find(button => button.props.children === '执行审计清理')!;
+  const apply = () => view.root.findAllByType(ConsoleButton).find(button => button.props.children === '查看清理预览')!;
   const auditDialog = () => view.root.findAllByType(ConsoleConfirmDialog).find(dialog => dialog.props.danger)!;
   const switchTo = (tab: string) => act(() => view.root.findByProps({ id: 'settings-tab-' + tab }).props.onClick());
   act(() => { apply().props.onClick(); });
@@ -180,9 +180,16 @@ test('database maintenance previews space and refreshes after a confirmed archiv
       policy: { automatic: false, task_event_retention_days: 30, operation_journal_retention_days: 90 },
     });
   });
-  const { view } = await openSettings(t, '/settings#retention');
+  const { view } = await openSettings(t, '/settings#database');
+  const tabs = view.root.findAllByProps({ role: 'tab' });
+  assert.deepEqual(tabs.map(tab => tab.props.id), [
+    'settings-tab-appearance', 'settings-tab-safety', 'settings-tab-retention',
+    'settings-tab-database', 'settings-tab-resources', 'settings-tab-sessions',
+  ]);
+  assert.equal(view.root.findByProps({ id: 'settings-tab-database' }).props['aria-selected'], true);
+  assert.equal(view.root.findAllByProps({ id: 'retention' }).length, 0);
   const archiveButton = () => view.root.findAllByType(ConsoleButton)
-    .find(button => button.props.children === '归档一批操作流水');
+    .find(button => button.props['aria-label'] === '归档一批操作流水');
   for (let attempt = 0; attempt < 30 && !archiveButton(); attempt++) {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); });
   }
@@ -201,6 +208,21 @@ test('database maintenance previews space and refreshes after a confirmed archiv
     'GET /api/database-maintenance',
   ]);
   assert.equal(archiveButton()?.props.disabled, true);
+});
+
+test('resource policy changes stay in the draft until saving and can be cancelled', async t => {
+  const { view } = await openSettings(t, '/settings#resources');
+  const cancel = () => view.root.findAllByType(ConsoleButton).find(button => button.props.children === '取消修改');
+  const save = () => view.root.findAllByType(ConsoleButton).find(button => button.props.children === '保存资源策略');
+  const scan = () => view.root.findAllByType('input').find(input => input.props['aria-label'] === '扫描线程上限');
+  assert.equal(scan()?.props.value, 2);
+  assert.equal(save()?.props.disabled, true);
+  act(() => scan()?.props.onChange({ target: { value: '4' } }));
+  assert.equal(scan()?.props.value, 4);
+  assert.equal(save()?.props.disabled, false);
+  act(() => cancel()?.props.onClick());
+  assert.equal(scan()?.props.value, 2);
+  assert.equal(save()?.props.disabled, true);
 });
 
 test('the enabled resource window renders its saved IANA time zone outside the common list', async t => {

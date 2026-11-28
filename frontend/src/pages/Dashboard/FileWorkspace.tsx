@@ -14,7 +14,7 @@ import { ConsoleSheet } from '../../components/ui/ConsoleSheet';
 import { MediaThumbnail, ThumbnailSwitch } from '../../components/ui/MediaThumbnail';
 import { StoragePreview } from '../../components/ui/StoragePreview';
 import { WorkflowQuickRunSheet } from '../../components/workflows/WorkflowQuickRunSheet';
-import { canQuickLook, WorkspaceEntries, workspaceEntryModified, workspaceEntryTypes } from './WorkspaceEntries';
+import { canQuickLook, WorkspaceEntries, WorkspaceEntriesLoading, workspaceEntryModified, workspaceEntryTypes } from './WorkspaceEntries';
 import { WorkspaceQuickLook } from './WorkspaceQuickLook';
 
 import { getStructuredApiError } from '../../api/errors';
@@ -184,6 +184,7 @@ export function FileWorkspace() {
   const favoritesKey = directoryHistoryKey('favorites', user?.id);
   const recentKey = directoryHistoryKey('recent', user?.id);
   const ownerId = user?.id ?? null;
+  const lastListing = useRef<{ owner: typeof ownerId; roots: string[] }>();
   const directoryKey = directory ?? null;
   const currentQuery = useQuery({
     queryKey: ['filesystem', 'workspace', ownerId, directoryKey, page, pageSize, filter],
@@ -208,10 +209,18 @@ export function FileWorkspace() {
   });
   const current = currentQuery.data?.path;
   const roots = currentQuery.data?.allowed_roots ?? [];
-  const currentBranch = current ? buildDirectoryBreadcrumb(current, roots) : null;
+  const displayedRoots = currentQuery.data?.allowed_roots ??
+    (lastListing.current?.owner === ownerId ? lastListing.current?.roots : undefined) ?? [];
+  const awaitingListing = currentQuery.isPending || currentQuery.isPlaceholderData;
+  const destination = directory ?? displayedRoots[0];
+  const pendingBranch = currentQuery.isPending && destination ? buildDirectoryBreadcrumb(destination, displayedRoots) : null;
+  const shownDirectory = current ?? (pendingBranch ? destination : undefined);
+  const showDesktopInspector = isDesktop && !inspectorClosed;
+  const currentBranch = current ? buildDirectoryBreadcrumb(current, roots) : pendingBranch;
   const currentRoot = currentBranch?.baseRoot;
   const reportedParent = currentQuery.data?.parent;
-  const parent = reportedParent && buildDirectoryBreadcrumb(reportedParent, roots) ? reportedParent : undefined;
+  const parent = reportedParent && buildDirectoryBreadcrumb(reportedParent, roots) ? reportedParent
+    : pendingBranch?.segments.length ? pendingBranch.segments.at(-2)?.path ?? pendingBranch.baseRoot : undefined;
   const entries = currentQuery.data?.items ?? [];
   const selection = entries.find(item => item.path === selectedPath);
   const quickLookEntries = showThumbnails && currentQuery.isSuccess && !currentQuery.isPlaceholderData
@@ -235,6 +244,12 @@ export function FileWorkspace() {
   const returnState = { fileWorkspaceReturn };
 
   useEffect(() => {
+    if (currentQuery.data && !currentQuery.isPlaceholderData) {
+      lastListing.current = { owner: ownerId, roots: currentQuery.data.allowed_roots };
+    }
+  }, [ownerId, currentQuery.data, currentQuery.isPlaceholderData]);
+
+  useEffect(() => {
     if (quickLook && !quickLookPath) setQuickLook(null);
   }, [quickLook, quickLookPath]);
 
@@ -248,7 +263,7 @@ export function FileWorkspace() {
   useEffect(() => {
     const breadcrumb = breadcrumbRef.current;
     if (breadcrumb) breadcrumb.scrollLeft = breadcrumb.scrollWidth;
-  }, [current, isMobile]);
+  }, [shownDirectory, isMobile]);
 
   /** Navigate only with paths provided by the backend or its directory breadcrumb. */
   function openDirectory(path: string) {
@@ -350,17 +365,17 @@ export function FileWorkspace() {
   const locations = <div className="nfc-file-workspace-locations">
     <section aria-label="允许的根目录">
       {!isMobile && <h2>存储位置</h2>}
-      {roots.map(root => <Fragment key={root}>
-        <button type="button" title={root} aria-current={current === root ? 'location' : undefined}
+      {displayedRoots.map(root => <Fragment key={root}>
+        <button type="button" title={root} aria-current={shownDirectory === root ? 'location' : undefined}
           onClick={() => openDirectory(root)}><ConsoleIcon name="hard-drive" size={16} /><span>{pathName(root)}</span></button>
-        {current && current !== root && currentRoot === (root.replace(/\/+$/, '') || '/') &&
+        {shownDirectory && shownDirectory !== root && currentRoot === (root.replace(/\/+$/, '') || '/') &&
           (isDesktop ? currentBranch?.segments.map(({ name, path }, index) => (
-            <button key={path} type="button" title={path} aria-current={path === current ? 'location' : undefined}
+            <button key={path} type="button" title={path} aria-current={path === shownDirectory ? 'location' : undefined}
               style={{ paddingInlineStart: 18 + 8 * Math.min(index, 3) }} onClick={() => openDirectory(path)}>
-              <ConsoleIcon name={path === current ? 'folder-open' : 'folder'} size={15} /><span>{name}</span>
+              <ConsoleIcon name={path === shownDirectory ? 'folder-open' : 'folder'} size={15} /><span>{name}</span>
             </button>
-          )) : <button type="button" title={current} aria-current="location" className="nfc-file-workspace-current-location"
-            onClick={() => openDirectory(current)}><ConsoleIcon name="folder" size={16} /><span>{pathName(current)}</span></button>)}
+          )) : <button type="button" title={shownDirectory} aria-current="location" className="nfc-file-workspace-current-location"
+            onClick={() => openDirectory(shownDirectory)}><ConsoleIcon name="folder" size={16} /><span>{pathName(shownDirectory)}</span></button>)}
       </Fragment>)}
     </section>
     {isDesktop ? <>
@@ -427,8 +442,11 @@ export function FileWorkspace() {
     {isMobile && <ConsoleButton size="sm" variant="ghost" onClick={() => setLocationsOpen(true)}
       leadingIcon={<ConsoleIcon name="hard-drive" size={15} />}>位置</ConsoleButton>}
     <div className="nfc-file-workspace-breadcrumb" ref={breadcrumbRef}>
-      {current && <PathBreadcrumb currentPath={current} allowedRoots={roots} onNavigate={openDirectory} />}
+      {shownDirectory && <PathBreadcrumb currentPath={shownDirectory} allowedRoots={displayedRoots} onNavigate={openDirectory} />}
     </div>
+    {awaitingListing && <span className="nfc-file-workspace-location-status" role="status">
+      <i aria-hidden="true" />{currentQuery.isPlaceholderData ? '正在读取' : '正在打开'}
+    </span>}
   </div>;
   const search = <WorkspaceSearch key={directory ?? 'root'} initialValue={filter}
     onSearch={value => changeList(value, 1, pageSize)} />;
@@ -454,7 +472,8 @@ export function FileWorkspace() {
   );
   const thumbnailControl = <ThumbnailSwitch compact />;
   const detailLabel = isDesktop && !inspectorClosed ? '收起详情' : '显示详情';
-  const detailControl = current && <button type="button" className="nfc-file-workspace-icon" aria-label={isDesktop ? detailLabel : '详情'}
+  const detailControl = (current || awaitingListing) && <button type="button" className="nfc-file-workspace-icon" aria-label={isDesktop ? detailLabel : '详情'}
+      disabled={!current}
       title={detailLabel} aria-expanded={isDesktop ? !inspectorClosed : showInspectionSheet}
       onClick={event => {
         if (isDesktop) setInspectorClosed(closed => !closed);
@@ -474,46 +493,43 @@ export function FileWorkspace() {
       </div>
     </>}
   </div>;
-  const count = currentQuery.isSuccess && <p className="nfc-file-workspace-count" role="status">
+  const count = currentQuery.data && <p className="nfc-file-workspace-count" role="status">
     <span>{filter ? '找到 ' : ''}{currentQuery.data.total.toLocaleString()} 项</span>
     {(selection || resumed) && <span className="nfc-file-workspace-selection-note">
       {selection && <span>已选 1 项</span>}
       {resumed && <span className="nfc-file-workspace-resumed">已回到上次位置</span>}
     </span>}
   </p>;
-  const pagination = currentQuery.isSuccess && currentQuery.data.total > 0 && <ConsolePagination
+  const pagination = currentQuery.data && currentQuery.data.total > 0 && <ConsolePagination
     page={page} pageSize={pageSize} pageSizes={pageSizes} total={currentQuery.data.total}
     onChange={(next, size) => changeList(filter, next, size)} />;
 
   return <section ref={workspaceArea} className="nfc-operations-page nfc-file-workspace" aria-label="文件空间">
-    {isDesktop && <header className="nfc-file-workspace-page-heading">
-      <h1 ref={headingRef} tabIndex={-1}>文件空间</h1>
-      <div className="nfc-file-workspace-heading-actions">
-        {parent && <ConsoleButton size="sm" variant="ghost" onClick={() => openDirectory(parent)}
-          leadingIcon={<ConsoleIcon name="arrow-up" size={15} />}>返回上一级</ConsoleButton>}
-        {runWorkflow}
+    <header className="nfc-file-workspace-page-heading">
+      <div>
+        <h1 ref={headingRef} tabIndex={-1}>{!isDesktop && shownDirectory ? pathName(shownDirectory) : '文件空间'}</h1>
+        {!isDesktop && count}
       </div>
-    </header>}
-    <div className="nfc-file-workspace-window">
+      <div className="nfc-file-workspace-heading-actions">
+        {isDesktop && parent && <ConsoleButton size="sm" variant="ghost" onClick={() => openDirectory(parent)}
+          leadingIcon={<ConsoleIcon name="arrow-up" size={15} />}>返回上一级</ConsoleButton>}
+        {currentQuery.isPending && (isDesktop || shownDirectory) ?
+          <ConsoleButton size="sm" variant="primary" disabled leadingIcon={<ConsoleIcon name="play" size={15} />}>
+            运行工作流
+          </ConsoleButton> : runWorkflow}
+        {isMobile && <Link className="nfc-file-workspace-quiet-link" to={'/dashboard?' + overview}>
+          <ConsoleIcon name="activity" size={16} /> 运行概览
+        </Link>}
+      </div>
+    </header>
+    <div className="nfc-file-workspace-window" data-loading={awaitingListing || undefined}>
       {toolbar}
-      <div className={'nfc-file-workspace-panes' + (current && !inspectorClosed ? ' has-inspector' : '')}>
+      <div className={'nfc-file-workspace-panes' + (showDesktopInspector ? ' has-inspector' : '')}>
         {!isMobile && <aside className="nfc-file-workspace-rail">{locations}</aside>}
         <section className="nfc-file-workspace-center" aria-label="当前目录">
-          {!isDesktop && <div className="nfc-file-workspace-title">
-            <div>
-              <h1 ref={headingRef} tabIndex={-1}>{current ? pathName(current) : '文件空间'}</h1>
-              {count}
-            </div>
-            <div className="nfc-file-workspace-heading-actions">
-              {runWorkflow}
-              {isMobile && <Link className="nfc-file-workspace-quiet-link" to={'/dashboard?' + overview}>
-                <ConsoleIcon name="activity" size={16} /> 运行概览
-              </Link>}
-            </div>
-          </div>}
           <div className="nfc-file-workspace-list-scroll" ref={scrollList} onScroll={savePosition}
-            tabIndex={isDesktop ? 0 : undefined} role="region" aria-label="文件列表">
-            {currentQuery.isPending ? <p className="nfc-file-workspace-loading" role="status">正在读取目录…</p> : currentQuery.isError ?
+            tabIndex={isDesktop ? 0 : undefined} role="region" aria-label="文件列表" aria-busy={awaitingListing || undefined}>
+            {currentQuery.isPending ? <WorkspaceEntriesLoading list={currentListView} /> : currentQuery.isError && !currentQuery.data ?
               <div className="nfc-file-workspace-error" role="alert">
                 <strong>无法读取此目录</strong><p>{getStructuredApiError(currentQuery.error).message}</p>
                 <ConsoleButton size="sm" loading={currentQuery.isFetching}
@@ -523,17 +539,33 @@ export function FileWorkspace() {
                 selectedPath={selectedPath} selectedRef={selectedEntry} pending={currentQuery.isPlaceholderData}
                 openOnClick={isMobile} quickLookEnabled={showThumbnails} onOpen={openDirectory}
                 onInspect={inspect} onSelect={selectEntry} onQuickLook={openQuickLook} /> :
-              <ConsoleEmpty title={currentQuery.data.total ? '此页已没有项目'
+              <ConsoleEmpty title={currentQuery.data?.total ? '此页已没有项目'
               : filter ? '没有找到符合条件的项目' : '这个目录里还没有项目'}
               action={filter ? <ConsoleButton onClick={() => changeList('', 1, pageSize)}>清除搜索</ConsoleButton> : undefined} />}
           </div>
-          {isDesktop ? (count || pagination) && <footer className="nfc-file-workspace-list-footer">{count}
+          {isDesktop ? <footer className="nfc-file-workspace-list-footer">
+            {count ?? (awaitingListing ? <span className="nfc-file-workspace-count">正在读取{shownDirectory ? pathName(shownDirectory) : '目录'}</span> : null)}
             {selection && quickLookEntries.includes(selection) && <span className="nfc-file-workspace-preview-hint">
               <kbd>↑</kbd> <kbd>↓</kbd> 切换选择 · 空格预览
             </span>}{pagination}</footer> : pagination}
         </section>
-        {isDesktop && inspection && !inspectorClosed && <aside className="nfc-file-workspace-inspector" aria-label="目录详情">
-          {inspection}
+        {showDesktopInspector && <aside className="nfc-file-workspace-inspector" aria-label="目录详情">
+          {inspection ?? <div className="nfc-file-workspace-detail">
+            <header className="nfc-file-workspace-inspector-bar">
+              <span>目录详情</span>
+              <button type="button" className="nfc-file-workspace-icon" aria-label="关闭目录详情" onClick={() => setInspectorClosed(true)}>
+                <ConsoleIcon name="x" size={17} />
+              </button>
+            </header>
+            <div className="nfc-file-workspace-detail-body">
+              {awaitingListing && <div className="nfc-file-workspace-placeholder-cover" aria-hidden="true" />}
+              {shownDirectory && <div className="nfc-file-workspace-detail-identity">
+                <span className="nfc-file-workspace-detail-icon"><ConsoleIcon name="folder" size={20} /></span>
+                <div><h2>{pathName(shownDirectory)}</h2><span>目录</span></div>
+              </div>}
+              {shownDirectory && <dl><div><dt>所在路径</dt><dd><CodePath value={shownDirectory} copy={false} /></dd></div></dl>}
+            </div>
+          </div>}
         </aside>}
       </div>
     </div>

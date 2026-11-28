@@ -68,8 +68,6 @@ export function buildReviewPack(rootDir, destination, expectedHeadSha) {
           'Wrong desktop inner scroll eligibility: ' + result.route);
         assert.equal(scroll.captured, expected,
           'Missing desktop scroll-bottom screenshot: ' + [width, result.route, result.theme].join(' '));
-        if (result.route === '/settings') assert.ok(scroll.scrollable && scroll.maxScroll >= 100,
-          'Settings desktop workspace lower content is not covered');
       }
       if (result.route === '/download-verification') {
         const pixels = result.detailScreenshotPixels;

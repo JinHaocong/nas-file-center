@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
+import { WorkflowRunActivityButton } from '../workflows/WorkflowRunActivityButton';
 import { currentDestination, primaryDestinations } from './navItems';
 
 interface Props {
@@ -28,5 +29,6 @@ export const MobileDock: React.FC<Props> = ({ moreOpen, onMore }) => {
         <ConsoleIcon name="menu" size={19} /><span>更多</span>
       </button>
     </div>
+    <WorkflowRunActivityButton compact />
   </nav>;
 };

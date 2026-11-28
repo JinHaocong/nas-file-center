@@ -6,7 +6,8 @@ from sqlalchemy import Integer, case, delete, func, or_, select, text
 from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from app.batch.organizer_report_cleanup import (
-    is_report_task, preview_unavailable, report_task_filter, request_report_cleanup,
+    RESULT as ORGANIZER_RESULT_EVENT, archived_result, is_report_task, preview_unavailable,
+    report_reclaimed, report_task_filter, request_report_cleanup,
 )
 from app.config import Settings
 from app.exceptions import StateConflictError
@@ -81,6 +82,34 @@ def _organizer_context(job: WorkJob, data: dict) -> dict:
     }
 
 
+def _organizer_page_results(session: Session, jobs: list[WorkJob]) -> dict[int, dict]:
+    """Collect result counts for this page without opening individual report files."""
+    outcomes = ("success", "conflict", "skipped", "failed")
+    batches = {job.id: job for job in jobs if job.kind == _ORGANIZER_BATCH
+               and job.status == JobState.COMPLETED.value and is_report_task(job)}
+    results = {}
+    for job_id, job in batches.items():
+        summary = archived_result(job)
+        if isinstance(summary, dict) and all(type(summary.get(f"{key}_count")) is int for key in outcomes):
+            results[job_id] = {f"{key}_count": summary[f"{key}_count"] for key in outcomes}
+            results[job_id]["conflicts_available"] = False
+
+    live_ids = batches.keys() - results.keys()
+    if live_ids:
+        contexts = case((func.json_valid(TaskEvent.context_json), TaskEvent.context_json), else_="{}")
+        outcome = func.json_extract(contexts, "$.status")
+        for job_id, state, count in session.execute(
+            select(TaskEvent.job_id, outcome, func.count()).where(
+                TaskEvent.job_id.in_(live_ids), TaskEvent.event_type == ORGANIZER_RESULT_EVENT, outcome.in_(outcomes),
+            ).group_by(TaskEvent.job_id, outcome)
+        ):
+            summary = results.setdefault(job_id, dict.fromkeys((f"{key}_count" for key in outcomes), 0))
+            summary[f"{state}_count"] = count
+        for job_id in live_ids & results.keys():
+            results[job_id]["conflicts_available"] = bool(results[job_id]["conflict_count"]) and not report_reclaimed(batches[job_id])
+    return results
+
+
 def _preserved_organizer_history():
     """Retain historical approvals and preview evidence used by a saved batch report."""
     batch = aliased(WorkJob)
@@ -143,6 +172,7 @@ def format_task(job: WorkJob) -> dict:
         "id": _public_id(job),
         "job_type": job.kind,
         "status": job.status,
+        "pause_requested": job.status == JobState.RUNNING.value and job.pause_requested_at is not None,
         "capabilities": caps,
         "progress": {
             "current": curr,
@@ -201,12 +231,15 @@ class TaskService:
         page_size: int = 50,
         status: str | None = None,
         job_type: str | None = None,
+        include_organizer_results: bool = False,
     ) -> dict:
         page = max(1, int(page))
         page_size = min(500, max(1, int(page_size)))
         offset = (page - 1) * page_size
 
         with self.SessionLocal() as session:
+            if include_organizer_results:
+                session.execute(text("BEGIN"))
             stmt = select(WorkJob)
             count_stmt = select(func.count(WorkJob.id))
 
@@ -224,9 +257,13 @@ class TaskService:
 
             total = session.scalar(count_stmt) or 0
             rows = list(session.scalars(stmt.order_by(WorkJob.id.desc()).limit(page_size).offset(offset)))
+            organizer_results = _organizer_page_results(session, rows) if include_organizer_results else {}
 
             return {
-                "items": [format_task(r) for r in rows],
+                "items": [
+                    {**format_task(row), "organizer_result": organizer_results[row.id]}
+                    if row.id in organizer_results else format_task(row) for row in rows
+                ],
                 "page": page,
                 "page_size": page_size,
                 "total": total,
@@ -289,6 +326,8 @@ class TaskService:
                 return format_task(job)
 
             if job.status == JobState.RUNNING.value:
+                if job.pause_requested_at is not None:
+                    return format_task(job)
                 job.pause_requested_at = now
                 log_task_event(
                     session,

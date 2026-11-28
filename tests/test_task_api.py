@@ -198,16 +198,23 @@ def test_task_pause_and_resume_api(test_setup):
     # 1. Pause queued job -> immediately paused
     res_pause_q = client.post(f"/api/tasks/{q_id}/pause")
     assert res_pause_q.status_code == 200
+    assert res_pause_q.json()["pause_requested"] is False
     with SessionLocal() as session:
         assert session.get(WorkJob, q_id).status == JobState.PAUSED.value
 
     # 2. Pause running job -> sets pause_requested_at
     res_pause_r = client.post(f"/api/tasks/{r_id}/pause")
     assert res_pause_r.status_code == 200
+    assert res_pause_r.json()["pause_requested"] is True
+    assert client.get(f"/api/tasks/{r_id}").json()["pause_requested"] is True
+    rows = client.get("/api/tasks?status=running").json()["items"]
+    assert next(row for row in rows if row["id"] == r_id)["pause_requested"] is True
+    assert client.post(f"/api/tasks/{r_id}/pause").json()["pause_requested"] is True
     with SessionLocal() as session:
         j = session.get(WorkJob, r_id)
         assert j.status == JobState.RUNNING.value
         assert j.pause_requested_at is not None
+        assert len(list(session.scalars(select(TaskEvent).where(TaskEvent.job_id == r_id)))) == 1
 
     # 3. Pause terminal job -> 409 Conflict
     res_pause_c = client.post(f"/api/tasks/{c_id}/pause")
@@ -216,6 +223,7 @@ def test_task_pause_and_resume_api(test_setup):
     # 4. Resume paused job -> moves back to queued
     res_resume = client.post(f"/api/tasks/{q_id}/resume")
     assert res_resume.status_code == 200
+    assert res_resume.json()["pause_requested"] is False
     with SessionLocal() as session:
         j = session.get(WorkJob, q_id)
         assert j.status == JobState.QUEUED.value
@@ -224,6 +232,47 @@ def test_task_pause_and_resume_api(test_setup):
     # 5. Resume non-paused job -> 409 Conflict
     res_resume_invalid = client.post(f"/api/tasks/{r_id}/resume")
     assert res_resume_invalid.status_code == 409
+
+
+def test_task_list_reads_completed_organizer_result_counts_only_for_admins(test_setup):
+    client = test_setup["client"]
+    settings = test_setup["settings"]
+    exact_id = 9007199254740993
+    organizer_state = json.dumps({"organizer_flow": "recursive-batch-v1", "selection": "/fixture/trips"})
+    archived = {"success_count": 12, "conflict_count": 0, "skipped_count": 1, "failed_count": 0}
+    with test_setup["SessionLocal"]() as session:
+        session.add_all([
+            WorkJob(id=exact_id, kind="media-organizer-batch", status="completed", state_json=organizer_state),
+            WorkJob(id=exact_id + 1, kind="media-organizer-batch", status="completed", state_json=organizer_state,
+                    checkpoint_json=json.dumps({"organizer_archived_result": archived})),
+            WorkJob(id=exact_id + 2, kind="media-organizer-batch", status="running", state_json=organizer_state),
+            WorkJob(id=exact_id + 3, kind="media-organizer-batch", status="completed"),
+        ])
+        session.flush()
+        session.add_all([
+            TaskEvent(job_id=job_id, event_type="media_organizer_unit_result", message="result",
+                      context_json=json.dumps({"status": status}))
+            for job_id, status in ((exact_id, "success"), (exact_id, "conflict"),
+                                   (exact_id, "failed"), (exact_id + 2, "conflict"), (exact_id + 3, "conflict"))
+        ])
+        member = User(username="task-member", password_hash="unused", role="member", is_active=True)
+        session.add(member)
+        session.flush()
+        _, member_token = create_session(session, user_id=member.id, max_age_seconds=86400)
+        session.commit()
+
+    page = client.get("/api/tasks?page=2&page_size=2").json()
+    rows = {row["id"]: row for row in page["items"]}
+    assert rows[str(exact_id)]["organizer_result"] == {
+        "success_count": 1, "conflict_count": 1, "skipped_count": 0, "failed_count": 1,
+        "conflicts_available": True,
+    }
+    assert rows[str(exact_id + 1)]["organizer_result"] == {**archived, "conflicts_available": False}
+    assert all("organizer_result" not in row for row in client.get("/api/tasks?page_size=2").json()["items"])
+
+    client.cookies.set(settings.session_cookie_name, member_token)
+    members_view = client.get("/api/tasks?page=2&page_size=2").json()["items"]
+    assert len(members_view) == 2 and all("organizer_result" not in row for row in members_view)
 
 
 def test_task_cancel_api(test_setup):
