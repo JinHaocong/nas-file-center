@@ -11,12 +11,13 @@ interface Props {
   className?: string;
   titleAside?: React.ReactNode;
   dismissDisabled?: boolean;
+  returnFocusFallback?: () => HTMLElement | null;
 }
 
 /** Right-aligned Radix sheet with controlled close and accessible focus behavior. */
 export const ConsoleSheet: React.FC<Props> = ({
   open, onClose, title, description, children, className = '',
-  titleAside, dismissDisabled = false,
+  titleAside, dismissDisabled = false, returnFocusFallback,
 }) => {
   // Controlled Sheets have no Dialog.Trigger, so remember the active launcher
   // before the portal moves keyboard focus into the inspector.
@@ -42,10 +43,15 @@ export const ConsoleSheet: React.FC<Props> = ({
             // Lists can refresh or remove the opener; never focus detached or
             // disabled elements. Fall back to Radix's normal close semantics.
             if (target?.isConnected && !target.matches(':disabled') &&
-                !target.closest('[aria-disabled="true"], [inert], [hidden]')) {
+                !target.closest('[aria-disabled="true"], [inert], [hidden]') && target.getClientRects().length) {
               event.preventDefault();
               target.focus({ preventScroll: true });
+              return;
             }
+            const fallback = returnFocusFallback?.();
+            if (!fallback?.isConnected) return;
+            event.preventDefault();
+            fallback.focus({ preventScroll: true });
           }}
         >
           <header className="nfc-v2-sheet-header">

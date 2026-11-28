@@ -353,10 +353,24 @@
   background: transparent;
 }
 .nfc-task-detail-drawer .nfc-v2-task-inspector .nfc-overlay-section-header h3 { margin: 0; }
+.nfc-task-detail-drawer .nfc-v2-task-overview > .nfc-overlay-section-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.nfc-v2-task-run-duration {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.nfc-v2-task-run-duration strong { color: var(--v2-text); font-size: 12px; font-weight: 650; }
+.nfc-task-detail-drawer .nfc-v2-task-overview .nfc-task-progress-meta { font-variant-numeric: tabular-nums; }
 .nfc-task-detail-drawer .nfc-v2-task-inspector .nfc-v2-task-facts {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   padding-inline: 0;
 }
+.nfc-v2-task-paths dd .nfc-code-path { max-width: 100%; }
 .nfc-task-detail-drawer :is(.nfc-v2-task-overview, .nfc-v2-task-commands) > :not(.nfc-overlay-section-header) {
   padding-inline: 0;
 }

@@ -407,12 +407,12 @@ try {
             viewportHeight: window.innerHeight,
             hasShell: Boolean(shell),
             busy: Boolean(main?.querySelector('.nfc-session-loading')),
-            mobileHeader: header && identity && commandCluster && left && parentCrumb ? {
+            mobileHeader: header && identity && commandCluster && left ? {
               identityText: identity.textContent?.trim() || '',
               identityHeight: identity.getBoundingClientRect().height,
               identityLineHeight: parseFloat(identityStyle.lineHeight),
               identityWrap: identityStyle.whiteSpace,
-              parentCrumbDisplay: getComputedStyle(parentCrumb).display,
+              parentCrumbDisplay: parentCrumb ? getComputedStyle(parentCrumb).display : 'none',
               commandsLeft: commandCluster.getBoundingClientRect().left,
               commandsRight: commandCluster.getBoundingClientRect().right,
               leftRight: left.getBoundingClientRect().right,
@@ -1471,8 +1471,9 @@ try {
           await directory.waitFor({ state: 'hidden' });
           await tab.waitForFunction(() => document.activeElement === document.querySelector('.nfc-header-nav-toggle'));
           if ((width === 390 || width === 1440) && themeLabel === 'light-dark') {
-            const shortcuts = tab.getByRole('navigation', { name: width === 390 ? '移动端快捷导航' : '常用页面' });
-            await shortcuts.getByRole('link', { name: '整理', exact: true }).click();
+            const mobile = width === 390;
+            const shortcuts = tab.getByRole('navigation', { name: mobile ? '移动端快捷导航' : '主导航', exact: true });
+            await shortcuts.getByRole('link', { name: mobile ? '整理' : '智能媒体整理', exact: true }).click();
             await tab.getByRole('heading', { name: '智能媒体整理', exact: true }).waitFor();
             await opener.click();
             await directory.getByRole('link', { name: '批量处理', exact: true }).click();
@@ -1482,13 +1483,19 @@ try {
           }
         }
         const headerCollision = await tab.evaluate(() => {
-          const header = document.querySelector('.nfc-v2-header:not(.has-file-toolbar)');
-          const shortcuts = header?.querySelector('.nfc-studio-shortcuts');
-          const commands = header?.querySelector('.nfc-header-command-cluster');
-          if (!shortcuts || !commands || !shortcuts.getClientRects().length) return false;
-          return shortcuts.getBoundingClientRect().right > commands.getBoundingClientRect().left + 1;
+          const bounds = Array.from(document.querySelectorAll(
+            '.nfc-v2-header > :is(.nfc-v2-header-left, .nfc-header-file-toolbar, .nfc-header-command-cluster)',
+          )).map(node => node.getBoundingClientRect()).filter(rect => rect.width > 0);
+          return bounds.slice(1).some((rect, index) => bounds[index].right > rect.left + 1);
         });
-        if (headerCollision) problems.push('Header shortcut bar overlaps system actions');
+        if (headerCollision) problems.push('Header location, tools or system actions overlap');
+        if (width >= 1200 && !item.public) {
+          const rail = tab.getByRole('navigation', { name: '主导航', exact: true });
+          if (await rail.count() !== 1 || !await rail.isVisible() ||
+              await rail.locator('[aria-current="page"]').count() !== 1) {
+            problems.push('The desktop navigation must expose one active destination');
+          }
+        }
         report.push({ route: item.path, width, theme: themeLabel, ...audit, problems });
         if (problems.length) failures.push({ route: item.path, theme: themeLabel, problems });
       } catch (err) {

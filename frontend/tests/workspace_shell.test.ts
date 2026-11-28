@@ -1,24 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { navLabel, workspaceNavigationGroup, workspaceViewKey } from '../src/components/layout/navItems';
+import { consoleNavGroups, consoleNavigation, currentDestination, navLabel, workspaceViewKey } from '../src/components/layout/navItems';
 
 test('cloud files has its own destination beside local files', () => {
   assert.equal(navLabel('/cloud-files'), '云端文件');
-  assert.deepEqual(workspaceNavigationGroup('/cloud-files')?.items.slice(0, 2).map(item => item.path),
+  assert.deepEqual(consoleNavGroups[0].items.slice(0, 2).map(item => item.path),
     ['/dashboard', '/cloud-files']);
 });
 
-test('directory browsing and reopened organizer jobs use the page’s own directory rail', () => {
-  assert.equal(workspaceNavigationGroup('/dashboard'), undefined);
-  assert.equal(workspaceNavigationGroup('/batch', '?operation=media-organize'), undefined);
-  assert.equal(workspaceNavigationGroup('/batch', '?batch=123'), undefined);
+test('the desktop navigation inventory gives each destination a single entry', () => {
+  assert.equal(new Set(consoleNavigation.map(item => item.path)).size, consoleNavigation.length);
+  assert.equal(currentDestination('/dashboard', '?directory=/data'), '/dashboard');
+  assert.equal(currentDestination('/batch', '?operation=media-organize'), '/batch?operation=media-organize');
+  assert.equal(currentDestination('/batch', '?batch=123'), '/batch?operation=media-organize');
 });
 
-test('tool details remain under their navigation group with their parent destination', () => {
-  assert.equal(workspaceNavigationGroup('/scans/17/dedupe')?.label, '查找与核对');
-  assert.equal(workspaceNavigationGroup('/workflows/8')?.label, '任务与设置');
-  assert.equal(workspaceNavigationGroup('/batch')?.label, '整理与恢复');
+test('tool details select their parent destination in the navigation rail', () => {
+  assert.equal(currentDestination('/scans/17/dedupe', ''), '/scans');
+  assert.equal(currentDestination('/workflows/8', ''), '/workflows');
+  assert.equal(currentDestination('/batch', ''), '/batch');
 });
 
 test('scroll history distinguishes directory changes but not inspecting another item', () => {

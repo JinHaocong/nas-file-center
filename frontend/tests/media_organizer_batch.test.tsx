@@ -106,7 +106,7 @@ test('mobile media organizer opens a controlled sheet without inserting rows or 
   assert.equal(view.root.findByType(ConsoleSheet).props.open, true);
   act(() => view.update(render(0)));
   act(() => view.root.findByType(ConsoleSheet).props.onClose());
-  assert.equal(view.root.findAllByType(ConsoleSheet).length, 0);
+  assert.equal(view.root.findByType(ConsoleSheet).props.open, false);
   act(() => view.update(render(4)));
   act(() => view.root.findByProps({ title: allUnits[4].unit }).props.onClick());
   assert.equal(view.root.findByType(ConsoleSheet).props.open, true);
@@ -132,6 +132,34 @@ test('an archive promotion identifies whole child directories in its preview', t
   const rendered = JSON.stringify(view.toJSON());
   assert.match(rendered, /整体上提 2 个子目录/);
   assert.doesNotMatch(rendered, /0 个文件/);
+});
+
+test('the selected directory shows reported path changes and full bucket destinations', t => {
+  const destination = `${readyUnit.unit}/P [3 60B]`;
+  const moves = ['cover', 'beach', 'forest', 'park', 'already'].map((name, index) => ({
+    source: `${readyUnit.unit}/incoming/${name}.jpg`,
+    target: index === 4 ? `${readyUnit.unit}/incoming/${name}.jpg` : `${destination}/00${index + 1}.jpg`,
+    kind: 'P' as const, bytes: 20,
+  }));
+  const unit = { ...readyUnit, status: 'ready' as const, sample_moves: [moves[4], ...moves.slice(0, 4)],
+    groups: [{ name: 'P [3 60B]', destination, count: 3, bytes: 60 }] };
+  let view!: ReactTestRenderer;
+  act(() => {
+    view = TestRenderer.create(<DisplayPreferencesProvider>
+      <MediaOrganizerPreviewReport preview={{ ...preview, units: [unit] }} selected={unit}
+        onSelect={() => {}} onDetails={() => {}} action={null} footer={null}>{null}</MediaOrganizerPreviewReport>
+    </DisplayPreferencesProvider>);
+  });
+  t.after(() => act(() => view.unmount()));
+  const paths = view.root.findAllByType('code').map(node => node.props.title);
+  for (const move of moves.slice(0, 3)) {
+    assert.ok(paths.includes(move.source));
+    assert.ok(paths.includes(move.target));
+  }
+  assert.ok(paths.includes(destination));
+  assert.ok(!paths.includes(moves[3].source));
+  assert.ok(!paths.includes(moves[4].source));
+  assert.match(JSON.stringify(view.toJSON()), /查看完整映射/);
 });
 
 /** Render a real route with a fresh query client. */
@@ -160,7 +188,8 @@ test('one selected directory previews automatically and repeated confirmation st
       return Response.json({ job_id: previewId, status: 'queued' });
     }
     if (url.includes('/batches/')) return Response.json(report);
-    return Response.json(preview);
+    return Response.json({ ...preview, summary: { ...preview.summary,
+      ready_count: 2, recycle_count: 1, needs_assignment_count: 1 } });
   });
   const { view, dispose } = await openBatch('/batch?operation=media-organize');
   t.after(dispose);
@@ -175,11 +204,19 @@ test('one selected directory previews automatically and repeated confirmation st
   await waitForRenderedText(view, '目标路径已存在');
   assert.match(JSON.stringify(view.toJSON()), /blocked\/001.jpg/);
   const confirm = view.root.findAllByType('button').find(button =>
-    button.findAllByType('span').some(span => span.children.join('') === '确认整理全部'));
+    button.findAllByType('span').some(span => span.children.join('') === '确认整理与回收'));
   assert.ok(confirm && !confirm.props.disabled, 'a conflicting neighbor must not block ready work');
+  act(() => confirm.props.onClick());
+  assert.equal(requests.length, 1, 'opening the confirmation must not submit changes');
+  const dialog = view.root.findByType(ConsoleConfirmDialog);
+  assert.equal(dialog.props.open, true);
+  const confirmationText = JSON.stringify(TestRenderer.create(dialog.props.description).toJSON());
+  for (const expected of [selection, '待整理目录', '冲突目录', '待确认归属', '附带文件回收']) {
+    assert.ok(confirmationText.includes(expected), `confirmation must include ${expected}`);
+  }
   await act(async () => {
-    confirm.props.onClick();
-    confirm.props.onClick();
+    dialog.props.onConfirm();
+    dialog.props.onConfirm();
     await settle();
   });
   assert.deepEqual(requests.slice(1), [{
@@ -188,6 +225,7 @@ test('one selected directory previews automatically and repeated confirmation st
   await act(async () => {
     finishBatch(Response.json({ job_id: batchId, status: 'queued' }));
   });
+  assert.equal(dialog.props.open, false);
   await waitForRenderedText(view, '整理结果');
   await waitForRenderedText(view, '目标路径已存在');
   assert.doesNotMatch(JSON.stringify(view.toJSON()), /EXECUTE_MEDIA_ORGANIZER|RECOVER_MEDIA_ORGANIZER|维护窗口/);

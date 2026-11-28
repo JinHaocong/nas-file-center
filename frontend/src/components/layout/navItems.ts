@@ -54,9 +54,6 @@ export const primaryDestinations: ConsoleNavItem[] = [
   { path: '/tasks', label: '记录', icon: 'clock' },
 ];
 
-/** Give the cloud workspace a desktop shortcut without crowding the phone dock. */
-export const desktopDestinations = [primaryDestinations[0], cloudFilesDestination, ...primaryDestinations.slice(1)];
-
 /** A reopened preview or batch belongs to media organization as well. */
 export function currentDestination(pathname: string, search: string): string {
   const root = '/' + pathname.split('/')[1];
@@ -74,13 +71,6 @@ export function currentDestination(pathname: string, search: string): string {
 export function navLabel(pathname: string, search = ''): string {
   const destination = currentDestination(pathname, search);
   return consoleNavigation.find(item => item.path === destination)?.label ?? '文件空间';
-}
-
-/** Document workspaces own their location rail; tool routes use their navigation group. */
-export function workspaceNavigationGroup(pathname: string, search = ''): ConsoleNavGroup | undefined {
-  const destination = currentDestination(pathname, search);
-  if (destination === '/dashboard' || destination === '/batch?operation=media-organize') return undefined;
-  return consoleNavGroups.find(group => group.items.some(item => item.path === destination));
 }
 
 /** Folder history has its own scroll position; selection and filter changes keep the current view. */

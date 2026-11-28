@@ -1,5 +1,6 @@
 import dayjs from 'dayjs';
 import {
+  TaskItem,
   TaskStatus,
   WorkerHealthStatus,
   TaskLogLevel,
@@ -71,6 +72,12 @@ export function computeProgressPercentage(
 
 export function isProgressIndeterminate(total: number, percent?: number | null): boolean {
   return total <= 0 || percent === null || percent === undefined;
+}
+
+/** Read the throughput reported by the Worker for an active legacy rclone copy. */
+export function getReportedTaskSpeed(task: TaskItem): string | null {
+  if (task.job_type !== 'cloud-copy' || task.status !== 'running') return null;
+  return /^rclone 正在复制，速度 (\d+(?:\.\d+)? MiB\/s)$/.exec(task.progress?.message ?? '')?.[1] ?? null;
 }
 
 export interface TaskEtaResult {

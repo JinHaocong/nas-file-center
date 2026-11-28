@@ -28,12 +28,14 @@ describe('v0.4.0 C2B operations surfaces contract', () => {
 
   test('Task Center preserves polling, cleanup, detail and delete semantics', () => {
     const source = read('src/pages/Tasks/index.tsx');
+    const drawer = read('src/components/tasks/TaskDetailDrawer.tsx');
     assert.match(source, /return hasActive \? 3000 : false/);
     assert.match(source, /TaskHistoryCleanupModal/);
     assert.match(source, /TaskDeleteButton/);
     assert.match(source, /TaskDetailDrawer/);
     assert.match(source, /WorkerStatusCard/);
-    assert.match(source, /setInterval\(\(\) =>/);
+    assert.match(drawer, /enabled: Boolean\(taskId && open\)/);
+    assert.match(drawer, /if \(!live\) return;[\s\S]*setInterval\(\(\) =>/);
   });
 
   test('Plans list uses responsive operational data view without legacy Card shell', () => {

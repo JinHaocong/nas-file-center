@@ -25,13 +25,16 @@ const PAGE_SIZE = 100;
 
 export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   open, onCancel, onConfirm, multiple = false, initialPath, selectedValues,
-  returnFocusTo, disabled = false,
+  returnFocusTo, disabled = false, inline,
 }) => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
   const { isMobile } = useResponsive();
-  const [currentPath, setCurrentPath] = useState('');
+  const rootPath = inline?.rootPath;
+  const onBusyChange = inline?.onBusyChange;
+  const [currentPath, setCurrentPath] = useState(() => rootPath && initialPath &&
+    isWithinDirectoryRoots(initialPath, [rootPath]) ? initialPath : '');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
@@ -69,27 +72,31 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     setIsConfirming(false);
     confirmingRef.current = false;
     pendingLocationFocus.current = null;
+    return () => { selectionSessionRef.current += 1; };
   }, [open, disabled, initialPath, selectedValues, multiple]);
 
+  const requestedPath = rootPath && !isWithinDirectoryRoots(currentPath, [rootPath]) ? rootPath : currentPath;
   const { data: dirData, isLoading: isDirLoading, isFetching: isDirFetching,
     isError: isDirError, error: dirError, refetch: refetchDir,
   } = useQuery({
-    queryKey: ['filesystem', 'list', currentPath, page, PAGE_SIZE, searchQuery, user?.id ?? null],
+    queryKey: ['filesystem', 'list', requestedPath || '', page, PAGE_SIZE, searchQuery, user?.id ?? null],
     queryFn: () => filesystemApi.listDirectory(
-      currentPath || undefined, true, page, PAGE_SIZE, searchQuery || undefined,
+      requestedPath || undefined, true, page, PAGE_SIZE, searchQuery || undefined,
     ),
     enabled: open,
     staleTime: 5000,
     placeholderData: (previous, previousQuery) => {
       const key = previousQuery?.queryKey;
       // Preserve the list and paginator only when loading another page in the same directory.
-      return key?.[2] === currentPath && key[5] === searchQuery && key[6] === (user?.id ?? null)
+      return key?.[2] === (requestedPath || '') && key[5] === searchQuery && key[6] === (user?.id ?? null)
         ? previous : undefined;
     },
   });
   useEffect(() => {
-    if (open && dirData?.path && !currentPath) setCurrentPath(dirData.path);
-  }, [open, dirData?.path, currentPath]);
+    if (open && dirData?.path && !currentPath && (!rootPath || isWithinDirectoryRoots(dirData.path, [rootPath]))) {
+      setCurrentPath(dirData.path);
+    }
+  }, [open, dirData?.path, currentPath, rootPath]);
 
   const { data: favData, isError: isFavError, refetch: refetchFav } = useQuery({
     queryKey: directoryHistoryKey('favorites', user?.id),
@@ -131,7 +138,16 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   const effectiveCurrentPath =
     !isDirError && !isDirFetching && dirData &&
     (!currentPath || resolvedPath === currentPath) ? resolvedPath : '';
-  const allowedRoots = dirData?.allowed_roots || [];
+  const serverRoots = dirData?.allowed_roots || [];
+  const allowedRoots = rootPath
+    ? [...new Set(serverRoots.flatMap(root => isWithinDirectoryRoots(rootPath, [root]) ? [rootPath]
+      : isWithinDirectoryRoots(root, [rootPath]) ? [root] : []))]
+    : serverRoots;
+  const insideScope = (path: string) => !rootPath || isWithinDirectoryRoots(path, [rootPath]);
+  const directoryItems = dirData?.items?.filter(item => insideScope(item.path));
+  const favorites = favData?.items?.filter(item => insideScope(item.path));
+  const recents = recentData?.items?.filter(item => insideScope(item.path));
+  const parentAllowed = !!dirData?.parent && insideScope(dirData.parent);
   const isCurrentAllowed = isWithinDirectoryRoots(effectiveCurrentPath, allowedRoots);
   const isCurrentFavorite = useMemo(() =>
     favData?.items?.some(item => item.path === effectiveCurrentPath),
@@ -157,7 +173,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
 
   /** Return keyboard focus to the current directory context after the next folder loads. */
   const handleNavigate = (path: string) => {
-    if (disabledRef.current || confirmingRef.current) return;
+    if (disabledRef.current || confirmingRef.current || !insideScope(path)) return;
     if (path !== currentPath) pendingLocationFocus.current = { path, opener: document.activeElement };
     setCurrentPath(path);
     setSearchQuery('');
@@ -209,6 +225,276 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   const busy = isConfirming || addFavMutation.isPending || delFavMutation.isPending;
   const hasSelection = selectedPaths.length > 0 || isCurrentAllowed;
 
+  /** Use the same guarded deletion in the modal and inline picker. */
+  function confirmFavoriteRemoval() {
+    if (confirmFavoriteId !== null && !delFavMutation.isPending) delFavMutation.mutate(confirmFavoriteId);
+  }
+
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+  }, [busy, onBusyChange]);
+
+  const content = (
+    <>
+      <div className="nfc-directory-picker-body">
+        <div className="nfc-directory-browser-toolbar">
+          <div ref={locationRow} tabIndex={-1} role="group" aria-label="当前目录位置" className="nfc-directory-browser-row">
+            <PathBreadcrumb currentPath={effectiveCurrentPath || requestedPath}
+              allowedRoots={allowedRoots} onNavigate={handleNavigate} />
+            <div className="nfc-v2-directory-toolbar-actions">
+              <ConsoleButton size="sm" disabled={busy || !parentAllowed}
+                leadingIcon={<ConsoleIcon name="arrow-up" size={15} />}
+                aria-label="返回上一级"
+                onClick={() => dirData?.parent && handleNavigate(dirData.parent)}>
+                上一级
+              </ConsoleButton>
+              <ConsoleButton size="sm" disabled={busy} loading={isDirFetching}
+                aria-label="刷新目录" onClick={() => { void refetchDir(); }}
+                leadingIcon={<ConsoleIcon name="refresh" size={15} />}>刷新</ConsoleButton>
+              <ConsoleButton size="sm" disabled={busy || !isCurrentAllowed}
+                aria-label="收藏当前目录"
+                leadingIcon={<ConsoleIcon name="star" size={15} />}
+                onClick={() => setIsAddingFavorite(previous => !previous)}>
+                {isCurrentFavorite ? '已收藏' : '收藏'}
+              </ConsoleButton>
+              <ConsoleButton size="sm" disabled={busy || !isCurrentAllowed}
+                leadingIcon={<ConsoleIcon name="plus" size={15} />}
+                onClick={handleSelectCurrent}>选择当前目录</ConsoleButton>
+            </div>
+          </div>
+          {isAddingFavorite && isCurrentAllowed && (
+            <div className="nfc-directory-favorite-editor">
+              <input type="text" aria-label="收藏别名" value={favoriteLabel}
+                placeholder="收藏别名（可选）"
+                disabled={busy}
+                onChange={event => setFavoriteLabel(event.target.value)} />
+              <ConsoleButton size="sm" variant="primary" loading={addFavMutation.isPending}
+                disabled={busy || !!isCurrentFavorite}
+                onClick={() => addFavMutation.mutate({
+                  path: effectiveCurrentPath, label: favoriteLabel,
+                })}>保存收藏</ConsoleButton>
+              <ConsoleButton size="sm" disabled={busy}
+                onClick={() => setIsAddingFavorite(false)}>取消</ConsoleButton>
+            </div>
+          )}
+        </div>
+
+        <div className="nfc-v2-directory-tabs" role="tablist" aria-label="目录来源">
+          {([
+            ['browser', '目录浏览', 'folder'],
+            ['favorites', '收藏目录 (' + (favorites?.length || 0) + ')', 'star'],
+            ['recent', '最近使用 (' + (recents?.length || 0) + ')', 'history'],
+          ] as const).map(([tab, label, icon]) => (
+            <button type="button" role="tab" key={tab} id={'nfc-directory-tab-' + tab}
+              ref={node => { tabRefs.current[tab] = node; }}
+              aria-selected={activeTab === tab} aria-controls="nfc-directory-active-panel"
+              tabIndex={activeTab === tab ? 0 : -1}
+              disabled={busy} className={activeTab === tab ? 'is-active' : ''}
+              onClick={() => setActiveTab(tab)}
+              onKeyDown={event => {
+                if (busy) return;
+                const next = nextDirectoryTab(activeTab, event.key);
+                if (next === null) return;
+                event.preventDefault();
+                setActiveTab(next);
+                tabRefs.current[next]?.focus();
+              }}>
+              <ConsoleIcon name={icon} size={15} />{label}
+            </button>
+          ))}
+        </div>
+        <div role="tabpanel" id="nfc-directory-active-panel"
+          aria-labelledby={'nfc-directory-tab-' + activeTab}
+          tabIndex={0} className="nfc-v2-directory-panel">
+          {activeTab === 'browser' && (
+            <>
+              <div className="nfc-directory-search-row">
+                <ConsoleIcon name="search" size={17} />
+                <input type="search" aria-label="搜索子目录"
+                  placeholder="筛选当前目录的子目录"
+                  value={searchQuery} disabled={busy}
+                  onChange={event => { setSearchQuery(event.target.value); setPage(1); }} />
+              </div>
+              {isDirError ? (
+                <div className="nfc-v2-directory-error" role="alert">
+                  无法读取目录：{dirError instanceof Error ? dirError.message : '请检查目录访问权限'}
+                  <ConsoleButton size="sm" onClick={() => { void refetchDir(); }}>重试</ConsoleButton>
+                </div>
+              ) : isDirLoading || (isDirFetching && !dirData) ? (
+                <p className="nfc-v2-directory-loading" role="status">正在读取目录…</p>
+              ) : !directoryItems?.length ? (
+                <ConsoleEmpty title={searchQuery ? '没有匹配的子目录' : '当前目录下无子文件夹'} />
+              ) : (
+                <>
+                  <div className="nfc-directory-list-viewport" role="region" aria-label="子目录列表"
+                    tabIndex={0} aria-busy={isDirFetching || undefined}>
+                    <ul className="nfc-v2-directory-list">
+                      {directoryItems.map(item => (
+                        <li className={selectedPaths.includes(item.path) ? 'is-selected' : ''}
+                          key={item.path}>
+                          <button type="button" className="nfc-v2-directory-open"
+                            disabled={busy || isDirFetching} onClick={() => handleNavigate(item.path)}
+                            aria-label={'进入目录 ' + item.name}>
+                            <MediaThumbnail path={item.path} kind="directory" />
+                            <span><strong>{item.name}</strong><small>{item.path}</small></span>
+                          </button>
+                          {multiple ? (
+                            <label className="nfc-v2-directory-toggle">
+                              <input type="checkbox" aria-label={'选择目录 ' + item.name}
+                                disabled={busy || isDirFetching} checked={selectedPaths.includes(item.path)}
+                                onChange={() => handleToggleSelect(item.path)} />
+                            </label>
+                          ) : (
+                            <ConsoleButton size="sm"
+                              variant={selectedPaths.includes(item.path) ? 'primary' : 'secondary'}
+                              disabled={busy || isDirFetching} onClick={() => handleToggleSelect(item.path)}>
+                              {selectedPaths.includes(item.path) ? '已选' : '选择'}
+                            </ConsoleButton>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="nfc-directory-pagination-row">
+                    <span role="status">{isDirFetching ? '正在更新目录列表…' : `共 ${dirData?.total ?? 0} 个目录`}</span>
+                    {(dirData?.total ?? 0) > PAGE_SIZE && (
+                      <ConsolePagination page={page} pageSize={PAGE_SIZE}
+                        total={dirData?.total ?? 0} pageSizes={[PAGE_SIZE]}
+                        onChange={newPage => setPage(newPage)} />
+                    )}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+          {activeTab === 'favorites' && (
+            <div className="nfc-directory-secondary-list">
+              {isFavError ? (
+                <div className="nfc-v2-directory-error" role="alert">
+                  收藏目录加载失败
+                  <ConsoleButton size="sm" onClick={() => { void refetchFav(); }}>重试</ConsoleButton>
+                </div>
+              ) : !favorites?.length ? (
+                <ConsoleEmpty title="暂无收藏目录" description="可在目录浏览中收藏常用路径" />
+              ) : (
+                <ul className="nfc-v2-directory-list">
+                  {favorites.map(fav => (
+                    <li className={fav.exists ? '' : 'is-missing'} key={fav.id}>
+                      {fav.exists ? <MediaThumbnail path={fav.path} kind="directory" /> : <ConsoleIcon name="star" size={18} />}
+                      <div className="nfc-v2-directory-item-copy">
+                        <strong>{fav.label || fav.path}</strong>
+                        <small>{fav.path}{!fav.exists && ' · 路径不存在'}</small>
+                      </div>
+                      <ConsoleButton size="sm" disabled={!fav.exists || busy}
+                        onClick={() => handleNavigate(fav.path)}>进入目录</ConsoleButton>
+                      <ConsoleButton size="sm" variant="danger" disabled={busy}
+                        aria-label={'删除收藏 ' + (fav.label || fav.path)}
+                        onClick={() => setConfirmFavoriteId(fav.id)}
+                        leadingIcon={<ConsoleIcon name="trash" size={14} />}>删除</ConsoleButton>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          {activeTab === 'recent' && (
+            <div className="nfc-directory-secondary-list">
+              {isRecentError ? (
+                <div className="nfc-v2-directory-error" role="alert">
+                  最近访问目录加载失败
+                  <ConsoleButton size="sm" onClick={() => { void refetchRecent(); }}>重试</ConsoleButton>
+                </div>
+              ) : !recents?.length ? (
+                <ConsoleEmpty title="暂无最近使用记录" />
+              ) : (
+                <ul className="nfc-v2-directory-list">
+                  {recents.map(rec => (
+                    <li className={rec.exists ? '' : 'is-missing'} key={rec.id}>
+                      {rec.exists ? <MediaThumbnail path={rec.path} kind="directory" /> : <ConsoleIcon name="history" size={18} />}
+                      <div className="nfc-v2-directory-item-copy">
+                        <strong>{rec.path}</strong>
+                        <small>最近使用时间：{formatDateTime(rec.last_used_at)}
+                          {!rec.exists && ' · 路径不存在'}
+                        </small>
+                      </div>
+                      <ConsoleButton size="sm" disabled={!rec.exists || busy}
+                        onClick={() => handleNavigate(rec.path)}>进入目录</ConsoleButton>
+                      {multiple ? (
+                        <label className="nfc-v2-directory-toggle">
+                          <input type="checkbox" aria-label={'选择最近目录 ' + rec.path}
+                            disabled={!rec.exists || busy}
+                            checked={selectedPaths.includes(rec.path)}
+                            onChange={() => handleToggleSelect(rec.path)} />
+                        </label>
+                      ) : (
+                        <ConsoleButton size="sm" disabled={!rec.exists || busy}
+                          onClick={() => handleToggleSelect(rec.path)}>
+                          {selectedPaths.includes(rec.path) ? '已选' : '选择'}
+                        </ConsoleButton>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+        {inline && confirmFavoriteId !== null && (
+          <div className="nfc-directory-inline-confirm" role="group" aria-label="确认删除收藏目录">
+            <span>删除这条收藏记录？</span>
+            <div className="nfc-v2-directory-toolbar-actions">
+              <ConsoleButton size="sm" disabled={busy} onClick={() => setConfirmFavoriteId(null)}>
+                保留收藏
+              </ConsoleButton>
+              <ConsoleButton size="sm" variant="danger" loading={delFavMutation.isPending}
+                disabled={busy} onClick={confirmFavoriteRemoval}>删除收藏</ConsoleButton>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <footer className="nfc-directory-picker-footer">
+        <div className="nfc-directory-picker-selection">
+          {multiple ? (
+            <>
+              <span role="status">已选 <strong>{selectedPaths.length}</strong> 个目录</span>
+              <div className="nfc-directory-picker-selected-tags">
+                {selectedPaths.map(path => (
+                  <button type="button" key={path}
+                    aria-label={'移除已选目录 ' + path}
+                    disabled={busy}
+                    onClick={() => setSelectedPaths(previous => previous.filter(item => item !== path))}>
+                    {path} <ConsoleIcon name="x" size={13} />
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <span className="nfc-directory-picker-current-selection">
+              <small>当前选择</small>
+              <strong>{selectedPaths[0] || effectiveCurrentPath || '尚未选择'}</strong>
+            </span>
+          )}
+        </div>
+        <div className="nfc-directory-picker-footer-actions">
+          <ConsoleButton disabled={busy} onClick={cancel}>{inline ? '返回' : '取消'}</ConsoleButton>
+          <ConsoleButton variant="primary" loading={isConfirming}
+            disabled={busy || isDirFetching || isDirError || !dirData || !hasSelection}
+            leadingIcon={<ConsoleIcon name="check-circle" size={16} />}
+            onClick={() => { void handleConfirm(); }}>确认选择</ConsoleButton>
+        </div>
+      </footer>
+    </>
+  );
+
+  if (inline) {
+    return <section className="nfc-directory-picker-inline nfc-v2-directory-dialog nfc-reading-picker"
+      data-mobile={isMobile || undefined} aria-label="NAS 目录浏览" aria-busy={busy || undefined}>
+      {content}
+    </section>;
+  }
+
   return (
     <Dialog.Root open={open && !disabled} onOpenChange={next => { if (!next) cancel(); }}>
       <Dialog.Portal>
@@ -245,252 +531,13 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
             </button>
           </header>
 
-          <div className="nfc-directory-picker-body">
-            <div className="nfc-directory-browser-toolbar">
-              <div ref={locationRow} tabIndex={-1} role="group" aria-label="当前目录位置" className="nfc-directory-browser-row">
-                <PathBreadcrumb currentPath={effectiveCurrentPath || currentPath}
-                  allowedRoots={allowedRoots} onNavigate={handleNavigate} />
-                <div className="nfc-v2-directory-toolbar-actions">
-                  <ConsoleButton size="sm" disabled={busy || !dirData?.parent}
-                    leadingIcon={<ConsoleIcon name="arrow-up" size={15} />}
-                    aria-label="返回上一级"
-                    onClick={() => dirData?.parent && handleNavigate(dirData.parent)}>
-                    上一级
-                  </ConsoleButton>
-                  <ConsoleButton size="sm" disabled={busy} loading={isDirFetching}
-                    aria-label="刷新目录" onClick={() => { void refetchDir(); }}
-                    leadingIcon={<ConsoleIcon name="refresh" size={15} />}>刷新</ConsoleButton>
-                  <ConsoleButton size="sm" disabled={busy || !isCurrentAllowed}
-                    aria-label="收藏当前目录"
-                    leadingIcon={<ConsoleIcon name="star" size={15} />}
-                    onClick={() => setIsAddingFavorite(previous => !previous)}>
-                    {isCurrentFavorite ? '已收藏' : '收藏'}
-                  </ConsoleButton>
-                  <ConsoleButton size="sm" disabled={busy || !isCurrentAllowed}
-                    leadingIcon={<ConsoleIcon name="plus" size={15} />}
-                    onClick={handleSelectCurrent}>选择当前目录</ConsoleButton>
-                </div>
-              </div>
-              {isAddingFavorite && isCurrentAllowed && (
-                <div className="nfc-directory-favorite-editor">
-                  <input type="text" aria-label="收藏别名" value={favoriteLabel}
-                    placeholder="收藏别名（可选）"
-                    disabled={busy}
-                    onChange={event => setFavoriteLabel(event.target.value)} />
-                  <ConsoleButton size="sm" variant="primary" loading={addFavMutation.isPending}
-                    disabled={busy || !!isCurrentFavorite}
-                    onClick={() => addFavMutation.mutate({
-                      path: effectiveCurrentPath, label: favoriteLabel,
-                    })}>保存收藏</ConsoleButton>
-                  <ConsoleButton size="sm" disabled={busy}
-                    onClick={() => setIsAddingFavorite(false)}>取消</ConsoleButton>
-                </div>
-              )}
-            </div>
-
-            <div className="nfc-v2-directory-tabs" role="tablist" aria-label="目录来源">
-              {([
-                ['browser', '目录浏览', 'folder'],
-                ['favorites', '收藏目录 (' + (favData?.items?.length || 0) + ')', 'star'],
-                ['recent', '最近使用 (' + (recentData?.items?.length || 0) + ')', 'history'],
-              ] as const).map(([tab, label, icon]) => (
-                <button type="button" role="tab" key={tab} id={'nfc-directory-tab-' + tab}
-                  ref={node => { tabRefs.current[tab] = node; }}
-                  aria-selected={activeTab === tab} aria-controls="nfc-directory-active-panel"
-                  tabIndex={activeTab === tab ? 0 : -1}
-                  disabled={busy} className={activeTab === tab ? 'is-active' : ''}
-                  onClick={() => setActiveTab(tab)}
-                  onKeyDown={event => {
-                    if (busy) return;
-                    const next = nextDirectoryTab(activeTab, event.key);
-                    if (next === null) return;
-                    event.preventDefault();
-                    setActiveTab(next);
-                    tabRefs.current[next]?.focus();
-                  }}>
-                  <ConsoleIcon name={icon} size={15} />{label}
-                </button>
-              ))}
-            </div>
-            <div role="tabpanel" id="nfc-directory-active-panel"
-              aria-labelledby={'nfc-directory-tab-' + activeTab}
-              tabIndex={0} className="nfc-v2-directory-panel">
-              {activeTab === 'browser' && (
-                <>
-                  <div className="nfc-directory-search-row">
-                    <ConsoleIcon name="search" size={17} />
-                    <input type="search" aria-label="搜索子目录"
-                      placeholder="筛选当前目录的子目录"
-                      value={searchQuery} disabled={busy}
-                      onChange={event => { setSearchQuery(event.target.value); setPage(1); }} />
-                  </div>
-                  {isDirError ? (
-                    <div className="nfc-v2-directory-error" role="alert">
-                      无法读取目录：{dirError instanceof Error ? dirError.message : '请检查目录访问权限'}
-                      <ConsoleButton size="sm" onClick={() => { void refetchDir(); }}>重试</ConsoleButton>
-                    </div>
-                  ) : isDirLoading || (isDirFetching && !dirData) ? (
-                    <p className="nfc-v2-directory-loading" role="status">正在读取目录…</p>
-                  ) : !dirData?.items?.length ? (
-                    <ConsoleEmpty title={searchQuery ? '没有匹配的子目录' : '当前目录下无子文件夹'} />
-                  ) : (
-                    <>
-                      <div className="nfc-directory-list-viewport" role="region" aria-label="子目录列表"
-                        tabIndex={0} aria-busy={isDirFetching || undefined}>
-                        <ul className="nfc-v2-directory-list">
-                          {dirData.items.map(item => (
-                            <li className={selectedPaths.includes(item.path) ? 'is-selected' : ''}
-                              key={item.path}>
-                              <button type="button" className="nfc-v2-directory-open"
-                                disabled={busy || isDirFetching} onClick={() => handleNavigate(item.path)}
-                                aria-label={'进入目录 ' + item.name}>
-                                <MediaThumbnail path={item.path} kind="directory" />
-                                <span><strong>{item.name}</strong><small>{item.path}</small></span>
-                              </button>
-                              {multiple ? (
-                                <label className="nfc-v2-directory-toggle">
-                                  <input type="checkbox" aria-label={'选择目录 ' + item.name}
-                                    disabled={busy || isDirFetching} checked={selectedPaths.includes(item.path)}
-                                    onChange={() => handleToggleSelect(item.path)} />
-                                </label>
-                              ) : (
-                                <ConsoleButton size="sm"
-                                  variant={selectedPaths.includes(item.path) ? 'primary' : 'secondary'}
-                                  disabled={busy || isDirFetching} onClick={() => handleToggleSelect(item.path)}>
-                                  {selectedPaths.includes(item.path) ? '已选' : '选择'}
-                                </ConsoleButton>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                      <div className="nfc-directory-pagination-row">
-                        <span role="status">{isDirFetching ? '正在更新目录列表…' : `共 ${dirData.total} 个目录`}</span>
-                        {dirData.total > PAGE_SIZE && (
-                          <ConsolePagination page={page} pageSize={PAGE_SIZE}
-                            total={dirData.total} pageSizes={[PAGE_SIZE]}
-                            onChange={newPage => setPage(newPage)} />
-                        )}
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-              {activeTab === 'favorites' && (
-                <div className="nfc-directory-secondary-list">
-                  {isFavError ? (
-                    <div className="nfc-v2-directory-error" role="alert">
-                      收藏目录加载失败
-                      <ConsoleButton size="sm" onClick={() => { void refetchFav(); }}>重试</ConsoleButton>
-                    </div>
-                  ) : !favData?.items?.length ? (
-                    <ConsoleEmpty title="暂无收藏目录" description="可在目录浏览中收藏常用路径" />
-                  ) : (
-                    <ul className="nfc-v2-directory-list">
-                      {favData.items.map(fav => (
-                        <li className={fav.exists ? '' : 'is-missing'} key={fav.id}>
-                          {fav.exists ? <MediaThumbnail path={fav.path} kind="directory" /> : <ConsoleIcon name="star" size={18} />}
-                          <div className="nfc-v2-directory-item-copy">
-                            <strong>{fav.label || fav.path}</strong>
-                            <small>{fav.path}{!fav.exists && ' · 路径不存在'}</small>
-                          </div>
-                          <ConsoleButton size="sm" disabled={!fav.exists || busy}
-                            onClick={() => handleNavigate(fav.path)}>进入目录</ConsoleButton>
-                          <ConsoleButton size="sm" variant="danger" disabled={busy}
-                            aria-label={'删除收藏 ' + (fav.label || fav.path)}
-                            onClick={() => setConfirmFavoriteId(fav.id)}
-                            leadingIcon={<ConsoleIcon name="trash" size={14} />}>删除</ConsoleButton>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-              {activeTab === 'recent' && (
-                <div className="nfc-directory-secondary-list">
-                  {isRecentError ? (
-                    <div className="nfc-v2-directory-error" role="alert">
-                      最近访问目录加载失败
-                      <ConsoleButton size="sm" onClick={() => { void refetchRecent(); }}>重试</ConsoleButton>
-                    </div>
-                  ) : !recentData?.items?.length ? (
-                    <ConsoleEmpty title="暂无最近使用记录" />
-                  ) : (
-                    <ul className="nfc-v2-directory-list">
-                      {recentData.items.map(rec => (
-                        <li className={rec.exists ? '' : 'is-missing'} key={rec.id}>
-                          {rec.exists ? <MediaThumbnail path={rec.path} kind="directory" /> : <ConsoleIcon name="history" size={18} />}
-                          <div className="nfc-v2-directory-item-copy">
-                            <strong>{rec.path}</strong>
-                            <small>最近使用时间：{formatDateTime(rec.last_used_at)}
-                              {!rec.exists && ' · 路径不存在'}
-                            </small>
-                          </div>
-                          <ConsoleButton size="sm" disabled={!rec.exists || busy}
-                            onClick={() => handleNavigate(rec.path)}>进入目录</ConsoleButton>
-                          {multiple ? (
-                            <label className="nfc-v2-directory-toggle">
-                              <input type="checkbox" aria-label={'选择最近目录 ' + rec.path}
-                                disabled={!rec.exists || busy}
-                                checked={selectedPaths.includes(rec.path)}
-                                onChange={() => handleToggleSelect(rec.path)} />
-                            </label>
-                          ) : (
-                            <ConsoleButton size="sm" disabled={!rec.exists || busy}
-                              onClick={() => handleToggleSelect(rec.path)}>
-                              {selectedPaths.includes(rec.path) ? '已选' : '选择'}
-                            </ConsoleButton>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <footer className="nfc-directory-picker-footer">
-            <div className="nfc-directory-picker-selection">
-              {multiple ? (
-                <>
-                  <span role="status">已选 <strong>{selectedPaths.length}</strong> 个目录</span>
-                  <div className="nfc-directory-picker-selected-tags">
-                    {selectedPaths.map(path => (
-                      <button type="button" key={path}
-                        aria-label={'移除已选目录 ' + path}
-                        disabled={busy}
-                        onClick={() => setSelectedPaths(previous => previous.filter(item => item !== path))}>
-                        {path} <ConsoleIcon name="x" size={13} />
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <span className="nfc-directory-picker-current-selection">
-                  <small>当前选择</small>
-                  <strong>{selectedPaths[0] || effectiveCurrentPath || '尚未选择'}</strong>
-                </span>
-              )}
-            </div>
-            <div className="nfc-directory-picker-footer-actions">
-              <ConsoleButton disabled={busy} onClick={cancel}>取消</ConsoleButton>
-              <ConsoleButton variant="primary" loading={isConfirming}
-                disabled={busy || isDirFetching || isDirError || !dirData || !hasSelection}
-                leadingIcon={<ConsoleIcon name="check-circle" size={16} />}
-                onClick={() => { void handleConfirm(); }}>确认选择</ConsoleButton>
-            </div>
-          </footer>
+          {content}
           <ConsoleConfirmDialog open={confirmFavoriteId !== null}
             onOpenChange={next => { if (!next && !delFavMutation.isPending) setConfirmFavoriteId(null); }}
             title="确认删除收藏目录？"
             description="仅删除收藏记录，不会删除 NAS 上的目录或文件。"
             confirmText="删除收藏" busy={delFavMutation.isPending}
-            onConfirm={() => {
-              if (confirmFavoriteId !== null && !delFavMutation.isPending) {
-                delFavMutation.mutate(confirmFavoriteId);
-              }
-            }} />
+            onConfirm={confirmFavoriteRemoval} />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

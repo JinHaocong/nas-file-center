@@ -14,46 +14,85 @@
   .nfc-workspace-frame { overflow: hidden; }
   .nfc-workspace-navigation {
     display: grid;
-    flex: 0 0 184px;
+    flex: 0 0 clamp(158px, 11.8vw, 184px);
     align-content: start;
     align-self: stretch;
-    gap: 2px;
-    overflow: auto;
+    gap: 12px;
+    min-inline-size: 0;
+    overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 14px 10px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--nfc-tint-line) transparent;
+    padding: 12px 9px;
     border-inline-end: 1px solid var(--studio-line);
-    background: var(--studio-soft);
+    background: color-mix(in srgb, var(--studio-soft) 74%, var(--studio-ground));
     color: var(--studio-muted);
   }
-  .nfc-workspace-navigation > a {
+  .nfc-workspace-navigation-group {
+    display: grid;
+    gap: 2px;
+    min-inline-size: 0;
+  }
+  .nfc-workspace-navigation-group > a {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 9px;
-    min-height: 35px;
-    padding: 5px 8px;
+    gap: 8px;
+    min-height: 33px;
+    padding: 4px 8px;
     border-radius: 7px;
     color: inherit;
     font-size: 13px;
     font-weight: 640;
     text-decoration: none;
   }
-  .nfc-workspace-navigation .nfc-workspace-home { color: var(--studio-ink); }
-  .nfc-workspace-navigation > a[aria-current="page"] {
+  .nfc-workspace-navigation-group > a > svg { flex: 0 0 auto; }
+  .nfc-workspace-navigation-group > a > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .nfc-workspace-navigation-group > a:hover { background: var(--studio-paper); color: var(--studio-ink); }
+  .nfc-workspace-navigation-group > a[aria-current="page"] {
     background: var(--nfc-tint-soft);
     color: var(--nfc-tint);
     font-weight: 750;
     box-shadow: inset 0 0 0 1px var(--nfc-tint-line);
   }
-  .nfc-workspace-navigation > a:hover { background: var(--nfc-tint-soft); color: var(--nfc-tint); }
+  .nfc-workspace-navigation-group > a[aria-current="page"]::before {
+    position: absolute;
+    inset: 9px auto 9px 0;
+    inline-size: 2px;
+    border-radius: 2px;
+    background: var(--nfc-tint);
+    content: '';
+    pointer-events: none;
+  }
   .nfc-workspace-navigation-title {
-    margin: 15px 8px 5px;
+    margin: 1px 8px 3px;
     color: var(--studio-muted);
     font-size: 11px;
-    font-weight: 730;
+    font-weight: 680;
   }
-  .nfc-workspace-navigation > a > svg { flex: 0 0 auto; }
+  .nfc-workspace-navigation[data-compact='true'] {
+    flex-basis: 55px;
+    gap: 7px;
+    padding: 9px 6px;
+  }
+  .nfc-workspace-navigation[data-compact='true'] .nfc-workspace-navigation-group + .nfc-workspace-navigation-group {
+    border-top: 1px solid var(--studio-line);
+    padding-top: 7px;
+  }
+  .nfc-workspace-navigation[data-compact='true'] :is(.nfc-workspace-navigation-title, a > span) {
+    display: none;
+  }
+  .nfc-workspace-navigation[data-compact='true'] a {
+    min-height: 32px;
+    justify-content: center;
+    padding-inline: 0;
+  }
   .nfc-studio .nfc-workspace-navigation + .nfc-v2-page-content.nfc-page-content {
-    padding-inline: clamp(23px, 3vw, 48px) !important;
+    padding-inline: clamp(20px, 2.5vw, 40px) !important;
   }
   .nfc-studio .nfc-v2-header.nfc-header {
     height: 58px;
@@ -61,7 +100,6 @@
     flex-basis: 58px;
     padding-inline: 16px !important;
   }
-  .nfc-studio .nfc-v2-header .nfc-v2-breadcrumb { padding-inline-start: 12px; }
   .nfc-studio .nfc-v2-header .nfc-v2-breadcrumb > svg { display: block; color: var(--studio-muted); }
 }
 
@@ -184,7 +222,7 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .nfc-workspace-navigation > a {
+  .nfc-workspace-navigation-group > a {
     transition: background-color 150ms var(--nfc-motion-ease), color 150ms var(--nfc-motion-ease);
   }
   .nfc-v2-login-shell .nfc-v2-login-input-wrap {

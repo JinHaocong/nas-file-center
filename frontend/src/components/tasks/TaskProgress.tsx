@@ -13,21 +13,29 @@ interface Props {
   showDetails?: boolean;
   /** The containing header already shows task status. */
   summarized?: boolean;
+  /** The ledger shows progress and actual speed in a stable, compact row. */
+  compact?: boolean;
+  reportedSpeed?: string | null;
   startedAt?: string | null;
   now?: dayjs.Dayjs;
 }
 
 export const TaskProgress: React.FC<Props> = ({
-  progress, status, size = 'small', showDetails = false, summarized = false, startedAt, now,
+  progress, status, size = 'small', showDetails = false, summarized = false, compact = false,
+  reportedSpeed, startedAt, now,
 }) => {
   const current = progress?.current || 0;
   const total = progress?.total || 0;
-  const message = progress?.message;
+  const message = reportedSpeed ? null : progress?.message;
   const percent = computeProgressPercentage(current, total, progress?.percent);
-  const eta = calculateTaskEta(status, current, total, startedAt, progress?.percent, now);
-  const etaText = !summarized || status === 'queued' || status === 'running'
+  const eta = compact ? null : calculateTaskEta(status, current, total, startedAt, progress?.percent, now);
+  const etaText = eta && (!summarized || status === 'queued' || status === 'running')
     ? 'ETA: ' + eta.text : undefined;
+  const timing = reportedSpeed
+    ? <><span className="nfc-v2-task-speed" title="复制速度">{reportedSpeed}</span>{etaText && ' · ' + etaText}</>
+    : etaText;
 
+  /** Keep the primary count and the live metric aligned in both layouts. */
   const meta = (primary: React.ReactNode, secondary?: React.ReactNode) => (
     <div className="nfc-task-progress-meta">
       <span>{primary}</span>
@@ -55,6 +63,7 @@ export const TaskProgress: React.FC<Props> = ({
       status === 'completed' ? 'success' : status === 'running' ? 'active' : 'normal';
     return (
       <div className={'nfc-task-progress nfc-task-progress-bar nfc-v2-progress-' + tone +
+        (compact ? ' is-ledger-progress' : '') +
         (showDetails ? ' is-detailed' : '') + (size === 'small' ? ' is-small' : '')}>
         <div className="nfc-v2-progress-track">
           <ProgressMotionTrack value={percent}>
@@ -65,13 +74,18 @@ export const TaskProgress: React.FC<Props> = ({
         </div>
         {meta(
           current + ' / ' + total + (showDetails ? ' (' + percent + '%)' : ''),
-          etaText,
+          timing,
         )}
-        {message && (
+        {!compact && message && (
           <span className="nfc-task-progress-message" title={message}>{message}</span>
         )}
       </div>
     );
+  }
+
+  if (compact) {
+    const summary = current > 0 ? current + ' 项' : status === 'running' ? '进度未知' : '—';
+    return <div className="nfc-task-progress is-ledger-progress">{meta(summary, timing)}</div>;
   }
 
   if (status === 'running') {
@@ -81,7 +95,7 @@ export const TaskProgress: React.FC<Props> = ({
           <span className="nfc-v2-progress-spinner" aria-hidden="true" />
           <span title={message || '正在执行...'}>{message || '正在执行...'}</span>
         </div>
-        {meta('进度未知' + (current > 0 ? ' (' + current + ' 项)' : ''), etaText)}
+        {meta('进度未知' + (current > 0 ? ' (' + current + ' 项)' : ''), timing)}
       </div>
     );
   }

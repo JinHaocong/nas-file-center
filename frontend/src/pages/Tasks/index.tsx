@@ -1,12 +1,10 @@
-import { sqliteIdText } from '../../utils/sqliteId';
-import { taskTypeLabel } from '../../utils/taskTypeLabel';
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import dayjs from 'dayjs';
 import { tasksApi } from '../../api/tasks';
 import { useTitle } from '../../hooks/useTitle';
-import { formatDateTime, formatElapsed } from '../../utils/format';
+import { sqliteIdText } from '../../utils/sqliteId';
+import { taskTypeLabel } from '../../utils/taskTypeLabel';
 import type { TaskId, TaskItem } from '../../types/task';
 import { WorkerStatusCard } from '../../components/tasks/WorkerStatusCard';
 import { TaskProgress } from '../../components/tasks/TaskProgress';
@@ -14,6 +12,7 @@ import { TaskDetailDrawer } from '../../components/tasks/TaskDetailDrawer';
 import { TaskDeleteButton } from '../../components/tasks/TaskDeleteButton';
 import { TaskHistoryCleanupModal } from '../../components/tasks/TaskHistoryCleanupModal';
 import { OrganizerReportInventory } from '../../components/tasks/OrganizerReportInventory';
+import { getReportedTaskSpeed } from '../../components/tasks/task_utils';
 import { useAuth } from '../../contexts/AuthContext';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
@@ -55,6 +54,32 @@ const QUICK_STATUS_OPTIONS = [
   { label: '已失败', value: 'failed' },
 ] as const;
 
+/** Return focus to the queue if the detail was opened by a link or its launcher is gone. */
+function taskQueueFocusTarget() {
+  return document.getElementById('nfc-task-queue');
+}
+
+/** Render the same record identity and detail trigger in the table and on mobile. */
+function TaskRecordIdentity({ task, selected, onOpen }: {
+  task: TaskItem;
+  selected: boolean;
+  onOpen: (taskId: TaskId, trigger: HTMLButtonElement) => void;
+}) {
+  return (
+    <div className="nfc-v2-task-identity">
+      <strong>{taskTypeLabel(task.job_type)}</strong>
+      <div className="nfc-v2-task-identity-meta">
+        <button type="button" className="nfc-table-link nfc-mono nfc-v2-task-id"
+          aria-haspopup="dialog" aria-expanded={selected}
+          onClick={event => onOpen(task.id, event.currentTarget)}>#{task.id}</button>
+        {(task.error || task.error_code) && (
+          <span className="nfc-table-error nfc-v2-task-error">{task.error_code || '有错误记录'}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export const TasksPage: React.FC = () => {
   useTitle('任务中心');
   const { user } = useAuth();
@@ -67,12 +92,14 @@ export const TasksPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const selectedTaskId = sqliteIdText(searchParams.get('task'));
-  const [currentTime, setCurrentTime] = useState<dayjs.Dayjs>(() => dayjs());
 
   /** Put drawer selection in the URL so reload and browser Back restore the shown record. */
-  function openTaskDetail(taskId: TaskId) {
+  function openTaskDetail(taskId: TaskId, trigger?: HTMLButtonElement) {
     const nextId = sqliteIdText(taskId);
     if (!nextId || nextId === selectedTaskId) return;
+    // WebKit does not focus mouse-activated buttons by default. Let the
+    // shared drawer capture the exact opener just like keyboard activation.
+    trigger?.focus({ preventScroll: true });
     const next = new URLSearchParams(searchParams);
     next.set('task', nextId);
     setSearchParams(next, {
@@ -115,15 +142,6 @@ export const TasksPage: React.FC = () => {
       return hasActive ? 3000 : false;
     },
   });
-
-  useEffect(() => {
-    const hasRunning = data?.items?.some((j) => j.status === 'running');
-    if (!hasRunning) return;
-    const timer = setInterval(() => {
-      setCurrentTime(dayjs());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [data?.items]);
 
   const handleStatusFilterChange = (val: string) => {
     setStatusFilter(val);
@@ -175,7 +193,6 @@ export const TasksPage: React.FC = () => {
     <div className="nfc-operations-page nfc-tasks-page nfc-page-layout-ledger nfc-v2-tasks-page nfc-record-workspace">
       <PageHeader
         title="任务中心"
-        description="查看正在进行的任务，打开记录可核对进度和执行结果。"
         actions={
           <ActionBar compact>
             {user?.role === 'admin' && <OrganizerReportInventory />}
@@ -199,10 +216,8 @@ export const TasksPage: React.FC = () => {
       {latestFailure && (
         <section className="nfc-record-attention" aria-label="本页最近失败的任务">
           <ConsoleIcon name="info" size={18} />
-          <div><strong>本页最近失败 · #{latestFailure.id} {taskTypeLabel(latestFailure.job_type)}</strong>
-            {(latestFailure.error || latestFailure.error_code) && <p>{latestFailure.error || latestFailure.error_code}</p>}
-          </div>
-          <ConsoleButton size="sm" onClick={() => openTaskDetail(latestFailure.id)}>查看失败详情</ConsoleButton>
+          <div><strong>本页最近失败 · #{latestFailure.id} {taskTypeLabel(latestFailure.job_type)}</strong></div>
+          <ConsoleButton size="sm" onClick={event => openTaskDetail(latestFailure.id, event.currentTarget)}>查看失败详情</ConsoleButton>
         </section>
       )}
 
@@ -218,21 +233,19 @@ export const TasksPage: React.FC = () => {
       )}
 
       <DataPanel
+        id="nfc-task-queue"
         title="任务队列"
-        description="按状态和类型筛选任务。"
         action={<span className="nfc-panel-count">{isError ? '—' : data?.total ?? 0} 项</span>}
         className="nfc-panel-flush"
         variant="dense"
       >
-        <div className="nfc-record-controls">
+        <ActionBar className="nfc-filter-bar nfc-v2-task-filter-bar">
           <div className="nfc-record-segments" role="group" aria-label="任务快捷筛选">
             {QUICK_STATUS_OPTIONS.map(({ label, value }) => (
               <button key={value} type="button" aria-pressed={statusFilter === value}
                 onClick={() => handleStatusFilterChange(value)}>{label}</button>
             ))}
           </div>
-        </div>
-        <ActionBar className="nfc-filter-bar nfc-v2-task-filter-bar">
           <ConsoleSelect id="nfc-task-status-filter" label="状态" value={statusFilter}
             onChange={handleStatusFilterChange} options={STATUS_OPTIONS} />
           <ConsoleSelect id="nfc-task-type-filter" label="任务类型" value={jobTypeFilter}
@@ -261,47 +274,25 @@ export const TasksPage: React.FC = () => {
               <div className="nfc-v2-task-table-scroll">
                 <table className="nfc-v2-task-table">
                   <thead><tr>
-                    <th scope="col">任务 ID</th>
-                    <th scope="col">任务类型</th>
+                    <th scope="col">任务</th>
                     <th scope="col">状态</th>
                     <th scope="col">执行进度</th>
-                    <th scope="col">创建时间</th>
-                    <th scope="col">执行耗时</th>
-                    <th scope="col">错误</th>
                     <th scope="col">操作</th>
                   </tr></thead>
                   <tbody>{items.map(task => {
-                    const errorText = task.error || task.error_code || '';
-                    const clippedError = errorText.length > 28 ? errorText.slice(0, 28) + '…' : errorText;
+                    const selected = selectedTaskId !== null && sqliteIdText(task.id) === selectedTaskId;
                     return (
-                      <tr key={task.id} className={selectedTaskId !== null && sqliteIdText(task.id) === selectedTaskId ? 'nfc-record-selected' : undefined}>
-                        <td>
-                          <button type="button" className="nfc-table-link nfc-mono nfc-v2-task-id"
-                            onClick={() => openTaskDetail(task.id)}>
-                            #{task.id}
-                          </button>
-                        </td>
-                        <td><span className="nfc-kind-badge" title={task.job_type}>{taskTypeLabel(task.job_type)}</span></td>
+                      <tr key={task.id} className={selected ? 'nfc-record-selected' : undefined}>
+                        <td><TaskRecordIdentity task={task} selected={selected} onOpen={openTaskDetail} /></td>
                         <td><StatusBadge status={task.status} /></td>
                         <td className="nfc-v2-task-progress-cell">
-                          <TaskProgress progress={task.progress} status={task.status}
-                            startedAt={task.started_at} now={currentTime} />
-                        </td>
-                        <td className="nfc-v2-task-date">{formatDateTime(task.created_at)}</td>
-                        <td className="nfc-v2-task-date">
-                          {formatElapsed(task.started_at, task.finished_at, currentTime)}
-                        </td>
-                        <td>
-                          {errorText ? (
-                            <span className="nfc-table-error nfc-v2-task-error" title={errorText}>
-                              {task.error_code ? '[' + task.error_code + '] ' : ''}{clippedError}
-                            </span>
-                          ) : <span className="nfc-table-muted">—</span>}
+                          <TaskProgress progress={task.progress} status={task.status} compact
+                            reportedSpeed={getReportedTaskSpeed(task)} />
                         </td>
                         <td><div className="nfc-row-actions">
-                          <ConsoleButton size="sm" variant="ghost"
+                          <ConsoleButton size="sm" variant="ghost" aria-haspopup="dialog" aria-expanded={selected}
                             leadingIcon={<ConsoleIcon name="search" size={15} />}
-                            onClick={() => openTaskDetail(task.id)}>详情</ConsoleButton>
+                            onClick={event => openTaskDetail(task.id, event.currentTarget)}>详情</ConsoleButton>
                           <TaskDeleteButton task={task} size="small" type="text"
                             onSuccess={() => handleDeleted(task.id)} />
                         </div></td>
@@ -313,40 +304,28 @@ export const TasksPage: React.FC = () => {
             }
             mobile={
               <div className="nfc-mobile-record-list">
-                {items.map(task => (
-                  <article className={'nfc-task-mobile-card' +
-                    (selectedTaskId !== null && sqliteIdText(task.id) === selectedTaskId ? ' nfc-record-selected' : '')} key={task.id}>
-                    <div className="nfc-mobile-record-heading">
-                      <div>
-                        <button type="button" className="nfc-mobile-record-title nfc-mono"
-                          onClick={() => openTaskDetail(task.id)}>#{task.id}</button>
-                        <span className="nfc-kind-badge" title={task.job_type}>{taskTypeLabel(task.job_type)}</span>
+                {items.map(task => {
+                  const selected = selectedTaskId !== null && sqliteIdText(task.id) === selectedTaskId;
+                  return (
+                    <article className={'nfc-task-mobile-card' + (selected ? ' nfc-record-selected' : '')} key={task.id}>
+                      <div className="nfc-mobile-record-heading">
+                        <TaskRecordIdentity task={task} selected={selected} onOpen={openTaskDetail} />
+                        <StatusBadge status={task.status} />
                       </div>
-                      <StatusBadge status={task.status} />
-                    </div>
-                    <div className="nfc-mobile-record-progress">
-                      <TaskProgress progress={task.progress} status={task.status}
-                        startedAt={task.started_at} now={currentTime} showDetails />
-                    </div>
-                    <div className="nfc-mobile-record-facts">
-                      <span>创建 <b>{formatDateTime(task.created_at)}</b></span>
-                      <span>耗时 <b>{formatElapsed(task.started_at, task.finished_at, currentTime)}</b></span>
-                    </div>
-                    {(task.error || task.error_code) && (
-                      <div className="nfc-mobile-record-error">
-                        {task.error_code ? '[' + task.error_code + '] ' : ''}
-                        {task.error || task.error_code}
+                      <div className="nfc-mobile-record-progress">
+                        <TaskProgress progress={task.progress} status={task.status} compact
+                          reportedSpeed={getReportedTaskSpeed(task)} />
                       </div>
-                    )}
-                    <div className="nfc-mobile-record-actions">
-                      <ConsoleButton size="sm" variant="ghost"
-                        leadingIcon={<ConsoleIcon name="search" size={15} />}
-                        onClick={() => openTaskDetail(task.id)}>查看详情</ConsoleButton>
-                      <TaskDeleteButton task={task} type="text"
-                        onSuccess={() => handleDeleted(task.id)} />
-                    </div>
-                  </article>
-                ))}
+                      <div className="nfc-mobile-record-actions">
+                        <ConsoleButton size="sm" variant="ghost" aria-haspopup="dialog" aria-expanded={selected}
+                          leadingIcon={<ConsoleIcon name="search" size={15} />}
+                          onClick={event => openTaskDetail(task.id, event.currentTarget)}>查看详情</ConsoleButton>
+                        <TaskDeleteButton task={task} type="text"
+                          onSuccess={() => handleDeleted(task.id)} />
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             }
           />
@@ -359,6 +338,7 @@ export const TasksPage: React.FC = () => {
         open={selectedTaskId !== null}
         onClose={closeTaskDetail}
         onViewTask={openTaskDetail}
+        returnFocusFallback={taskQueueFocusTarget}
       />
     </div>
   );

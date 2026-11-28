@@ -37,7 +37,9 @@ interface Props {
   configuration: CloudFilesConfiguration;
   openId: string | null;
   onOpen: (id: string | null) => void;
-  recent: RecentTransfer[];
+  activity: ReturnType<typeof useCloudTransferList>;
+  onInteract: () => void;
+  onCollapse: () => void;
   onDismissReceipt: (id: string) => void;
 }
 
@@ -156,8 +158,24 @@ function TransferDetails({ transfer, configuration }: { transfer: CloudTransfer;
   </div>;
 }
 
-/** Poll native task receipts and guard a cancellation or deletion against stale permissions. */
-export function TransferLedger({ configuration, openId, onOpen, recent, onDismissReceipt }: Props) {
+/** Keep discovery and provider observations active while the transfer pane is folded. */
+export function useCloudTransferList(enabled: boolean, recent: RecentTransfer[]) {
+  const list = useQuery({
+    queryKey: cloudTransfersKey, queryFn: cloudFilesApi.list, retry: false,
+    refetchInterval: query => recent.some(item => item.expires > Date.now()) ||
+      query.state.data?.items.some(transfer => isLiveTransfer(transfer.status))
+      ? pollInterval : enabled ? discoveryInterval : false,
+  });
+  const liveTransfers = useObservedList(list.data?.items || emptyTransfers, list.dataUpdatedAt);
+  const listedIds = new Set(liveTransfers.map(transfer => transfer.id));
+  const waiting = recent.filter(item => item.expires > Date.now() && !listedIds.has(item.receipt.id));
+  const transfers = [...waiting.map(item => item.receipt), ...liveTransfers];
+  return { list, waiting, transfers };
+}
+
+/** Show live transfer details and guard mutations against stale permissions. */
+export function TransferLedger({ configuration, openId, onOpen, activity, onInteract,
+  onCollapse, onDismissReceipt }: Props) {
   const client = useQueryClient();
   const idPrefix = useId();
   const [action, setAction] = useState<PendingAction | null>(null);
@@ -165,17 +183,7 @@ export function TransferLedger({ configuration, openId, onOpen, recent, onDismis
   const [visibleCount, setVisibleCount] = useState(filePageSize);
   const [refreshing, setRefreshing] = useState(false);
   const inFlight = useRef(false);
-
-  const list = useQuery({
-    queryKey: cloudTransfersKey, queryFn: cloudFilesApi.list, retry: false,
-    refetchInterval: query => recent.some(item => item.expires > Date.now()) ||
-      query.state.data?.items.some(transfer => isLiveTransfer(transfer.status))
-      ? pollInterval : configuration.enabled ? discoveryInterval : false,
-  });
-  const liveTransfers = useObservedList(list.data?.items || emptyTransfers, list.dataUpdatedAt);
-  const listedIds = new Set(liveTransfers.map(transfer => transfer.id));
-  const waiting = recent.filter(item => item.expires > Date.now() && !listedIds.has(item.receipt.id));
-  const transfers = [...waiting.map(item => item.receipt), ...liveTransfers];
+  const { list, waiting, transfers } = activity;
   const openSummary = transfers.find(transfer => transfer.id === openId);
   const visible = transfers.slice(0, visibleCount);
   if (openSummary && !visible.includes(openSummary)) visible.push(openSummary);
@@ -240,16 +248,21 @@ export function TransferLedger({ configuration, openId, onOpen, recent, onDismis
   const liveCount = transfers.filter(transfer => isLiveTransfer(transfer.status)).length;
   const cancelling = action?.kind === 'cancel';
   const providerErrors = Object.entries(list.data?.errors || {}) as [CloudFileProvider, string][];
-  return <section id="nfc-cloud-files-transfers" className="nfc-cloud-files-ledger" aria-labelledby="nfc-cloud-transfer-title">
+  return <section id="nfc-cloud-files-transfers" className="nfc-cloud-files-ledger" aria-labelledby="nfc-cloud-transfer-title"
+    onFocusCapture={onInteract}>
     <header className="nfc-cloud-ledger-header">
       <div className="nfc-cloud-ledger-title">
         <ConsoleIcon name="activity" size={16} />
         <h2 id="nfc-cloud-transfer-title">传输任务</h2>
         {liveCount > 0 && <span className="nfc-cloud-ledger-count">{liveCount} 个进行中</span>}
       </div>
-      <ConsoleButton size="sm" variant="ghost" disabled={list.isFetching} loading={refreshing} aria-label="刷新传输任务"
-        leadingIcon={<ConsoleIcon name="refresh" size={16} />}
-        onClick={() => { void refreshTransfers(); }} />
+      <div className="nfc-cloud-ledger-controls">
+        <ConsoleButton size="sm" variant="ghost" disabled={list.isFetching} loading={refreshing} aria-label="刷新传输任务"
+          leadingIcon={<ConsoleIcon name="refresh" size={16} />}
+          onClick={() => { void refreshTransfers(); }} />
+        <ConsoleButton size="sm" variant="ghost" aria-label="折叠传输任务" onClick={onCollapse}
+          leadingIcon={<ConsoleIcon name="x" size={16} />} />
+      </div>
     </header>
     <div className="nfc-cloud-transfer-scroll" role="region" aria-label="传输任务列表" tabIndex={0}>
       {list.isPending && <p className="nfc-cloud-files-muted nfc-cloud-ledger-message" role="status">正在读取传输任务…</p>}

@@ -8,6 +8,7 @@ import { Header } from '../components/Header';
 import { ResponsiveNav } from '../components/layout/ResponsiveNav';
 import { MobileDock } from '../components/layout/MobileDock';
 import { WorkspaceNavigation } from '../components/layout/WorkspaceNavigation';
+import { currentDestination } from '../components/layout/navItems';
 import { ConsoleIcon } from '../components/ui/ConsoleIcon';
 import { useResponsive } from '../hooks/useResponsive';
 
@@ -17,6 +18,7 @@ export const MainLayout: React.FC = () => {
   const { isMobile, isDesktop } = useResponsive();
   const { pathname, search } = useLocation();
   const fileSpace = Boolean(matchPath('/dashboard', pathname)) && new URLSearchParams(search).get('view') !== 'overview';
+  const compactNavigation = fileSpace || currentDestination(pathname, search) === '/batch?operation=media-organize';
   const [fileToolbar, setFileToolbar] = useState<HTMLDivElement | null>(null);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
@@ -65,7 +67,7 @@ export const MainLayout: React.FC = () => {
       <Header isMobile={isMobile} navigationOpen={navigationOpen} onOpenNavigation={openNavigation}
         fileToolbarRef={fileSpace && isDesktop ? setFileToolbar : undefined} />
       <div className="nfc-workspace-frame">
-        <WorkspaceNavigation />
+        {isDesktop && <WorkspaceNavigation compact={compactNavigation} />}
         <main ref={main} className="nfc-page-content nfc-v2-page-content" id="main-content" tabIndex={-1}>
           <Outlet context={fileSpace && isDesktop ? fileToolbar : null} />
         </main>

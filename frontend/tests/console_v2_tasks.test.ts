@@ -43,11 +43,13 @@ describe('Console v2 Task Center native UI migration', () => {
     for (const token of [
       "queryKey: ['tasksList', page, pageSize, statusFilter, jobTypeFilter]",
       'return hasActive ? 3000 : false',
-      "setInterval(() =>", "currentTime",
       "searchParams.get('task')", "next.delete('task')",
       'TaskProgress', 'TaskDeleteButton', 'TaskDetailDrawer',
       'TaskHistoryCleanupModal', 'WorkerStatusCard', 'handleDeleted',
     ]) assert.ok(source.includes(token), token);
+    const drawer = read('src/components/tasks/TaskDetailDrawer.tsx');
+    assert.match(drawer, /setInterval\(\(\) =>/);
+    assert.doesNotMatch(source, /setInterval\(/);
     assert.match(source, /pageSizes=\{\[20, 50, 100, 200\]\}/);
     assert.match(source, /onSuccess=\{\(\) => handleDeleted\(task.id\)\}/);
     assert.match(source, /isError \? \[\] : data\?\.items \|\| \[\]/);

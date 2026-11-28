@@ -6,7 +6,7 @@ import { SafeModeBadge } from './SafeModeBadge';
 import { WorkerStatusBadge } from './WorkerStatusBadge';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { ConsoleIcon } from './ui/ConsoleIcon';
-import { currentDestination, desktopDestinations, navLabel, primaryDestinations } from './layout/navItems';
+import { navLabel } from './layout/navItems';
 
 interface Props {
   isMobile: boolean;
@@ -22,15 +22,11 @@ function dismissMenu(menu: HTMLDetailsElement | null, restoreFocus = false) {
   if (restoreFocus) menu.querySelector('summary')?.focus();
 }
 
-/** Global workspace navigation, session controls and live safety indicators. */
+/** Keep location, search, session controls and live safety indicators in the top row. */
 export const Header: React.FC<Props> = ({ isMobile, navigationOpen, onOpenNavigation, fileToolbarRef }) => {
   const { user, logout } = useAuth();
   const { mode, setMode } = useTheme();
   const location = useLocation();
-  const selected = currentDestination(location.pathname, location.search);
-  const shortcuts = isMobile ? primaryDestinations : desktopDestinations;
-  const tabIndex = shortcuts.findIndex(item => item.path === selected);
-  const tabStyle = { '--studio-active': Math.max(0, tabIndex), '--studio-slots': shortcuts.length } as React.CSSProperties;
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const header = useRef<HTMLElement>(null);
 
@@ -71,15 +67,11 @@ export const Header: React.FC<Props> = ({ isMobile, navigationOpen, onOpenNaviga
           <strong>NAS File Center</strong>
         </Link>
         {!fileToolbarRef && <div className="nfc-v2-breadcrumb">
-          <span>文件空间</span><ConsoleIcon name="chevron-right" size={13} />
+          <ConsoleIcon name="chevron-right" size={13} />
           <strong>{navLabel(location.pathname, location.search)}</strong>
         </div>}
       </div>
-      {fileToolbarRef ? <div className="nfc-header-file-toolbar" ref={fileToolbarRef} /> :
-        <nav className="nfc-studio-shortcuts" aria-label="常用页面" data-selected={tabIndex >= 0} style={tabStyle}>
-          {shortcuts.map(item => <Link key={item.path} to={item.path}
-            aria-current={selected === item.path ? 'page' : undefined}>{item.label}</Link>)}
-        </nav>}
+      {fileToolbarRef && <div className="nfc-header-file-toolbar" ref={fileToolbarRef} />}
       <div className="nfc-header-command-cluster">
         <div className="nfc-header-status" aria-label="系统安全与任务状态">
           <SafeModeBadge /><WorkerStatusBadge />

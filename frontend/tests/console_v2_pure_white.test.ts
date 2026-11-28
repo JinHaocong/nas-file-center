@@ -28,11 +28,12 @@ describe('Console surfaces, navigation materials and controls', () => {
     assert.match(shell, /\.nfc-v2-nav-item\.is-active\s*\{[^}]*background:\s*var\(--nfc-tint-soft\);[^}]*color:\s*var\(--nfc-tint\);/);
   });
 
-  test('the top navigation opens a searchable tool directory with page identity and version', () => {
+  test('the header shows page identity and opens the searchable tool directory', () => {
     const sidebar = read('src/components/Sidebar.tsx');
     const header = read('src/components/Header.tsx');
     assert.ok(header.includes('nfc-studio-brand'));
-    assert.ok(header.includes('primaryDestinations'));
+    assert.ok(header.includes('navLabel(location.pathname, location.search)'));
+    assert.match(header, /onClick=\{onOpenNavigation\}[\s\S]*?aria-haspopup="dialog"/);
     assert.ok(sidebar.includes('type="search"'));
     assert.ok(sidebar.includes("selectedKey === item.path ? 'page'"));
     const productVersion = JSON.parse(read('package.json')).version as string;

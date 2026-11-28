@@ -31,6 +31,14 @@ const task = {
   error: null, error_code: null, retry_of: null,
   checkpoint: {}, payload: {},
 };
+const watchedTask = {
+  ...task, id: '9007199254740999', job_type: 'cloud-copy', status: 'running',
+  progress: { current: 4, total: 12, percent: 33.3, message: 'rclone 正在复制，速度 18.4 MiB/s' },
+  created_at: new Date(Date.now() - 105_000).toISOString(),
+  started_at: new Date(Date.now() - 95_000).toISOString(),
+  heartbeat_at: new Date().toISOString(), finished_at: null,
+  payload: { remote_root: 'Cloud/收集/照片归档', local_root: '/data/example/destination' },
+};
 const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js',
   'preview', '--host', '127.0.0.1', '--port', '4180', '--strictPort'],
 { cwd: process.cwd(), stdio: 'ignore' });
@@ -46,19 +54,52 @@ async function ready() {
   }
   throw Error('Vite preview was not ready');
 }
-function fixture(url) {
+function fixture(url, useWatchFixture) {
   const path = new URL(url).pathname;
   if (path === '/api/auth/me') {
     return { id: 1, username: 'visual-read-only-admin', role: 'admin', is_admin: true };
   }
-  if (path === '/api/tasks') return { items: [task], total: 1, page: 1, page_size: 50 };
+  if (path === '/api/tasks') return { items: useWatchFixture ? [watchedTask, task] : [task],
+    total: useWatchFixture ? 2 : 1, page: 1, page_size: 50 };
   if (path === '/api/tasks/42') return task;
-  if (path === '/api/tasks/42/logs') return { items: [], total: 0, page: 1, page_size: 50 };
+  if (path === '/api/tasks/' + watchedTask.id) return watchedTask;
+  if (/^\/api\/tasks\/\d+\/logs$/.test(path)) return { items: [], total: 0, page: 1, page_size: 50 };
   if (path === '/api/tasks/worker') return {
     status: 'offline', worker_id: null, started_at: null,
     heartbeat_at: null, heartbeat_age_seconds: null,
   };
   return { items: [], total: 0, safe_mode: true };
+}
+
+/** Verify the compact watch row, deep-link selection, and focus after a CSS-hidden opener. */
+async function auditTaskMonitor(page, width) {
+  const id = '#' + watchedTask.id;
+  const list = page.locator('#nfc-task-queue');
+  const row = list.locator(width < 768 ? 'article' : 'tbody tr').filter({ hasText: id });
+  const sheet = page.getByRole('dialog', { name: '任务详情' });
+  const expectedPath = watchedTask.payload.local_root;
+  if (width >= 768) await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto(BASE_URL + '/tasks?return=keep&task=' + watchedTask.id, { waitUntil: 'domcontentloaded' });
+  await sheet.getByText(expectedPath, { exact: true }).waitFor();
+  assert.match(await row.getAttribute('class') ?? '', /nfc-record-selected/);
+  assert.match(await row.innerText(), /18\.4 MiB\/s/);
+  assert.doesNotMatch(await row.innerText(), /example\/destination/);
+  const pageScroll = await page.evaluate(() => window.scrollY);
+  await sheet.getByRole('button', { name: '查看任务日志' }).click();
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '任务日志');
+  assert.equal(await page.evaluate(() => window.scrollY), pageScroll, 'Jump to logs only scrolls inside the sheet');
+  await page.keyboard.press('Escape');
+  await sheet.waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => document.activeElement?.id === 'nfc-task-queue');
+  assert.equal(new URL(page.url()).search, '?return=keep');
+  await row.getByRole('button', { name: id, exact: true }).click();
+  await sheet.getByText(expectedPath, { exact: true }).waitFor();
+  const opener = row.getByText(id, { exact: true });
+  await opener.evaluate(button => { button.style.display = 'none'; });
+  await sheet.getByRole('button', { name: '关闭详情抽屉' }).click();
+  await sheet.waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => document.activeElement?.id === 'nfc-task-queue');
+  assert.equal(new URL(page.url()).search, '?return=keep');
 }
 /** Audit the mounted dialog after Radix registers its pointer layer. */
 async function inspect(page, theme, width, mode) {
@@ -80,9 +121,12 @@ async function inspect(page, theme, width, mode) {
         rect: { left: b.left, right: b.right, top: b.top, bottom: b.bottom },
       };
     };
-    const expected = mode === 'nested'
-      ? (theme === 'dark' ? 'rgb(35, 39, 34)' : 'rgb(255, 254, 250)')
-      : (theme === 'dark' ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)');
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = 'var(--studio-paper)';
+    document.querySelector(target).append(probe);
+    const expected = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    if (expected === 'rgba(0, 0, 0, 0)') throw Error('Missing opaque dialog surface token');
     const rows = mode === 'nested' ? [
       ['sheet overlay', '.nfc-v2-sheet-overlay', 1100, false],
       ['sheet dialog', '.nfc-v2-sheet.nfc-overlay-drawer', 1101, true],
@@ -185,6 +229,7 @@ try {
       }, theme.mode);
       const page = await context.newPage();
       const writes = [];
+      let useWatchFixture = false;
       await page.route('**/api/**', async route => {
         const request = route.request();
         if (request.method() !== 'GET') {
@@ -194,7 +239,7 @@ try {
           return;
         }
         await route.fulfill({ status: 200, contentType: 'application/json',
-          body: JSON.stringify(fixture(request.url())) });
+          body: JSON.stringify(fixture(request.url(), useWatchFixture)) });
       });
       const label = theme.mode + '-' + theme.system + '-' + width;
       try {
@@ -298,6 +343,10 @@ try {
         await history.getByRole('button', { name: '关闭历史清理窗口' }).click();
         await history.waitFor({ state: 'hidden' });
         await page.waitForFunction(opener => document.activeElement === opener, historyOpener);
+        if ((width === 390 && theme.mode === 'light') || (width === 1440 && theme.mode === 'dark')) {
+          useWatchFixture = true;
+          await auditTaskMonitor(page, width);
+        }
         assert.deepEqual(writes, [], 'Browser must not submit any mutating API request');
         completed += 1;
         console.log('[TASK BROWSER HISTORY PASS] ' + label);

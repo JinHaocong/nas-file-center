@@ -16,4 +16,8 @@ export interface DirectoryPickerModalProps {
   initialPath?: string;
   selectedValues?: string | string[];
   returnFocusTo?: HTMLElement | null;
+  inline?: {
+    rootPath: string;
+    onBusyChange?: (busy: boolean) => void;
+  };
 }

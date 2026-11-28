@@ -42,11 +42,18 @@ body { font-family: var(--studio-font); }
   background: var(--nfc-tint-fill);
   color: var(--nfc-tint-on-fill);
 }
-.nfc-studio .nfc-v2-header-left { gap: 18px; }
-.nfc-studio .nfc-v2-header .nfc-v2-breadcrumb { border-left: 1px solid var(--studio-line); padding-left: 16px; }
+.nfc-studio .nfc-v2-header-left { flex: 1 1 auto; min-inline-size: 0; gap: 12px; }
+.nfc-studio .nfc-v2-header .nfc-v2-breadcrumb { gap: 6px; min-inline-size: 0; }
 .nfc-studio .nfc-v2-breadcrumb > :is(span, svg) { display: none; }
-.nfc-studio-shortcuts, .nfc-studio-segment {
-  --studio-slots: 4;
+.nfc-studio .nfc-v2-breadcrumb > strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nfc-studio-segment {
+  --studio-slots: 2;
+  --studio-active: 0;
   position: relative;
   isolation: isolate;
   display: inline-grid;
@@ -57,9 +64,8 @@ body { font-family: var(--studio-font); }
   border-radius: 10px;
   background: var(--studio-soft);
 }
-.nfc-studio-segment { --studio-slots: 2; --studio-active: 0; }
 .nfc-studio-segment[data-source="favorites"] { --studio-active: 1; }
-.nfc-studio-shortcuts::before, .nfc-studio-segment::before {
+.nfc-studio-segment::before {
   content: "";
   position: absolute;
   inset: 3px auto 3px 3px;
@@ -72,8 +78,7 @@ body { font-family: var(--studio-font); }
   pointer-events: none;
   z-index: -1;
 }
-.nfc-studio-shortcuts[data-selected="false"]::before { opacity: 0; }
-.nfc-studio-shortcuts a, .nfc-studio-segment button {
+.nfc-studio-segment button {
   border: 0;
   border-radius: 7px;
   padding: 7px 13px;
@@ -87,7 +92,7 @@ body { font-family: var(--studio-font); }
   text-align: center;
   cursor: pointer;
 }
-.nfc-studio-shortcuts a[aria-current="page"], .nfc-studio-segment button[aria-pressed="true"] {
+.nfc-studio-segment button[aria-pressed="true"] {
   color: var(--nfc-tint);
 }
 .nfc-studio .nfc-header-command-cluster {
@@ -125,12 +130,12 @@ body { font-family: var(--studio-font); }
 .nfc-studio :is(a, button, summary):focus-visible, .nfc-studio-tools-dialog :is(a, button, input):focus-visible { outline: 2px solid var(--nfc-tint); outline-offset: 3px; }
 
 .nfc-studio .nfc-v2-page-content.nfc-page-content {
-  padding: clamp(24px, 3vw, 42px) var(--studio-gutter) 64px !important;
+  padding: clamp(20px, 2vw, 30px) var(--studio-gutter) 64px !important;
   margin: 0;
   background: var(--studio-ground);
 }
 .nfc-studio .nfc-page-content .nfc-page-header {
-  padding: 0 0 10px !important;
+  padding: 0 0 8px !important;
   background: transparent !important;
   color: var(--studio-ink);
   border: 0 !important;
@@ -140,11 +145,12 @@ body { font-family: var(--studio-font); }
 }
 .nfc-studio .nfc-page-content .nfc-page-title {
   color: var(--studio-ink) !important;
-  font: 740 clamp(26px, 2.15vw, 35px)/1.18 var(--studio-font) !important;
-  letter-spacing: -.036em;
+  font: 730 clamp(23px, 1.85vw, 31px)/1.2 var(--studio-font) !important;
+  letter-spacing: -.032em;
 }
 .nfc-studio .nfc-page-content .nfc-page-description {
   color: var(--studio-muted) !important;
+  margin-top: 5px;
   line-height: 1.56;
 }
 .nfc-studio .nfc-page-content .nfc-data-panel {
@@ -249,27 +255,16 @@ body { font-family: var(--studio-font); }
 .nfc-studio .nfc-v2-dashboard .nfc-metric-icon svg { width: 15px; height: 15px; }
 
 @media (min-width: 1150px) {
-  .nfc-studio .nfc-v2-header.nfc-header { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); }
-  .nfc-studio .nfc-v2-header.nfc-header:not(.has-file-toolbar) {
-    grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
+  .nfc-studio .nfc-v2-header.nfc-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
   .nfc-studio .nfc-v2-header-left > .nfc-studio-brand { flex: 0 0 auto; }
-  .nfc-studio .nfc-v2-header .nfc-v2-breadcrumb { min-width: 0; }
   .nfc-studio .nfc-v2-breadcrumb > svg { flex-shrink: 0; }
-  .nfc-studio .nfc-v2-breadcrumb > strong {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
   .nfc-studio .nfc-header-command-cluster { justify-self: end; }
-}
-@media (min-width: 1150px) and (max-width: 1279px) {
-  .nfc-studio-shortcuts a { padding-inline: 9px; }
 }
 @media (max-width: 1149px) {
   .nfc-studio .nfc-v2-header-left { gap: 10px; }
-  .nfc-studio-shortcuts { display: none; }
   .nfc-studio .nfc-v2-dashboard-content { grid-template-columns: minmax(0,1fr); }
 }
 @media (max-width: 767px) {
@@ -281,7 +276,7 @@ body { font-family: var(--studio-font); }
   .nfc-studio .nfc-v2-header .nfc-header-status { max-width: none; gap: 3px; }
   .nfc-studio .nfc-v2-header .nfc-header-status-badge { padding-inline: 5px; font-size: 11px; }
   .nfc-studio .nfc-v2-page-content.nfc-page-content { padding: 21px 14px calc(90px + env(safe-area-inset-bottom)) !important; }
-  .nfc-studio .nfc-page-content .nfc-page-title { font-size: 28px !important; }
+  .nfc-studio .nfc-page-content .nfc-page-title { font-size: 25px !important; }
   .nfc-studio .nfc-v2-dashboard .nfc-metric-grid { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
   .nfc-studio .nfc-v2-dashboard .nfc-metric-card { padding: 12px !important; }
   .nfc-studio .nfc-v2-dashboard .nfc-metric-card:nth-child(n+3) { border-top: 1px solid var(--studio-line) !important; }

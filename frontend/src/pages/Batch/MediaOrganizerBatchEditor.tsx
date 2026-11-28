@@ -5,6 +5,7 @@ import { useSearchParams } from 'react-router-dom';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
 import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
+import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
 import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { DataPanel } from '../../components/ui/DataPanel';
 import {
@@ -22,7 +23,7 @@ import type { TaskStatus } from '../../types/task';
 const panelClass = 'nfc-v2-batch-media-panel';
 const pageSizes = [10, 25, 50, 100];
 const previewFilters: readonly [MediaPreviewFilter, string][] = [
-  ['all', '全部'], ['ready', '待整理'], ['blocked', '冲突'], ['already_organized', '已整理'],
+  ['all', '全部'], ['ready', '待处理'], ['blocked', '冲突'], ['already_organized', '已整理'],
   ['skipped', '跳过'], ['needs_assignment', '待确认归属'],
 ];
 
@@ -85,6 +86,7 @@ export function MediaOrganizerBatchEditor() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [inspectedUnit, setInspectedUnit] = useState<string | null>(null);
   const [action, setAction] = useState<'preview' | 'confirm' | null>(null);
+  const [confirmPreviewId, setConfirmPreviewId] = useState<OrganizerJobId | null>(null);
   const [problem, setProblem] = useState('');
   const [previewPage, setPreviewPage] = useState({ page: 1, size: 25 });
   const [filter, setFilter] = useState<MediaPreviewFilter>('all');
@@ -214,10 +216,13 @@ export function MediaOrganizerBatchEditor() {
   /** Confirm the entire reviewed preview and follow its existing or new batch. */
   function confirmBatch() {
     if (busy || selectedPath !== null || batchId || existingBatchId || !previewId || !preview?.execution_enabled ||
-      preview.status !== 'completed' || preview.selection !== selection || !preview.summary?.ready_count) return;
+      preview.status !== 'completed' || preview.selection !== selection || !preview.summary?.ready_count ||
+      confirmPreviewId !== previewId) return;
     void runAction('confirm', '无法开始整理', async signal => {
       const receipt = await mediaOrganizerBatchApi.startBatch(previewId);
-      if (!signal.aborted) showJobs(previewId, receipt.job_id);
+      if (signal.aborted) return;
+      setConfirmPreviewId(null);
+      showJobs(previewId, receipt.job_id);
     });
   }
 
@@ -229,6 +234,15 @@ export function MediaOrganizerBatchEditor() {
   const currentUnit = currentPreview?.units.find(row => row.unit === inspectedUnit) ?? currentPreview?.units[0];
   const currentDetails = details?.previewId === previewId && details?.unit === currentUnit?.unit ? details : null;
   const previewSummary = currentPreview?.summary;
+  const confirmationOpen = Boolean(canConfirm && previewId && confirmPreviewId === previewId);
+  const recycleCount = previewSummary?.recycle_count ?? 0;
+
+  /** Show the scope of the reviewed preview before committing its changes. */
+  function reviewBatch(open: boolean) {
+    if (inFlight.current) return;
+    setProblem('');
+    setConfirmPreviewId(open && canConfirm && !busy ? previewId : null);
+  }
 
   /** Switch the inspector and discard any detail report belonging to the previous unit. */
   function inspectUnit(row: MediaBatchPreviewUnit) {
@@ -253,9 +267,10 @@ export function MediaOrganizerBatchEditor() {
     const opener = detailOpener.current;
     // 窗口尺寸跨过断点后，详情可能已经移动到目录卡片所在的行。
     if (opener?.isConnected === false) {
-      document.querySelector<HTMLButtonElement>('.nfc-unit-card[aria-pressed="true"]')?.focus();
+      document.querySelector<HTMLButtonElement>('.nfc-unit-card[aria-pressed="true"]')?.focus({ preventScroll: true });
     } else {
-      opener?.focus();
+      opener?.focus({ preventScroll: true });
+      opener?.scrollIntoView?.({ block: 'nearest', behavior: 'instant' });
     }
   }
 
@@ -306,7 +321,7 @@ export function MediaOrganizerBatchEditor() {
         {invalidLink && <p className="nfc-v2-batch-error" role="alert">整理任务编号无效</p>}
         {suggestedPaths.length > 0 && !suggestedValid &&
           <p className="nfc-v2-batch-error" role="alert">目录入口无效，请重新选择目录。</p>}
-        {problem && <p className="nfc-v2-batch-error" role="alert">{problem}</p>}
+        {problem && !confirmationOpen && <p className="nfc-v2-batch-error" role="alert">{problem}</p>}
       </section>
 
       {(action === 'preview' || scanning || previewQuery.isError ||
@@ -344,7 +359,10 @@ export function MediaOrganizerBatchEditor() {
           detailBusy={assignmentBusy}
           action={canConfirm && (
             <ConsoleButton variant="primary" disabled={busy} loading={action === 'confirm'}
-              onClick={confirmBatch}>{currentPreview.summary.recycle_count ? '确认整理与回收' : '确认整理全部'}</ConsoleButton>
+              onClick={event => {
+                event?.currentTarget.focus({ preventScroll: true });
+                reviewBatch(true);
+              }}>{recycleCount ? '确认整理与回收' : '确认整理全部'}</ConsoleButton>
           )}
           footer={<ConsolePagination page={previewPage.page} pageSize={previewPage.size}
             total={currentPreview.filtered_total} pageSizes={pageSizes}
@@ -361,6 +379,24 @@ export function MediaOrganizerBatchEditor() {
           <OrganizerFilters value={filter} counts={filterCounts} onChange={changeFilter} disabled={assignmentBusy} />
         </MediaOrganizerPreviewReport>
       )}
+      <ConsoleConfirmDialog open={confirmationOpen} onOpenChange={reviewBatch}
+        title={recycleCount ? '整理并回收文件' : '开始批量整理'}
+        description={previewSummary && <div className="nfc-organizer-batch-confirmation">
+          <p>将按整批预览执行，冲突和待确认归属的目录会跳过。</p>
+          <div className="nfc-organizer-batch-confirmation-path">
+            <span>整理范围</span><code>{currentPreview?.selection}</code>
+          </div>
+          <dl className="nfc-organizer-batch-confirmation-counts">
+            <div><dt>待整理目录</dt><dd>{(previewSummary.ready_count - recycleCount).toLocaleString()}</dd></div>
+            <div><dt>冲突目录</dt><dd>{previewSummary.blocked_count.toLocaleString()}</dd></div>
+            <div><dt>待确认归属</dt><dd>{(previewSummary.needs_assignment_count ?? 0).toLocaleString()}</dd></div>
+            <div><dt>附带文件回收</dt><dd>{recycleCount.toLocaleString()}</dd></div>
+          </dl>
+          {recycleCount > 0 && <p>附带文件将移入极空间回收站。</p>}
+          {problem && <p className="nfc-v2-batch-error" role="alert">{problem}</p>}
+        </div>}
+        confirmText={recycleCount ? '开始整理与回收' : '开始整理'} onConfirm={confirmBatch}
+        disabled={!canConfirm || busy} busy={action === 'confirm'} danger={recycleCount > 0} />
     </>
   );
 }

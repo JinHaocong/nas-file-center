@@ -1,8 +1,9 @@
-import { Fragment, useMemo, useRef, useState } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import * as Dialog from '@radix-ui/react-dialog';
 
-import { DirectoryPicker } from '../../components/DirectoryPicker';
+import { DirectoryPickerModal } from '../../components/DirectoryPicker';
+import { isWithinDirectoryRoots } from '../../components/DirectoryPicker/selection_model';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleCheckbox } from '../../components/ui/ConsoleCheckbox';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
@@ -42,10 +43,18 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
   const [names, setNames] = useState<string[]>([]);
   const [destination, setDestination] = useState(localRoot);
   const [copyOpen, setCopyOpen] = useState(false);
+  const [copyStep, setCopyStep] = useState<'review' | 'target'>('review');
+  const [pickerBusy, setPickerBusy] = useState(false);
   const [error, setError] = useState('');
   const [skippedCount, setSkippedCount] = useState(0);
   const locationRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const selectionFocus = useRef<HTMLInputElement | null>(null);
+  const copyTrigger = useRef<HTMLButtonElement>(null);
+  const targetButton = useRef<HTMLButtonElement>(null);
+  const targetHeading = useRef<HTMLHeadingElement>(null);
+  const focusCopyStep = useRef(false);
+  const lastReview = useRef<CloudEntry[]>([]);
   const inFlight = useRef(false);
 
   const remotes = useQuery({
@@ -80,12 +89,34 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
   const selected = useMemo(() => selectedEntries.map(entry => entry.name), [selectedEntries]);
 
   const start = useMutation({ mutationFn: cloudFilesApi.start });
-  const insideRoot = destination === localRoot || destination.startsWith(localRoot + '/');
+  const insideRoot = isWithinDirectoryRoots(destination, [localRoot]);
   const canReview = writable && canBrowse && browse.isSuccess && !browse.isFetching &&
     selected.length > 0 && selected.length <= selectionLimit;
   const canStart = canReview && insideRoot;
+  const dialogBusy = start.isPending || (copyStep === 'target' && pickerBusy);
+  const reviewEntries = copyOpen ? selectedEntries : lastReview.current;
   const parts = path === '' ? [] : path.split('/');
   const label = provider === 'rclone' ? '根目录' : name;
+
+  useLayoutEffect(() => {
+    if (copyOpen) lastReview.current = selectedEntries;
+    if (!copyOpen || !focusCopyStep.current) return;
+    focusCopyStep.current = false;
+    (copyStep === 'target' ? targetHeading.current : targetButton.current)?.focus({ preventScroll: true });
+  }, [copyOpen, copyStep, selectedEntries]);
+
+  /** Move keyboard focus before removing a selection action or after a copy completes. */
+  function restoreSelectionFocus() {
+    const checkbox = selectionFocus.current;
+    if (checkbox?.isConnected && !checkbox.disabled) checkbox.focus({ preventScroll: true });
+    else listRef.current?.focus({ preventScroll: true });
+  }
+
+  /** Swap steps without opening another modal or moving the file browser. */
+  function showCopyStep(next: 'review' | 'target') {
+    focusCopyStep.current = true;
+    setCopyStep(next);
+  }
 
   /** Keep filtering local to the current directory and return the viewport to its first row. */
   function filterDirectory(value: string) {
@@ -127,8 +158,12 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
 
   return (
     <Dialog.Root open={copyOpen} onOpenChange={open => {
-      if (start.isPending) return;
-      if (open) setError('');
+      if (dialogBusy) return;
+      if (open) {
+        focusCopyStep.current = false;
+        setCopyStep('review');
+        setError('');
+      }
       setCopyOpen(open);
     }}>
       <section id="nfc-cloud-files-browser" className="nfc-cloud-files-browser" aria-label="云端目录">
@@ -207,6 +242,7 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
                     <label className="nfc-cloud-selection-hit">
                       <ConsoleCheckbox checked={checked} aria-label={'选择 ' + entry.name}
                         disabled={!writable || start.isPending || (!checked && selected.length >= selectionLimit)}
+                        onFocus={event => { selectionFocus.current = event.currentTarget; }}
                         onCheckedChange={checked => setNames(previous => checked
                           ? selected.length >= selectionLimit ? previous : [...new Set([...previous, entry.name])]
                           : previous.filter(name => name !== entry.name))} />
@@ -230,31 +266,43 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
               </ConsoleButton>}
             </>)}
           </div>
-          <footer className="nfc-cloud-files-destination">
+          {selected.length > 0 ? <footer className="nfc-cloud-files-destination nfc-cloud-selection-actions">
             <div className="nfc-cloud-files-submit">
               <div className="nfc-cloud-selection-status">
                 <small className="nfc-cloud-files-muted" role="status">
-                  {!writable ? '只读模式' : selected.length === selectionLimit
-                    ? '已选 ' + selectionLimit + ' 项（单次上限）' : selected.length
-                      ? '已选 ' + selected.length + ' 项' : skippedCount > 0
-                        ? '已跳过 ' + skippedCount + ' 个已有文件'
-                        : (search ? matched.length + ' 项匹配' : entries.length + ' 项')}
+                  已选 {selected.length} 项{selected.length === selectionLimit && '（单次上限）'}
                 </small>
-                {!!selected.length && <ConsoleButton size="sm" variant="ghost" disabled={start.isPending}
-                  onClick={() => setNames([])}>清除选择</ConsoleButton>}
+                <ConsoleButton size="sm" variant="ghost" disabled={start.isPending}
+                  onClick={() => {
+                    setNames([]);
+                    restoreSelectionFocus();
+                  }}>清除选择</ConsoleButton>
               </div>
               <Dialog.Trigger asChild>
-                <ConsoleButton variant="primary" disabled={!canReview || start.isPending}
+                <ConsoleButton ref={copyTrigger} variant="primary" disabled={!canReview || start.isPending}
                   leadingIcon={<ConsoleIcon name="arrow-down" size={17} />}>复制到 NAS</ConsoleButton>
               </Dialog.Trigger>
             </div>
-          </footer>
+          </footer> : <footer className="nfc-cloud-files-destination nfc-cloud-idle-footer">
+            <small className="nfc-cloud-files-muted" role="status">
+              {!writable ? '只读模式' : skippedCount > 0 ? '已跳过 ' + skippedCount + ' 个已有文件'
+                : (search ? matched.length + ' 项匹配' : entries.length + ' 项')}
+            </small>
+          </footer>}
         </>}
         <Dialog.Portal>
           <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-cloud-copy-overlay" />
-          <Dialog.Content className="nfc-v2-dialog nfc-overlay-modal nfc-cloud-copy-dialog"
-            aria-describedby={undefined} aria-busy={start.isPending || undefined}
-            onEscapeKeyDown={event => { if (start.isPending) event.preventDefault(); }}
+          <Dialog.Content className="nfc-v2-dialog nfc-overlay-modal nfc-cloud-copy-dialog" data-copy-step={copyStep}
+            aria-describedby={undefined} aria-busy={dialogBusy || undefined}
+            onEscapeKeyDown={event => {
+              if (dialogBusy || copyStep === 'target') event.preventDefault();
+              if (!dialogBusy && copyStep === 'target') showCopyStep('review');
+            }}
+            onCloseAutoFocus={event => {
+              if (copyTrigger.current?.isConnected && !copyTrigger.current.disabled) return;
+              event.preventDefault();
+              restoreSelectionFocus();
+            }}
             onPointerDownOutside={event => event.preventDefault()}>
             <header className="nfc-cloud-copy-header">
               <div className="nfc-cloud-copy-title">
@@ -262,37 +310,48 @@ export function CloudBrowser({ provider, name, localRoot, writable, onSubmitted 
                 <Dialog.Title>复制到 NAS</Dialog.Title>
               </div>
               <Dialog.Close asChild>
-                <button type="button" className="nfc-v2-dialog-close" aria-label="关闭复制窗口" disabled={start.isPending}>
+                <button type="button" className="nfc-v2-dialog-close" aria-label="关闭复制窗口" disabled={dialogBusy}>
                   <ConsoleIcon name="x" size={19} />
                 </button>
               </Dialog.Close>
             </header>
-            <div className="nfc-cloud-copy-content">
-              <section aria-labelledby="nfc-cloud-copy-selected" className="nfc-cloud-copy-items">
-                <h3 id="nfc-cloud-copy-selected">已选 {selected.length} 项</h3>
-                <ul className="nfc-cloud-copy-selection">
-                  {selectedEntries.map(entry => <li key={entry.name}>
-                    <CloudEntryIcon kind={entry.kind} />
-                    <span>{entry.name}</span>
-                    <small className="nfc-cloud-file-size">{entry.kind === 'directory' ? '文件夹' : displayBytes(entry.size)}</small>
-                  </li>)}
-                </ul>
-              </section>
-              <section role="group" aria-label="NAS 存放位置">
-                <h3>NAS 存放位置</h3>
-                <DirectoryPicker value={destination} allowManualInput={false} disabled={start.isPending}
-                  onChange={(value: string | string[]) => setDestination(typeof value === 'string' ? value : value[0] || '')} />
-                {destination && !insideRoot &&
-                  <p role="alert" className="nfc-cloud-files-error">请选择 {localRoot} 内的目录。</p>}
-              </section>
-              {error && <p role="alert" className="nfc-cloud-files-error">{error}</p>}
-            </div>
-            <footer className="nfc-cloud-copy-actions">
-              <Dialog.Close asChild><ConsoleButton disabled={start.isPending}>取消</ConsoleButton></Dialog.Close>
-              <ConsoleButton variant="primary" disabled={!canStart} loading={start.isPending}
-                leadingIcon={<ConsoleIcon name="arrow-down" size={16} />}
-                onClick={() => { void submit(); }}>{start.isPending ? '正在提交' : '开始复制'}</ConsoleButton>
-            </footer>
+            {copyStep === 'target' ? <>
+              <h3 className="nfc-cloud-copy-step-title" ref={targetHeading} tabIndex={-1}>选择 NAS 目录</h3>
+              <DirectoryPickerModal open={copyOpen} inline={{ rootPath: localRoot, onBusyChange: setPickerBusy }}
+                initialPath={insideRoot ? destination : localRoot} selectedValues={destination}
+                onConfirm={value => { if (typeof value === 'string') setDestination(value); }}
+                onCancel={() => showCopyStep('review')} />
+            </> : <>
+              <div className="nfc-cloud-copy-content">
+                <section aria-labelledby="nfc-cloud-copy-selected" className="nfc-cloud-copy-items">
+                  <h3 id="nfc-cloud-copy-selected">已选 {reviewEntries.length} 项</h3>
+                  <ul className="nfc-cloud-copy-selection">
+                    {reviewEntries.map(entry => <li key={entry.name}>
+                      <CloudEntryIcon kind={entry.kind} />
+                      <span>{entry.name}</span>
+                      <small className="nfc-cloud-file-size">{entry.kind === 'directory' ? '文件夹' : displayBytes(entry.size)}</small>
+                    </li>)}
+                  </ul>
+                </section>
+                <section role="group" aria-label="NAS 存放位置">
+                  <h3>NAS 存放位置</h3>
+                  <div className="nfc-cloud-copy-target">
+                    <span><ConsoleIcon name="folder" size={16} />{destination}</span>
+                    <ConsoleButton ref={targetButton} size="sm" disabled={start.isPending}
+                      onClick={() => showCopyStep('target')}>选择目录</ConsoleButton>
+                  </div>
+                  {destination && !insideRoot &&
+                    <p role="alert" className="nfc-cloud-files-error">请选择 {localRoot} 内的目录。</p>}
+                </section>
+                {error && <p role="alert" className="nfc-cloud-files-error">{error}</p>}
+              </div>
+              <footer className="nfc-cloud-copy-actions">
+                <Dialog.Close asChild><ConsoleButton disabled={start.isPending}>取消</ConsoleButton></Dialog.Close>
+                <ConsoleButton variant="primary" disabled={!canStart} loading={start.isPending}
+                  leadingIcon={<ConsoleIcon name="arrow-down" size={16} />}
+                  onClick={() => { void submit(); }}>{start.isPending ? '正在提交' : '开始复制'}</ConsoleButton>
+              </footer>
+            </>}
           </Dialog.Content>
         </Dialog.Portal>
       </section>
